@@ -654,8 +654,10 @@ class WorkspaceService:
                     cursor = max(cursor, int(event["id"]))
                     yield event
                 heartbeat_at = time.monotonic()
-                if self.status(job_id, user_id) in TERMINAL_JOB_STATUSES:
-                    return
+                # A worker may commit the terminal status in the same
+                # transaction as the last event. Loop once more so that a
+                # terminal status observed after a pending batch cannot hide
+                # events committed just after the query above.
                 continue
             if self.status(job_id, user_id) in TERMINAL_JOB_STATUSES:
                 return
