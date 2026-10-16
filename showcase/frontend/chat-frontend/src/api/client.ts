@@ -44,5 +44,7 @@ export const api = {
   deleteSession: (id: string) => requestJson('/api/delete_session', json({ session_id: id }), deleteSessionResponseSchema),
   listFiles: () => requestJson('/api/files', {}, filesResponseSchema),
   createJob: (message: string, sessionId: string, key: string) => requestJson('/api/agent/jobs', { ...json({ message, session_id: sessionId, web_search_enabled: false }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
+  resumeJob: (jobId: string, answer: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/resume`, { ...json({ answer }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
+  cancelJob: (jobId: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/cancel`, { ...json({}), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   activeJobs: (sessionId?: string) => requestJson(`/api/agent/jobs/active${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`, {}, activeJobsResponseSchema),
 }
