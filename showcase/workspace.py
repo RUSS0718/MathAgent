@@ -210,7 +210,19 @@ class WorkspaceStore:
                     "INSERT INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
                     (session_id, "user", problem, job_id, now),
                 )
-                self._insert_event(job_id, "job_queued", {"type": "job_queued", "job_id": job_id, "status": "queued"})
+                self._insert_event(
+                    job_id,
+                    "queued",
+                    {
+                        "type": "queued",
+                        "job_id": job_id,
+                        "status": "queued",
+                        "step_id": "queue",
+                        "node_name": "queue",
+                        "title": "任务已排队",
+                        "summary": "任务已持久化并等待执行",
+                    },
+                )
                 self._insert_run(job_id, problem, now)
                 self._connection.commit()
             except Exception:
@@ -231,7 +243,19 @@ class WorkspaceStore:
                 now = _utc_now()
                 self._connection.execute("UPDATE workspace_jobs SET status='running',updated_at=? WHERE job_id=?", (now, job_id))
                 self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "RUNNING", now)), now, job_id))
-                self._insert_event(job_id, "job_started", {"type": "job_started", "job_id": job_id, "status": "running"})
+                self._insert_event(
+                    job_id,
+                    "running",
+                    {
+                        "type": "running",
+                        "job_id": job_id,
+                        "status": "running",
+                        "step_id": "solve",
+                        "node_name": "solve",
+                        "title": "正在求解",
+                        "summary": "确定性适配器正在处理题目",
+                    },
+                )
                 self._connection.commit()
             except Exception:
                 self._connection.rollback()
@@ -263,7 +287,16 @@ class WorkspaceStore:
                     "UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?",
                     (_json(_run_snapshot(job_id, "COMPLETED", now, result)), now, job_id),
                 )
-                self._insert_event(job_id, "final_result", {"type": "final_result", "job_id": job_id, "status": "succeeded", "data": {"type": "text", "summary": final_response}})
+                self._insert_event(
+                    job_id,
+                    "final_result",
+                    {
+                        "type": "final_result",
+                        "job_id": job_id,
+                        "status": "succeeded",
+                        "data": {"type": "text", "summary": final_response},
+                    },
+                )
                 self._connection.commit()
             except Exception:
                 self._connection.rollback()
@@ -274,7 +307,16 @@ class WorkspaceStore:
             now = _utc_now()
             self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code=?,updated_at=? WHERE job_id=? AND status IN ('queued','running')", (code, now, job_id))
             self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "FAILED", now, error={"category": code})), now, job_id))
-            self._insert_event(job_id, "error", {"type": "error", "job_id": job_id, "message": code})
+            self._insert_event(
+                job_id,
+                "error",
+                {
+                    "type": "error",
+                    "job_id": job_id,
+                    "status": "failed",
+                    "message": code,
+                },
+            )
             self._connection.commit()
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
@@ -282,7 +324,9 @@ class WorkspaceStore:
             row = self._connection.execute("SELECT * FROM workspace_jobs WHERE job_id=? AND user_id=?", (job_id, user_id)).fetchone()
             if row is None:
                 raise WorkspaceError("job_not_found", status=404)
-        return self._job_payload(row, include_result=True)
+        payload = self._job_payload(row, include_result=True)
+        payload["last_event_id"] = self.last_event_id(job_id, user_id)
+        return payload
 
     def active_jobs(self, user_id: str, session_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
@@ -305,9 +349,39 @@ class WorkspaceStore:
                 (job_id, after_id),
             ).fetchall()
         return [
-            {"id": int(event["event_id"]), "event": event["event_type"], "data": _loads(event["payload_json"]), "created_at": event["created_at"]}
+            {
+                "id": int(event["event_id"]),
+                "event": event["event_type"],
+                "data": _loads(event["payload_json"]),
+                "created_at": event["created_at"],
+            }
             for event in events
         ]
+
+    def status(self, job_id: str, user_id: str) -> str:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT status FROM workspace_jobs WHERE job_id=? AND user_id=?",
+                (job_id, user_id),
+            ).fetchone()
+        if row is None:
+            raise WorkspaceError("job_not_found", status=404)
+        return str(row["status"])
+
+    def last_event_id(self, job_id: str, user_id: str) -> int:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT 1 FROM workspace_jobs WHERE job_id=? AND user_id=?",
+                (job_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise WorkspaceError("job_not_found", status=404)
+            event = self._connection.execute(
+                "SELECT COALESCE(MAX(event_id), 0) AS last_event_id "
+                "FROM workspace_events WHERE job_id=?",
+                (job_id,),
+            ).fetchone()
+        return int(event["last_event_id"])
 
     def close(self) -> None:
         with self._lock:
@@ -427,10 +501,58 @@ class WorkspaceService:
         return self.store.get_job(job_id, user_id)
 
     def active_jobs(self, user_id: str, session_id: str | None = None) -> list[dict[str, Any]]:
-        return self.store.active_jobs(user_id, session_id)
+        payloads = self.store.active_jobs(user_id, session_id)
+        for payload in payloads:
+            payload["last_event_id"] = self.store.last_event_id(payload["job_id"], user_id)
+        return payloads
 
     def events(self, job_id: str, user_id: str, after_id: int = 0) -> list[dict[str, Any]]:
         return self.store.events(job_id, user_id, after_id)
+
+    def status(self, job_id: str, user_id: str) -> str:
+        return self.store.status(job_id, user_id)
+
+    def last_event_id(self, job_id: str, user_id: str) -> int:
+        return self.store.last_event_id(job_id, user_id)
+
+    def stream_events(
+        self,
+        job_id: str,
+        user_id: str,
+        after_id: int = 0,
+        *,
+        heartbeat_interval: float = 0.05,
+        poll_interval: float = 0.01,
+    ):
+        """Yield committed public events until the Job reaches a terminal state.
+
+        The stream never executes a Job. It polls the same SQLite source used
+        by history and result queries, yielding a heartbeat when no committed
+        event is available yet.
+        """
+        cursor = after_id
+        heartbeat_at = time.monotonic()
+        while True:
+            pending = self.events(job_id, user_id, cursor)
+            if pending:
+                for event in pending:
+                    cursor = max(cursor, int(event["id"]))
+                    yield event
+                heartbeat_at = time.monotonic()
+                if self.status(job_id, user_id) in TERMINAL_JOB_STATUSES:
+                    return
+                continue
+            if self.status(job_id, user_id) in TERMINAL_JOB_STATUSES:
+                return
+            now = time.monotonic()
+            if now - heartbeat_at >= heartbeat_interval:
+                yield {
+                    "id": None,
+                    "event": "heartbeat",
+                    "data": {"type": "heartbeat", "job_id": job_id},
+                }
+                heartbeat_at = now
+            time.sleep(poll_interval)
 
     def close(self) -> None:
         self._executor.shutdown(wait=True)

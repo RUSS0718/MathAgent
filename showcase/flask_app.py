@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, g, jsonify, request, send_from_directory
+from flask import Flask, Response, g, jsonify, request, send_from_directory, stream_with_context
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 from .evidence import EvidencePackExporter
@@ -285,19 +285,36 @@ def create_app(
     @app.get("/api/agent/jobs/<job_id>/events")
     def get_job_events(job_id: str) -> Response | tuple[Response, int]:
         session = _require_auth(g.auth_session)
+        raw_cursor = request.args.get("last_event_id")
+        if raw_cursor is None:
+            raw_cursor = request.headers.get("Last-Event-ID", "0")
+        after_id = _parse_event_cursor(raw_cursor)
+        if after_id is None:
+            return _json_error("invalid_last_event_id", 400)
         try:
-            try:
-                after_id = max(0, int(request.args.get("last_event_id", "0")))
-            except ValueError:
-                return _json_error("invalid_last_event_id", 400)
-            events = workspace_service.events(job_id, session.user_id, after_id)
-            body = "".join(
-                f"id: {event['id']}\nevent: {event['event']}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
-                for event in events
-            )
-            return Response(body, content_type="text/event-stream; charset=utf-8")
+            # Validate ownership before returning a lazy streaming response.
+            workspace_service.get_job(job_id, session.user_id)
+            events = workspace_service.stream_events(job_id, session.user_id, after_id)
         except WorkspaceError as exc:
             return _workspace_error(exc)
+
+        def generate():
+            for event in events:
+                data = json.dumps(event["data"], ensure_ascii=False, separators=(",", ":"))
+                if event["id"] is None:
+                    yield f"event: {event['event']}\ndata: {data}\n\n"
+                else:
+                    yield (
+                        f"id: {int(event['id'])}\n"
+                        f"event: {event['event']}\n"
+                        f"data: {data}\n\n"
+                    )
+
+        return Response(
+            stream_with_context(generate()),
+            content_type="text/event-stream; charset=utf-8",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.post("/api/runs")
     def create_run() -> tuple[Response, int]:
@@ -410,6 +427,20 @@ def _set_auth_cookie_if_new(response: Response, store: LoopbackStore) -> Respons
 
 def _set_auth_cookie(response: Response, session: AuthSession) -> None:
     response.set_cookie(AUTH_COOKIE, session.session_id, httponly=True, samesite="Lax", path="/")
+
+
+def _parse_event_cursor(value: str | None) -> int | None:
+    if value is None or not value.isdigit():
+        return None
+    if value.startswith("+") or value.startswith("-"):
+        return None
+    try:
+        cursor = int(value, 10)
+    except ValueError:
+        return None
+    if cursor < 0 or cursor > 9_007_199_254_740_991:
+        return None
+    return cursor
 
 
 def _json_error(error: str, status: int) -> tuple[Response, int]:
