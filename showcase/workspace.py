@@ -478,6 +478,13 @@ class WorkspaceStore:
             raise WorkspaceError("job_not_found", status=404)
         return str(row["status"])
 
+    def problem(self, job_id: str) -> str:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT problem FROM workspace_jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+        return "" if row is None else str(row["problem"])
+
     def last_event_id(self, job_id: str, user_id: str) -> int:
         with self._lock:
             row = self._connection.execute(
@@ -540,9 +547,22 @@ class WorkspaceStore:
 class WorkspaceService:
     """Application service that queues deterministic fake Jobs exactly once."""
 
-    def __init__(self, database_path: str | Path = ":memory:", connection: sqlite3.Connection | None = None, *, execution_mode: str = "fake") -> None:
+    def __init__(
+        self,
+        database_path: str | Path = ":memory:",
+        connection: sqlite3.Connection | None = None,
+        *,
+        execution_mode: str = "fake",
+        execution_delay: float = 0.05,
+        worker_enabled: bool = True,
+        waiting_input_marker: str = "",
+    ) -> None:
         self.store = WorkspaceStore(database_path, connection=connection)
         self.execution_mode = execution_mode
+        self.execution_delay = max(0.0, float(execution_delay))
+        self.worker_enabled = worker_enabled
+        self.waiting_input_marker = waiting_input_marker
+        self._waiting_input_jobs: set[str] = set()
         self.store.recover_incomplete_jobs()
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="showcase-job")
         self._submitted: set[str] = set()
@@ -604,6 +624,8 @@ class WorkspaceService:
             user_id=user_id, job_id=job_id, operation="resume", idempotency_key=idempotency_key, request_digest=digest
         )
         if not existing:
+            with self._submit_lock:
+                self._submitted.discard(job_id)
             self._submit(job_id)
         return result, existing
 
@@ -620,7 +642,8 @@ class WorkspaceService:
             if job_id in self._submitted:
                 return
             self._submitted.add(job_id)
-        self._executor.submit(self._execute, job_id)
+        if self.worker_enabled:
+            self._executor.submit(self._execute, job_id)
 
     def _execute(self, job_id: str) -> None:
         try:
@@ -628,9 +651,17 @@ class WorkspaceService:
                 return
             # Keep the worker asynchronous even for the deterministic adapter so
             # the HTTP contract never waits for execution.
-            time.sleep(0.05)
+            time.sleep(self.execution_delay)
             if self.execution_mode == "live":
                 self.store.fail_job(job_id, "unavailable")
+                return
+            if (
+                self.waiting_input_marker
+                and job_id not in self._waiting_input_jobs
+                and self._problem(job_id).startswith(self.waiting_input_marker)
+            ):
+                self._waiting_input_jobs.add(job_id)
+                self.store.mark_waiting_input(job_id)
                 return
             if self.store.verification_mode(job_id) == "required":
                 self.store.fail_job(job_id, "needs_review")
@@ -641,6 +672,9 @@ class WorkspaceService:
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
         return self.store.get_job(job_id, user_id)
+
+    def _problem(self, job_id: str) -> str:
+        return self.store.problem(job_id)
 
     def active_jobs(self, user_id: str, session_id: str | None = None) -> list[dict[str, Any]]:
         payloads = self.store.active_jobs(user_id, session_id)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import tempfile
-import threading
 import time
 import unittest
 import uuid
@@ -34,7 +33,7 @@ class SseContractTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "showcase-v0.2"
-        self.app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(self.root)})
+        self.app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(self.root), "SHOWCASE_JOB_DELAY_SECONDS": 0.2})
         self.client = self.app.test_client()
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         self.headers = {"X-CSRF-Token": self.csrf, "Idempotency-Key": str(uuid.uuid4())}
@@ -62,8 +61,9 @@ class SseContractTest(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertTrue(response.content_type.startswith("text/event-stream"))
         events = parse_sse(response.get_data(as_text=True))
-        self.assertGreaterEqual(len(events), 3)
-        self.assertEqual(["queued", "running", "final_result"], [event["event"] for event in events[-3:]])
+        business_events = [event for event in events if event["event"] != "heartbeat"]
+        self.assertGreaterEqual(len(business_events), 3)
+        self.assertEqual(["queued", "running", "final_result"], [event["event"] for event in business_events[-3:]])
         ids = [int(event["id"]) for event in events if event["id"] is not None]
         self.assertEqual(ids, sorted(ids))
         self.assertTrue(all(value > 0 for value in ids))
@@ -86,26 +86,15 @@ class SseContractTest(unittest.TestCase):
             self.assertEqual("invalid_last_event_id", response.get_json()["error"])
 
     def test_stream_sends_heartbeat_while_job_is_running(self) -> None:
-        service = self.app.extensions["showcase_workspace_service"]
-        blocked = threading.Event()
-        release = threading.Event()
-
-        def hold_job(job_id: str) -> None:
-            blocked.set()
-            release.wait(timeout=2)
-            service.store.start_job(job_id)
-            service.store.complete_job(job_id, "答案：1", "确定性测试")
-
-        service._execute = hold_job
         job_id = self._create_job()
-        self.assertTrue(blocked.wait(timeout=1))
         response = self.client.get(f"/api/agent/jobs/{job_id}/events", buffered=False)
         first = next(response.response).decode("utf-8")
         self.assertIn("event: queued", first)
+        running = next(response.response).decode("utf-8")
+        self.assertIn("event: running", running)
         heartbeat = next(response.response).decode("utf-8")
         self.assertIn("event: heartbeat", heartbeat)
         self.assertNotIn("id:", heartbeat)
-        release.set()
         rest = b"".join(response.response).decode("utf-8")
         response.close()
         self.assertIn("event: final_result", rest)

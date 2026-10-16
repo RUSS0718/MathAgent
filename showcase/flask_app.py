@@ -54,6 +54,9 @@ def create_app(
         SHOWCASE_DATA_DIR=None,
         SHOWCASE_DATABASE_PATH=None,
         SHOWCASE_VISION_ENABLED=os.getenv("SHOWCASE_VISION_ENABLED", "").lower() in {"1", "true", "yes"},
+        SHOWCASE_JOB_DELAY_SECONDS=0.05,
+        SHOWCASE_WORKER_ENABLED=True,
+        SHOWCASE_WAITING_INPUT_MARKER="",
     )
     if config:
         app.config.from_mapping(dict(config))
@@ -76,6 +79,9 @@ def create_app(
         resolved_database,
         connection=shared_connection,
         execution_mode=str(app.config.get("SHOWCASE_MODE", "fake")),
+        execution_delay=float(app.config.get("SHOWCASE_JOB_DELAY_SECONDS", 0.05)),
+        worker_enabled=bool(app.config.get("SHOWCASE_WORKER_ENABLED", True)),
+        waiting_input_marker=str(app.config.get("SHOWCASE_WAITING_INPUT_MARKER", "")),
     )
     app.extensions["loopback_store"] = loopback_store
     app.extensions["showcase_run_service"] = service
