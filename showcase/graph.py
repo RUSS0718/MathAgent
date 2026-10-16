@@ -54,6 +54,7 @@ class LoopState(TypedDict, total=False):
     error: dict[str, Any] | None
     next_node: str
     resumed: bool
+    verification_mode: str
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,7 @@ class AgentDecision:
     tool_arguments: Mapping[str, Any] = field(default_factory=dict)
     summary: str = ""
     error_category: str = "agent_failure"
+    transport_mode: str = "unavailable"
 
     @classmethod
     def final(cls, response: str, summary: str = "") -> AgentDecision:
@@ -238,15 +240,31 @@ class LangGraphExecutionLoop:
                 updated["status"] = "VERIFYING"
                 updated["stage"] = "verifying"
                 updated["final_response"] = decision.final_response
+                tool_results = updated.get("tool_results", [])
+                if tool_results and isinstance(tool_results[-1], dict) and tool_results[-1].get("status") == "success":
+                    request_id = tool_results[-1].get("request_id")
+                    tool_results[-1]["continuation_request_id"] = request_id
+                    tool_results[-1]["transport_mode"] = decision.transport_mode
                 updated["next_node"] = "verify"
             return updated
         if decision.kind == "tool":
             if not decision.tool_name.strip():
                 _finish_with_error(updated, "tool_name_missing", "Agent requested a tool without a name")
+            elif int(updated.get("step_count", 0)) >= self.budget.max_steps:
+                _finish_with_error(updated, "budget_exhausted", "Agent loop budget exhausted")
+            elif any(item.get("status") == "success" for item in updated.get("tool_results", [])):
+                _finish_with_error(
+                    updated,
+                    "continuation_tool_request_exceeded",
+                    "A continuation may not request another tool",
+                )
+                updated["status"] = "NEEDS_REVIEW"
             else:
+                request_id = f"tool_request_{int(updated.get('tool_count', 0)) + 1}"
                 updated["pending_tool"] = {
                     "name": decision.tool_name,
                     "arguments": dict(decision.tool_arguments),
+                    "request_id": request_id,
                 }
                 updated["next_node"] = "tool"
             return updated
@@ -255,6 +273,8 @@ class LangGraphExecutionLoop:
             updated["status"] = "NEEDS_REVIEW"
             return updated
         _finish_with_error(updated, decision.error_category, decision.summary or "Agent failed")
+        if decision.error_category in {"configuration", "unavailable", "adapter_error", "showcase_dependency_missing"}:
+            updated["status"] = "NEEDS_REVIEW"
         return updated
 
     def _tool_node(self, state: LoopState) -> dict[str, Any]:
@@ -271,6 +291,7 @@ class LangGraphExecutionLoop:
             return updated
         name = str(pending.get("name", ""))
         arguments = pending.get("arguments", {})
+        request_id = str(pending.get("request_id") or f"tool_request_{int(updated.get('tool_count', 0)) + 1}")
         if not isinstance(arguments, Mapping):
             _finish_with_error(updated, "tool_arguments_invalid", "Tool arguments must be an object")
             return updated
@@ -289,7 +310,9 @@ class LangGraphExecutionLoop:
         )
         updated["tool_count"] = int(updated.get("tool_count", 0)) + 1
         tool_record = {
+            "request_id": request_id,
             "name": name,
+            "arguments": dict(arguments),
             "status": result.status,
             "parameter_summary": result.parameter_summary,
             "result_summary": result.result_summary,
@@ -306,7 +329,7 @@ class LangGraphExecutionLoop:
                 updated["status"] = "RUNNING"
                 updated["stage"] = "running"
                 updated["error"] = None
-                updated["pending_tool"] = {"name": name, "arguments": dict(arguments)}
+                updated["pending_tool"] = {"name": name, "arguments": dict(arguments), "request_id": request_id}
                 updated["next_node"] = "tool"
                 self._record_and_emit(
                     updated,
@@ -322,6 +345,12 @@ class LangGraphExecutionLoop:
 
     def _verify_node(self, state: LoopState) -> dict[str, Any]:
         updated = _normalize_state(state)
+        if updated.get("verification_mode") == "required" and not any(
+            item.get("status") == "success" for item in updated.get("tool_results", [])
+        ):
+            _finish_with_error(updated, "tool_evidence_missing", "Required verification has no valid tool event")
+            updated["status"] = "NEEDS_REVIEW"
+            return updated
         updated["stage"] = "synthesizing"
         updated["status"] = "SYNTHESIZING"
         self._record_and_emit(updated, "verification_completed", {"status": "pass"})
@@ -391,6 +420,7 @@ def _normalize_decision(value: AgentDecision | Mapping[str, Any]) -> AgentDecisi
         tool_arguments=(value.get("tool_arguments") if isinstance(value.get("tool_arguments"), Mapping) else {}),
         summary=str(value.get("summary", "")),
         error_category=str(value.get("error_category", "agent_failure")),
+        transport_mode=str(value.get("transport_mode", "unavailable")),
     )
 
 

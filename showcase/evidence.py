@@ -116,6 +116,9 @@ def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
 def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
     summary = {
         "evidence_id": result.get("evidence_id", result.get("name", "tool")),
+        "request_id": result.get("request_id"),
+        "continuation_request_id": result.get("continuation_request_id"),
+        "transport_mode": result.get("transport_mode", "unavailable"),
         "name": result.get("name"),
         "status": result.get("status"),
         "duration_seconds": result.get("duration_seconds"),

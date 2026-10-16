@@ -7,10 +7,12 @@ future product-only dependencies.
 
 from .adapters import (
     AdapterError,
+    ContinuationTransport,
     DeepAgentsAdapter,
     InternAgentAdapter,
     InternChatModel,
     InternModelAdapter,
+    ModelContinuationTransport,
     ModelResponse,
     ToolRequest,
 )
@@ -52,6 +54,7 @@ __all__ = [
     "AgentAdapter",
     "AgentDecision",
     "AdapterError",
+    "ContinuationTransport",
     "AgentResult",
     "FakeAgentAdapter",
     "GraphDependencyError",
@@ -74,6 +77,7 @@ __all__ = [
     "ToolExecutionResult",
     "ToolRequest",
     "ModelResponse",
+    "ModelContinuationTransport",
     "ToolRegistry",
     "ToolSpec",
     "PythonMathTool",

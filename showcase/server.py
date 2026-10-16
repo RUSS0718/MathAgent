@@ -158,6 +158,7 @@ def create_live_service(*, database_path: str = ":memory:") -> RunService:
 
     registry = ToolRegistry()
     registry.register_python_math()
+    registry.register_polynomial_check()
     agent = InternAgentAdapter(
         InternModelAdapter(),
         role="solver",
