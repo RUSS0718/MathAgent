@@ -71,6 +71,7 @@ class WorkspaceStore:
                 status TEXT NOT NULL,
                 result_json TEXT,
                 error_code TEXT,
+                input_user_file_id TEXT,
                 verification_mode TEXT NOT NULL DEFAULT 'auto',
                 idempotency_key TEXT NOT NULL,
                 request_digest TEXT NOT NULL,
@@ -111,6 +112,8 @@ class WorkspaceStore:
         columns = {row["name"] for row in self._connection.execute("PRAGMA table_info(workspace_jobs)")}
         if "verification_mode" not in columns:
             self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN verification_mode TEXT NOT NULL DEFAULT 'auto'")
+        if "input_user_file_id" not in columns:
+            self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN input_user_file_id TEXT")
         self._connection.commit()
 
     def create_session(self, user_id: str, title: str = "新对话") -> str:
@@ -192,6 +195,7 @@ class WorkspaceStore:
         idempotency_key: str,
         request_digest: str,
         verification_mode: str = "auto",
+        input_user_file_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Durably accept one Job and its user message before returning."""
 
@@ -219,9 +223,9 @@ class WorkspaceStore:
                 job_id = f"run_{secrets.token_hex(16)}"
                 now = _utc_now()
                 self._connection.execute(
-                    "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,verification_mode,idempotency_key,request_digest,created_at,updated_at) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (job_id, session_id, user_id, problem, "queued", None, None, verification_mode, idempotency_key, request_digest, now, now),
+                    "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,input_user_file_id,verification_mode,idempotency_key,request_digest,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (job_id, session_id, user_id, problem, "queued", None, None, input_user_file_id, verification_mode, idempotency_key, request_digest, now, now),
                 )
                 self._connection.execute(
                     "INSERT INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
@@ -238,6 +242,7 @@ class WorkspaceStore:
                         "node_name": "queue",
                         "title": "任务已排队",
                         "summary": "任务已持久化并等待执行",
+                        "asset_ref": ({"file_id": input_user_file_id, "vision_status": "unavailable"} if input_user_file_id else None),
                     },
                 )
                 self._insert_run(job_id, problem, now)
@@ -259,7 +264,7 @@ class WorkspaceStore:
                     return False
                 now = _utc_now()
                 self._connection.execute("UPDATE workspace_jobs SET status='running',updated_at=? WHERE job_id=?", (now, job_id))
-                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "RUNNING", now)), now, job_id))
+                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "RUNNING", now, asset_refs=self._asset_refs(job_id))), now, job_id))
                 self._insert_event(
                     job_id,
                     "running",
@@ -302,7 +307,7 @@ class WorkspaceStore:
                 )
                 self._connection.execute(
                     "UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?",
-                    (_json(_run_snapshot(job_id, "COMPLETED", now, result)), now, job_id),
+                    (_json(_run_snapshot(job_id, "COMPLETED", now, result, asset_refs=self._asset_refs(job_id))), now, job_id),
                 )
                 self._insert_event(
                     job_id,
@@ -358,7 +363,7 @@ class WorkspaceStore:
                     if status != "canceled":
                         now = _utc_now()
                         self._connection.execute("UPDATE workspace_jobs SET status='canceled',updated_at=? WHERE job_id=?", (now, job_id))
-                        self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "CANCELED", now)), now, job_id))
+                        self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "CANCELED", now, asset_refs=self._asset_refs(job_id))), now, job_id))
                         self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled"})
                     result = {"success": True, "job_id": job_id, "status": "canceled"}
                 else:
@@ -386,7 +391,7 @@ class WorkspaceStore:
                 job_id = row["job_id"]
                 now = _utc_now()
                 self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code='needs_review',updated_at=? WHERE job_id=?", (now, job_id))
-                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, error={"category": "needs_review"})), now, job_id))
+                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, error={"category": "needs_review"}, asset_refs=self._asset_refs(job_id))), now, job_id))
                 self._insert_event(job_id, "needs_review", {"type": "needs_review", "job_id": job_id, "status": "failed", "reason": "process_restart"})
             self._connection.commit()
             return len(rows)
@@ -395,7 +400,7 @@ class WorkspaceStore:
         with self._lock:
             now = _utc_now()
             self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code=?,updated_at=? WHERE job_id=? AND status IN ('queued','running')", (code, now, job_id))
-            self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "FAILED", now, error={"category": code})), now, job_id))
+            self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "FAILED", now, error={"category": code}, asset_refs=self._asset_refs(job_id))), now, job_id))
             self._insert_event(
                 job_id,
                 "error",
@@ -496,8 +501,13 @@ class WorkspaceStore:
     def _insert_run(self, job_id: str, problem: str, now: str) -> None:
         self._connection.execute(
             "INSERT OR IGNORE INTO runs(run_id,snapshot_json,created_at,updated_at) VALUES(?,?,?,?)",
-            (job_id, _json(_run_snapshot(job_id, "QUEUED", now, input_text=problem)), now, now),
+            (job_id, _json(_run_snapshot(job_id, "QUEUED", now, input_text=problem, asset_refs=self._asset_refs(job_id))), now, now),
         )
+
+    def _asset_refs(self, job_id: str) -> list[dict[str, Any]]:
+        row = self._connection.execute("SELECT input_user_file_id FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+        value = row["input_user_file_id"] if row is not None else None
+        return [{"file_id": value, "status": "unavailable"}] if value else []
 
     @staticmethod
     def _job_payload(row: sqlite3.Row, *, include_result: bool = False) -> dict[str, Any]:
@@ -506,6 +516,7 @@ class WorkspaceStore:
             "session_id": row["session_id"],
             "status": row["status"],
             "verification_mode": row["verification_mode"],
+            "input_user_file_id": row["input_user_file_id"],
             "last_event_id": None,
         }
         if include_result and row["result_json"]:
@@ -553,8 +564,8 @@ class WorkspaceService:
     ) -> tuple[dict[str, Any], bool]:
         if web_search_enabled:
             raise WorkspaceError("capability_unavailable", status=503)
-        if input_user_file_id is not None:
-            raise WorkspaceError("capability_unavailable", status=503)
+        if input_user_file_id is not None and (not isinstance(input_user_file_id, str) or not input_user_file_id):
+            raise WorkspaceError("file_id_invalid", status=400)
         if not isinstance(verification_mode, str) or verification_mode not in {"auto", "required", "off"}:
             raise WorkspaceError("verification_mode_invalid", status=400)
         if not _is_uuid_v4(idempotency_key):
@@ -567,6 +578,7 @@ class WorkspaceService:
             idempotency_key=idempotency_key,
             request_digest=digest,
             verification_mode=verification_mode,
+            input_user_file_id=input_user_file_id,
         )
         if not existing:
             self._submit(payload["job_id"])
@@ -700,6 +712,7 @@ def _run_snapshot(
     result: Mapping[str, Any] | None = None,
     error: Mapping[str, Any] | None = None,
     input_text: str = "",
+    asset_refs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     snapshot: dict[str, Any] = {
         "run_id": job_id,
@@ -708,7 +721,8 @@ def _run_snapshot(
         "status": status,
         "stage": "queued" if status == "QUEUED" else ("synthesis" if status == "COMPLETED" else "solving"),
         "input_ref": {"kind": "text", "length": len(input_text)} if input_text else {"kind": "text"},
-        "asset_refs": [],
+        "asset_refs": list(asset_refs or []),
+        "vision_status": "unavailable" if asset_refs else None,
         "result": dict(result) if result else None,
         "final_response": result.get("final_response") if result else None,
         "error": dict(error) if error else None,

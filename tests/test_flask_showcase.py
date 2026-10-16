@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -112,6 +113,50 @@ class FlaskShowcaseContractTest(unittest.TestCase):
 
         with self.assertRaises(ProfileBoundaryError):
             create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(self.root)}, profile="official")
+
+    def test_png_upload_is_unavailable_by_default(self) -> None:
+        body = self.client.get("/api/capabilities").get_json()
+        self.assertFalse(body["files"]["upload"]["enabled"])
+
+    def test_enabled_png_upload_validates_signature_and_lists_redacted_reference(self) -> None:
+        app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(self.root / "enabled"), "SHOWCASE_VISION_ENABLED": True})
+        client = app.test_client()
+        try:
+            csrf = client.get("/api/check_auth").get_json()["csrf_token"]
+            png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360f8cf00000004000101e2dd0000000049454e44ae426082")
+            uploaded = client.post("/api/upload_file", data={"file": (io.BytesIO(png), "题图.png")}, headers={"X-CSRF-Token": csrf}, content_type="multipart/form-data")
+            self.assertEqual(201, uploaded.status_code)
+            reference = uploaded.get_json()["file"]
+            self.assertEqual("image/png", reference["mime"])
+            self.assertNotIn("content", reference)
+            listed = client.get("/api/files").get_json()
+            self.assertEqual(reference["file_id"], listed[0]["file_id"])
+            bad = client.post("/api/upload_file", data={"file": (io.BytesIO(b"not png"), "fake.png")}, headers={"X-CSRF-Token": csrf}, content_type="multipart/form-data")
+            self.assertEqual(400, bad.status_code)
+            self.assertEqual("image_signature_invalid", bad.get_json()["error"])
+            removed = client.post("/api/delete_file", json={"file_id": reference["file_id"]}, headers={"X-CSRF-Token": csrf})
+            self.assertEqual(200, removed.status_code)
+            self.assertEqual([], client.get("/api/files").get_json())
+        finally:
+            app.extensions["showcase_run_service"].close()
+            app.extensions["loopback_store"].close()
+
+    def test_png_reference_enters_job_report_without_binary(self) -> None:
+        app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(self.root / "job"), "SHOWCASE_VISION_ENABLED": True})
+        client = app.test_client()
+        try:
+            csrf = client.get("/api/check_auth").get_json()["csrf_token"]
+            session = client.post("/api/new_chat", json={}, headers={"X-CSRF-Token": csrf}).get_json()["new_session_id"]
+            png = bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360f8cf00000004000101e2dd0000000049454e44ae426082")
+            uploaded = client.post("/api/upload_file", data={"file": (io.BytesIO(png), "q.png")}, headers={"X-CSRF-Token": csrf}, content_type="multipart/form-data").get_json()["file"]
+            import uuid
+            created = client.post("/api/agent/jobs", json={"message": "看图", "session_id": session, "input_user_file_id": uploaded["file_id"]}, headers={"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())})
+            self.assertEqual(202, created.status_code)
+            report = client.get(f"/api/agent/jobs/{created.get_json()['job_id']}/report")
+            self.assertEqual(uploaded["file_id"], report.get_json()["report"].get("asset_refs", [{}])[0].get("file_id"))
+        finally:
+            app.extensions["showcase_run_service"].close()
+            app.extensions["loopback_store"].close()
 
 
 if __name__ == "__main__":
