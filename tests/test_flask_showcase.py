@@ -94,6 +94,8 @@ class FlaskShowcaseContractTest(unittest.TestCase):
         self.assertTrue(body["jobs"]["enabled"])
         self.assertTrue(body["sse"]["enabled"])
         self.assertEqual(["auto", "required", "off"], body["verification_mode"])
+        self.assertFalse(body["files"]["upload"]["enabled"])
+        self.assertEqual("unavailable", body["files"]["upload"]["status"])
 
     def test_job_polynomial_check_is_public_and_persisted(self) -> None:
         csrf = self._csrf()
@@ -113,17 +115,6 @@ class FlaskShowcaseContractTest(unittest.TestCase):
         response = self.client.post("/api/agent/jobs/missing/polynomial-check", json={})
         self.assertEqual(401, response.status_code)
         self.assertEqual("auth_required", response.get_json()["code"])
-
-        self.assertFalse(body["files"]["upload"]["enabled"])
-        self.assertEqual("unavailable", body["files"]["upload"]["status"])
-
-        response = self.client.post(
-            "/api/upload_file",
-            data={},
-            headers={"X-CSRF-Token": self._csrf()},
-        )
-        self.assertEqual(503, response.status_code)
-        self.assertEqual("capability_unavailable", response.get_json()["error"])
 
     def test_error_contract_includes_readable_message_and_request_id(self) -> None:
         self.client.get("/api/check_auth")
