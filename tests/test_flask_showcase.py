@@ -110,7 +110,7 @@ class FlaskShowcaseContractTest(unittest.TestCase):
         self.client.get("/api/check_auth")
         response = self.client.post("/api/agent/jobs", json={}, headers={"X-CSRF-Token": self._csrf()})
         body = response.get_json()
-        self.assertEqual("message_missing", body["code"])
+        self.assertEqual("message_must_be_non_empty", body["code"])
         self.assertTrue(body["message"])
         self.assertEqual(response.headers.get("X-Request-ID"), body["request_id"])
 

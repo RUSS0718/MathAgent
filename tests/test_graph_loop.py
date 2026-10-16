@@ -123,7 +123,7 @@ class LangGraphLoopTest(unittest.TestCase):
         )
         loop.run({"run_id": "run_checkpoint_redaction", "problem": "test"})
         self.assertNotIn("secret", str(checkpoints))
-        self.assertTrue(all("arguments" not in state.get("pending_tool", {}) for state in checkpoints))
+        self.assertTrue(all(not isinstance(state.get("pending_tool"), dict) or "arguments" not in state["pending_tool"] for state in checkpoints))
 
     def test_required_unknown_checker_does_not_emit_verification_pass(self):
         loop = LangGraphExecutionLoop(
