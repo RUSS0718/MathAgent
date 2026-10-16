@@ -605,7 +605,24 @@ def _parse_event_cursor(value: str | None) -> int | None:
 
 
 def _json_error(error: str, status: int) -> tuple[Response, int]:
-    return jsonify({"success": False, "error": error, "code": error}), status
+    messages = {
+        "auth_required": "请先完成本地登录。",
+        "csrf_required": "请求缺少安全令牌。",
+        "csrf_invalid": "安全令牌无效。",
+        "invalid_json": "请求体必须是有效 JSON。",
+        "body_must_be_object": "请求体必须是对象。",
+        "capability_unavailable": "当前环境未启用该能力。",
+        "not_found": "请求的资源不存在。",
+        "invalid_last_event_id": "事件游标无效。",
+    }
+    response = jsonify({
+        "success": False,
+        "error": error,
+        "code": error,
+        "message": messages.get(error, "请求无法完成，请检查输入后重试。"),
+        "request_id": g.get("request_id"),
+    })
+    return response, status
 
 
 def _workspace_error(error: WorkspaceError) -> tuple[Response, int]:

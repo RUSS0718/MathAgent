@@ -94,6 +94,7 @@ class FlaskShowcaseContractTest(unittest.TestCase):
         self.assertTrue(body["jobs"]["enabled"])
         self.assertTrue(body["sse"]["enabled"])
         self.assertEqual(["auto", "required", "off"], body["verification_mode"])
+
         self.assertFalse(body["files"]["upload"]["enabled"])
         self.assertEqual("unavailable", body["files"]["upload"]["status"])
 
@@ -104,6 +105,14 @@ class FlaskShowcaseContractTest(unittest.TestCase):
         )
         self.assertEqual(503, response.status_code)
         self.assertEqual("capability_unavailable", response.get_json()["error"])
+
+    def test_error_contract_includes_readable_message_and_request_id(self) -> None:
+        self.client.get("/api/check_auth")
+        response = self.client.post("/api/agent/jobs", json={}, headers={"X-CSRF-Token": self._csrf()})
+        body = response.get_json()
+        self.assertEqual("message_missing", body["code"])
+        self.assertTrue(body["message"])
+        self.assertEqual(response.headers.get("X-Request-ID"), body["request_id"])
 
     def test_storage_defaults_are_created_and_profile_boundary_is_explicit(self) -> None:
         self.client.get("/api/check_auth")
