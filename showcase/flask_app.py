@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import os
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, g, jsonify, request
+from flask import Flask, Response, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import BadRequest
 
 from .evidence import EvidencePackExporter
@@ -24,6 +25,7 @@ from .run_service import (
 )
 from .server import create_live_service
 from .verification import LightweightVerificationHook
+from .workspace import WorkspaceError, WorkspaceService
 
 AUTH_COOKIE = "auth_session"
 MAX_BODY_BYTES = 1_000_000
@@ -64,8 +66,11 @@ def create_app(
             service = create_live_service(database_path=resolved_database)
         else:
             service = RunService(database_path=resolved_database)
+    shared_connection = getattr(getattr(service, "_store", None), "_connection", None)
+    workspace_service = WorkspaceService(resolved_database, connection=shared_connection)
     app.extensions["loopback_store"] = loopback_store
     app.extensions["showcase_run_service"] = service
+    app.extensions["showcase_workspace_service"] = workspace_service
     app.extensions["showcase_verifier"] = LightweightVerificationHook()
     app.extensions["showcase_evidence_exporter"] = EvidencePackExporter()
 
@@ -92,6 +97,10 @@ def create_app(
     def not_found(_error: Any) -> tuple[Response, int]:
         return _json_error("not_found", 404)
 
+    @app.errorhandler(WorkspaceError)
+    def workspace_error(error: WorkspaceError) -> tuple[Response, int]:
+        return _workspace_error(error)
+
     @app.get("/health")
     def health() -> Response:
         return jsonify(service.health())
@@ -102,8 +111,17 @@ def create_app(
     @app.get("/dashboard/<path:subpath>")
     def dashboard(subpath: str = "") -> Response:
         del subpath
-        response = Response(_dashboard_page(), content_type="text/html; charset=utf-8")
+        frontend_index = Path(__file__).parent / "frontend" / "chat-frontend" / "dist" / "index.html"
+        body = frontend_index.read_text(encoding="utf-8") if frontend_index.is_file() else _dashboard_page()
+        response = Response(body, content_type="text/html; charset=utf-8")
         return _set_auth_cookie_if_new(response, loopback_store)
+
+    @app.get("/dashboard-assets/<path:asset_path>")
+    def dashboard_asset(asset_path: str) -> Response:
+        asset_root = Path(__file__).parent / "frontend" / "chat-frontend" / "dist"
+        if not (asset_root / asset_path).is_file():
+            return _json_error("not_found", 404)[0], 404
+        return send_from_directory(asset_root, asset_path)
 
     @app.get("/api/check_auth")
     def check_auth() -> Response:
@@ -154,6 +172,130 @@ def create_app(
     @app.post("/api/delete_file")
     def unavailable_file_operation() -> tuple[Response, int]:
         return _json_error("capability_unavailable", 503)
+
+    @app.get("/api/sessions")
+    def list_sessions() -> Response | tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        try:
+            return jsonify(workspace_service.list_sessions(session.user_id))
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
+    @app.post("/api/new_chat")
+    def new_chat() -> tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        try:
+            session_id = workspace_service.create_session(session.user_id)
+            return jsonify({"success": True, "new_session_id": session_id}), 200
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
+    @app.get("/api/load_session")
+    def load_session() -> Response | tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        session_id = request.args.get("session", "")
+        try:
+            messages = workspace_service.load_session(session_id, session.user_id)
+            return jsonify({"success": True, "messages": messages})
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
+    @app.post("/api/change_session")
+    def change_session() -> tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        payload = _request_object()
+        if isinstance(payload, tuple):
+            return payload
+        session_id = payload.get("session_id")
+        title = payload.get("title")
+        if not isinstance(session_id, str) or not isinstance(title, str) or not title.strip():
+            return _json_error("invalid_session_title", 400)
+        if len(title.strip()) > 200:
+            return _json_error("session_title_too_large", 400)
+        try:
+            workspace_service.rename_session(session_id, session.user_id, title.strip())
+            return jsonify({"success": True, "session_id": session_id, "title": title.strip()}), 200
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
+    @app.post("/api/delete_session")
+    def delete_session() -> tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        payload = _request_object()
+        if isinstance(payload, tuple):
+            return payload
+        session_id = payload.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return _json_error("session_id_required", 400)
+        try:
+            workspace_service.delete_session(session_id, session.user_id)
+            return jsonify({"success": True}), 200
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
+    @app.post("/api/agent/jobs")
+    def create_job() -> tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        payload = _request_object()
+        if isinstance(payload, tuple):
+            return payload
+        message = payload.get("message")
+        session_id = payload.get("session_id")
+        if not isinstance(message, str) or not message.strip():
+            return _json_error("message_must_be_non_empty", 400)
+        if not isinstance(session_id, str) or not session_id:
+            return _json_error("session_id_required", 400)
+        if len(message.strip()) > 100_000:
+            return _json_error("message_too_large", 400)
+        idempotency_key = request.headers.get("Idempotency-Key", "")
+        try:
+            job, existing = workspace_service.create_job(
+                user_id=session.user_id,
+                session_id=session_id,
+                problem=message.strip(),
+                idempotency_key=idempotency_key,
+                web_search_enabled=payload.get("web_search_enabled", False) is True,
+                input_user_file_id=payload.get("input_user_file_id"),
+                verification_mode=payload.get("verification_mode", "auto"),
+            )
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+        status = 200 if existing else 202
+        return jsonify({"success": True, "job_id": job["job_id"], "status": job["status"], "existing": existing}), status
+
+    @app.get("/api/agent/jobs/active")
+    def active_jobs() -> Response | tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        session_id = request.args.get("session_id")
+        try:
+            return jsonify({"success": True, "jobs": workspace_service.active_jobs(session.user_id, session_id)})
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
+    @app.get("/api/agent/jobs/<job_id>")
+    def get_job(job_id: str) -> Response | tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        try:
+            return jsonify({"success": True, **workspace_service.get_job(job_id, session.user_id)})
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
+    @app.get("/api/agent/jobs/<job_id>/events")
+    def get_job_events(job_id: str) -> Response | tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        try:
+            try:
+                after_id = max(0, int(request.args.get("last_event_id", "0")))
+            except ValueError:
+                return _json_error("invalid_last_event_id", 400)
+            events = workspace_service.events(job_id, session.user_id, after_id)
+            body = "".join(
+                f"id: {event['id']}\nevent: {event['event']}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
+                for event in events
+            )
+            return Response(body, content_type="text/event-stream; charset=utf-8")
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
 
     @app.post("/api/runs")
     def create_run() -> tuple[Response, int]:
@@ -270,6 +412,26 @@ def _set_auth_cookie(response: Response, session: AuthSession) -> None:
 
 def _json_error(error: str, status: int) -> tuple[Response, int]:
     return jsonify({"success": False, "error": error, "code": error}), status
+
+
+def _workspace_error(error: WorkspaceError) -> tuple[Response, int]:
+    return _json_error(error.code, error.status)
+
+
+def _require_auth(session: AuthSession | None) -> AuthSession:
+    if session is None:
+        raise WorkspaceError("auth_required", status=401)
+    return session
+
+
+def _request_object() -> dict[str, Any] | tuple[Response, int]:
+    try:
+        payload = request.get_json(silent=False)
+    except BadRequest:
+        return _json_error("invalid_json", 400)
+    if not isinstance(payload, dict):
+        return _json_error("body_must_be_object", 400)
+    return payload
 
 
 def _dashboard_page() -> str:
