@@ -27,6 +27,7 @@ from .run_service import (
 from .server import create_live_service
 from .verification import LightweightVerificationHook
 from .workspace import WorkspaceError, WorkspaceService
+from .polynomial import PolynomialChecker
 
 AUTH_COOKIE = "auth_session"
 MAX_BODY_BYTES = 1_000_000
@@ -329,6 +330,19 @@ def create_app(
         session_id = request.args.get("session_id")
         try:
             return jsonify({"success": True, "jobs": workspace_service.active_jobs(session.user_id, session_id)})
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
+    @app.post("/api/agent/jobs/<job_id>/polynomial-check")
+    def verify_job_polynomial(job_id: str) -> Response | tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        payload = _request_object()
+        if isinstance(payload, tuple):
+            return payload
+        try:
+            result = PolynomialChecker().check(payload)
+            workspace_service.record_verification(user_id=session.user_id, job_id=job_id, result=result)
+            return jsonify({"success": True, "job_id": job_id, "result": result}), 200
         except WorkspaceError as exc:
             return _workspace_error(exc)
 

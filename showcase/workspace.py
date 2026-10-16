@@ -413,6 +413,17 @@ class WorkspaceStore:
             )
             self._connection.commit()
 
+    def record_verification(self, job_id: str, result: Mapping[str, Any]) -> None:
+        with self._lock:
+            row = self._connection.execute("SELECT 1 FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+            if row is None:
+                raise WorkspaceError("job_not_found", status=404)
+            now = _utc_now()
+            payload = {"checker": "polynomial_check", "result": dict(result)}
+            self._connection.execute("UPDATE workspace_jobs SET result_json=?,updated_at=? WHERE job_id=?", (_json(payload), now, job_id))
+            self._insert_event(job_id, "verification_completed", {"type": "verification_completed", "job_id": job_id, "status": result.get("candidate_status", "unknown"), "data": payload})
+            self._connection.commit()
+
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
         with self._lock:
             row = self._connection.execute("SELECT * FROM workspace_jobs WHERE job_id=? AND user_id=?", (job_id, user_id)).fetchone()
@@ -642,6 +653,10 @@ class WorkspaceService:
 
     def status(self, job_id: str, user_id: str) -> str:
         return self.store.status(job_id, user_id)
+
+    def record_verification(self, *, user_id: str, job_id: str, result: Mapping[str, Any]) -> None:
+        self.store.get_job(job_id, user_id)
+        self.store.record_verification(job_id, result)
 
     def last_event_id(self, job_id: str, user_id: str) -> int:
         return self.store.last_event_id(job_id, user_id)
