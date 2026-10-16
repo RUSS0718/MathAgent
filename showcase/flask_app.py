@@ -508,7 +508,7 @@ def create_app(
         result = job.get("result") if isinstance(job.get("result"), Mapping) else {}
         snapshot = {
             "run_id": job_id,
-            "execution_mode": "fake",
+            "execution_mode": "live" if app.config.get("SHOWCASE_MODE") == "live" else "fake",
             "status": str(job.get("status", "unavailable")).upper(),
             "stage": _job_stage(events),
             "result": result,
@@ -519,8 +519,10 @@ def create_app(
         }
         tool_results = [event["data"] for event in events if event.get("event") == "tool_completed"]
         verification = {"status": "unknown", "findings": ["verification_not_run"]}
+        if job.get("verification_mode") == "required" and not tool_results:
+            verification["findings"] = ["needs_review", "tool_evidence_missing"]
         report = app.extensions["showcase_evidence_exporter"].report(snapshot, tool_results=tool_results, verification=verification)
-        return jsonify({"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": "fake", "report": report})
+        return jsonify({"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": snapshot["execution_mode"], "report": report})
 
     @app.post("/api/runs/<run_id>/resume")
     def resume_run(run_id: str) -> tuple[Response, int]:
