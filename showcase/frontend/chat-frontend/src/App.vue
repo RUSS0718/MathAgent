@@ -12,4 +12,4 @@ const route = ref<DashboardRoute>(readDashboardRoute(globalThis.location.pathnam
 const ready = ref(false)
 onMounted(async () => { await auth.check(); await sessions.loadList(); ready.value = true; globalThis.addEventListener('popstate', () => { route.value = readDashboardRoute(globalThis.location.pathname) }) })
 </script>
-<template><p v-if="!ready" class="loading">加载中...</p><SettingsPanel v-else-if="route.view === 'settings'" /><ChatWorkspace v-else :path="route.path" /></template>
+<template><p v-if="!ready" class="loading">加载中...</p><SettingsPanel v-else-if="route.view === 'settings'" /><ChatWorkspace v-else :key="route.path" :path="route.path" :session-id="route.sessionId" /></template>

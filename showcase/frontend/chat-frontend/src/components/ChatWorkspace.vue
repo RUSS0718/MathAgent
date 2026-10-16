@@ -10,7 +10,7 @@ const sessions = useSessionsStore()
 const jobs = useJobsStore()
 const draft = ref('')
 const notice = ref('')
-const props = defineProps<{ path: string }>()
+const props = defineProps<{ path: string; sessionId: string | null }>()
 const current = computed(() => sessions.currentId ? jobs.activeForSession(sessions.currentId) : undefined)
 
 async function send(): Promise<void> {
@@ -27,7 +27,7 @@ async function newSession(): Promise<void> { const id = await sessions.create();
 async function selectSession(id: string): Promise<void> { await sessions.select(id); globalThis.history.pushState({}, '', sessionHref(id)); globalThis.dispatchEvent(new PopStateEvent('popstate')) }
 async function rename(id: string): Promise<void> { const title = globalThis.prompt('会话名称', sessions.items.find((item) => item.id === id)?.preview ?? '新对话'); if (title?.trim()) await sessions.rename(id, title.trim()) }
 async function remove(id: string): Promise<void> { await sessions.remove(id); if (!sessions.currentId) globalThis.history.pushState({}, '', workspaceHref()) }
-onMounted(async () => { if (props.path === settingsHref()) return; if (!sessions.items.length) await sessions.loadList(); if (sessions.currentId) await sessions.select(sessions.currentId) })
+onMounted(async () => { if (props.path === settingsHref()) return; if (!sessions.items.length) await sessions.loadList(); if (props.sessionId) await sessions.select(props.sessionId); else if (sessions.currentId) await sessions.select(sessions.currentId) })
 </script>
 
 <template>
