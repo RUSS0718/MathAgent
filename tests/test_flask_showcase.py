@@ -95,6 +95,25 @@ class FlaskShowcaseContractTest(unittest.TestCase):
         self.assertTrue(body["sse"]["enabled"])
         self.assertEqual(["auto", "required", "off"], body["verification_mode"])
 
+    def test_job_polynomial_check_is_public_and_persisted(self) -> None:
+        csrf = self._csrf()
+        session = self.client.post("/api/new_chat", headers={"X-CSRF-Token": csrf}).get_json()["new_session_id"]
+        created = self.client.post("/api/agent/jobs", json={"message": "校验", "session_id": session}, headers={"X-CSRF-Token": csrf, "Idempotency-Key": "00000000-0000-4000-8000-000000000001"})
+        self.assertIn(created.status_code, (200, 202))
+        job_id = created.get_json()["job_id"]
+        payload = {"schema_version": 1, "variable": "x", "coefficients": ["1", "0", "-1"], "domain": {"kind": "real"}, "candidates": ["1"]}
+        response = self.client.post(f"/api/agent/jobs/{job_id}/polynomial-check", json=payload, headers={"X-CSRF-Token": csrf})
+        self.assertEqual(200, response.status_code)
+        result = response.get_json()["result"]
+        self.assertEqual("pass", result["candidate_status"])
+        self.assertEqual("unknown", result["coverage_status"])
+        self.assertTrue(result["evidence_id"])
+
+    def test_job_polynomial_check_requires_auth(self) -> None:
+        response = self.client.post("/api/agent/jobs/missing/polynomial-check", json={})
+        self.assertEqual(401, response.status_code)
+        self.assertEqual("auth_required", response.get_json()["code"])
+
         self.assertFalse(body["files"]["upload"]["enabled"])
         self.assertEqual("unavailable", body["files"]["upload"]["status"])
 
