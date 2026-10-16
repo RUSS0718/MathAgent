@@ -2,7 +2,7 @@
   "version": "v0.2",
   "release_gate": "P0",
   "checked_at": "2026-10-17T00:00:00+08:00",
-  "source_commit": "2a1001e",
+  "source_commit": "f81c752",
   "release_status": "engineering-preview",
   "status_reason": "AC-06 requires real Intern credentials and six live tool continuations; no credential or live evidence is available.",
   "labels": ["live", "fake", "replay", "experimental", "unavailable", "planned"],
@@ -13,11 +13,11 @@
     "AC-04": {"status": "pass", "evidence": "tests/test_job_control.py; tests/test_workspace_jobs.py"},
     "AC-05": {"status": "pass", "evidence": "tests/test_graph_service.py; tests/test_job_control.py"},
     "AC-06": {"status": "unavailable", "evidence": "No Intern credential or live run evidence; fake continuation tests are not capability evidence."},
-    "AC-07": {"status": "pass", "evidence": "tests/test_polynomial.py"},
+    "AC-07": {"status": "pass", "evidence": "tests/test_polynomial.py; public /api/agent/jobs/<id>/polynomial-check contract"},
     "AC-08": {"status": "pass", "evidence": "showcase/frontend/chat-frontend npm run check; tests/test_reports.py"},
     "AC-09": {"status": "pass", "evidence": "tests/test_flask_showcase.py; tests/test_showcase_server.py"},
     "AC-10": {"status": "pass", "evidence": "tests/test_reports.py; tests/test_replay_release.py"},
-    "AC-11": {"status": "pass", "evidence": "80 unittest tests pass after SSE terminal event race fix; repository and release checks pass; frontend check passes."}
+    "AC-11": {"status": "pass", "evidence": "92 unittest tests pass; repository and release checks pass; frontend check passes."}
   },
   "math_effect_evaluation": {
     "status": "planned",
