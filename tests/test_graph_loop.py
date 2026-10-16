@@ -100,6 +100,41 @@ class LangGraphLoopTest(unittest.TestCase):
         self.assertEqual("FAILED", result["status"])
         self.assertEqual("budget_exhausted", result["error"]["category"])
 
+    def test_tool_event_does_not_persist_arguments_or_returned_values(self):
+        secret = "prompt=do-not-store token=abc123 complete-value"
+        loop = LangGraphExecutionLoop(
+            ScriptedAgent([AgentDecision.tool("python", {"prompt": secret, "value": secret}), AgentDecision.final("ok")]),
+            ScriptedTools([ToolExecutionResult.success(value={"prompt": secret, "value": secret}, result_summary=secret)]),
+        )
+        result = loop.run({"run_id": "run_redaction", "problem": "test"})
+        serialized = str(result)
+        self.assertNotIn("complete-value", serialized)
+        self.assertNotIn("abc123", serialized)
+        event = next(item for item in result["events"] if item["type"] == "tool_completed")
+        self.assertNotIn("arguments", event)
+        self.assertNotIn("value", event)
+
+    def test_checkpoint_does_not_persist_pending_tool_arguments(self):
+        checkpoints = []
+        loop = LangGraphExecutionLoop(
+            ScriptedAgent([AgentDecision.tool("python", {"token": "secret"}), AgentDecision.final("ok")]),
+            ScriptedTools([ToolExecutionResult.success(result_summary="1")]),
+            checkpoint_sink=lambda _run_id, state: checkpoints.append(state),
+        )
+        loop.run({"run_id": "run_checkpoint_redaction", "problem": "test"})
+        self.assertNotIn("secret", str(checkpoints))
+        self.assertTrue(all(not isinstance(state.get("pending_tool"), dict) or "arguments" not in state["pending_tool"] for state in checkpoints))
+
+    def test_required_unknown_checker_does_not_emit_verification_pass(self):
+        loop = LangGraphExecutionLoop(
+            ScriptedAgent([AgentDecision.tool("polynomial_check", {}), AgentDecision.final("x")]),
+            ScriptedTools([ToolExecutionResult.success(value={"candidate_status": "unknown", "coverage_status": "unknown"})]),
+        )
+        result = loop.run({"run_id": "run_unknown_check", "problem": "test", "verification_mode": "required"})
+        event = next(item for item in result["events"] if item["type"] == "verification_completed")
+        self.assertEqual("unknown", event["status"])
+        self.assertEqual("NEEDS_REVIEW", result["status"])
+
 
 if __name__ == "__main__":
     unittest.main()

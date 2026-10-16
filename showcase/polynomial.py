@@ -80,9 +80,12 @@ def _parse_coefficients(payload: Mapping[str, Any]) -> list[Fraction]:
     raw = payload.get("coefficients")
     if not isinstance(raw, list) or not 2 <= len(raw) <= 5:
         raise ValueError("degree_out_of_range")
-    if raw[0] == "0":
+    coefficients = [_parse_rational(value, "coefficient") for value in raw]
+    # A polynomial must have a genuinely non-zero leading coefficient.  This
+    # rejects alternate spellings such as -0, 0/1, and -0/1 as well.
+    if coefficients[0] == 0:
         raise ValueError("leading_zero_coefficient")
-    return [_parse_rational(value, "coefficient") for value in raw]
+    return coefficients
 
 
 def _parse_candidates(payload: Mapping[str, Any]) -> list[tuple[str, Fraction]]:
@@ -103,9 +106,13 @@ def _parse_domain(payload: Mapping[str, Any]) -> tuple[str, Fraction | None, Fra
         raise ValueError("domain_invalid")
     kind = domain.get("kind")
     if kind == "real":
+        if set(domain) != {"kind"}:
+            raise ValueError("domain_fields_invalid")
         return ("real", None, None, True, True)
     if kind != "interval":
         raise ValueError("domain_unsupported")
+    if set(domain) - {"kind", "left", "right", "left_closed", "right_closed"}:
+        raise ValueError("domain_fields_invalid")
     left = _parse_rational(domain.get("left"), "domain_endpoint")
     right = _parse_rational(domain.get("right"), "domain_endpoint")
     left_closed = domain.get("left_closed", True)

@@ -17,6 +17,7 @@ from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 from .evidence import EvidencePackExporter, replay_evidence
 from .loopback import AuthSession, LoopbackStore
+from .polynomial import PolynomialChecker
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
 from .run_service import (
     RunNotFoundError,
@@ -71,7 +72,11 @@ def create_app(
         else:
             service = RunService(database_path=resolved_database)
     shared_connection = getattr(getattr(service, "_store", None), "_connection", None)
-    workspace_service = WorkspaceService(resolved_database, connection=shared_connection)
+    workspace_service = WorkspaceService(
+        resolved_database,
+        connection=shared_connection,
+        execution_mode=str(app.config.get("SHOWCASE_MODE", "fake")),
+    )
     app.extensions["loopback_store"] = loopback_store
     app.extensions["showcase_run_service"] = service
     app.extensions["showcase_workspace_service"] = workspace_service
@@ -328,6 +333,19 @@ def create_app(
         except WorkspaceError as exc:
             return _workspace_error(exc)
 
+    @app.post("/api/agent/jobs/<job_id>/polynomial-check")
+    def verify_job_polynomial(job_id: str) -> Response | tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        payload = _request_object()
+        if isinstance(payload, tuple):
+            return payload
+        try:
+            result = PolynomialChecker().check(payload)
+            workspace_service.record_verification(user_id=session.user_id, job_id=job_id, result=result)
+            return jsonify({"success": True, "job_id": job_id, "result": result}), 200
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
     @app.get("/api/agent/jobs/<job_id>")
     def get_job(job_id: str) -> Response | tuple[Response, int]:
         session = _require_auth(g.auth_session)
@@ -508,7 +526,7 @@ def create_app(
         result = job.get("result") if isinstance(job.get("result"), Mapping) else {}
         snapshot = {
             "run_id": job_id,
-            "execution_mode": "fake",
+            "execution_mode": "live" if app.config.get("SHOWCASE_MODE") == "live" else "fake",
             "status": str(job.get("status", "unavailable")).upper(),
             "stage": _job_stage(events),
             "result": result,
@@ -519,8 +537,10 @@ def create_app(
         }
         tool_results = [event["data"] for event in events if event.get("event") == "tool_completed"]
         verification = {"status": "unknown", "findings": ["verification_not_run"]}
+        if job.get("verification_mode") == "required" and not tool_results:
+            verification["findings"] = ["needs_review", "tool_evidence_missing"]
         report = app.extensions["showcase_evidence_exporter"].report(snapshot, tool_results=tool_results, verification=verification)
-        return jsonify({"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": "fake", "report": report})
+        return jsonify({"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": snapshot["execution_mode"], "report": report})
 
     @app.post("/api/runs/<run_id>/resume")
     def resume_run(run_id: str) -> tuple[Response, int]:
@@ -605,7 +625,24 @@ def _parse_event_cursor(value: str | None) -> int | None:
 
 
 def _json_error(error: str, status: int) -> tuple[Response, int]:
-    return jsonify({"success": False, "error": error, "code": error}), status
+    messages = {
+        "auth_required": "请先完成本地登录。",
+        "csrf_required": "请求缺少安全令牌。",
+        "csrf_invalid": "安全令牌无效。",
+        "invalid_json": "请求体必须是有效 JSON。",
+        "body_must_be_object": "请求体必须是对象。",
+        "capability_unavailable": "当前环境未启用该能力。",
+        "not_found": "请求的资源不存在。",
+        "invalid_last_event_id": "事件游标无效。",
+    }
+    response = jsonify({
+        "success": False,
+        "error": error,
+        "code": error,
+        "message": messages.get(error, "请求无法完成，请检查输入后重试。"),
+        "request_id": g.get("request_id"),
+    })
+    return response, status
 
 
 def _workspace_error(error: WorkspaceError) -> tuple[Response, int]:

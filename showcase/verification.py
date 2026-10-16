@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
@@ -38,7 +39,22 @@ class LightweightVerificationHook:
         if not isinstance(final_response, str) or not final_response.strip():
             return VerificationResult("conflict", ("final_response_missing",))
         results = tool_results or []
-        polynomial = [item.get("value") for item in results if item.get("name") == "polynomial_check" and isinstance(item.get("value"), dict)]
+        polynomial = []
+        for item in results:
+            if item.get("name") != "polynomial_check":
+                continue
+            value = item.get("value")
+            if isinstance(value, dict):
+                polynomial.append(value)
+                continue
+            summary = item.get("result_summary")
+            if isinstance(summary, str):
+                try:
+                    parsed = json.loads(summary)
+                except (TypeError, ValueError):
+                    parsed = None
+                if isinstance(parsed, dict):
+                    polynomial.append(parsed)
         if polynomial:
             check = polynomial[-1]
             status = check.get("candidate_status")
