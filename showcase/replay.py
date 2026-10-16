@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .evidence import EvidencePackExporter
+from .evidence import EvidencePackExporter, replay_evidence
 
 
 class ReplayValidationError(ValueError):
@@ -75,4 +75,4 @@ def write_sample_replay(path: str | Path) -> dict[str, Any]:
     return pack
 
 
-__all__ = ["ReplayValidationError", "load_replay", "write_sample_replay"]
+__all__ = ["ReplayValidationError", "load_replay", "replay_evidence", "write_sample_replay"]
