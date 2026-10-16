@@ -349,15 +349,30 @@ class LangGraphExecutionLoop:
 
     def _verify_node(self, state: LoopState) -> dict[str, Any]:
         updated = _normalize_state(state)
-        if updated.get("verification_mode") == "required" and not any(
-            item.get("status") == "success" for item in updated.get("tool_results", [])
-        ):
+        results = updated.get("tool_results", [])
+        if updated.get("verification_mode") == "required" and not any(item.get("status") == "success" for item in results):
             _finish_with_error(updated, "tool_evidence_missing", "Required verification has no valid tool event")
             updated["status"] = "NEEDS_REVIEW"
             return updated
+        verification_status = "pass"
+        for item in results:
+            if item.get("name") != "polynomial_check":
+                continue
+            try:
+                summary = json.loads(str(item.get("result_summary", "")))
+            except (TypeError, ValueError):
+                summary = {}
+            candidate_status = summary.get("candidate_status")
+            if candidate_status in {"conflict", "unknown"}:
+                verification_status = candidate_status
+                break
         updated["stage"] = "synthesizing"
         updated["status"] = "SYNTHESIZING"
-        self._record_and_emit(updated, "verification_completed", {"status": "pass"})
+        self._record_and_emit(updated, "verification_completed", {"status": verification_status})
+        if verification_status in {"conflict", "unknown"} and updated.get("verification_mode") == "required":
+            _finish_with_error(updated, "verification_needs_review", "Checker evidence is not a complete pass")
+            updated["status"] = "NEEDS_REVIEW"
+            return updated
         updated["next_node"] = "terminal"
         return updated
 

@@ -49,6 +49,11 @@ class PolynomialCheckerTest(unittest.TestCase):
         self.assertEqual("unknown", result["candidate_status"])
         self.assertEqual([], result["candidates"])
 
+    def test_domain_unknown_fields_are_rejected(self):
+        result = PolynomialChecker().check({**VALID, "domain": {"kind": "real", "junk": True}})
+        self.assertEqual("unknown", result["candidate_status"])
+        self.assertEqual([], result["candidates"])
+
     def test_interval_boundary_is_checked_exactly(self):
         payload = {**VALID, "domain": {"kind": "interval", "left": "-1", "right": "1", "left_closed": True, "right_closed": False}}
         result = PolynomialChecker().check(payload)

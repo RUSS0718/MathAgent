@@ -125,6 +125,16 @@ class LangGraphLoopTest(unittest.TestCase):
         self.assertNotIn("secret", str(checkpoints))
         self.assertTrue(all("arguments" not in state.get("pending_tool", {}) for state in checkpoints))
 
+    def test_required_unknown_checker_does_not_emit_verification_pass(self):
+        loop = LangGraphExecutionLoop(
+            ScriptedAgent([AgentDecision.tool("polynomial_check", {}), AgentDecision.final("x")]),
+            ScriptedTools([ToolExecutionResult.success(value={"candidate_status": "unknown", "coverage_status": "unknown"})]),
+        )
+        result = loop.run({"run_id": "run_unknown_check", "problem": "test", "verification_mode": "required"})
+        event = next(item for item in result["events"] if item["type"] == "verification_completed")
+        self.assertEqual("unknown", event["status"])
+        self.assertEqual("NEEDS_REVIEW", result["status"])
+
 
 if __name__ == "__main__":
     unittest.main()

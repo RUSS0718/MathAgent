@@ -106,9 +106,13 @@ def _parse_domain(payload: Mapping[str, Any]) -> tuple[str, Fraction | None, Fra
         raise ValueError("domain_invalid")
     kind = domain.get("kind")
     if kind == "real":
+        if set(domain) != {"kind"}:
+            raise ValueError("domain_fields_invalid")
         return ("real", None, None, True, True)
     if kind != "interval":
         raise ValueError("domain_unsupported")
+    if set(domain) - {"kind", "left", "right", "left_closed", "right_closed"}:
+        raise ValueError("domain_fields_invalid")
     left = _parse_rational(domain.get("left"), "domain_endpoint")
     right = _parse_rational(domain.get("right"), "domain_endpoint")
     left_closed = domain.get("left_closed", True)
