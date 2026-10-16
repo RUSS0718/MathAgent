@@ -1,0 +1,3 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; color: #172033; background: #f5f7fb; }
+button, textarea { font: inherit; }
