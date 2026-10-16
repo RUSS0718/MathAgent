@@ -2,5 +2,6 @@
 # pyproject.toml + uv.lock; CI and bootstrap use `uv sync --locked`.
 -r requirements.txt
 requests>=2.31.0
+Flask>=3.1,<4
 langgraph==1.2.15
 deepagents==0.7.25

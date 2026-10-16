@@ -39,6 +39,14 @@ from .tools import PythonMathTool, ToolRegistry, ToolSpec
 from .verification import LightweightVerificationHook, VerificationResult
 from .vision import ImageAsset, VisionAdapter, VisionInputError, VisionResult
 
+
+def create_app(*args, **kwargs):
+    """Lazily build the Flask Showcase app without loading it for official code."""
+
+    from .flask_app import create_app as _create_app
+
+    return _create_app(*args, **kwargs)
+
 __all__ = [
     "AgentAdapter",
     "AgentDecision",
@@ -73,6 +81,7 @@ __all__ = [
     "VisionInputError",
     "VisionResult",
     "EvidencePackExporter",
+    "create_app",
     "LightweightVerificationHook",
     "VerificationResult",
     "ReplayValidationError",
