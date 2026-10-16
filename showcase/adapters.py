@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any
+from typing import Any, Protocol
 
 from .graph import AgentDecision
 from .run_service import AgentResult, RunRequest
@@ -45,6 +45,41 @@ class ModelResponse:
     usage: Mapping[str, Any] = field(default_factory=dict)
     model_id: str = ""
     error_category: str | None = None
+
+
+class ContinuationTransport(Protocol):
+    """Transport used to deliver one structured tool result back to Intern."""
+
+    mode: str
+
+    def continue_(
+        self,
+        messages: Sequence[Mapping[str, Any]],
+        tool_request: ToolRequest,
+        tool_result: Mapping[str, Any],
+    ) -> ModelResponse:
+        """Return the model continuation after a registered tool result."""
+
+
+class ModelContinuationTransport:
+    """Live continuation transport backed by the configured Intern client."""
+
+    mode = "live"
+
+    def __init__(self, model: InternModelAdapter) -> None:
+        self.model = model
+
+    def continue_(
+        self,
+        messages: Sequence[Mapping[str, Any]],
+        _tool_request: ToolRequest,
+        tool_result: Mapping[str, Any],
+    ) -> ModelResponse:
+        continuation = list(messages) + [{
+            "role": "tool",
+            "content": json.dumps(dict(tool_result), ensure_ascii=False, default=str),
+        }]
+        return self.model.complete(continuation)
 
 
 class InternModelAdapter:
@@ -119,10 +154,12 @@ class InternAgentAdapter:
         *,
         role: str = "solver",
         tool_schemas: Sequence[Mapping[str, Any]] = (),
+        continuation_transport: ContinuationTransport | None = None,
     ) -> None:
         self.model = model
         self.role = role
         self.tool_schemas = tuple(dict(schema) for schema in tool_schemas)
+        self.continuation_transport = continuation_transport or ModelContinuationTransport(model)
 
     def decide(self, state: Mapping[str, Any]) -> AgentDecision:
         """Ask Intern for one bounded decision using product-level state only."""
@@ -138,8 +175,21 @@ class InternAgentAdapter:
             },
             {"role": "user", "content": problem},
         ]
+        transport_mode = "live"
         try:
-            response = self.model.complete(messages, tools=self.tool_schemas)
+            previous = state.get("tool_results")
+            if isinstance(previous, Sequence) and previous and isinstance(previous[-1], Mapping):
+                last = previous[-1]
+                request = ToolRequest(
+                    str(last.get("name", "")),
+                    last.get("arguments", {}) if isinstance(last.get("arguments"), Mapping) else {},
+                )
+                response = self.continuation_transport.continue_(messages, request, last)
+                transport_mode = getattr(self.continuation_transport, "mode", "unavailable")
+                summary_prefix = f"continuation transport={transport_mode}"
+            else:
+                response = self.model.complete(messages, tools=self.tool_schemas)
+                summary_prefix = "model"
         except AdapterError as exc:
             return AgentDecision.failure(
                 f"Intern adapter unavailable: {exc.category}",
@@ -147,10 +197,17 @@ class InternAgentAdapter:
             )
         if response.tool_requests:
             request = response.tool_requests[0]
+            if request.name == "polynomial_check" and not _valid_polynomial_request(request.arguments):
+                return AgentDecision.review("Intern polynomial_check request does not match the registered schema", "tool_request_invalid")
             return AgentDecision.tool(request.name, request.arguments, summary="Intern requested a tool")
         if not response.text.strip():
             return AgentDecision.failure("Intern returned an empty response", "empty_model_response")
-        return AgentDecision.final(response.text, summary=f"model={response.model_id}")
+        return AgentDecision(
+            kind="final",
+            final_response=response.text,
+            summary=f"{summary_prefix}={response.model_id}",
+            transport_mode=(transport_mode if summary_prefix.startswith("continuation") else "live"),
+        )
 
     def run(self, request: RunRequest) -> AgentResult:
         """Provide the RunService AgentAdapter shape for a single model turn."""
@@ -322,6 +379,19 @@ def _accepts_keyword(function: Callable[..., Any], name: str) -> bool:
         return False
 
 
+def _valid_polynomial_request(arguments: Mapping[str, Any]) -> bool:
+    required = {"schema_version", "variable", "coefficients", "domain", "candidates"}
+    return (
+        isinstance(arguments, Mapping)
+        and required.issubset(arguments)
+        and arguments.get("schema_version") == 1
+        and isinstance(arguments.get("variable"), str)
+        and isinstance(arguments.get("coefficients"), list)
+        and isinstance(arguments.get("domain"), Mapping)
+        and isinstance(arguments.get("candidates"), list)
+    )
+
+
 def _message_role(message: Any) -> str:
     role = getattr(message, "type", None)
     return {"human": "user", "ai": "assistant", "system": "system", "tool": "tool"}.get(
@@ -352,10 +422,12 @@ def _extract_agent_text(result: Any) -> str:
 
 __all__ = [
     "AdapterError",
+    "ContinuationTransport",
     "DeepAgentsAdapter",
     "InternAgentAdapter",
     "InternChatModel",
     "InternModelAdapter",
     "ModelResponse",
+    "ModelContinuationTransport",
     "ToolRequest",
 ]

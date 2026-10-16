@@ -208,6 +208,7 @@ class RunService:
             "tool_results": [],
             "final_response": None,
             "error": None,
+            "verification_mode": request.metadata.get("verification_mode", "auto"),
         }
         self._configure_execution_loop()
         try:
@@ -262,6 +263,7 @@ class RunService:
                 "result": {
                     "final_response": state.get("final_response"),
                     "summary": "langgraph execution",
+                    "tool_results": copy.deepcopy(state.get("tool_results", [])),
                 },
                 "updated_at": _utc_now(),
             }
