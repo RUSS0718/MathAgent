@@ -114,6 +114,17 @@ class LangGraphLoopTest(unittest.TestCase):
         self.assertNotIn("arguments", event)
         self.assertNotIn("value", event)
 
+    def test_checkpoint_does_not_persist_pending_tool_arguments(self):
+        checkpoints = []
+        loop = LangGraphExecutionLoop(
+            ScriptedAgent([AgentDecision.tool("python", {"token": "secret"}), AgentDecision.final("ok")]),
+            ScriptedTools([ToolExecutionResult.success(result_summary="1")]),
+            checkpoint_sink=lambda _run_id, state: checkpoints.append(state),
+        )
+        loop.run({"run_id": "run_checkpoint_redaction", "problem": "test"})
+        self.assertNotIn("secret", str(checkpoints))
+        self.assertTrue(all("arguments" not in state.get("pending_tool", {}) for state in checkpoints))
+
 
 if __name__ == "__main__":
     unittest.main()

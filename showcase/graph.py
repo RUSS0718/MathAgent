@@ -396,7 +396,13 @@ class LangGraphExecutionLoop:
         if self.event_sink is not None:
             self.event_sink(run_id, event)
         if self.checkpoint_sink is not None:
-            self.checkpoint_sink(run_id, checkpoint or event)
+            checkpoint_payload = copy.deepcopy(dict(checkpoint or event))
+            pending = checkpoint_payload.get("pending_tool")
+            if isinstance(pending, Mapping):
+                checkpoint_payload["pending_tool"] = {
+                    key: value for key, value in pending.items() if key != "arguments"
+                }
+            self.checkpoint_sink(run_id, checkpoint_payload)
 
 
 def _normalize_state(state: Mapping[str, Any]) -> LoopState:
