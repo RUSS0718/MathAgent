@@ -2,7 +2,7 @@
   "version": "v0.2",
   "release_gate": "P0",
   "checked_at": "2026-10-17T00:00:00+08:00",
-  "source_commit": "f81c752",
+  "source_commit": "dea0680",
   "release_status": "engineering-preview",
   "status_reason": "AC-06 requires real Intern credentials and six live tool continuations; no credential or live evidence is available.",
   "labels": ["live", "fake", "replay", "experimental", "unavailable", "planned"],
