@@ -1,0 +1,89 @@
+# MathAgent 文档索引
+
+文档职责：为开发者和 agent 提供版本、开发阶段、能力验收及官方边界的阅读入口。
+
+适用范围：理解 v0.1、规划 v0.2、定位设计与验收证据；执行规则以根 [AGENTS.md](../AGENTS.md) 为准。
+
+## 先读哪些文档
+
+| 当前任务 | 阅读顺序 | 读完应能判断 |
+| --- | --- | --- |
+| 了解 v0.1 做到了什么 | [能力基线](evals/v0.1-capability-baseline.md) → [开发完成记录](https://github.com/RUSS0718/MathAgent/issues/1#issuecomment-6209639217) → 下方 v0.1 文档链 | 工程完成、真实模型连接与数学效果各有什么证据 |
+| 规划或评审 v0.2 | [v0.2 PRD Lite](prd/subjective-agent-platform-prd-v0.2.md) → [v0.2 实现规格](specs/subjective-agent-platform-v0.2-spec.md) → [现状与前端接口调研](research/v0.2-planning-baseline.md) → [accepted ADR](#架构决策) | 范围、实现决策、测试 seam、验收条件和待验证假设 |
+| 修改官方入口或讨论合并 | [BASELINE.json](../BASELINE.json) → [官方架构](architecture/pre-v0.1-official-agent-architecture.md) → [合并边界](release-boundary.md) | 冻结文件、调用预算、输出合同及重新验收要求 |
+| 运行或演示 | [Demo 说明](demo.md) → [演示脚本](../DEMO_SCRIPT.md) → [验收门禁](ACCEPTANCE.md) | 入口、运行模式、回放和发布检查方式 |
+
+## v0.1 开发与验收文档链
+
+下表按工程阶段导航；阶段设计、任务关闭和能力证据分别阅读。
+
+| 阶段 | 文档 / 记录 | 用途与证据边界 |
+| --- | --- | --- |
+| Product Goal | [v0.1 PRD](prd/subjective-agent-platform-prd-v0.1.md) | accepted 的版本范围；不是当前完成状态表 |
+| Research | [开源 Agent 调研](research/open_source_agent_landscape.md) | 机制来源与最初选型依据 |
+| Risk Assessment / Spike | [风险评估](risk-assessment-v0.1.md)、[Spike 结果](risk-spike-v0.1-results.md) | 开发前连接实验；原型通过不代表产品能力通过 |
+| Technical Design | [v0.1 技术设计](architecture/subjective-agent-platform-technical-design-v0.1.md)、下方 ADR | accepted 的实现边界；其中“待实现”保留开发前语境 |
+| Spec / Acceptance Contract | [v0.1 实现规范](specs/subjective-agent-platform-v0.1-spec.md)、[总任务 #1](https://github.com/RUSS0718/MathAgent/issues/1) | 用户故事、接口责任、切片验收和开发完成评论 |
+| Run / Persistence | [#2 Run 与 Profile](https://github.com/RUSS0718/MathAgent/issues/2)、[#3 持久化](https://github.com/RUSS0718/MathAgent/issues/3) | 开发切片合同与完成状态 |
+| Agent / Tool Loop | [#4 执行循环](https://github.com/RUSS0718/MathAgent/issues/4)、[#5 工具](https://github.com/RUSS0718/MathAgent/issues/5)、[#6 文本 Adapter](https://github.com/RUSS0718/MathAgent/issues/6) | 动态循环、预算、实验工具和模型连接的实现任务 |
+| Vision / Evidence | [#7 图文 Adapter](https://github.com/RUSS0718/MathAgent/issues/7)、[#8 Verification / Evidence](https://github.com/RUSS0718/MathAgent/issues/8) | 资产引用、轻量检查与导出合同 |
+| Browser Vertical Slice | [#9 API 与浏览器切片](https://github.com/RUSS0718/MathAgent/issues/9) | v0.1 最小页面；不代表完整工作台或实时 SSE |
+| Eval / Regression | [v0.1 能力基线](evals/v0.1-capability-baseline.md) | 当前能力结论；具体 live probes 优先于未同步的 pending 表格 |
+| Demo Hardening / Release | [#10 回放与发布闸门](https://github.com/RUSS0718/MathAgent/issues/10)、[Demo](demo.md)、[脚本](../DEMO_SCRIPT.md)、[回放样例](replay/showcase-replay-v0.1.json) | 区分 live / fake / replay，检查脱敏与故障展示 |
+| Quality / Release Gate | [验收门禁](ACCEPTANCE.md)、[合并边界](release-boundary.md)、[质量 CI](../.github/workflows/quality.yml)、[发布检查](../scripts/check_showcase_release.py) | 工程与官方隔离门禁；不能推导数学正确率 |
+| Scoring / Delivery | [评分证据矩阵](JUDGE_SCORECARD.md)、[评分材料清单](subjective-score-checklist.md) | 视频、技术报告、结果包的交付要求；清单勾选不是成绩证明 |
+
+## v0.2 规格入口
+
+- [v0.2 实现规格](specs/subjective-agent-platform-v0.2-spec.md)（[GitHub Issue #12](https://github.com/RUSS0718/MathAgent/issues/12)）：按已确认的测试 seam 整理问题、用户故事、实现决策、测试决策和范围边界。
+- [v0.2 PRD Lite](prd/subjective-agent-platform-prd-v0.2.md)：产品目标、前后端范围、能力发布门槛和验收合同。
+- [v0.2 规划调研](research/v0.2-planning-baseline.md)：v0.1 能力事实、CausalAgent 接口核对和设计取舍。
+
+### v0.2 tickets
+
+父规格为 [Issue #12](https://github.com/RUSS0718/MathAgent/issues/12)。以下 tickets 按依赖顺序创建；阻塞关系写在各 Issue 正文中。
+
+| Slice | Issue | Blocked by |
+| --- | --- | --- |
+| Flask Showcase 与 loopback 工作区入口 | [#13](https://github.com/RUSS0718/MathAgent/issues/13) | — |
+| 数学 chat-frontend、ChatSession 与 Job 创建 | [#14](https://github.com/RUSS0718/MathAgent/issues/14) | #13 |
+| 持久事件流与 SSE 断线恢复 | [#15](https://github.com/RUSS0718/MathAgent/issues/15) | #14 |
+| Job 控制、幂等和重启复核 | [#16](https://github.com/RUSS0718/MathAgent/issues/16) | #15 |
+| 安全数学报告、Evidence 与回放 | [#17](https://github.com/RUSS0718/MathAgent/issues/17) | #15、#16 |
+| `polynomial_check` 候选验证闭环 | [#18](https://github.com/RUSS0718/MathAgent/issues/18) | #17 |
+| 真实 Intern 工具请求与 continuation | [#19](https://github.com/RUSS0718/MathAgent/issues/19) | #16、#18 |
+| v0.2 P0 验收与发布门禁 | [#20](https://github.com/RUSS0718/MathAgent/issues/20) | #19 |
+| P1 单张 PNG 题图 | [#21](https://github.com/RUSS0718/MathAgent/issues/21) | #20 |
+
+截至 2026-10-16，GitHub #1–#10 均已关闭；总任务评论记录了开发收尾检查。仓库未找到独立的 v0.1 复盘报告、最终视频或最终技术报告文件；不能仅由任务关闭推断这些材料已经交付。
+
+## 架构决策
+
+- [ADR-0001：official / showcase 分离](adr/0001-profile-separation.md)
+- [ADR-0002：LangGraph / DeepAgents 职责边界](adr/0002-langgraph-deepagents-boundary.md)
+- [ADR-0003：实验 Python 工具与可替换 Verifier](adr/0003-experimental-python-tool-and-lightweight-verifier.md)
+- [ADR-0004：V0.2 Flask 兼容入口与前端边界](adr/0004-v0-2-flask-and-frontend-boundary.md)
+- [ADR-0005：V0.2 限定域 `polynomial_check`](adr/0005-v0-2-polynomial-check-contract.md)
+- [ADR-0006：V0.2 单用户身份与本地持久化](adr/0006-v0-2-local-auth-and-persistence.md)
+- [GLOSSARY](../GLOSSARY.md)：Profile、Run、Stage、Evidence Pack 等术语。
+
+v0.2 PRD 是待评审提案；不覆盖这些 accepted ADR，也不授权修改官方 baseline。
+
+## 工程环境与 agent 约定
+
+- [初始化蓝图](engineering-bootstrap-plan.md)、[Codespace 调研](research/codespace-bootstrap-landscape.md)
+- [提交与分支规范](engineering/commit-convention.md)
+- [Issue tracker](agents/issue-tracker.md)、[状态标签](agents/triage-labels.md)、[领域文档约定](agents/domain.md)
+- [示例目录说明](../examples/README.md)、[比赛仓库调研](research/hackathon-winning-repo-landscape.md)
+
+## 早期方案与时效说明
+
+| 文档 | 阅读方式 |
+| --- | --- |
+| [未版本化 PRD](prd/subjective-agent-platform-prd.md)、[未版本化技术架构](architecture/subjective-agent-platform-technical-design.md) | 早期 DRAFT / 长期设想；React、FastAPI、搜索、记忆等描述不代表 v0.1 已实现或 v0.2 已批准 |
+| [GAP.md](../GAP.md) | 早期路线图，包含已过期的 In progress / Planned 项；当前状态查能力基线与对应实现 |
+| [原架构说明](architecture.md)、[评分材料清单](subjective-score-checklist.md) | 早期演示叙事与交付提醒；官方实现以 baseline 和版本化官方架构为准 |
+
+能力报告中的文本、图文 pending 行与后续成功 probe 并存；读取“已完成的 live probes”小节和限制说明。当前仍未证明产品真实工具选择稳定，也没有独立数学正确率提升证据。详细核对依据见 [v0.2 规划调研](research/v0.2-planning-baseline.md)。
+
+新增版本时，在本索引更新该版本 PRD、技术设计、任务合同和能力报告入口；设计标为 accepted、任务关闭、能力通过应分别记录来源。

@@ -111,6 +111,12 @@ python -m unittest discover -s tests -v
 
 ## 产品设计文档
 
+- [版本、开发阶段与能力验收索引](docs/README.md)
+- [v0.1 PRD](docs/prd/subjective-agent-platform-prd-v0.1.md)、[技术设计](docs/architecture/subjective-agent-platform-technical-design-v0.1.md)、[能力基线与 live probes](docs/evals/v0.1-capability-baseline.md)
+- [v0.2 PRD Lite（待评审）](docs/prd/subjective-agent-platform-prd-v0.2.md)、[v0.2 实现规格](docs/specs/subjective-agent-platform-v0.2-spec.md)、[GitHub Issue #12](https://github.com/RUSS0718/MathAgent/issues/12)、[现状与前端接口调研](docs/research/v0.2-planning-baseline.md)
+
+以下未版本化 PRD / 架构为早期总体设想，当前版本范围与验收状态从上方索引进入。
+
 - [主观评测 Agent Workbench PRD](docs/prd/subjective-agent-platform-prd.md)
 - [技术架构与开源项目机制映射](docs/architecture/subjective-agent-platform-technical-design.md)
 - [开源 Agent 项目调研](docs/research/open_source_agent_landscape.md)
