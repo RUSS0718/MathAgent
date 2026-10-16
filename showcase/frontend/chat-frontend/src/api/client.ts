@@ -3,7 +3,7 @@ import { ApiError } from './errors'
 import { checkAuthResponseSchema, logoutResponseSchema } from './auth.schemas'
 import { activeJobsResponseSchema, jobActionResponseSchema } from './jobs.schemas'
 import { changeSessionResponseSchema, deleteSessionResponseSchema, loadSessionResponseSchema, newChatResponseSchema, sessionsResponseSchema } from './sessions.schemas'
-import { filesResponseSchema } from './files.schemas'
+import { filesResponseSchema, uploadResponseSchema } from './files.schemas'
 import { reportSchema } from './reports.schemas'
 
 let csrfToken = ''
@@ -44,7 +44,9 @@ export const api = {
   changeSession: (id: string, title: string) => requestJson('/api/change_session', json({ session_id: id, title }), changeSessionResponseSchema),
   deleteSession: (id: string) => requestJson('/api/delete_session', json({ session_id: id }), deleteSessionResponseSchema),
   listFiles: () => requestJson('/api/files', {}, filesResponseSchema),
-  createJob: (message: string, sessionId: string, key: string) => requestJson('/api/agent/jobs', { ...json({ message, session_id: sessionId, web_search_enabled: false }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
+  uploadFile: (file: File) => { const body = new FormData(); body.append('file', file); return requestJson('/api/upload_file', { method: 'POST', body }, uploadResponseSchema) },
+  deleteFile: (fileId: string) => requestJson('/api/delete_file', json({ file_id: fileId }), z.object({ success: z.boolean(), file_id: z.string() })),
+  createJob: (message: string, sessionId: string, key: string, fileId?: string) => requestJson('/api/agent/jobs', { ...json({ message, session_id: sessionId, web_search_enabled: false, input_user_file_id: fileId }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   resumeJob: (jobId: string, answer: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/resume`, { ...json({ answer }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   cancelJob: (jobId: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/cancel`, { ...json({}), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   activeJobs: (sessionId?: string) => requestJson(`/api/agent/jobs/active${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`, {}, activeJobsResponseSchema),

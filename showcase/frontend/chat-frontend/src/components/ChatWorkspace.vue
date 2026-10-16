@@ -5,12 +5,16 @@ import { createIdempotencyKey } from '../runtime/jobs/idempotency'
 import { sessionHref, settingsHref, workspaceHref } from '../runtime/navigation/app-route'
 import { useJobsStore } from '../stores/jobs.store'
 import { useSessionsStore } from '../stores/sessions.store'
+import { useFilesStore } from '../stores/files.store'
 import ReportSection from './ReportSection.vue'
 
 const sessions = useSessionsStore()
 const jobs = useJobsStore()
+const files = useFilesStore()
 const draft = ref('')
 const notice = ref('')
+const visionEnabled = ref(false)
+const selectedFile = ref<string | undefined>()
 const report = ref<Awaited<ReturnType<typeof api.jobReport>> | null>(null)
 const props = defineProps<{ path: string; sessionId: string | null }>()
 const current = computed(() => sessions.currentId ? jobs.activeForSession(sessions.currentId) : undefined)
@@ -18,11 +22,12 @@ const current = computed(() => sessions.currentId ? jobs.activeForSession(sessio
 async function send(): Promise<void> {
   const message = draft.value.trim()
   if (!message || current.value || !sessions.currentId) return
-  const result = await api.createJob(message, sessions.currentId, createIdempotencyKey())
+  const result = await api.createJob(message, sessions.currentId, createIdempotencyKey(), selectedFile.value)
   if (!result.success || !result.job_id || !result.status) throw new Error(result.error ?? '任务未被接受')
   jobs.start(result.job_id, sessions.currentId, result.status)
   sessions.addUser(message, result.job_id)
   draft.value = ''
+  selectedFile.value = undefined
   await sessions.select(sessions.currentId)
   await loadReport(result.job_id)
 }
@@ -49,7 +54,7 @@ async function selectSession(id: string): Promise<void> { await sessions.select(
 async function rename(id: string): Promise<void> { const title = globalThis.prompt('会话名称', sessions.items.find((item) => item.id === id)?.preview ?? '新对话'); if (title?.trim()) await sessions.rename(id, title.trim()) }
 async function remove(id: string): Promise<void> { await sessions.remove(id); if (!sessions.currentId) globalThis.history.pushState({}, '', workspaceHref()) }
 async function loadReport(jobId: string): Promise<void> { try { report.value = await api.jobReport(jobId) } catch { report.value = null } }
-onMounted(async () => { if (props.path === settingsHref()) return; if (!sessions.items.length) await sessions.loadList(); if (props.sessionId) await sessions.select(props.sessionId); else if (sessions.currentId) await sessions.select(sessions.currentId); const latest = sessions.messages.at(-1); if (latest?.analysis_job_id) await loadReport(latest.analysis_job_id) })
+onMounted(async () => { const capabilities = await fetch('/api/capabilities').then((response) => response.json()) as { files?: { upload?: { enabled?: boolean } } }; visionEnabled.value = capabilities.files?.upload?.enabled === true; if (visionEnabled.value) await files.load(); if (props.path === settingsHref()) return; if (!sessions.items.length) await sessions.loadList(); if (props.sessionId) await sessions.select(props.sessionId); else if (sessions.currentId) await sessions.select(sessions.currentId); const latest = sessions.messages.at(-1); if (latest?.analysis_job_id) await loadReport(latest.analysis_job_id) })
 </script>
 
 <template>
@@ -65,7 +70,7 @@ onMounted(async () => { if (props.path === settingsHref()) return; if (!sessions
       <section class="messages" aria-live="polite"><article v-for="(message, index) in sessions.messages" :key="`${message.analysis_job_id}-${index}`" :class="message.sender"><strong>{{ message.sender === 'user' ? '你' : 'MathAgent' }}</strong><p>{{ message.text }}</p></article><p v-if="!sessions.messages.length">输入一道数学题开始。</p></section>
       <ReportSection v-if="report" :mode="report.mode" :report="report.report" />
       <p v-if="current">任务状态：{{ current.status }} <button type="button" @click="cancelCurrent" :disabled="['succeeded','failed','canceled'].includes(current.status)">取消</button><button v-if="current.status === 'waiting_input'" type="button" @click="resumeCurrent">恢复</button></p>
-      <form @submit.prevent="send"><textarea v-model="draft" aria-label="数学问题" placeholder="输入数学问题" :disabled="Boolean(current)"></textarea><button type="submit" :disabled="!draft.trim() || Boolean(current)">提交</button></form>
+      <form @submit.prevent="send"><textarea v-model="draft" aria-label="数学问题" placeholder="输入数学问题" :disabled="Boolean(current)"></textarea><input v-if="visionEnabled" type="file" accept="image/png" aria-label="PNG题图" @change="async (event) => { const file = (event.target as HTMLInputElement).files?.[0]; if (file) { await files.upload(file); selectedFile = files.items.at(-1)?.file_id } }" /><button v-if="selectedFile" type="button" @click="selectedFile = undefined">移除题图</button><button type="submit" :disabled="!draft.trim() || Boolean(current)">提交</button></form>
     </main>
   </div>
 </template>

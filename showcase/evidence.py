@@ -78,6 +78,8 @@ class EvidencePackExporter:
             "answer": answer,
             "public_summary": summary,
             "stage": snapshot.get("stage"),
+            "asset_refs": snapshot.get("asset_refs", []),
+            "vision_status": snapshot.get("vision_status"),
             "tool_summaries": [_tool_summary(item) for item in tool_results],
             "checks": check,
             "limitations": ["公开报告省略完整提示、隐藏推理、凭证和原始图片。"],

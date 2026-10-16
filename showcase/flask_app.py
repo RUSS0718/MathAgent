@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import os
@@ -29,6 +30,8 @@ from .workspace import WorkspaceError, WorkspaceService
 
 AUTH_COOKIE = "auth_session"
 MAX_BODY_BYTES = 1_000_000
+MAX_PNG_BYTES = 2 * 1024 * 1024
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 VERIFICATION_MODES = ["auto", "required", "off"]
 
 
@@ -49,6 +52,7 @@ def create_app(
         SHOWCASE_MODE="fake",
         SHOWCASE_DATA_DIR=None,
         SHOWCASE_DATABASE_PATH=None,
+        SHOWCASE_VISION_ENABLED=os.getenv("SHOWCASE_VISION_ENABLED", "").lower() in {"1", "true", "yes"},
     )
     if config:
         app.config.from_mapping(dict(config))
@@ -73,13 +77,21 @@ def create_app(
     app.extensions["showcase_workspace_service"] = workspace_service
     app.extensions["showcase_verifier"] = LightweightVerificationHook()
     app.extensions["showcase_evidence_exporter"] = EvidencePackExporter()
+    files_index = storage_root / "attachments" / "index.json"
+    try:
+        persisted_files = json.loads(files_index.read_text(encoding="utf-8")) if files_index.is_file() else {}
+    except (OSError, ValueError):
+        persisted_files = {}
+    app.extensions["showcase_files"] = persisted_files if isinstance(persisted_files, dict) else {}
+    app.extensions["showcase_files_index"] = files_index
 
     @app.before_request
     def attach_request_context() -> Response | None:
         g.request_id = request.headers.get("X-Request-ID") or f"req_{uuid.uuid4().hex}"
         g.auth_session = loopback_store.get(request.cookies.get(AUTH_COOKIE))
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-            if request.content_length is not None and request.content_length > MAX_BODY_BYTES:
+            body_limit = MAX_PNG_BYTES + 64 * 1024 if request.path == "/api/upload_file" else MAX_BODY_BYTES
+            if request.content_length is not None and request.content_length > body_limit:
                 return _json_error("invalid_body_size", 400)
             if g.auth_session is None:
                 return _json_error("auth_required", 401)
@@ -146,9 +158,11 @@ def create_app(
     @app.get("/api/capabilities")
     def capabilities() -> Response:
         upload = {
-            "enabled": False,
-            "status": "unavailable",
-            "reason": "capability_unavailable",
+            "enabled": bool(app.config.get("SHOWCASE_VISION_ENABLED")),
+            "status": "available" if app.config.get("SHOWCASE_VISION_ENABLED") else "unavailable",
+            "reason": None if app.config.get("SHOWCASE_VISION_ENABLED") else "capability_unavailable",
+            "mime": "image/png",
+            "max_bytes": MAX_PNG_BYTES,
         }
         return jsonify(
             {
@@ -168,12 +182,46 @@ def create_app(
 
     @app.get("/api/files")
     def files() -> Response:
-        return jsonify([])
+        return jsonify(list(app.extensions["showcase_files"].values()))
 
     @app.post("/api/upload_file")
+    def upload_file() -> tuple[Response, int]:
+        if not app.config.get("SHOWCASE_VISION_ENABLED"):
+            return _json_error("capability_unavailable", 503)
+        uploaded = request.files.get("file")
+        if uploaded is None or not uploaded.filename:
+            return _json_error("file_required", 400)
+        content = uploaded.read(MAX_PNG_BYTES + 1)
+        if len(content) > MAX_PNG_BYTES:
+            return _json_error("image_too_large", 413)
+        if not content.startswith(PNG_SIGNATURE):
+            return _json_error("image_signature_invalid", 400)
+        if len(content) < 33 or content[12:16] != b"IHDR" or int.from_bytes(content[16:20], "big") == 0 or int.from_bytes(content[20:24], "big") == 0 or not content.endswith(b"IEND\xaeB`\x82"):
+            return _json_error("image_corrupt", 400)
+        file_id = f"file_{uuid.uuid4().hex}"
+        digest = hashlib.sha256(content).hexdigest()
+        attachment = Path(app.config["SHOWCASE_DATA_DIR"]) / "attachments" / f"{file_id}.png"
+        attachment.write_bytes(content)
+        reference = {"file_id": file_id, "reference": file_id, "mime": "image/png", "size": len(content), "sha256": digest, "status": "ready"}
+        app.extensions["showcase_files"][file_id] = reference
+        files_index.write_text(json.dumps(app.extensions["showcase_files"], ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        return jsonify({"file": reference}), 201
+
     @app.post("/api/delete_file")
-    def unavailable_file_operation() -> tuple[Response, int]:
-        return _json_error("capability_unavailable", 503)
+    def delete_file() -> tuple[Response, int]:
+        if not app.config.get("SHOWCASE_VISION_ENABLED"):
+            return _json_error("capability_unavailable", 503)
+        payload = _request_object()
+        if isinstance(payload, tuple):
+            return payload
+        file_id = payload.get("file_id")
+        files_by_id = app.extensions["showcase_files"]
+        if files_by_id.pop(file_id, None) is None:
+            return _json_error("file_not_found", 404)
+        path = Path(app.config["SHOWCASE_DATA_DIR"]) / "attachments" / f"{file_id}.png"
+        path.unlink(missing_ok=True)
+        files_index.write_text(json.dumps(files_by_id, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        return jsonify({"success": True, "file_id": file_id}), 200
 
     @app.get("/api/sessions")
     def list_sessions() -> Response | tuple[Response, int]:
@@ -249,6 +297,12 @@ def create_app(
             return _json_error("session_id_required", 400)
         if len(message.strip()) > 100_000:
             return _json_error("message_too_large", 400)
+        file_id = payload.get("input_user_file_id")
+        if file_id is not None:
+            if not app.config.get("SHOWCASE_VISION_ENABLED"):
+                return _json_error("capability_unavailable", 503)
+            if file_id not in app.extensions["showcase_files"]:
+                return _json_error("file_not_found", 404)
         idempotency_key = request.headers.get("Idempotency-Key", "")
         try:
             job, existing = workspace_service.create_job(
@@ -257,7 +311,7 @@ def create_app(
                 problem=message.strip(),
                 idempotency_key=idempotency_key,
                 web_search_enabled=payload.get("web_search_enabled", False) is True,
-                input_user_file_id=payload.get("input_user_file_id"),
+                input_user_file_id=file_id,
                 verification_mode=payload.get("verification_mode", "auto"),
             )
         except WorkspaceError as exc:
@@ -460,6 +514,8 @@ def create_app(
             "result": result,
             "final_response": result.get("final_response"),
             "error": job.get("error"),
+            "asset_refs": ([{**app.extensions["showcase_files"].get(job.get("input_user_file_id"), {"file_id": job.get("input_user_file_id")}), "vision_status": "unavailable"}] if job.get("input_user_file_id") else []),
+            "vision_status": "unavailable" if job.get("input_user_file_id") else None,
         }
         tool_results = [event["data"] for event in events if event.get("event") == "tool_completed"]
         verification = {"status": "unknown", "findings": ["verification_not_run"]}
