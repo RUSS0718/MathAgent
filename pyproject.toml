@@ -10,6 +10,7 @@ dependencies = [
 
 [project.optional-dependencies]
 showcase = [
+  "flask>=3.1,<4",
   "langgraph==1.2.15",
   "deepagents==0.7.25",
 ]
@@ -19,6 +20,7 @@ dev = [
   "pre-commit>=3.7,<5",
   "pytest>=8,<9",
   "requests>=2.31,<3",
+  "flask>=3.1,<4",
   "ruff>=0.11,<1",
   "langgraph==1.2.15",
   "deepagents==0.7.25",

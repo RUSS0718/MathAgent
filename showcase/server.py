@@ -167,6 +167,14 @@ def create_live_service(*, database_path: str = ":memory:") -> RunService:
     return RunService(execution_loop=loop, database_path=database_path)
 
 
+def create_app(*args: Any, **kwargs: Any):
+    """Lazily build the Flask Showcase app while retaining the v0.1 server module."""
+
+    from .flask_app import create_app as _create_app
+
+    return _create_app(*args, **kwargs)
+
+
 def serve(host: str = "127.0.0.1", port: int = 8090) -> None:
     """Run the local Showcase server until interrupted."""
 
