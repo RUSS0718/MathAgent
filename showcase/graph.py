@@ -293,6 +293,7 @@ class LangGraphExecutionLoop:
             "status": result.status,
             "parameter_summary": result.parameter_summary,
             "result_summary": result.result_summary,
+            "value": result.value,
             "error_category": result.error_category,
             "duration_seconds": result.duration_seconds,
         }

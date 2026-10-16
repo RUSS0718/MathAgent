@@ -22,6 +22,7 @@ from .graph import (
     LoopBudget,
     ToolExecutionResult,
 )
+from .polynomial import PolynomialChecker
 from .profile import OFFICIAL_PROFILE, SHOWCASE_PROFILE, ProfileBoundaryError
 from .replay import ReplayValidationError, load_replay, write_sample_replay
 from .run_service import (
@@ -76,6 +77,7 @@ __all__ = [
     "ToolRegistry",
     "ToolSpec",
     "PythonMathTool",
+    "PolynomialChecker",
     "ImageAsset",
     "VisionAdapter",
     "VisionInputError",

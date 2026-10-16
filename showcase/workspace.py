@@ -71,6 +71,7 @@ class WorkspaceStore:
                 status TEXT NOT NULL,
                 result_json TEXT,
                 error_code TEXT,
+                verification_mode TEXT NOT NULL DEFAULT 'auto',
                 idempotency_key TEXT NOT NULL,
                 request_digest TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -107,6 +108,9 @@ class WorkspaceStore:
                 ON workspace_events(job_id, event_id);
             """
         )
+        columns = {row["name"] for row in self._connection.execute("PRAGMA table_info(workspace_jobs)")}
+        if "verification_mode" not in columns:
+            self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN verification_mode TEXT NOT NULL DEFAULT 'auto'")
         self._connection.commit()
 
     def create_session(self, user_id: str, title: str = "新对话") -> str:
@@ -187,6 +191,7 @@ class WorkspaceStore:
         problem: str,
         idempotency_key: str,
         request_digest: str,
+        verification_mode: str = "auto",
     ) -> tuple[dict[str, Any], bool]:
         """Durably accept one Job and its user message before returning."""
 
@@ -214,9 +219,9 @@ class WorkspaceStore:
                 job_id = f"run_{secrets.token_hex(16)}"
                 now = _utc_now()
                 self._connection.execute(
-                    "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,idempotency_key,request_digest,created_at,updated_at) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                    (job_id, session_id, user_id, problem, "queued", None, None, idempotency_key, request_digest, now, now),
+                    "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,verification_mode,idempotency_key,request_digest,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (job_id, session_id, user_id, problem, "queued", None, None, verification_mode, idempotency_key, request_digest, now, now),
                 )
                 self._connection.execute(
                     "INSERT INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
@@ -412,6 +417,11 @@ class WorkspaceStore:
         payload["last_event_id"] = self.last_event_id(job_id, user_id)
         return payload
 
+    def verification_mode(self, job_id: str) -> str:
+        with self._lock:
+            row = self._connection.execute("SELECT verification_mode FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+        return str(row["verification_mode"]) if row is not None else "auto"
+
     def active_jobs(self, user_id: str, session_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             query = "SELECT * FROM workspace_jobs WHERE user_id=? AND status IN ('queued','running','waiting_input')"
@@ -495,6 +505,7 @@ class WorkspaceStore:
             "job_id": row["job_id"],
             "session_id": row["session_id"],
             "status": row["status"],
+            "verification_mode": row["verification_mode"],
             "last_event_id": None,
         }
         if include_result and row["result_json"]:
@@ -555,6 +566,7 @@ class WorkspaceService:
             problem=problem,
             idempotency_key=idempotency_key,
             request_digest=digest,
+            verification_mode=verification_mode,
         )
         if not existing:
             self._submit(payload["job_id"])
@@ -593,11 +605,10 @@ class WorkspaceService:
             # Keep the worker asynchronous even for the deterministic adapter so
             # the HTTP contract never waits for execution.
             time.sleep(0.05)
-            self.store.complete_job(
-                job_id,
-                "Fake Agent completed a deterministic showcase run.",
-                "fake adapter",
-            )
+            if self.store.verification_mode(job_id) == "required":
+                self.store.fail_job(job_id, "needs_review")
+            else:
+                self.store.complete_job(job_id, "Fake Agent completed a deterministic showcase run.", "fake adapter")
         except Exception:
             self.store.fail_job(job_id, "job_execution_failed")
 

@@ -114,7 +114,7 @@ def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
 
 
 def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    summary = {
         "evidence_id": result.get("evidence_id", result.get("name", "tool")),
         "name": result.get("name"),
         "status": result.get("status"),
@@ -123,6 +123,13 @@ def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         "result_summary": result.get("result_summary", ""),
         "error_category": result.get("error_category"),
     }
+    value = result.get("value")
+    if result.get("name") == "polynomial_check" and isinstance(value, Mapping):
+        summary["candidate_status"] = value.get("candidate_status", "unknown")
+        summary["coverage_status"] = value.get("coverage_status", "unknown")
+        summary["limitations"] = value.get("limitations", [])
+        summary["checker_evidence_id"] = value.get("evidence_id")
+    return summary
 
 
 def _multimodal_status(snapshot: Mapping[str, Any]) -> str:

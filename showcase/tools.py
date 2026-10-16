@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .graph import ToolExecutionResult
+from .polynomial import PolynomialChecker
 from .profile import SHOWCASE_PROFILE
 from .redaction import summarize_parameters
 
@@ -101,6 +102,16 @@ class ToolRegistry:
             capabilities=("calculation", "symbolic_math"),
             timeout_seconds=timeout_seconds,
             experimental=True,
+        )
+
+    def register_polynomial_check(self, *, timeout_seconds: float = 3.0) -> ToolSpec:
+        """Register the bounded exact polynomial candidate checker."""
+
+        return self.register(
+            "polynomial_check",
+            PolynomialChecker().check,
+            capabilities=("verification", "polynomial_candidates"),
+            timeout_seconds=timeout_seconds,
         )
 
     def describe(self) -> list[dict[str, Any]]:
@@ -318,4 +329,4 @@ exec(compile(source, "<python_math>", "exec"), globals_dict, {})
 '''
 
 
-__all__ = ["PythonMathTool", "ToolRegistry", "ToolSpec"]
+__all__ = ["PolynomialChecker", "PythonMathTool", "ToolRegistry", "ToolSpec"]

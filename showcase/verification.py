@@ -38,6 +38,15 @@ class LightweightVerificationHook:
         if not isinstance(final_response, str) or not final_response.strip():
             return VerificationResult("conflict", ("final_response_missing",))
         results = tool_results or []
+        polynomial = [item.get("value") for item in results if item.get("name") == "polynomial_check" and isinstance(item.get("value"), dict)]
+        if polynomial:
+            check = polynomial[-1]
+            status = check.get("candidate_status")
+            if status in {"pass", "conflict", "unknown"}:
+                findings.append(f"polynomial_candidate_status:{status}")
+                coverage = check.get("coverage_status", "unknown")
+                findings.append(f"polynomial_coverage_status:{coverage}")
+                return VerificationResult(status, tuple(findings), checker="polynomial_check")
         failed_tools = [
             str(result.get("name", "unknown"))
             for result in results
