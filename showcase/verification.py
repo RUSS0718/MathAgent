@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import re
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 

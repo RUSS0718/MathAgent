@@ -17,6 +17,7 @@ from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 from .evidence import EvidencePackExporter, replay_evidence
 from .loopback import AuthSession, LoopbackStore
+from .polynomial import PolynomialChecker
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
 from .run_service import (
     RunNotFoundError,
@@ -27,7 +28,6 @@ from .run_service import (
 from .server import create_live_service
 from .verification import LightweightVerificationHook
 from .workspace import WorkspaceError, WorkspaceService
-from .polynomial import PolynomialChecker
 
 AUTH_COOKIE = "auth_session"
 MAX_BODY_BYTES = 1_000_000
