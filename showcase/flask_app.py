@@ -14,7 +14,7 @@ from typing import Any
 from flask import Flask, Response, g, jsonify, request, send_from_directory, stream_with_context
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
-from .evidence import EvidencePackExporter
+from .evidence import EvidencePackExporter, replay_evidence
 from .loopback import AuthSession, LoopbackStore
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
 from .run_service import (
@@ -395,6 +395,77 @@ def create_app(
         )
         return jsonify(pack)
 
+    @app.get("/api/runs/<run_id>/report")
+    def get_run_report(run_id: str) -> Response | tuple[Response, int]:
+        """Return the stable public report DTO for an existing Run."""
+
+        try:
+            snapshot = service.get_run(run_id)
+            events = service.get_events(run_id)
+        except RunNotFoundError as exc:
+            return _json_error(exc.category, 404)
+        tool_results = [event for event in events if event.get("type") == "tool_completed"]
+        verification = app.extensions["showcase_verifier"].verify(snapshot, tool_results)
+        return jsonify({
+            "version": app.extensions["showcase_evidence_exporter"].report_version,
+            "evidence_id": run_id,
+            "status": snapshot.get("status"),
+            "mode": snapshot.get("execution_mode", "unavailable"),
+            "report": app.extensions["showcase_evidence_exporter"].report(
+                snapshot, tool_results=tool_results, verification={
+                    "status": verification.status,
+                    "findings": list(verification.findings),
+                    "checker": verification.checker,
+                }
+            ),
+        })
+
+    @app.post("/api/evidence/replay")
+    def replay_saved_evidence() -> Response | tuple[Response, int]:
+        """Replay a saved public pack; this route has no model/tool execution path."""
+
+        payload = _request_object()
+        if isinstance(payload, tuple):
+            return payload
+        try:
+            return jsonify(replay_evidence(payload))
+        except ValueError:
+            return _json_error("replay_invalid", 400)
+
+    @app.get("/api/runs/<run_id>/replay")
+    def replay_run_evidence(run_id: str) -> Response | tuple[Response, int]:
+        try:
+            snapshot = service.get_run(run_id)
+            events = service.get_events(run_id)
+        except RunNotFoundError as exc:
+            return _json_error(exc.category, 404)
+        tool_results = [event for event in events if event.get("type") == "tool_completed"]
+        pack = app.extensions["showcase_evidence_exporter"].export(snapshot, events=events, tool_results=tool_results)
+        return jsonify(replay_evidence(pack))
+
+    @app.get("/api/agent/jobs/<job_id>/report")
+    def get_job_report(job_id: str) -> Response | tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        try:
+            job = workspace_service.get_job(job_id, session.user_id)
+            events = workspace_service.events(job_id, session.user_id)
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+        result = job.get("result") if isinstance(job.get("result"), Mapping) else {}
+        snapshot = {
+            "run_id": job_id,
+            "execution_mode": "fake",
+            "status": str(job.get("status", "unavailable")).upper(),
+            "stage": _job_stage(events),
+            "result": result,
+            "final_response": result.get("final_response"),
+            "error": job.get("error"),
+        }
+        tool_results = [event["data"] for event in events if event.get("event") == "tool_completed"]
+        verification = {"status": "unknown", "findings": ["verification_not_run"]}
+        report = app.extensions["showcase_evidence_exporter"].report(snapshot, tool_results=tool_results, verification=verification)
+        return jsonify({"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": "fake", "report": report})
+
     @app.post("/api/runs/<run_id>/resume")
     def resume_run(run_id: str) -> tuple[Response, int]:
         try:
@@ -499,6 +570,15 @@ def _request_object() -> dict[str, Any] | tuple[Response, int]:
     if not isinstance(payload, dict):
         return _json_error("body_must_be_object", 400)
     return payload
+
+
+def _job_stage(events: list[Mapping[str, Any]]) -> str:
+    """Map the latest public Job event to a report stage."""
+
+    if not events:
+        return "unknown"
+    latest = events[-1].get("data", {})
+    return str(latest.get("stage") or latest.get("node_name") or latest.get("type") or "unknown")
 
 
 def _dashboard_page() -> str:

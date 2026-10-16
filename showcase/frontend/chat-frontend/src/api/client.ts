@@ -4,6 +4,7 @@ import { checkAuthResponseSchema, logoutResponseSchema } from './auth.schemas'
 import { activeJobsResponseSchema, jobActionResponseSchema } from './jobs.schemas'
 import { changeSessionResponseSchema, deleteSessionResponseSchema, loadSessionResponseSchema, newChatResponseSchema, sessionsResponseSchema } from './sessions.schemas'
 import { filesResponseSchema } from './files.schemas'
+import { reportSchema } from './reports.schemas'
 
 let csrfToken = ''
 export function setCsrfToken(value: string): void { csrfToken = value }
@@ -47,4 +48,5 @@ export const api = {
   resumeJob: (jobId: string, answer: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/resume`, { ...json({ answer }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   cancelJob: (jobId: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/cancel`, { ...json({}), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   activeJobs: (sessionId?: string) => requestJson(`/api/agent/jobs/active${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`, {}, activeJobsResponseSchema),
+  jobReport: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/report`, {}, reportSchema),
 }

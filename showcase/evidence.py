@@ -15,6 +15,7 @@ class EvidencePackExporter:
     """Export observable summaries while excluding sensitive request bodies."""
 
     version = "evidence-v0.1"
+    report_version = "report-v0.2"
 
     def export(
         self,
@@ -30,7 +31,8 @@ class EvidencePackExporter:
         verification_data = _verification_dict(verification)
         pack = {
             "version": self.version,
-            "exported_at": datetime.now(UTC).isoformat(),
+            # A Run's update timestamp makes repeated reads byte-stable.
+            "exported_at": snapshot.get("updated_at") or datetime.now(UTC).isoformat(),
             "run": {
                 "run_id": snapshot.get("run_id"),
                 "profile": snapshot.get("profile"),
@@ -53,7 +55,33 @@ class EvidencePackExporter:
                 "verification": "implemented",
             },
         }
-        return redact(pack)
+        safe = redact(pack)
+        safe["evidence_id"] = str(snapshot.get("run_id") or "unknown")
+        safe["mode"] = _mode(snapshot)
+        safe["report"] = self.report(snapshot, tool_results=tool_results, verification=verification_data)
+        return safe
+
+    def report(
+        self,
+        snapshot: Mapping[str, Any],
+        *,
+        tool_results: Sequence[Mapping[str, Any]] = (),
+        verification: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Build the public report DTO without exposing prompts or hidden reasoning."""
+
+        result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
+        answer = snapshot.get("final_response") or result.get("final_response") or ""
+        summary = snapshot.get("agent_summary") or result.get("summary") or ""
+        check = verification or {"status": "unknown", "findings": ["verification_not_run"]}
+        return redact({
+            "answer": answer,
+            "public_summary": summary,
+            "stage": snapshot.get("stage"),
+            "tool_summaries": [_tool_summary(item) for item in tool_results],
+            "checks": check,
+            "limitations": ["公开报告省略完整提示、隐藏推理、凭证和原始图片。"],
+        })
 
     def to_json(self, pack: Mapping[str, Any]) -> str:
         """Serialize an Evidence Pack with stable UTF-8 JSON."""
@@ -106,4 +134,20 @@ def _multimodal_status(snapshot: Mapping[str, Any]) -> str:
     return "planned"
 
 
-__all__ = ["EvidencePackExporter"]
+def _mode(snapshot: Mapping[str, Any]) -> str:
+    value = snapshot.get("run_mode") or snapshot.get("execution_mode") or snapshot.get("mode")
+    return value if value in {"live", "fake", "replay", "experimental", "unavailable", "planned"} else "unavailable"
+
+
+def replay_evidence(pack: Mapping[str, Any]) -> dict[str, Any]:
+    """Replay a previously saved public Evidence Pack without executing anything."""
+
+    if not isinstance(pack, Mapping) or not pack.get("evidence_id"):
+        raise ValueError("replay_invalid")
+    result = json.loads(json.dumps(pack, ensure_ascii=False))
+    result["mode"] = "replay"
+    result.setdefault("limitations", ["回放仅读取已保存 Evidence Pack。"])
+    return redact(result)
+
+
+__all__ = ["EvidencePackExporter", "replay_evidence"]
