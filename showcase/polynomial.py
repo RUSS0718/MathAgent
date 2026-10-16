@@ -80,9 +80,12 @@ def _parse_coefficients(payload: Mapping[str, Any]) -> list[Fraction]:
     raw = payload.get("coefficients")
     if not isinstance(raw, list) or not 2 <= len(raw) <= 5:
         raise ValueError("degree_out_of_range")
-    if raw[0] == "0":
+    coefficients = [_parse_rational(value, "coefficient") for value in raw]
+    # A polynomial must have a genuinely non-zero leading coefficient.  This
+    # rejects alternate spellings such as -0, 0/1, and -0/1 as well.
+    if coefficients[0] == 0:
         raise ValueError("leading_zero_coefficient")
-    return [_parse_rational(value, "coefficient") for value in raw]
+    return coefficients
 
 
 def _parse_candidates(payload: Mapping[str, Any]) -> list[tuple[str, Fraction]]:

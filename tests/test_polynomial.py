@@ -37,6 +37,18 @@ class PolynomialCheckerTest(unittest.TestCase):
         self.assertTrue(result["limitations"])
         self.assertEqual([], result["candidates"])
 
+    def test_zero_valued_leading_coefficient_spellings_are_rejected(self):
+        for spelling in ("-0", "0/1", "-0/1"):
+            with self.subTest(spelling=spelling):
+                result = PolynomialChecker().check({**VALID, "coefficients": [spelling, "1"]})
+                self.assertEqual("unknown", result["candidate_status"])
+                self.assertEqual([], result["candidates"])
+
+    def test_empty_candidates_are_unknown(self):
+        result = PolynomialChecker().check({**VALID, "candidates": []})
+        self.assertEqual("unknown", result["candidate_status"])
+        self.assertEqual([], result["candidates"])
+
     def test_interval_boundary_is_checked_exactly(self):
         payload = {**VALID, "domain": {"kind": "interval", "left": "-1", "right": "1", "left_closed": True, "right_closed": False}}
         result = PolynomialChecker().check(payload)

@@ -8,10 +8,13 @@ of the persisted Run snapshot.
 from __future__ import annotations
 
 import copy
+import json
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, TypedDict
+
+from .redaction import redact_text, summarize_parameters
 
 try:
     from langgraph.checkpoint.memory import InMemorySaver
@@ -309,14 +312,15 @@ class LangGraphExecutionLoop:
             duration_seconds=result.duration_seconds or round(time.monotonic() - started, 3),
         )
         updated["tool_count"] = int(updated.get("tool_count", 0)) + 1
+        # Public graph state is persisted in Run snapshots and Evidence packs.
+        # Keep invocation arguments and returned values out of that boundary;
+        # only shape summaries are safe to expose.
         tool_record = {
             "request_id": request_id,
             "name": name,
-            "arguments": dict(arguments),
             "status": result.status,
-            "parameter_summary": result.parameter_summary,
-            "result_summary": result.result_summary,
-            "value": result.value,
+            "parameter_summary": result.parameter_summary or summarize_parameters(arguments),
+            "result_summary": _safe_result_summary(name, result),
             "error_category": result.error_category,
             "duration_seconds": result.duration_seconds,
         }
@@ -439,6 +443,24 @@ def _normalize_tool_result(value: ToolExecutionResult | Mapping[str, Any]) -> To
         value=value.get("value"),
         error_category=(str(value["error_category"]) if value.get("error_category") else None),
         duration_seconds=float(value.get("duration_seconds", 0.0) or 0.0),
+    )
+
+
+def _safe_result_summary(name: str, result: ToolExecutionResult) -> str:
+    """Keep only bounded, semantic result metadata in public state."""
+
+    if isinstance(result.value, Mapping) and name == "polynomial_check":
+        selected = {
+            key: result.value.get(key)
+            for key in ("checker", "evidence_id", "candidate_status", "coverage_status", "duplicates")
+            if key in result.value
+        }
+        return json.dumps(selected, ensure_ascii=False, sort_keys=True)[:1000]
+    summary = str(result.result_summary or "")
+    return redact_text(summary)[:200] if summary.isdigit() else json.dumps(
+        {"type": type(result.value).__name__, "length": len(result.value) if isinstance(result.value, (str, bytes, list, tuple, dict)) else None},
+        ensure_ascii=False,
+        sort_keys=True,
     )
 
 

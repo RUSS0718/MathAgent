@@ -100,6 +100,20 @@ class LangGraphLoopTest(unittest.TestCase):
         self.assertEqual("FAILED", result["status"])
         self.assertEqual("budget_exhausted", result["error"]["category"])
 
+    def test_tool_event_does_not_persist_arguments_or_returned_values(self):
+        secret = "prompt=do-not-store token=abc123 complete-value"
+        loop = LangGraphExecutionLoop(
+            ScriptedAgent([AgentDecision.tool("python", {"prompt": secret, "value": secret}), AgentDecision.final("ok")]),
+            ScriptedTools([ToolExecutionResult.success(value={"prompt": secret, "value": secret}, result_summary=secret)]),
+        )
+        result = loop.run({"run_id": "run_redaction", "problem": "test"})
+        serialized = str(result)
+        self.assertNotIn("complete-value", serialized)
+        self.assertNotIn("abc123", serialized)
+        event = next(item for item in result["events"] if item["type"] == "tool_completed")
+        self.assertNotIn("arguments", event)
+        self.assertNotIn("value", event)
+
 
 if __name__ == "__main__":
     unittest.main()
