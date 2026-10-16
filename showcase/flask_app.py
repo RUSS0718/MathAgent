@@ -71,7 +71,11 @@ def create_app(
         else:
             service = RunService(database_path=resolved_database)
     shared_connection = getattr(getattr(service, "_store", None), "_connection", None)
-    workspace_service = WorkspaceService(resolved_database, connection=shared_connection)
+    workspace_service = WorkspaceService(
+        resolved_database,
+        connection=shared_connection,
+        execution_mode=str(app.config.get("SHOWCASE_MODE", "fake")),
+    )
     app.extensions["loopback_store"] = loopback_store
     app.extensions["showcase_run_service"] = service
     app.extensions["showcase_workspace_service"] = workspace_service

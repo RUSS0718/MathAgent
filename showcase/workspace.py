@@ -529,8 +529,9 @@ class WorkspaceStore:
 class WorkspaceService:
     """Application service that queues deterministic fake Jobs exactly once."""
 
-    def __init__(self, database_path: str | Path = ":memory:", connection: sqlite3.Connection | None = None) -> None:
+    def __init__(self, database_path: str | Path = ":memory:", connection: sqlite3.Connection | None = None, *, execution_mode: str = "fake") -> None:
         self.store = WorkspaceStore(database_path, connection=connection)
+        self.execution_mode = execution_mode
         self.store.recover_incomplete_jobs()
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="showcase-job")
         self._submitted: set[str] = set()
@@ -617,6 +618,9 @@ class WorkspaceService:
             # Keep the worker asynchronous even for the deterministic adapter so
             # the HTTP contract never waits for execution.
             time.sleep(0.05)
+            if self.execution_mode == "live":
+                self.store.fail_job(job_id, "unavailable")
+                return
             if self.store.verification_mode(job_id) == "required":
                 self.store.fail_job(job_id, "needs_review")
             else:
