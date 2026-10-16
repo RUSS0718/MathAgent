@@ -385,7 +385,7 @@ class WorkspaceService:
             raise WorkspaceError("capability_unavailable", status=503)
         if input_user_file_id is not None:
             raise WorkspaceError("capability_unavailable", status=503)
-        if verification_mode not in {"auto", "required", "off"}:
+        if not isinstance(verification_mode, str) or verification_mode not in {"auto", "required", "off"}:
             raise WorkspaceError("verification_mode_invalid", status=400)
         if not idempotency_key.strip():
             raise WorkspaceError("idempotency_key_required", status=400)
