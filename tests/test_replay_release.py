@@ -16,6 +16,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReplayReleaseTest(unittest.TestCase):
+    def test_v02_release_evidence_keeps_live_gate_honest(self):
+        evidence = json.loads(
+            (ROOT / "docs" / "evals" / "v0.2-release-evidence.json").read_text(encoding="utf-8")
+        )
+        self.assertIn(evidence["release_status"], {"engineering-preview", "unavailable"})
+        self.assertEqual("unavailable", evidence["acceptance"]["AC-06"]["status"])
+        self.assertEqual("planned", evidence["math_effect_evaluation"]["status"])
+        self.assertTrue(
+            {"live", "fake", "replay", "experimental", "unavailable", "planned"}.issubset(
+                evidence["labels"]
+            )
+        )
+
     def test_checked_in_replay_is_explicit_and_redacted(self):
         path = ROOT / "docs" / "replay" / "showcase-replay-v0.1.json"
         replay = load_replay(path)
