@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response, g, jsonify, request
-from werkzeug.exceptions import BadRequest
+from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 from .evidence import EvidencePackExporter
 from .loopback import AuthSession, LoopbackStore
@@ -74,6 +74,8 @@ def create_app(
         g.request_id = request.headers.get("X-Request-ID") or f"req_{uuid.uuid4().hex}"
         g.auth_session = loopback_store.get(request.cookies.get(AUTH_COOKIE))
         if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            if request.content_length is not None and request.content_length > MAX_BODY_BYTES:
+                return _json_error("invalid_body_size", 400)
             if g.auth_session is None:
                 return _json_error("auth_required", 401)
             csrf_token = request.headers.get("X-CSRF-Token")
@@ -159,7 +161,7 @@ def create_app(
     def create_run() -> tuple[Response, int]:
         try:
             payload = request.get_json(silent=False)
-        except BadRequest:
+        except (BadRequest, UnsupportedMediaType):
             return _json_error("invalid_json", 400)
         if not isinstance(payload, dict):
             return _json_error("body_must_be_object", 400)
