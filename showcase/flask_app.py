@@ -316,6 +316,40 @@ def create_app(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
+    @app.post("/api/agent/jobs/<job_id>/resume")
+    def resume_job(job_id: str) -> tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        payload = _request_object()
+        if isinstance(payload, tuple):
+            return payload
+        try:
+            result, existing = workspace_service.resume_job(
+                user_id=session.user_id,
+                job_id=job_id,
+                idempotency_key=request.headers.get("Idempotency-Key", ""),
+                answer=str(payload.get("answer", "")),
+            )
+            return jsonify({**result, "existing": existing}), 200 if existing else 202
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
+    @app.post("/api/agent/jobs/<job_id>/cancel")
+    def cancel_job(job_id: str) -> tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        payload = _request_object()
+        if isinstance(payload, tuple):
+            return payload
+        del payload
+        try:
+            result, existing = workspace_service.cancel_job(
+                user_id=session.user_id,
+                job_id=job_id,
+                idempotency_key=request.headers.get("Idempotency-Key", ""),
+            )
+            return jsonify({**result, "existing": existing}), 200
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
     @app.post("/api/runs")
     def create_run() -> tuple[Response, int]:
         try:

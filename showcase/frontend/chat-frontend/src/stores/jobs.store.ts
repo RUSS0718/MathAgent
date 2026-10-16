@@ -50,6 +50,7 @@ export const useJobsStore = defineStore('jobs', {
       const type = event.data.type
       const terminal = terminalStatuses.has(record.status)
       if (!terminal && type === 'queued') record.status = 'queued'
+      else if (!terminal && type === 'resumed') record.status = 'queued'
       else if (!terminal && type === 'running') record.status = 'running'
       else if (!terminal && type === 'interrupt') record.status = 'waiting_input'
       else if (!terminal && type === 'final_result') record.status = 'succeeded'

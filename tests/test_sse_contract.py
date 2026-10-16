@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+import uuid
 from pathlib import Path
 
 from showcase.flask_app import create_app
@@ -36,7 +37,7 @@ class SseContractTest(unittest.TestCase):
         self.app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(self.root)})
         self.client = self.app.test_client()
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
-        self.headers = {"X-CSRF-Token": self.csrf, "Idempotency-Key": "sse-contract"}
+        self.headers = {"X-CSRF-Token": self.csrf, "Idempotency-Key": str(uuid.uuid4())}
         self.session_id = self.client.post("/api/new_chat", headers={"X-CSRF-Token": self.csrf}).get_json()["new_session_id"]
 
     def tearDown(self) -> None:
@@ -45,7 +46,8 @@ class SseContractTest(unittest.TestCase):
         self.app.extensions["loopback_store"].close()
         self.temp_dir.cleanup()
 
-    def _create_job(self, *, key: str = "sse-contract") -> str:
+    def _create_job(self, *, key: str | None = None) -> str:
+        key = key or str(uuid.uuid4())
         response = self.client.post(
             "/api/agent/jobs",
             json={"message": "求解 x + 1 = 2", "session_id": self.session_id},
@@ -95,7 +97,7 @@ class SseContractTest(unittest.TestCase):
             service.store.complete_job(job_id, "答案：1", "确定性测试")
 
         service._execute = hold_job
-        job_id = self._create_job(key="heartbeat-contract")
+        job_id = self._create_job()
         self.assertTrue(blocked.wait(timeout=1))
         response = self.client.get(f"/api/agent/jobs/{job_id}/events", buffered=False)
         first = next(response.response).decode("utf-8")
@@ -109,7 +111,7 @@ class SseContractTest(unittest.TestCase):
         self.assertIn("event: final_result", rest)
 
     def test_events_do_not_cross_job_sessions(self) -> None:
-        first_job = self._create_job(key="session-a")
+        first_job = self._create_job()
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
             if self.client.get(f"/api/agent/jobs/{first_job}").get_json()["status"] == "succeeded":
@@ -119,7 +121,7 @@ class SseContractTest(unittest.TestCase):
         second = self.client.post(
             "/api/agent/jobs",
             json={"message": "题目 B", "session_id": second_session},
-            headers={"X-CSRF-Token": self.csrf, "Idempotency-Key": "session-b"},
+            headers={"X-CSRF-Token": self.csrf, "Idempotency-Key": str(uuid.uuid4())},
         )
         second_job = second.get_json()["job_id"]
         first_events = parse_sse(self.client.get(f"/api/agent/jobs/{first_job}/events").get_data(as_text=True))

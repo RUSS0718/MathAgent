@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import time
 import unittest
+import uuid
 from pathlib import Path
 
 from showcase.flask_app import create_app
@@ -59,10 +60,11 @@ class WorkspaceJobsContractTest(unittest.TestCase):
 
     def test_job_is_accepted_before_fake_adapter_finishes_and_history_is_unique(self) -> None:
         session_id = self.client.post("/api/new_chat", headers=self._headers()).get_json()["new_session_id"]
+        first_key = str(uuid.uuid4())
         response = self.client.post(
             "/api/agent/jobs",
             json={"message": "计算 1 + 1", "session_id": session_id, "web_search_enabled": False},
-            headers=self._headers(**{"Idempotency-Key": "job-key-1"}),
+            headers=self._headers(**{"Idempotency-Key": first_key}),
         )
 
         self.assertEqual(202, response.status_code)
@@ -85,7 +87,7 @@ class WorkspaceJobsContractTest(unittest.TestCase):
         replay = self.client.post(
             "/api/agent/jobs",
             json={"message": "计算 1 + 1", "session_id": session_id, "web_search_enabled": False},
-            headers=self._headers(**{"Idempotency-Key": "job-key-1"}),
+            headers=self._headers(**{"Idempotency-Key": first_key}),
         )
         self.assertEqual(200, replay.status_code)
         self.assertEqual({"success": True, "job_id": body["job_id"], "existing": True}, {
@@ -100,14 +102,14 @@ class WorkspaceJobsContractTest(unittest.TestCase):
         first = self.client.post(
             "/api/agent/jobs",
             json={"message": "题目 A", "session_id": session_id},
-            headers=self._headers(**{"Idempotency-Key": "active-a"}),
+            headers=self._headers(**{"Idempotency-Key": str(uuid.uuid4())}),
         )
         self.assertEqual(202, first.status_code)
 
         second = self.client.post(
             "/api/agent/jobs",
             json={"message": "题目 B", "session_id": session_id},
-            headers=self._headers(**{"Idempotency-Key": "active-b"}),
+            headers=self._headers(**{"Idempotency-Key": str(uuid.uuid4())}),
         )
         self.assertEqual(409, second.status_code)
         self.assertEqual("active_job_conflict", second.get_json()["code"])
@@ -116,7 +118,7 @@ class WorkspaceJobsContractTest(unittest.TestCase):
         unavailable = self.client.post(
             "/api/agent/jobs",
             json={"message": "上传题", "session_id": session_id, "input_user_file_id": 1},
-            headers=self._headers(**{"Idempotency-Key": "file-key"}),
+            headers=self._headers(**{"Idempotency-Key": str(uuid.uuid4())}),
         )
         self.assertEqual(503, unavailable.status_code)
         self.assertEqual("capability_unavailable", unavailable.get_json()["code"])

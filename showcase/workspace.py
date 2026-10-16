@@ -13,6 +13,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import uuid
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -83,6 +84,17 @@ class WorkspaceStore:
                 event_type TEXT NOT NULL,
                 payload_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
+                FOREIGN KEY (job_id) REFERENCES workspace_jobs(job_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS workspace_actions (
+                user_id TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                job_id TEXT NOT NULL,
+                request_digest TEXT NOT NULL,
+                response_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, idempotency_key),
                 FOREIGN KEY (job_id) REFERENCES workspace_jobs(job_id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_updated
@@ -302,6 +314,78 @@ class WorkspaceStore:
                 self._connection.rollback()
                 raise
 
+    def mark_waiting_input(self, job_id: str) -> None:
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            row = self._connection.execute("SELECT status FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+            if row is None:
+                self._connection.rollback()
+                raise WorkspaceError("job_not_found", status=404)
+            if row["status"] not in ACTIVE_JOB_STATUSES:
+                self._connection.rollback()
+                raise WorkspaceError("job_not_waiting_input", status=409)
+            now = _utc_now()
+            self._connection.execute("UPDATE workspace_jobs SET status='waiting_input',updated_at=? WHERE job_id=?", (now, job_id))
+            self._insert_event(job_id, "interrupt", {"type": "interrupt", "job_id": job_id, "status": "waiting_input"})
+            self._connection.commit()
+
+    def control_job(self, *, user_id: str, job_id: str, operation: str, idempotency_key: str, request_digest: str) -> tuple[dict[str, Any], bool]:
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                existing = self._connection.execute(
+                    "SELECT operation,job_id,request_digest,response_json FROM workspace_actions WHERE user_id=? AND idempotency_key=?",
+                    (user_id, idempotency_key),
+                ).fetchone()
+                if existing is not None:
+                    if existing["operation"] != operation or existing["job_id"] != job_id or existing["request_digest"] != request_digest:
+                        raise WorkspaceError("idempotency_conflict", status=409)
+                    result = _loads(existing["response_json"])
+                    self._connection.commit()
+                    return result, True
+                row = self._connection.execute("SELECT * FROM workspace_jobs WHERE job_id=? AND user_id=?", (job_id, user_id)).fetchone()
+                if row is None:
+                    raise WorkspaceError("job_not_found", status=404)
+                status = row["status"]
+                if operation == "cancel":
+                    if status in TERMINAL_JOB_STATUSES and status != "canceled":
+                        raise WorkspaceError("job_not_cancelable", status=409)
+                    if status != "canceled":
+                        now = _utc_now()
+                        self._connection.execute("UPDATE workspace_jobs SET status='canceled',updated_at=? WHERE job_id=?", (now, job_id))
+                        self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "CANCELED", now)), now, job_id))
+                        self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled"})
+                    result = {"success": True, "job_id": job_id, "status": "canceled"}
+                else:
+                    if status != "waiting_input":
+                        raise WorkspaceError("job_not_resumable", status=409)
+                    now = _utc_now()
+                    self._connection.execute("UPDATE workspace_jobs SET status='queued',updated_at=? WHERE job_id=?", (now, job_id))
+                    self._insert_event(job_id, "resumed", {"type": "resumed", "job_id": job_id, "status": "queued"})
+                    result = {"success": True, "job_id": job_id, "status": "queued"}
+                self._connection.execute(
+                    "INSERT INTO workspace_actions(user_id,idempotency_key,operation,job_id,request_digest,response_json,created_at) VALUES(?,?,?,?,?,?,?)",
+                    (user_id, idempotency_key, operation, job_id, request_digest, _json(result), _utc_now()),
+                )
+                self._connection.commit()
+                return result, False
+            except Exception:
+                self._connection.rollback()
+                raise
+
+    def recover_incomplete_jobs(self) -> int:
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            rows = self._connection.execute("SELECT job_id FROM workspace_jobs WHERE status IN ('queued','running','waiting_input')").fetchall()
+            for row in rows:
+                job_id = row["job_id"]
+                now = _utc_now()
+                self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code='needs_review',updated_at=? WHERE job_id=?", (now, job_id))
+                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, error={"category": "needs_review"})), now, job_id))
+                self._insert_event(job_id, "needs_review", {"type": "needs_review", "job_id": job_id, "status": "failed", "reason": "process_restart"})
+            self._connection.commit()
+            return len(rows)
+
     def fail_job(self, job_id: str, code: str) -> None:
         with self._lock:
             now = _utc_now()
@@ -425,6 +509,7 @@ class WorkspaceService:
 
     def __init__(self, database_path: str | Path = ":memory:", connection: sqlite3.Connection | None = None) -> None:
         self.store = WorkspaceStore(database_path, connection=connection)
+        self.store.recover_incomplete_jobs()
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="showcase-job")
         self._submitted: set[str] = set()
         self._submit_lock = threading.Lock()
@@ -461,8 +546,8 @@ class WorkspaceService:
             raise WorkspaceError("capability_unavailable", status=503)
         if not isinstance(verification_mode, str) or verification_mode not in {"auto", "required", "off"}:
             raise WorkspaceError("verification_mode_invalid", status=400)
-        if not idempotency_key.strip():
-            raise WorkspaceError("idempotency_key_required", status=400)
+        if not _is_uuid_v4(idempotency_key):
+            raise WorkspaceError("idempotency_key_invalid", status=400)
         digest = _request_digest(session_id, problem, web_search_enabled, input_user_file_id, verification_mode)
         payload, existing = self.store.create_job(
             user_id=user_id,
@@ -474,6 +559,25 @@ class WorkspaceService:
         if not existing:
             self._submit(payload["job_id"])
         return payload, existing
+
+    def resume_job(self, *, user_id: str, job_id: str, idempotency_key: str, answer: str = "") -> tuple[dict[str, Any], bool]:
+        if not _is_uuid_v4(idempotency_key):
+            raise WorkspaceError("idempotency_key_invalid", status=400)
+        digest = _request_digest("resume", job_id, answer)
+        result, existing = self.store.control_job(
+            user_id=user_id, job_id=job_id, operation="resume", idempotency_key=idempotency_key, request_digest=digest
+        )
+        if not existing:
+            self._submit(job_id)
+        return result, existing
+
+    def cancel_job(self, *, user_id: str, job_id: str, idempotency_key: str) -> tuple[dict[str, Any], bool]:
+        if not _is_uuid_v4(idempotency_key):
+            raise WorkspaceError("idempotency_key_invalid", status=400)
+        result, existing = self.store.control_job(
+            user_id=user_id, job_id=job_id, operation="cancel", idempotency_key=idempotency_key, request_digest=_request_digest("cancel", job_id, "")
+        )
+        return result, existing
 
     def _submit(self, job_id: str) -> None:
         with self._submit_lock:
@@ -488,7 +592,7 @@ class WorkspaceService:
                 return
             # Keep the worker asynchronous even for the deterministic adapter so
             # the HTTP contract never waits for execution.
-            time.sleep(0.005)
+            time.sleep(0.05)
             self.store.complete_job(
                 job_id,
                 "Fake Agent completed a deterministic showcase run.",
@@ -559,9 +663,21 @@ class WorkspaceService:
         self.store.close()
 
 
-def _request_digest(session_id: str, problem: str, web_search_enabled: bool, file_id: Any, verification_mode: str) -> str:
-    payload = {"session_id": session_id, "message": problem, "web_search_enabled": web_search_enabled, "input_user_file_id": file_id, "verification_mode": verification_mode}
+def _request_digest(*args: Any) -> str:
+    if len(args) == 5:
+        session_id, problem, web_search_enabled, file_id, verification_mode = args
+        payload = {"session_id": session_id, "message": problem, "web_search_enabled": web_search_enabled, "input_user_file_id": file_id, "verification_mode": verification_mode}
+    else:
+        payload = {"operation": list(args)}
     return hashlib.sha256(_json(payload).encode("utf-8")).hexdigest()
+
+
+def _is_uuid_v4(value: str) -> bool:
+    try:
+        parsed = uuid.UUID(value)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return parsed.version == 4 and str(parsed) == value.lower()
 
 
 def _run_snapshot(

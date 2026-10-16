@@ -23,6 +23,24 @@ async function send(): Promise<void> {
   draft.value = ''
   await sessions.select(sessions.currentId)
 }
+async function cancelCurrent(): Promise<void> {
+  if (!current.value) return
+  try {
+    const result = await api.cancelJob(current.value.jobId, createIdempotencyKey())
+    jobs.start(current.value.jobId, current.value.sessionId, result.status ?? 'canceled')
+    notice.value = result.existing ? '已重放取消结果。' : '任务已取消。'
+  } catch (error) { notice.value = error instanceof Error ? error.message : '取消失败。' }
+}
+async function resumeCurrent(): Promise<void> {
+  if (!current.value) return
+  const answer = globalThis.prompt('补充条件', '')
+  if (answer === null) return
+  try {
+    const result = await api.resumeJob(current.value.jobId, answer, createIdempotencyKey())
+    jobs.start(current.value.jobId, current.value.sessionId, result.status ?? 'queued')
+    notice.value = result.existing ? '已重放恢复结果。' : '任务已恢复。'
+  } catch (error) { notice.value = error instanceof Error ? error.message : '恢复失败。' }
+}
 async function newSession(): Promise<void> { const id = await sessions.create(); globalThis.history.pushState({}, '', sessionHref(id)); globalThis.dispatchEvent(new PopStateEvent('popstate')) }
 async function selectSession(id: string): Promise<void> { await sessions.select(id); globalThis.history.pushState({}, '', sessionHref(id)); globalThis.dispatchEvent(new PopStateEvent('popstate')) }
 async function rename(id: string): Promise<void> { const title = globalThis.prompt('会话名称', sessions.items.find((item) => item.id === id)?.preview ?? '新对话'); if (title?.trim()) await sessions.rename(id, title.trim()) }
@@ -41,6 +59,7 @@ onMounted(async () => { if (props.path === settingsHref()) return; if (!sessions
       <h1>数学工作区</h1>
       <p v-if="notice" role="status">{{ notice }}</p>
       <section class="messages" aria-live="polite"><article v-for="(message, index) in sessions.messages" :key="`${message.analysis_job_id}-${index}`" :class="message.sender"><strong>{{ message.sender === 'user' ? '你' : 'MathAgent' }}</strong><p>{{ message.text }}</p></article><p v-if="!sessions.messages.length">输入一道数学题开始。</p></section>
+      <p v-if="current">任务状态：{{ current.status }} <button type="button" @click="cancelCurrent" :disabled="['succeeded','failed','canceled'].includes(current.status)">取消</button><button v-if="current.status === 'waiting_input'" type="button" @click="resumeCurrent">恢复</button></p>
       <form @submit.prevent="send"><textarea v-model="draft" aria-label="数学问题" placeholder="输入数学问题" :disabled="Boolean(current)"></textarea><button type="submit" :disabled="!draft.trim() || Boolean(current)">提交</button></form>
     </main>
   </div>
