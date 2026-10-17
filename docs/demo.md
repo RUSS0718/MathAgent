@@ -27,3 +27,26 @@ python demo_server.py --host 127.0.0.1 --port 8080
 
 没有凭证时，使用 `docs/replay/showcase-replay-v0.1.json` 进行回放，并在 Demo
 中标记 `replay`、`experimental` 和 `unavailable` 状态，不把回放当作实时模型调用。
+
+## v0.2 Workbench 与 CLI
+
+真实调试使用 Flask 工作区和 `live` 模式。先在仓库根目录准备未跟踪的 `.env`，至少设置 `INTERN_API_KEY`，然后分别启动后端和前端：
+
+```powershell
+uv sync --all-groups
+uv run python showcase_server.py --mode live --data-dir artifacts/showcase-v0.2
+cd showcase/frontend/chat-frontend
+npm ci --no-audit --no-fund
+npm run dev
+```
+
+浏览器打开 `http://localhost:5174/dashboard`。提交题目后，页面的“Agent 执行节点”会显示 `intake`、`planner`、`solver`、按需 `tool`、`verifier`、`synthesizer` 和 `terminal` 的公共事件；刷新页面会从已保存的 Job 事件重新订阅。
+
+CLI 与网页共用身份、Job、SSE 和报告接口。默认 `probe` 拒绝 fake 或未配置凭证的服务，避免把离线结果当成真实 API 证据：
+
+```powershell
+uv run python showcase_cli.py capabilities
+uv run python showcase_cli.py probe "求解 x^2-1=0，并检查候选根。"
+```
+
+也可以逐步调试：`session list|create|load`、`job submit|watch|status|events|report|cancel|resume|polynomial-check` 和 `file list|upload|delete`。CLI 的 cookie 默认保存在被忽略的 `artifacts/showcase-v0.2/cli.cookies`。

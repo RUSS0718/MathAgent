@@ -12,6 +12,24 @@
 
 演示必须明确区分实时运行、回放运行和计划中的功能。
 
+## V0.2 Workbench 路径
+
+真实 API 演示使用下面的命令；`probe` 和浏览器都会走同一个 live pipeline：
+
+```powershell
+uv run python showcase_server.py --mode live --host 127.0.0.1 --port 8090 --data-dir artifacts/showcase-v0.2
+cd showcase/frontend/chat-frontend
+npm run dev
+```
+
+打开 `http://localhost:5174/dashboard`，或在另一个终端运行：
+
+```powershell
+uv run python showcase_cli.py probe "求解方程 x+1=2，并给出简要验证。"
+```
+
+页面与 CLI 都应显示 `intake → planner → solver → verifier → synthesizer → terminal`；模型请求注册工具时，时间线中还会显示 `tool` 节点。错误必须落在具体节点并进入 `failed` / 复核状态。
+
 ## V0.1 Showcase 路径
 
 无凭证时使用确定性的回放证据：

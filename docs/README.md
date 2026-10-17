@@ -38,6 +38,7 @@
 - [v0.2 实现规格](specs/subjective-agent-platform-v0.2-spec.md)（[GitHub Issue #12](https://github.com/RUSS0718/MathAgent/issues/12)）：按已确认的测试 seam 整理问题、用户故事、实现决策、测试决策和范围边界。
 - [v0.2 PRD Lite](prd/subjective-agent-platform-prd-v0.2.md)：产品目标、前后端范围、能力发布门槛和验收合同。
 - [v0.2 规划调研](research/v0.2-planning-baseline.md)：v0.1 能力事实、CausalAgent 接口核对和设计取舍。
+- [v0.2 Live 调试规格](specs/subjective-agent-platform-v0.2-live-debug-spec.md)：真实 Intern pipeline、CLI 合同和 Agent 节点时间线。
 
 ### v0.2 tickets
 
