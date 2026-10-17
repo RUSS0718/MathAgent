@@ -24,15 +24,19 @@ const current = computed(() => sessions.currentId ? jobs.activeForSession(sessio
 async function send(): Promise<void> {
   const message = draft.value.trim()
   if (!message || current.value || !sessions.currentId) return
-  const result = await api.createJob(message, sessions.currentId, createIdempotencyKey(), selectedFile.value)
-  if (!result.success || !result.job_id || !result.status) throw new Error(result.error ?? '任务未被接受')
-  jobs.start(result.job_id, sessions.currentId, result.status)
-  void jobController.subscribe(result.job_id)
-  sessions.addUser(message, result.job_id)
-  draft.value = ''
-  selectedFile.value = undefined
-  await sessions.select(sessions.currentId)
-  await loadReport(result.job_id)
+  try {
+    const result = await api.createJob(message, sessions.currentId, createIdempotencyKey(), selectedFile.value)
+    if (!result.success || !result.job_id || !result.status) throw new Error(result.error ?? '任务未被接受')
+    jobs.start(result.job_id, sessions.currentId, result.status)
+    void jobController.subscribe(result.job_id)
+    sessions.addUser(message, result.job_id)
+    draft.value = ''
+    selectedFile.value = undefined
+    await sessions.select(sessions.currentId)
+    await loadReport(result.job_id)
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : '任务提交失败。'
+  }
 }
 async function cancelCurrent(): Promise<void> {
   if (!current.value) return
