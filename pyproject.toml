@@ -13,6 +13,7 @@ showcase = [
   "flask>=3.1,<4",
   "langgraph==1.2.15",
   "deepagents==0.7.25",
+  "python-dotenv>=1.0,<2",
 ]
 
 [dependency-groups]
@@ -21,6 +22,7 @@ dev = [
   "pytest>=8,<9",
   "requests>=2.31,<3",
   "flask>=3.1,<4",
+  "python-dotenv>=1.0,<2",
   "ruff>=0.11,<1",
   "langgraph==1.2.15",
   "deepagents==0.7.25",
