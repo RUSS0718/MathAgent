@@ -59,7 +59,24 @@ async function selectSession(id: string): Promise<void> { await sessions.select(
 async function rename(id: string): Promise<void> { const title = globalThis.prompt('会话名称', sessions.items.find((item) => item.id === id)?.preview ?? '新对话'); if (title?.trim()) await sessions.rename(id, title.trim()) }
 async function remove(id: string): Promise<void> { await sessions.remove(id); if (!sessions.currentId) globalThis.history.pushState({}, '', workspaceHref()) }
 async function loadReport(jobId: string): Promise<void> { try { report.value = await api.jobReport(jobId) } catch { report.value = null } }
-onMounted(async () => { const capabilities = await api.capabilities(); visionEnabled.value = capabilities.files.upload.enabled; if (visionEnabled.value) await files.load(); if (props.path === settingsHref()) return; if (!sessions.items.length) await sessions.loadList(); if (props.sessionId) await sessions.select(props.sessionId); else if (sessions.currentId) await sessions.select(sessions.currentId); const latest = sessions.messages.at(-1); if (latest?.analysis_job_id) { await loadReport(latest.analysis_job_id); void jobController.subscribe(latest.analysis_job_id) } })
+onMounted(async () => {
+  const capabilities = await api.capabilities()
+  visionEnabled.value = capabilities.files.upload.enabled
+  if (visionEnabled.value) await files.load()
+  if (props.path === settingsHref()) return
+  if (!sessions.items.length) await sessions.loadList()
+  if (props.sessionId) await sessions.select(props.sessionId)
+  else if (sessions.currentId) await sessions.select(sessions.currentId)
+  else {
+    const sessionId = await sessions.create()
+    globalThis.history.replaceState({}, '', sessionHref(sessionId))
+  }
+  const latest = sessions.messages.at(-1)
+  if (latest?.analysis_job_id) {
+    await loadReport(latest.analysis_job_id)
+    void jobController.subscribe(latest.analysis_job_id)
+  }
+})
 </script>
 
 <template>
