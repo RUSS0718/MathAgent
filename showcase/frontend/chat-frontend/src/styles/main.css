@@ -14,12 +14,18 @@ form button { margin-top: 8px; padding: 8px 18px; color: #fff; background: var(-
 form button:disabled { opacity: .5; }
 .loading { padding: 40px; }
 .agent-timeline { margin-top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
-.agent-timeline header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
-.agent-timeline h2 { margin: 0; font-size: 1rem; }
-.agent-timeline header span, .timeline-meta span, .timeline-summary, .agent-timeline small { color: var(--muted); font-size: .875rem; }
-.agent-timeline ol { display: grid; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
-.agent-timeline li { padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface-muted); }
-.timeline-meta { display: flex; justify-content: space-between; gap: 12px; }
-.timeline-title, .timeline-summary { margin: 4px 0 0; }
+.timeline-header { display: flex; width: 100%; justify-content: space-between; align-items: center; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
+.timeline-header span:first-child { display: grid; gap: 3px; }
+.timeline-header small, .timeline-node, .timeline-duration, .timeline-summary, .step-details { color: var(--muted); font-size: .875rem; }
+.timeline-steps { display: grid; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
+.timeline-step { border-left: 3px solid var(--accent); background: var(--surface-muted); }
+.step-header { display: grid; grid-template-columns: auto 1fr auto auto auto; width: 100%; gap: 8px; align-items: center; padding: 10px 12px; border: 0; background: transparent; color: inherit; text-align: left; }
+.step-status { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.step-completed .step-status { background: #2f855a; }
+.step-failed .step-status { background: #c53030; }
 .timeline-title { font-weight: 600; }
+.step-details { padding: 0 12px 10px 30px; }
+.timeline-title, .timeline-summary { margin: 4px 0 0; }
+.step-details ul { display: grid; gap: 4px; margin: 8px 0 0; padding: 0; list-style: none; }
+.step-details li { display: flex; gap: 8px; justify-content: space-between; }
 @media (max-width: 720px) { .workspace { grid-template-columns: 1fr; } .sidebar { border-right: 0; border-bottom: 1px solid var(--border); } main { padding: 20px 12px; } }
