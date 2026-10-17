@@ -28,7 +28,7 @@ async function send(): Promise<void> {
     const result = await api.createJob(message, sessions.currentId, createIdempotencyKey(), selectedFile.value)
     if (!result.success || !result.job_id || !result.status) throw new Error(result.error ?? '任务未被接受')
     jobs.start(result.job_id, sessions.currentId, result.status)
-    void jobController.subscribe(result.job_id)
+    observeJob(result.job_id)
     sessions.addUser(message, result.job_id)
     draft.value = ''
     selectedFile.value = undefined
@@ -44,6 +44,7 @@ async function cancelCurrent(): Promise<void> {
     const result = await api.cancelJob(current.value.jobId, createIdempotencyKey())
     jobs.start(current.value.jobId, current.value.sessionId, result.status ?? 'canceled')
     if (result.status && !['canceled', 'failed', 'succeeded'].includes(result.status)) void jobController.subscribe(current.value.jobId)
+    await loadReport(current.value.jobId)
     notice.value = result.existing ? '已重放取消结果。' : '任务已取消。'
   } catch (error) { notice.value = error instanceof Error ? error.message : '取消失败。' }
 }
@@ -54,7 +55,7 @@ async function resumeCurrent(): Promise<void> {
   try {
     const result = await api.resumeJob(current.value.jobId, answer, createIdempotencyKey())
     jobs.start(current.value.jobId, current.value.sessionId, result.status ?? 'queued')
-    void jobController.subscribe(current.value.jobId)
+    observeJob(current.value.jobId)
     notice.value = result.existing ? '已重放恢复结果。' : '任务已恢复。'
   } catch (error) { notice.value = error instanceof Error ? error.message : '恢复失败。' }
 }
@@ -63,6 +64,13 @@ async function selectSession(id: string): Promise<void> { await sessions.select(
 async function rename(id: string): Promise<void> { const title = globalThis.prompt('会话名称', sessions.items.find((item) => item.id === id)?.preview ?? '新对话'); if (title?.trim()) await sessions.rename(id, title.trim()) }
 async function remove(id: string): Promise<void> { await sessions.remove(id); if (!sessions.currentId) globalThis.history.pushState({}, '', workspaceHref()) }
 async function loadReport(jobId: string): Promise<void> { try { report.value = await api.jobReport(jobId) } catch { report.value = null } }
+function observeJob(jobId: string): void {
+  void jobController.subscribe(jobId).then(async () => {
+    await loadReport(jobId)
+    const record = jobs.byId(jobId)
+    if (record?.error) notice.value = record.error
+  })
+}
 onMounted(async () => {
   const capabilities = await api.capabilities()
   visionEnabled.value = capabilities.files.upload.enabled
@@ -78,7 +86,7 @@ onMounted(async () => {
   const latest = sessions.messages.at(-1)
   if (latest?.analysis_job_id) {
     await loadReport(latest.analysis_job_id)
-    void jobController.subscribe(latest.analysis_job_id)
+    observeJob(latest.analysis_job_id)
   }
 })
 </script>
@@ -94,7 +102,7 @@ onMounted(async () => {
       <h1>数学工作区</h1>
       <p v-if="notice" role="status">{{ notice }}</p>
       <section class="messages" aria-live="polite"><article v-for="(message, index) in sessions.messages" :key="`${message.analysis_job_id}-${index}`" :class="message.sender"><strong>{{ message.sender === 'user' ? '你' : 'MathAgent' }}</strong><p>{{ message.text }}</p></article><p v-if="!sessions.messages.length">输入一道数学题开始。</p></section>
-      <ReportSection v-if="report" :mode="report.mode" :report="report.report" />
+      <ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
       <p v-if="current">任务状态：{{ current.status }} <button type="button" @click="cancelCurrent" :disabled="['succeeded','failed','canceled'].includes(current.status)">取消</button><button v-if="current.status === 'waiting_input'" type="button" @click="resumeCurrent">恢复</button></p>
       <form @submit.prevent="send"><textarea v-model="draft" aria-label="数学问题" placeholder="输入数学问题" :disabled="Boolean(current)"></textarea><input v-if="visionEnabled" type="file" accept="image/png" aria-label="PNG题图" @change="async (event) => { const file = (event.target as HTMLInputElement).files?.[0]; if (file) { await files.upload(file); selectedFile = files.items.at(-1)?.file_id } }" /><button v-if="selectedFile" type="button" @click="selectedFile = undefined">移除题图</button><button type="submit" :disabled="!draft.trim() || Boolean(current)">提交</button></form>
     </main>
