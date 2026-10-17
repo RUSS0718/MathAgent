@@ -44,6 +44,25 @@ def check_release_evidence() -> None:
     if not EVIDENCE_MD.is_file() or not EVIDENCE_JSON.is_file():
         raise RuntimeError("release_evidence_missing")
     payload = json.loads(EVIDENCE_JSON.read_text(encoding="utf-8"))
+    source_commit = payload.get("source_commit")
+    if not isinstance(source_commit, str) or not source_commit:
+        raise RuntimeError("release_source_commit_missing")
+    resolved = subprocess.run(
+        ["git", "cat-file", "-e", f"{source_commit}^{{commit}}"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    if resolved.returncode:
+        raise RuntimeError("release_source_commit_unknown")
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", source_commit, "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    if ancestor.returncode:
+        raise RuntimeError("release_source_commit_not_ancestor")
     if payload.get("release_status") not in {"engineering-preview", "unavailable"}:
         raise RuntimeError("release_status_overstated")
     required_labels = {"live", "fake", "replay", "experimental", "unavailable", "planned"}

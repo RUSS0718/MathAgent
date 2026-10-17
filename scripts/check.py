@@ -25,6 +25,7 @@ def main() -> int:
     if args.offline:
         workspace.append("--offline")
     _run(workspace)
+    _run([sys.executable, "scripts/check_test_seams.py"])
     _run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"])
     _run([sys.executable, "demo_server.py", "--help"])
     _run([sys.executable, "showcase_server.py", "--help"])

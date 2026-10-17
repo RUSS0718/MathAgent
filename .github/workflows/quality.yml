@@ -32,3 +32,23 @@ jobs:
         run: uv run python scripts/check.py --offline
       - name: Run Showcase release gate
         run: uv run python scripts/check_showcase_release.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: showcase/frontend/chat-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: npm
+          cache-dependency-path: showcase/frontend/chat-frontend/package-lock.json
+      - name: Install locked frontend dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
+      - name: Check frontend
+        run: npm run check
