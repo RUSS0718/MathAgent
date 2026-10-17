@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { ApiError } from './errors'
 import { checkAuthResponseSchema, logoutResponseSchema } from './auth.schemas'
-import { activeJobsResponseSchema, jobActionResponseSchema } from './jobs.schemas'
+import { activeJobsResponseSchema, jobActionResponseSchema, jobResponseSchema } from './jobs.schemas'
 import { changeSessionResponseSchema, deleteSessionResponseSchema, loadSessionResponseSchema, newChatResponseSchema, sessionsResponseSchema } from './sessions.schemas'
 import { filesResponseSchema, uploadResponseSchema } from './files.schemas'
 import { reportSchema } from './reports.schemas'
@@ -51,6 +51,7 @@ export const api = {
   resumeJob: (jobId: string, answer: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/resume`, { ...json({ answer }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   cancelJob: (jobId: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/cancel`, { ...json({}), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   activeJobs: (sessionId?: string) => requestJson(`/api/agent/jobs/active${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`, {}, activeJobsResponseSchema),
+  getJob: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}`, {}, jobResponseSchema),
   jobReport: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/report`, {}, reportSchema),
   capabilities: () => requestJson('/api/capabilities', {}, capabilitiesResponseSchema),
 }

@@ -7,6 +7,7 @@ import { useJobsStore } from '../stores/jobs.store'
 import { useSessionsStore } from '../stores/sessions.store'
 import { useFilesStore } from '../stores/files.store'
 import ReportSection from './ReportSection.vue'
+import AgentTimeline from './AgentTimeline.vue'
 import { JobController } from '../runtime/jobs/job-controller'
 
 const sessions = useSessionsStore()
@@ -20,6 +21,10 @@ const selectedFile = ref<string | undefined>()
 const report = ref<Awaited<ReturnType<typeof api.jobReport>> | null>(null)
 const props = defineProps<{ path: string; sessionId: string | null }>()
 const current = computed(() => sessions.currentId ? jobs.activeForSession(sessions.currentId) : undefined)
+const selectedJob = computed(() => {
+  const jobId = sessions.messages.at(-1)?.analysis_job_id
+  return jobId ? jobs.byId(jobId) : undefined
+})
 
 async function send(): Promise<void> {
   const message = draft.value.trim()
@@ -72,9 +77,16 @@ function observeJob(jobId: string): void {
   })
 }
 onMounted(async () => {
-  const capabilities = await api.capabilities()
-  visionEnabled.value = capabilities.files.upload.enabled
-  if (visionEnabled.value) await files.load()
+  try {
+    const capabilities = await api.capabilities()
+    if (capabilities.execution?.mode === 'live' && capabilities.execution.status !== 'configured') {
+      notice.value = 'live 模式未检测到 Intern API 凭证。'
+    }
+    visionEnabled.value = capabilities.files.upload.enabled
+    if (visionEnabled.value) await files.load()
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : '能力检查失败。'
+  }
   if (props.path === settingsHref()) return
   if (!sessions.items.length) await sessions.loadList()
   if (props.sessionId) await sessions.select(props.sessionId)
@@ -85,6 +97,11 @@ onMounted(async () => {
   }
   const latest = sessions.messages.at(-1)
   if (latest?.analysis_job_id) {
+    try {
+      jobs.observe(await api.getJob(latest.analysis_job_id))
+    } catch (error) {
+      notice.value = error instanceof Error ? error.message : '任务状态加载失败。'
+    }
     await loadReport(latest.analysis_job_id)
     observeJob(latest.analysis_job_id)
   }
@@ -102,6 +119,7 @@ onMounted(async () => {
       <h1>数学工作区</h1>
       <p v-if="notice" role="status">{{ notice }}</p>
       <section class="messages" aria-live="polite"><article v-for="(message, index) in sessions.messages" :key="`${message.analysis_job_id}-${index}`" :class="message.sender"><strong>{{ message.sender === 'user' ? '你' : 'MathAgent' }}</strong><p>{{ message.text }}</p></article><p v-if="!sessions.messages.length">输入一道数学题开始。</p></section>
+      <AgentTimeline v-if="selectedJob" :events="selectedJob.events" />
       <ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
       <p v-if="current">任务状态：{{ current.status }} <button type="button" @click="cancelCurrent" :disabled="['succeeded','failed','canceled'].includes(current.status)">取消</button><button v-if="current.status === 'waiting_input'" type="button" @click="resumeCurrent">恢复</button></p>
       <form @submit.prevent="send"><textarea v-model="draft" aria-label="数学问题" placeholder="输入数学问题" :disabled="Boolean(current)"></textarea><input v-if="visionEnabled" type="file" accept="image/png" aria-label="PNG题图" @change="async (event) => { const file = (event.target as HTMLInputElement).files?.[0]; if (file) { await files.upload(file); selectedFile = files.items.at(-1)?.file_id } }" /><button v-if="selectedFile" type="button" @click="selectedFile = undefined">移除题图</button><button type="submit" :disabled="!draft.trim() || Boolean(current)">提交</button></form>

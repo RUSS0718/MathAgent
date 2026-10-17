@@ -24,6 +24,7 @@ from .graph import (
     LoopBudget,
     ToolExecutionResult,
 )
+from .live_pipeline import LiveAgentPipeline, PipelineBudget, PipelineFailure
 from .polynomial import PolynomialChecker
 from .profile import OFFICIAL_PROFILE, SHOWCASE_PROFILE, ProfileBoundaryError
 from .replay import ReplayValidationError, load_replay, write_sample_replay
@@ -63,6 +64,9 @@ __all__ = [
     "InternChatModel",
     "InternModelAdapter",
     "LangGraphExecutionLoop",
+    "LiveAgentPipeline",
+    "PipelineBudget",
+    "PipelineFailure",
     "LoopBudget",
     "OFFICIAL_PROFILE",
     "ProfileBoundaryError",

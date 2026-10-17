@@ -20,6 +20,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .redaction import redact
+
 ACTIVE_JOB_STATUSES = ("queued", "running", "waiting_input")
 TERMINAL_JOB_STATUSES = ("succeeded", "failed", "canceled")
 
@@ -254,7 +256,7 @@ class WorkspaceStore:
         assert row is not None
         return self._job_payload(row), False
 
-    def start_job(self, job_id: str) -> bool:
+    def start_job(self, job_id: str, *, execution_mode: str = "fake") -> bool:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
@@ -264,7 +266,7 @@ class WorkspaceStore:
                     return False
                 now = _utc_now()
                 self._connection.execute("UPDATE workspace_jobs SET status='running',updated_at=? WHERE job_id=?", (now, job_id))
-                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "RUNNING", now, asset_refs=self._asset_refs(job_id))), now, job_id))
+                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "RUNNING", now, execution_mode=execution_mode, asset_refs=self._asset_refs(job_id))), now, job_id))
                 self._insert_event(
                     job_id,
                     "running",
@@ -396,11 +398,14 @@ class WorkspaceStore:
             self._connection.commit()
             return len(rows)
 
-    def fail_job(self, job_id: str, code: str) -> None:
+    def fail_job(self, job_id: str, code: str, *, execution_mode: str = "fake") -> None:
         with self._lock:
             now = _utc_now()
-            self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code=?,updated_at=? WHERE job_id=? AND status IN ('queued','running')", (code, now, job_id))
-            self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "FAILED", now, error={"category": code}, asset_refs=self._asset_refs(job_id))), now, job_id))
+            updated = self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code=?,updated_at=? WHERE job_id=? AND status IN ('queued','running')", (code, now, job_id))
+            if updated.rowcount == 0:
+                self._connection.commit()
+                return
+            self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "FAILED", now, execution_mode=execution_mode, error={"category": code}, asset_refs=self._asset_refs(job_id))), now, job_id))
             self._insert_event(
                 job_id,
                 "error",
@@ -412,6 +417,90 @@ class WorkspaceStore:
                 },
             )
             self._connection.commit()
+
+    def append_event(self, job_id: str, event: Mapping[str, Any]) -> None:
+        """Append one already-redacted public pipeline event."""
+
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT status FROM workspace_jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            if row is None:
+                raise WorkspaceError("job_not_found", status=404)
+            if row["status"] in TERMINAL_JOB_STATUSES:
+                return
+            payload = redact(dict(event))
+            payload.setdefault("job_id", job_id)
+            self._insert_event(job_id, str(payload.get("type", "progress")), payload)
+            self._connection.commit()
+
+    def finish_live_job(self, job_id: str, state: Mapping[str, Any]) -> None:
+        """Persist a live pipeline result without exposing private model values."""
+
+        status = str(state.get("status", "FAILED"))
+        terminal_status = "succeeded" if status == "COMPLETED" else "failed"
+        final_response = state.get("final_response")
+        result = {
+            "final_response": final_response if isinstance(final_response, str) else "",
+            "summary": str(state.get("summary", "live pipeline")),
+            "tool_results": [
+                {key: value for key, value in item.items() if key != "_value"}
+                for item in state.get("tool_results", [])
+                if isinstance(item, Mapping)
+            ],
+            "verification": dict(state.get("verification", {}))
+            if isinstance(state.get("verification"), Mapping)
+            else {"status": "unknown"},
+        }
+        error = state.get("error") if isinstance(state.get("error"), Mapping) else None
+        error_code = str(error.get("category")) if error else None
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._connection.execute(
+                    "SELECT * FROM workspace_jobs WHERE job_id=?", (job_id,)
+                ).fetchone()
+                if row is None or row["status"] in TERMINAL_JOB_STATUSES:
+                    self._connection.rollback()
+                    return
+                now = _utc_now()
+                self._connection.execute(
+                    "UPDATE workspace_jobs SET status=?,result_json=?,error_code=?,updated_at=? WHERE job_id=?",
+                    (terminal_status, _json(result), error_code, now, job_id),
+                )
+                if terminal_status == "succeeded":
+                    self._connection.execute(
+                        "INSERT OR IGNORE INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
+                        (row["session_id"], "ai", result["final_response"], job_id, now),
+                    )
+                    self._connection.execute(
+                        "UPDATE chat_sessions SET updated_at=? WHERE session_id=?",
+                        (now, row["session_id"]),
+                    )
+                self._connection.execute(
+                    "UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?",
+                    (
+                        _json(
+                            _run_snapshot(
+                                job_id,
+                                "COMPLETED" if terminal_status == "succeeded" else "FAILED",
+                                now,
+                                execution_mode="live",
+                                result=result,
+                                error=error,
+                                input_text=str(row["problem"]),
+                                stage=str(state.get("stage", "failed")),
+                                asset_refs=self._asset_refs(job_id),
+                            )
+                        ),
+                        now,
+                        job_id,
+                    ),
+                )
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
 
     def record_verification(self, job_id: str, result: Mapping[str, Any]) -> None:
         with self._lock:
@@ -545,7 +634,7 @@ class WorkspaceStore:
 
 
 class WorkspaceService:
-    """Application service that queues deterministic fake Jobs exactly once."""
+    """Application service that queues one workspace Job exactly once."""
 
     def __init__(
         self,
@@ -556,12 +645,14 @@ class WorkspaceService:
         execution_delay: float = 0.05,
         worker_enabled: bool = True,
         waiting_input_marker: str = "",
+        pipeline: Any | None = None,
     ) -> None:
         self.store = WorkspaceStore(database_path, connection=connection)
         self.execution_mode = execution_mode
         self.execution_delay = max(0.0, float(execution_delay))
         self.worker_enabled = worker_enabled
         self.waiting_input_marker = waiting_input_marker
+        self.pipeline = pipeline
         self._waiting_input_jobs: set[str] = set()
         self.store.recover_incomplete_jobs()
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="showcase-job")
@@ -647,13 +738,22 @@ class WorkspaceService:
 
     def _execute(self, job_id: str) -> None:
         try:
-            if not self.store.start_job(job_id):
+            if not self.store.start_job(job_id, execution_mode=self.execution_mode):
                 return
             # Keep the worker asynchronous even for the deterministic adapter so
             # the HTTP contract never waits for execution.
             time.sleep(self.execution_delay)
             if self.execution_mode == "live":
-                self.store.fail_job(job_id, "unavailable")
+                if self.pipeline is None:
+                    self.store.fail_job(job_id, "unavailable", execution_mode="live")
+                    return
+                state = self.pipeline.run(
+                    job_id,
+                    self._problem(job_id),
+                    verification_mode=self.store.verification_mode(job_id),
+                    emit=lambda event: self.store.append_event(job_id, event),
+                )
+                self.store.finish_live_job(job_id, state)
                 return
             if (
                 self.waiting_input_marker
@@ -668,7 +768,7 @@ class WorkspaceService:
             else:
                 self.store.complete_job(job_id, "Fake Agent completed a deterministic showcase run.", "fake adapter")
         except Exception:
-            self.store.fail_job(job_id, "job_execution_failed")
+            self.store.fail_job(job_id, "job_execution_failed", execution_mode=self.execution_mode)
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
         return self.store.get_job(job_id, user_id)
@@ -766,13 +866,15 @@ def _run_snapshot(
     error: Mapping[str, Any] | None = None,
     input_text: str = "",
     asset_refs: list[dict[str, Any]] | None = None,
+    execution_mode: str = "fake",
+    stage: str | None = None,
 ) -> dict[str, Any]:
     snapshot: dict[str, Any] = {
         "run_id": job_id,
         "profile": "showcase_mvp",
-        "execution_mode": "fake",
+        "execution_mode": execution_mode,
         "status": status,
-        "stage": "queued" if status == "QUEUED" else ("synthesis" if status == "COMPLETED" else "solving"),
+        "stage": stage or ("queued" if status == "QUEUED" else ("synthesis" if status == "COMPLETED" else "solving")),
         "input_ref": {"kind": "text", "length": len(input_text)} if input_text else {"kind": "text"},
         "asset_refs": list(asset_refs or []),
         "vision_status": "unavailable" if asset_refs else None,

@@ -10,6 +10,7 @@ const capabilitySchema = z.object({
 
 export const capabilitiesResponseSchema = z.object({
   profile: z.string(),
+  execution: z.object({ mode: z.string(), provider: z.string(), status: z.string() }).optional(),
   jobs: z.object({ enabled: z.boolean(), status: z.string() }),
   sse: z.object({ enabled: z.boolean(), status: z.string() }),
   verification_mode: z.array(z.string()),

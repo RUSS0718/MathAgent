@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from .adapters import InternAgentAdapter, InternModelAdapter
 from .evidence import EvidencePackExporter
 from .graph import LangGraphExecutionLoop
+from .live_pipeline import LiveAgentPipeline
 from .run_service import RunNotFoundError, RunResumeUnavailable, RunService, RunValidationError
 from .tools import ToolRegistry
 from .verification import LightweightVerificationHook
@@ -166,6 +167,15 @@ def create_live_service(*, database_path: str = ":memory:") -> RunService:
     )
     loop = LangGraphExecutionLoop(agent, registry)
     return RunService(execution_loop=loop, database_path=database_path)
+
+
+def create_live_pipeline() -> LiveAgentPipeline:
+    """Build the live workspace pipeline with the real Intern client seam."""
+
+    registry = ToolRegistry()
+    registry.register_python_math()
+    registry.register_polynomial_check()
+    return LiveAgentPipeline(InternModelAdapter(), registry)
 
 
 def create_app(*args: Any, **kwargs: Any):

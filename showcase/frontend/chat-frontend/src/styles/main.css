@@ -13,4 +13,13 @@ textarea { width: 100%; min-height: 100px; margin-top: 16px; padding: 12px; bord
 form button { margin-top: 8px; padding: 8px 18px; color: #fff; background: var(--accent); border: 0; border-radius: 6px; }
 form button:disabled { opacity: .5; }
 .loading { padding: 40px; }
+.agent-timeline { margin-top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.agent-timeline header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.agent-timeline h2 { margin: 0; font-size: 1rem; }
+.agent-timeline header span, .timeline-meta span, .timeline-summary, .agent-timeline small { color: var(--muted); font-size: .875rem; }
+.agent-timeline ol { display: grid; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
+.agent-timeline li { padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--surface-muted); }
+.timeline-meta { display: flex; justify-content: space-between; gap: 12px; }
+.timeline-title, .timeline-summary { margin: 4px 0 0; }
+.timeline-title { font-weight: 600; }
 @media (max-width: 720px) { .workspace { grid-template-columns: 1fr; } .sidebar { border-right: 0; border-bottom: 1px solid var(--border); } main { padding: 20px 12px; } }

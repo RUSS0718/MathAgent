@@ -15,6 +15,13 @@ from typing import Any
 from flask import Flask, Response, g, jsonify, request, send_from_directory, stream_with_context
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - showcase dependency installs python-dotenv
+    load_dotenv = None
+else:
+    load_dotenv()
+
 from .evidence import EvidencePackExporter, replay_evidence
 from .loopback import AuthSession, LoopbackStore
 from .polynomial import PolynomialChecker
@@ -25,7 +32,7 @@ from .run_service import (
     RunService,
     RunValidationError,
 )
-from .server import create_live_service
+from .server import create_live_pipeline, create_live_service
 from .verification import LightweightVerificationHook
 from .workspace import WorkspaceError, WorkspaceService
 
@@ -69,9 +76,12 @@ def create_app(
     app.config["SHOWCASE_DATABASE_PATH"] = str(resolved_database)
 
     loopback_store = LoopbackStore(resolved_database)
+    live_pipeline = app.config.get("SHOWCASE_LIVE_PIPELINE")
     if service is None:
         if app.config["SHOWCASE_MODE"] == "live":
             service = create_live_service(database_path=resolved_database)
+            if live_pipeline is None:
+                live_pipeline = create_live_pipeline()
         else:
             service = RunService(database_path=resolved_database)
     shared_connection = getattr(getattr(service, "_store", None), "_connection", None)
@@ -82,10 +92,12 @@ def create_app(
         execution_delay=float(app.config.get("SHOWCASE_JOB_DELAY_SECONDS", 0.05)),
         worker_enabled=bool(app.config.get("SHOWCASE_WORKER_ENABLED", True)),
         waiting_input_marker=str(app.config.get("SHOWCASE_WAITING_INPUT_MARKER", "")),
+        pipeline=live_pipeline,
     )
     app.extensions["loopback_store"] = loopback_store
     app.extensions["showcase_run_service"] = service
     app.extensions["showcase_workspace_service"] = workspace_service
+    app.extensions["showcase_live_pipeline"] = live_pipeline
     app.extensions["showcase_verifier"] = LightweightVerificationHook()
     app.extensions["showcase_evidence_exporter"] = EvidencePackExporter()
     files_index = storage_root / "attachments" / "index.json"
@@ -182,6 +194,11 @@ def create_app(
                 "sse": {"enabled": True, "status": "available"},
                 "verification_mode": VERIFICATION_MODES,
                 "files": {"upload": upload},
+                "execution": {
+                    "mode": str(app.config.get("SHOWCASE_MODE", "fake")),
+                    "provider": "intern",
+                    "status": "configured" if os.getenv("INTERN_API_KEY") else "missing_credentials",
+                },
                 "capabilities": {
                     "jobs": True,
                     "sse": True,
@@ -541,8 +558,24 @@ def create_app(
             "asset_refs": ([{**app.extensions["showcase_files"].get(job.get("input_user_file_id"), {"file_id": job.get("input_user_file_id")}), "vision_status": "unavailable"}] if job.get("input_user_file_id") else []),
             "vision_status": "unavailable" if job.get("input_user_file_id") else None,
         }
-        tool_results = [event["data"] for event in events if event.get("event") == "tool_completed"]
-        verification = {"status": "unknown", "findings": ["verification_not_run"]}
+        stored_tools = result.get("tool_results") if isinstance(result.get("tool_results"), list) else []
+        tool_results = [item for item in stored_tools if isinstance(item, Mapping)]
+        if not tool_results:
+            tool_results = [
+                {
+                    "name": event["data"].get("name", event["data"].get("tool_name")),
+                    "status": event["data"].get("status"),
+                    "summary": event["data"].get("summary", ""),
+                    "result_summary": event["data"].get("summary", ""),
+                }
+                for event in events
+                if event.get("event") in {"tool_completed", "tool_call_result"}
+                and isinstance(event.get("data"), Mapping)
+            ]
+        verification = result.get("verification") if isinstance(result.get("verification"), Mapping) else {
+            "status": "unknown",
+            "findings": ["verification_not_run"],
+        }
         if job.get("verification_mode") == "required" and not tool_results:
             verification["findings"] = ["needs_review", "tool_evidence_missing"]
         report = app.extensions["showcase_evidence_exporter"].report(snapshot, tool_results=tool_results, verification=verification)

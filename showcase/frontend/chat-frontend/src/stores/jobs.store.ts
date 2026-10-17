@@ -11,6 +11,7 @@ export interface JobRecord {
   renderedEventId: number
   summary: string
   error: string | null
+  events: DecodedSseEvent[]
 }
 
 const terminalStatuses = new Set<Status>(['succeeded', 'failed', 'canceled'])
@@ -33,6 +34,7 @@ export const useJobsStore = defineStore('jobs', {
         renderedEventId: 0,
         summary: '',
         error: null,
+        events: [],
       }
       record.sessionId = sessionId
       if (!terminalStatuses.has(record.status)) record.status = status
@@ -41,12 +43,17 @@ export const useJobsStore = defineStore('jobs', {
       return record
     },
     observe(job: ActiveJobResponse): JobRecord {
-      return this.start(job.job_id, job.session_id, job.status, job.last_event_id ?? 0)
+      const existing = this.records[job.job_id]
+      const cursor = existing?.events.length ? job.last_event_id ?? 0 : 0
+      const record = this.start(job.job_id, job.session_id, job.status, cursor)
+      record.error = typeof job.error === 'string' ? job.error : null
+      return record
     },
     applyEvent(jobId: string, event: DecodedSseEvent): void {
       const record = this.records[jobId]
       if (!record || event.id === null || event.id <= record.lastEventId) return
       record.lastEventId = event.id
+      if (event.event !== 'heartbeat') record.events.push(event)
       const type = event.data.type
       const terminal = terminalStatuses.has(record.status)
       if (!terminal && type === 'queued') record.status = 'queued'
