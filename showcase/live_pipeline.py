@@ -31,11 +31,11 @@ EventSink = Callable[[Mapping[str, Any]], None]
 
 @dataclass(frozen=True)
 class PipelineBudget:
-    """Independent live budget; it is deliberately smaller than a full agent runtime."""
+    """Independent live budget aligned with the long Showcase evaluation slot."""
 
-    max_model_calls: int = 4
-    max_tool_calls: int = 1
-    max_runtime_seconds: float = 90.0
+    max_model_calls: int = 6
+    max_tool_calls: int = 2
+    max_runtime_seconds: float = 1_100.0
 
 
 class PipelineFailure(RuntimeError):

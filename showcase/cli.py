@@ -25,7 +25,7 @@ class CliError(RuntimeError):
 class ShowcaseClient:
     """Small stdlib-only client that mirrors the browser API calls."""
 
-    def __init__(self, base_url: str, cookie_file: Path, timeout: float = 120.0) -> None:
+    def __init__(self, base_url: str, cookie_file: Path, timeout: float = 1_200.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.cookie_file = cookie_file
         self.timeout = timeout
@@ -118,7 +118,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="MathAgent v0.2 Showcase CLI (shared HTTP/SSE contract)")
     parser.add_argument("--base-url", default=os.getenv("SHOWCASE_BASE_URL", "http://127.0.0.1:8090"))
     parser.add_argument("--cookie-file", type=Path, default=Path("artifacts/showcase-v0.2/cli.cookies"))
-    parser.add_argument("--timeout", type=float, default=120.0)
+    parser.add_argument("--timeout", type=float, default=1_200.0)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("health")

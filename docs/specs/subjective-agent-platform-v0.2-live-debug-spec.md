@@ -12,6 +12,7 @@
 - `fake` 仍用于无凭证的离线合同测试；人工调试 CLI 默认要求服务为 `live`，不把 fake 结果当作真实能力证据。
 - 事件只包含节点名称、状态、耗时和脱敏摘要，不包含完整提示、隐藏推理、凭证、原始图片或工具参数值。
 - live pipeline 使用有限节点和独立预算：`intake`、`planner`、`solver`、按需 `tool`、`verifier`、`synthesizer`、`terminal`。
+- live 默认采用长槽预算：总运行 1100 秒、最多 6 次模型调用、2 次工具调用、单次 Intern 请求 180 秒并最多重试 2 次；这些值只属于 Showcase，可由 `SHOWCASE_*` 环境变量覆盖。
 
 ## 验收合同
 

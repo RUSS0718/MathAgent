@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 from collections.abc import Mapping
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,7 +15,7 @@ from urllib.parse import urlsplit
 from .adapters import InternAgentAdapter, InternModelAdapter
 from .evidence import EvidencePackExporter
 from .graph import LangGraphExecutionLoop
-from .live_pipeline import LiveAgentPipeline
+from .live_pipeline import LiveAgentPipeline, PipelineBudget
 from .run_service import RunNotFoundError, RunResumeUnavailable, RunService, RunValidationError
 from .tools import ToolRegistry
 from .verification import LightweightVerificationHook
@@ -175,7 +176,33 @@ def create_live_pipeline() -> LiveAgentPipeline:
     registry = ToolRegistry()
     registry.register_python_math()
     registry.register_polynomial_check()
-    return LiveAgentPipeline(InternModelAdapter(), registry)
+    model = InternModelAdapter(
+        max_tokens=_positive_int_env("SHOWCASE_INTERN_MAX_TOKENS", 16_384),
+        client_timeout=_positive_int_env("SHOWCASE_INTERN_TIMEOUT_SECONDS", 180),
+        client_retry=_positive_int_env("SHOWCASE_INTERN_RETRY_COUNT", 2),
+    )
+    budget = PipelineBudget(
+        max_model_calls=_positive_int_env("SHOWCASE_PIPELINE_MAX_MODEL_CALLS", 6),
+        max_tool_calls=_positive_int_env("SHOWCASE_PIPELINE_MAX_TOOL_CALLS", 2),
+        max_runtime_seconds=_positive_float_env("SHOWCASE_PIPELINE_MAX_RUNTIME_SECONDS", 1100.0),
+    )
+    return LiveAgentPipeline(model, registry, budget=budget)
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    try:
+        value = float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
 
 
 def create_app(*args: Any, **kwargs: Any):

@@ -40,6 +40,8 @@ npm ci --no-audit --no-fund
 npm run dev
 ```
 
+长题的 live 预算默认按 Showcase 长槽运行（总运行 1100 秒、单次 Intern 请求 180 秒、2 次重试、16384 输出 tokens）；需要临时调整时使用 `.env` 中的 `SHOWCASE_*` 变量。官方 `user_agent.py` 的打榜预算不随之改变。
+
 浏览器打开 `http://localhost:5174/dashboard`。提交题目后，页面的“Agent 执行节点”会显示 `intake`、`planner`、`solver`、按需 `tool`、`verifier`、`synthesizer` 和 `terminal` 的公共事件；刷新页面会从已保存的 Job 事件重新订阅。
 
 CLI 与网页共用身份、Job、SSE 和报告接口。默认 `probe` 拒绝 fake 或未配置凭证的服务，避免把离线结果当成真实 API 证据：

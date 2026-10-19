@@ -123,10 +123,10 @@ class ToolExecutor(Protocol):
 class LoopBudget:
     """Hard upper bounds for one graph invocation."""
 
-    max_steps: int = 8
-    max_tools: int = 4
-    max_retries: int = 1
-    max_runtime_seconds: float = 30.0
+    max_steps: int = 16
+    max_tools: int = 6
+    max_retries: int = 2
+    max_runtime_seconds: float = 1_100.0
 
     def validate(self) -> None:
         if self.max_steps <= 0 or self.max_tools < 0 or self.max_retries < 0:

@@ -91,12 +91,16 @@ class InternModelAdapter:
         *,
         model_id: str | None = None,
         temperature: float = 0.2,
-        max_tokens: int = 4096,
+        max_tokens: int = 16_384,
+        client_timeout: int | None = None,
+        client_retry: int | None = None,
     ) -> None:
         self._client = client
         self.model_id = model_id or os.environ.get("INTERN_MODEL", "intern-s2")
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.client_timeout = client_timeout
+        self.client_retry = client_retry
 
     def complete(
         self,
@@ -138,7 +142,12 @@ class InternModelAdapter:
         try:
             from llm_client import InternChatClient
 
-            self._client = InternChatClient()
+            client_kwargs: dict[str, int] = {}
+            if self.client_timeout is not None:
+                client_kwargs["timeout"] = self.client_timeout
+            if self.client_retry is not None:
+                client_kwargs["retry"] = self.client_retry
+            self._client = InternChatClient(**client_kwargs)
         except Exception as exc:  # noqa: BLE001 - missing credentials are expected locally
             category = getattr(exc, "category", None) or "configuration"
             raise AdapterError(str(category), type(exc).__name__) from exc
@@ -248,7 +257,7 @@ class InternChatModel:
                     {"role": _message_role(message), "content": _message_content(message)}
                     for message in messages
                 ]
-                text = self.client.chat(payload, temperature=0.2, max_tokens=4096)
+                text = self.client.chat(payload, temperature=0.2, max_tokens=16_384)
                 text = str(text)
                 requests = _parse_tool_requests(text)
                 if requests:
