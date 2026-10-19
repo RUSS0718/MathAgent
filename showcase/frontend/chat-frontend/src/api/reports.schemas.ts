@@ -10,7 +10,7 @@ export const reportSchema = z.object({
     public_summary: z.string(),
     stage: z.string(),
     tool_summaries: z.array(z.record(z.string(), z.unknown())),
-    checks: z.record(z.string(), z.unknown()),
+    checks: z.object({ status: z.string().optional(), findings: z.array(z.string()).optional() }).passthrough(),
     limitations: z.array(z.string()),
   }),
 })

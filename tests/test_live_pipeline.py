@@ -39,6 +39,7 @@ class LivePipelineContractTest(unittest.TestCase):
         self.assertTrue({"intake", "planner", "solver", "verifier", "synthesizer", "terminal"}.issubset(node_names))
         self.assertTrue(any(event.get("type") == "final_result" for event in events))
         self.assertNotIn("求解 x+1=2", str(events))
+        self.assertIn("简体中文", model.calls[-1][0][0]["content"])
 
     def test_tool_request_uses_tool_node_and_continuation_without_private_value(self) -> None:
         model = ScriptedModel([

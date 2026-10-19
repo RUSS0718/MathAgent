@@ -13,6 +13,20 @@ textarea { width: 100%; min-height: 100px; margin-top: 16px; padding: 12px; bord
 form button { margin-top: 8px; padding: 8px 18px; color: #fff; background: var(--accent); border: 0; border-radius: 6px; }
 form button:disabled { opacity: .5; }
 .loading { padding: 40px; }
+.report-section { margin-top: 16px; padding: 20px 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.report-section h2 { margin: 0 0 12px; font-size: 1.25rem; }
+.report-meta { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--muted); font-size: .9rem; }
+.report-content { margin-top: 18px; line-height: 1.7; overflow-wrap: anywhere; }
+.report-content h1, .report-content h2, .report-content h3 { margin: 18px 0 8px; color: var(--text); line-height: 1.35; }
+.report-content h1 { font-size: 1.3rem; }
+.report-content h2 { font-size: 1.15rem; }
+.report-content h3 { font-size: 1rem; }
+.report-content p { margin: 10px 0; }
+.report-content ul { margin: 10px 0; padding-left: 1.4rem; }
+.report-content code { padding: 2px 5px; border-radius: 4px; background: var(--surface-muted); font-family: ui-monospace, monospace; font-size: .9em; }
+.report-content a { color: var(--accent); }
+.report-summary { margin: 16px 0 0; color: var(--muted); }
+.report-limitations { margin: 14px 0 0; padding-left: 1.4rem; color: var(--muted); font-size: .9rem; }
 .agent-timeline { margin-top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .timeline-header { display: flex; width: 100%; justify-content: space-between; align-items: center; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
 .timeline-header span:first-child { display: grid; gap: 3px; }

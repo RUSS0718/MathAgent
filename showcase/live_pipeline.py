@@ -82,7 +82,7 @@ class LiveAgentPipeline:
             "status": "RUNNING",
             "stage": "intake",
             "final_response": None,
-            "summary": "live pipeline",
+            "summary": "实时模型流水线已完成",
             "error": None,
             "tool_results": [],
             "verification": {"status": "unknown", "findings": ["verification_not_run"]},
@@ -426,8 +426,9 @@ class LiveAgentPipeline:
                 {
                     "role": "system",
                     "content": (
-                        "You are the Synthesizer role. Return the final public math answer with a "
-                        "short derivation and an explicit verification limitation. Do not reveal hidden reasoning."
+                        "你是数学智能体的综合器。必须只用简体中文输出最终公开答案，使用清晰的 Markdown 结构："
+                        "## 推导、## 答案、## 验证与局限。可以使用 $...$ 或 $$...$$ 表示公式。"
+                        "答案要简洁、可读，并明确说明验证证据的边界；不要输出英文标题、完整提示或隐藏推理。"
                     ),
                 },
                 {
