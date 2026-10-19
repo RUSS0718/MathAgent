@@ -7,8 +7,11 @@ import { useJobsStore } from '../stores/jobs.store'
 import { useSessionsStore } from '../stores/sessions.store'
 import { useFilesStore } from '../stores/files.store'
 import ReportSection from './ReportSection.vue'
-import AgentTimeline from './AgentTimeline.vue'
 import { JobController } from '../runtime/jobs/job-controller'
+import SessionSidebar from './SessionSidebar.vue'
+import MessageList from './MessageList.vue'
+import ComposerBar from './ComposerBar.vue'
+import WorkspaceInspector from './WorkspaceInspector.vue'
 
 const sessions = useSessionsStore()
 const jobs = useJobsStore()
@@ -17,7 +20,11 @@ const files = useFilesStore()
 const draft = ref('')
 const notice = ref('')
 const visionEnabled = ref(false)
+const executionMode = ref('live')
 const selectedFile = ref<string | undefined>()
+const selectedFileName = ref<string | undefined>()
+const sidebarOpen = ref(false)
+const inspectorOpen = ref(true)
 const report = ref<Awaited<ReturnType<typeof api.jobReport>> | null>(null)
 const props = defineProps<{ path: string; sessionId: string | null }>()
 const current = computed(() => sessions.currentId ? jobs.activeForSession(sessions.currentId) : undefined)
@@ -37,6 +44,7 @@ async function send(): Promise<void> {
     sessions.addUser(message, result.job_id)
     draft.value = ''
     selectedFile.value = undefined
+    selectedFileName.value = undefined
     await sessions.select(sessions.currentId)
     await loadReport(result.job_id)
   } catch (error) {
@@ -64,10 +72,14 @@ async function resumeCurrent(): Promise<void> {
     notice.value = result.existing ? '已重放恢复结果。' : '任务已恢复。'
   } catch (error) { notice.value = error instanceof Error ? error.message : '恢复失败。' }
 }
-async function newSession(): Promise<void> { const id = await sessions.create(); globalThis.history.pushState({}, '', sessionHref(id)); globalThis.dispatchEvent(new PopStateEvent('popstate')) }
-async function selectSession(id: string): Promise<void> { await sessions.select(id); globalThis.history.pushState({}, '', sessionHref(id)); globalThis.dispatchEvent(new PopStateEvent('popstate')) }
+async function newSession(): Promise<void> { const id = await sessions.create(); sidebarOpen.value = false; globalThis.history.pushState({}, '', sessionHref(id)); globalThis.dispatchEvent(new PopStateEvent('popstate')) }
+async function selectSession(id: string): Promise<void> { await sessions.select(id); sidebarOpen.value = false; globalThis.history.pushState({}, '', sessionHref(id)); globalThis.dispatchEvent(new PopStateEvent('popstate')) }
 async function rename(id: string): Promise<void> { const title = globalThis.prompt('会话名称', sessions.items.find((item) => item.id === id)?.preview ?? '新对话'); if (title?.trim()) await sessions.rename(id, title.trim()) }
 async function remove(id: string): Promise<void> { await sessions.remove(id); if (!sessions.currentId) globalThis.history.pushState({}, '', workspaceHref()) }
+function useStarter(value: string): void { draft.value = value }
+function openSettings(): void { globalThis.location.assign(settingsHref()) }
+function chooseFile(event: Event): void { const file = (event.target as HTMLInputElement).files?.[0]; if (file) { void files.upload(file).then(() => { selectedFile.value = files.items.at(-1)?.file_id; selectedFileName.value = file.name }) } }
+function clearFile(): void { selectedFile.value = undefined; selectedFileName.value = undefined }
 async function loadReport(jobId: string): Promise<void> { try { report.value = await api.jobReport(jobId) } catch { report.value = null } }
 function observeJob(jobId: string): void {
   void jobController.subscribe(jobId).then(async () => {
@@ -79,6 +91,7 @@ function observeJob(jobId: string): void {
 onMounted(async () => {
   try {
     const capabilities = await api.capabilities()
+    executionMode.value = capabilities.execution?.mode ?? 'live'
     if (capabilities.execution?.mode === 'live' && capabilities.execution.status !== 'configured') {
       notice.value = 'live 模式未检测到 Intern API 凭证。'
     }
@@ -109,20 +122,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="workspace">
-    <aside class="sidebar">
-      <header><strong>MathAgent</strong><button type="button" @click="newSession">新建会话</button></header>
-      <ul><li v-for="item in sessions.items" :key="item.id" :class="{ selected: item.id === sessions.currentId }"><button type="button" @click="selectSession(item.id)">{{ item.preview }}</button><button type="button" @click="rename(item.id)" aria-label="重命名">✎</button><button type="button" @click="remove(item.id)" aria-label="删除">×</button></li></ul>
-      <a :href="settingsHref()">设置</a>
-    </aside>
+  <div class="workspace-shell" :class="{ 'sidebar-open': sidebarOpen, 'inspector-open': inspectorOpen }">
+    <SessionSidebar :items="sessions.items" :current-id="sessions.currentId" :open="sidebarOpen" @new="newSession" @select="selectSession" @rename="rename" @remove="remove" @settings="openSettings" @close="sidebarOpen = false" />
     <main>
-      <h1>数学工作区</h1>
-      <p v-if="notice" role="status">{{ notice }}</p>
-      <section class="messages" aria-live="polite"><article v-for="(message, index) in sessions.messages" :key="`${message.analysis_job_id}-${index}`" :class="message.sender"><strong>{{ message.sender === 'user' ? '你' : 'MathAgent' }}</strong><p>{{ message.text }}</p></article><p v-if="!sessions.messages.length">输入一道数学题开始。</p></section>
-      <AgentTimeline v-if="selectedJob" :events="selectedJob.events" />
-      <ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
-      <p v-if="current">任务状态：{{ current.status }} <button type="button" @click="cancelCurrent" :disabled="['succeeded','failed','canceled'].includes(current.status)">取消</button><button v-if="current.status === 'waiting_input'" type="button" @click="resumeCurrent">恢复</button></p>
-      <form @submit.prevent="send"><textarea v-model="draft" aria-label="数学问题" placeholder="输入数学问题" :disabled="Boolean(current)"></textarea><input v-if="visionEnabled" type="file" accept="image/png" aria-label="PNG题图" @change="async (event) => { const file = (event.target as HTMLInputElement).files?.[0]; if (file) { await files.upload(file); selectedFile = files.items.at(-1)?.file_id } }" /><button v-if="selectedFile" type="button" @click="selectedFile = undefined">移除题图</button><button type="submit" :disabled="!draft.trim() || Boolean(current)">提交</button></form>
+      <div class="workspace-topbar"><button class="icon-button mobile-only" type="button" aria-label="打开会话栏" @click="sidebarOpen = true">☰</button><div class="topbar-title"><span class="topbar-kicker">MATHAGENT</span><strong>{{ sessions.items.find((item) => item.id === sessions.currentId)?.preview ?? '新数学会话' }}</strong></div><div class="topbar-actions"><span class="live-pill" :class="{ 'is-fake': executionMode === 'fake' }"><i></i>{{ executionMode === 'fake' ? 'FAKE' : 'LIVE' }}</span><button class="inspector-toggle" type="button" :aria-pressed="inspectorOpen" @click="inspectorOpen = !inspectorOpen">{{ inspectorOpen ? '隐藏运行观察' : '显示运行观察' }}</button></div></div>
+      <p v-if="notice" class="workspace-notice" role="status">{{ notice }}</p>
+      <section class="conversation-area"><div class="conversation-scroll"><MessageList :messages="sessions.messages" @starter="useStarter" /><ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" /></div><ComposerBar v-model="draft" :disabled="Boolean(current)" :running="Boolean(current && !['succeeded','failed','canceled'].includes(current.status))" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile" /></section>
     </main>
+    <WorkspaceInspector :open="inspectorOpen" :job="selectedJob" :report="report" @close="inspectorOpen = false" />
   </div>
 </template>
