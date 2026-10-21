@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .evidence_store import append_check
+from .final_evidence import bind_verification
 from .redaction import redact
 from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, freeze_budget
 from .run_checkpoints import RunCheckpointSaver
@@ -307,7 +308,7 @@ class WorkspaceStore:
                     self._connection.rollback()
                     return
                 now = _utc_now()
-                result = {"final_response": final_response, "summary": summary}
+                result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response)}
                 self._connection.execute(
                     "UPDATE workspace_jobs SET status='succeeded',result_json=?,updated_at=? WHERE job_id=?",
                     (_json(result), now, job_id),
@@ -486,6 +487,7 @@ class WorkspaceStore:
             if isinstance(state.get("verification"), Mapping)
             else {"status": "unknown"},
         }
+        result["verification"] = bind_verification(result["final_response"], result["verification"])
         error = state.get("error") if isinstance(state.get("error"), Mapping) else None
         error_code = str(error.get("category")) if error else None
         with self._lock:

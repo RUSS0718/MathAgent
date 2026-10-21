@@ -26,6 +26,10 @@ class EvidenceHistoryContractTest(unittest.TestCase):
                 break
             time.sleep(0.01)
         original = job["result"]
+        self.assertEqual("unknown", original["verification"]["status"])
+        self.assertTrue(original["verification"]["artifact"]["sha256"])
+        self.assertEqual(original["verification"], self.client.get(f"/api/runs/{job_id}").get_json()["result"]["verification"])
+        self.assertEqual(original["verification"], self.client.get(f"/api/runs/{job_id}/evidence").get_json()["verification"])
         original_events = self.client.get(f"/api/runs/{job_id}/events").get_json()["events"]
         payload = {"schema_version": 1, "variable": "x", "coefficients": ["1", "-1"], "domain": {"kind": "real"}, "candidates": ["1"]}
         self.second_app = second_app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(self.root)})
