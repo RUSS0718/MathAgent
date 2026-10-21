@@ -89,3 +89,4 @@
 - 最终重点合同 12 项通过；`uv run --frozen --no-sync python scripts/check.py --offline` 通过，146 项测试耗时 86.897 秒；`uv run --frozen --no-sync python scripts/check_showcase_release.py` 返回 `showcase_release=PASS`；`uv run --frozen --no-sync ruff check .` 与 `git diff --check` 通过。
 - 发布检查与完整测试并发运行时曾出现 SSE 时序失败；顺序独立重跑发布检查后通过。该次暂态失败保留为环境与时序证据，不表述为首次检查全部通过。
 - 相对 S3 前集成提交 `facd137`，`user_agent.py`、`implementations/` 与 `BASELINE.json` 无差异。此次未调用模型 API，离线合同通过不证明在线预算效果、精确费用或数学能力提升；S4–S6 尚未验收。PR #22 保持 Draft/Open。
+- CI 后续暴露干净环境下的测试隔离缺陷：同步预算测试在设置替身凭证前构造客户端。本地 `.env` 曾掩盖该前提；测试现显式设置 dummy key。清除 provider 环境后的单项回归先失败后通过，重点 12 项、完整离线 146 项（83.305 秒）、顺序 release gate 和全部 pre-commit hooks 通过；没有读取或输出凭证值，也未联网调用模型。此处仅记录本地修复验收，远端 CI 状态另行核对。
