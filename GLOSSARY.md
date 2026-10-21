@@ -10,3 +10,4 @@
 - **Stage**：Run 内可恢复的阶段，例如 intake、planning、solving、verifying。
 - **Evidence Pack**：答案、解释、验证、来源、工具调用和事件摘要的导出包。
 - **Baseline**：官方 88/12/0 评测对应的字节和行为基线，不等同于普遍能力保证。
+- **研究基础设施阶段（S1–S6）**：Intern S2 实验与 Showcase 的有序工程准备阶段；区别于 R1–R5 算法方向，以及 v0.2 Workbench 文档中含义不同的 S1–S4 阶段。
