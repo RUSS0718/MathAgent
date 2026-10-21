@@ -128,6 +128,16 @@ class MalformedJobReportClient(MissingJobReportClient):
         return response
 
 
+class EmptyAttemptReportsClient(MissingJobReportClient):
+    def get(self, path, *args, **kwargs):
+        response = self.client.get(path, *args, **kwargs)
+        if path.endswith("/report"):
+            payload = response.get_json()
+            payload["report"]["request_attempts"] = []
+            return StaticJsonResponse(payload)
+        return response
+
+
 ARGUMENTS = (
     {
         "schema_version": 1,
@@ -189,6 +199,7 @@ class G2LiveGateContractTest(unittest.TestCase):
         injected_client=None,
         missing_job_report=False,
         malformed_job_report=False,
+        empty_attempt_reports=False,
     ):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -232,6 +243,8 @@ class G2LiveGateContractTest(unittest.TestCase):
                 client = MissingJobReportClient(client)
             if malformed_job_report:
                 client = MalformedJobReportClient(client)
+            if empty_attempt_reports:
+                client = EmptyAttemptReportsClient(client)
             report = run_g2_campaign(
                 client,
                 poll_interval_seconds=0.005,
@@ -463,6 +476,24 @@ class G2LiveGateContractTest(unittest.TestCase):
         self.assertTrue(all(row["protocol_evidence"] == "blocked" for row in report["runs"][1:]))
         self.assertTrue(all(row["run_id"] is None for row in report["runs"][1:]))
 
+    def test_empty_attempt_reports_after_tool_schema_rejection_make_counts_unknown(self):
+        invalid_arguments = {**ARGUMENTS[0], "domain": "real"}
+        provider = FakeHTTPProvider([_tool_response("g2-invalid-domain", invalid_arguments)])
+
+        report = self._run_campaign(provider, empty_attempt_reports=True)
+
+        self.assertEqual("needs_review", report["contract_result"])
+        self.assertFalse(report["attempts_complete"])
+        self.assertIsNone(report["http_attempt_count"])
+        self.assertIsNone(report["known_http_attempt_count"])
+        self.assertEqual(1, len(provider.requests))
+        first = report["runs"][0]
+        self.assertFalse(first["attempts_complete"])
+        self.assertEqual([], first["attempts"])
+        self.assertEqual("tool_schema_invalid", first["error_category"])
+        self.assertTrue(all(row["protocol_evidence"] == "blocked" for row in report["runs"][1:]))
+        self.assertTrue(all(row["run_id"] is None for row in report["runs"][1:]))
+
     def test_unavailable_attempt_report_marks_counts_unknown_and_blocks_batch(self):
         provider = FakeHTTPProvider(_successful_outcomes())
         report = self._run_campaign(provider, missing_job_report=True)
@@ -503,6 +534,8 @@ class G2LiveGateContractTest(unittest.TestCase):
         self.assertEqual(6, len(report["runs"]))
         self.assertEqual("configuration", report["runs"][0]["error_category"])
         self.assertEqual([], report["runs"][0]["attempts"])
+        self.assertTrue(report["attempts_complete"])
+        self.assertEqual(0, report["http_attempt_count"])
         self.assertEqual([], provider.requests)
         self.assertEqual(0, client.calls)
         self.assertTrue(all(row["protocol_evidence"] == "blocked" for row in report["runs"][1:]))

@@ -126,17 +126,24 @@ def run_g2_campaign(
             run_snapshot = _json_payload(run_snapshot_response)
             run_report = _json_payload(run_report_response)
             evidence = _json_payload(evidence_response)
+            row.update(
+                _run_evidence_summary(
+                    run_id, job, job_report, run_snapshot, run_report, evidence
+                )
+            )
+            run_error = run_snapshot.get("error")
             attempt_report_issue = _attempt_report_issue(
                 run_id,
                 job_report_response,
                 job_report,
                 run_report_response,
                 run_report,
-            )
-            row.update(
-                _run_evidence_summary(
-                    run_id, job, job_report, run_snapshot, run_report, evidence
-                )
+                pre_request_configuration=(
+                    isinstance(run_error, Mapping)
+                    and run_error.get("category") == "configuration"
+                    and _tool_summaries(job_report) == []
+                    and _tool_summaries(run_report) == []
+                ),
             )
             row["status"] = "unknown" if timed_out else str(job.get("status", "failed"))
             if timed_out:
@@ -144,7 +151,8 @@ def run_g2_campaign(
                 row["error_category"] = "workspace_run_timeout"
             elif attempt_report_issue:
                 row["attempts_complete"] = False
-                row["error_category"] = attempt_report_issue
+                if not row["error_category"]:
+                    row["error_category"] = attempt_report_issue
             protocol_passed = _protocol_evidence_passes(row)
             row["protocol_evidence"] = (
                 ("pass" if provider_live else "simulated")
@@ -304,6 +312,11 @@ def _run_evidence_summary(
     }
 
 
+def _tool_summaries(report: Mapping[str, Any]) -> Any:
+    data = report.get("report")
+    return data.get("tool_summaries") if isinstance(data, Mapping) else None
+
+
 def _protocol_evidence_passes(row: Mapping[str, Any]) -> bool:
     attempts = row.get("attempts")
     if (
@@ -367,6 +380,8 @@ def _attempt_report_issue(
     job_report: Mapping[str, Any],
     run_response: Any,
     run_report: Mapping[str, Any],
+    *,
+    pre_request_configuration: bool = False,
 ) -> str | None:
     if getattr(job_response, "status_code", None) != 200 or getattr(run_response, "status_code", None) != 200:
         return "attempt_report_unavailable"
@@ -378,13 +393,19 @@ def _attempt_report_issue(
     run_attempts = run_data.get("request_attempts")
     if not isinstance(job_attempts, list) or not isinstance(run_attempts, list):
         return "attempt_report_unavailable"
-    if job_attempts != run_attempts or not _valid_attempt_list(job_attempts, run_id):
+    if job_attempts != run_attempts:
+        return "attempt_report_malformed"
+    if not job_attempts and pre_request_configuration:
+        return None
+    if not _valid_attempt_list(job_attempts, run_id):
         return "attempt_report_malformed"
     return None
 
 
 def _valid_attempt_list(attempts: Any, run_id: str) -> bool:
-    return isinstance(attempts, list) and all(_valid_attempt(item, run_id) for item in attempts)
+    return isinstance(attempts, list) and bool(attempts) and all(
+        _valid_attempt(item, run_id) for item in attempts
+    )
 
 
 def _valid_attempt(attempt: Any, run_id: str) -> bool:
