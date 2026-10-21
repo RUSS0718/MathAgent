@@ -97,3 +97,9 @@
 - 预算预留与取消通过 SQLite 事务确定动作准入；已准入请求按在途处理，取消停止后续调度。终态 checkpoint 封存并冻结结束时间与耗时，迟到 usage 继续结算；安全 waiting_input 可在重启后恢复，其他不明 active checkpoint 进入 needs_review 并拒绝公开 resume。
 - 双轴审查发现的问题均已修复并复核关闭。最终顺序执行：控制重点 11 项通过；`uv run python scripts/check.py --offline` 157 项测试通过（109.687 秒）；`uv run python scripts/check_showcase_release.py` 返回 `showcase_release=PASS`；`uv run ruff check showcase tests`、`uv run pre-commit run --all-files` 与 `git diff --check` 通过。check-json 无匹配文件而跳过。
 - 相对前一集成提交 `d595ef9`，`user_agent.py`、`implementations/` 与 `BASELINE.json` 无差异。此次仅完成离线工程验收，未调用模型 API，不证明远端请求可撤销、精确费用或数学正确率提升。PR #22 保持 Draft/Open。
+
+## S3 托管 CI 并发认证修复（2026-10-21）
+
+- 托管 CI 暴露 LoopbackStore 共享 SQLite connection 的并发事务缺陷，独立复现出现 `InterfaceError`。`dc2bb35` 为连接上的事务增加 RLock 作用域，并补公开接口并发回归；未改认证合同。
+- 最终顺序验证：重点 23 项通过；完整离线 158 项测试通过（136.245 秒），`repository_check=PASS`；独立 Showcase release gate、全部适用 pre-commit hooks、直接 Ruff 格式与静态检查、`git diff --check` 均通过。官方 `user_agent.py`、`implementations/` 与 `BASELINE.json` 无差异；未调用模型 API。
+- 此处仅记录本地修复验收。#28 在新的托管 CI 通过前保持重新打开状态，S4 暂停；不能由本地通过推断远端 CI 已通过。PR #22 保持 Draft/Open。
