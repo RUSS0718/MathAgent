@@ -48,8 +48,8 @@ class FinalEvidenceContractTest(unittest.TestCase):
                 "schema_version": 1, "variable": "x", "coefficients": ["1", "0", "-1"],
                 "domain": {"kind": "real"}, "candidates": ["1"],
             }),
-            ProviderResponse({"content": "x=1\r\n候选"}),
-            ProviderResponse({"content": "x=1\n候选"}),
+            ProviderResponse({"content": "x=1\r\n候选é"}),
+            ProviderResponse({"content": "x=1\n候选e\u0301"}),
         ])
         result = self._run_job(provider, registry)
         check = result["evidence"]["verification"]
