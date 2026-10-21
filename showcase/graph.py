@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, TypedDict
 
+from .final_evidence import checked_verification
 from .redaction import redact_text, summarize_parameters
 from .verification import LightweightVerificationHook
 
@@ -357,7 +358,7 @@ class LangGraphExecutionLoop:
             updated["status"] = "NEEDS_REVIEW"
             return updated
         checked = LightweightVerificationHook().verify(updated, results)
-        verification_status = checked.status
+        verification_status = checked_verification(updated.get("final_response") or "", checked, results)["status"]
         updated["stage"] = "synthesizing"
         updated["status"] = "SYNTHESIZING"
         self._record_and_emit(updated, "verification_completed", {"status": verification_status})
