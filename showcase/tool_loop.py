@@ -9,6 +9,7 @@ from typing import Any
 from .adapters import AdapterError, InternModelAdapter, ModelContinuationTransport, ModelResponse
 from .graph import ToolExecutionResult
 from .redaction import redact_text
+from .run_budget import current_budget
 from .tool_protocol import ToolProtocol, ToolRequest
 from .tools import ToolRegistry
 
@@ -69,7 +70,7 @@ def run_tool_roundtrip(
     if error:
         record = _rejected_record(run_id, sink, request.protocol, request, error)
         return ToolLoopOutcome("", (record,), error, "Solver 工具请求无效")
-    if tool_count >= max_tool_calls:
+    if current_budget() is None and tool_count >= max_tool_calls:
         record = _rejected_record(
             run_id, sink, request.protocol, request, "tool_budget_exhausted"
         )
@@ -128,7 +129,7 @@ def run_tool_roundtrip(
         return ToolLoopOutcome(
             "", (record,), result.error_category or "tool_failed", "数学工具调用失败，需要复核"
         )
-    if model_calls[0] >= max_model_calls:
+    if current_budget() is None and model_calls[0] >= max_model_calls:
         record["continuation_status"] = "missing"
         record["continuation_error_category"] = "model_budget_exhausted"
         return ToolLoopOutcome(

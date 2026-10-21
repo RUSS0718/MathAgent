@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .redaction import redact
+from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget
 
 ACTIVE_JOB_STATUSES = ("queued", "running", "waiting_input")
 TERMINAL_JOB_STATUSES = ("succeeded", "failed", "canceled")
@@ -453,6 +454,7 @@ class WorkspaceStore:
             "final_response": final_response if isinstance(final_response, str) else "",
             "summary": str(state.get("summary", "live pipeline")),
             "request_attempts": list(state.get("request_attempts", [])),
+            "budget": state.get("budget"),
             "tool_results": [
                 {key: value for key, value in item.items() if key != "_value"}
                 for item in state.get("tool_results", [])
@@ -677,6 +679,7 @@ class WorkspaceService:
         self.worker_enabled = worker_enabled
         self.waiting_input_marker = waiting_input_marker
         self.pipeline = pipeline
+        self.budget_ledger = RunBudgetLedger(self.store._connection, self.store._lock)
         self._waiting_input_jobs: set[str] = set()
         self.store.recover_incomplete_jobs()
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="showcase-job")
@@ -771,12 +774,14 @@ class WorkspaceService:
                 if self.pipeline is None:
                     self.store.fail_job(job_id, "unavailable", execution_mode="live")
                     return
-                state = self.pipeline.run(
-                    job_id,
-                    self._problem(job_id),
-                    verification_mode=self.store.verification_mode(job_id),
-                    emit=lambda event: self.store.append_event(job_id, event),
-                )
+                limits = getattr(self.pipeline, "budget", RunBudgetLimits())
+                with bind_budget(self.budget_ledger.ensure(job_id, limits)):
+                    state = self.pipeline.run(
+                        job_id,
+                        self._problem(job_id),
+                        verification_mode=self.store.verification_mode(job_id),
+                        emit=lambda event: self.store.append_event(job_id, event),
+                    )
                 self.store.finish_live_job(job_id, state)
                 return
             if (

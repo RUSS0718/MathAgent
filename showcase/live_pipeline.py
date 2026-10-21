@@ -20,6 +20,7 @@ from .adapters import (
 )
 from .redaction import redact_text
 from .request_attempts import capture_pipeline_attempts
+from .run_budget import RunBudgetLimits, current_budget
 from .tool_loop import run_tool_roundtrip
 from .tool_protocol import ToolProtocol
 from .tools import ToolRegistry
@@ -29,12 +30,8 @@ EventSink = Callable[[Mapping[str, Any]], None]
 
 
 @dataclass(frozen=True)
-class PipelineBudget:
-    """Independent live budget aligned with the long Showcase evaluation slot."""
-
-    max_model_calls: int = 6
-    max_tool_calls: int = 2
-    max_runtime_seconds: float = 1_100.0
+class PipelineBudget(RunBudgetLimits):
+    """Finite Run limits shared with every HTTP retry and tool dispatch."""
 
 
 class PipelineFailure(RuntimeError):
@@ -415,7 +412,7 @@ class LiveAgentPipeline:
         tools: Sequence[Mapping[str, Any]] = (),
         call_counter: list[int],
     ) -> ModelResponse:
-        if call_counter[0] >= self.budget.max_model_calls:
+        if current_budget() is None and call_counter[0] >= self.budget.max_model_calls:
             raise PipelineFailure("model_budget_exhausted", "模型调用超出 live pipeline 预算", review=True)
         call_counter[0] += 1
         response = self.model.complete(messages, tools=tools, metadata={"role": role})

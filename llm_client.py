@@ -111,6 +111,7 @@ class InternChatClient:
         _attempt_records: list[dict[str, Any]] | None = None,
         _tool_calls_capture: list[Any] | None = None,
         _allow_empty_content: bool = False,
+        _attempt_budget: Any = None,
     ) -> str:
         """Send a request; explicit reasoning_mode wins over thinking_mode and defaults."""
         effective_timeout = self.timeout if timeout_seconds is None else int(timeout_seconds)
@@ -168,6 +169,10 @@ class InternChatClient:
                 "started_at_utc": datetime.now(UTC).isoformat(),
                 "status": "pending",
             }
+            attempt_timeout = effective_timeout
+            if _attempt_budget is not None:
+                estimate = len(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"))
+                attempt_timeout = min(effective_timeout, _attempt_budget.before_attempt(request_event, estimate))
             response = None
             failure: BaseException | None = None
             try:
@@ -175,7 +180,7 @@ class InternChatClient:
                     self.api_base,
                     headers=headers,
                     data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                    timeout=effective_timeout,
+                    timeout=attempt_timeout,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -286,6 +291,8 @@ class InternChatClient:
                             else None
                         ),
                     )
+                if _attempt_budget is not None:
+                    _attempt_budget.after_attempt(request_event)
                 self.request_diagnostics.append(request_event)
                 if _attempt_records is not None:
                     _attempt_records.append(dict(request_event))

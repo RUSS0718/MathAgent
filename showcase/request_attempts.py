@@ -8,6 +8,8 @@ from typing import Any
 
 from llm_response import public_attempt
 
+from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, current_budget
+
 _capture: ContextVar[Any] = ContextVar("showcase_attempt_capture", default=None)
 
 
@@ -34,7 +36,16 @@ def capture_pipeline_attempts(function):
         records = []
         token = _capture.set((run_id, records, kwargs.get("emit")))
         try:
-            state = function(self, run_id, *args, **kwargs)
+            if current_budget() is None:
+                if not hasattr(self, "_run_ledger"):
+                    self._run_ledger = RunBudgetLedger()
+                limits = RunBudgetLimits(**vars(getattr(self, "budget", RunBudgetLimits())))
+                budget = self._run_ledger.ensure(run_id, limits)
+            else:
+                budget = current_budget()
+            with bind_budget(budget):
+                state = function(self, run_id, *args, **kwargs)
+            state["budget"] = budget.snapshot()
             state["request_attempts"] = records
             return state
         finally:

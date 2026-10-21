@@ -53,6 +53,7 @@ class EvidencePackExporter:
             "agent": {"summary": snapshot.get("agent_summary", "")},
             "tools": [_tool_summary(result) for result in tool_results],
             "request_attempts": _attempts(snapshot),
+            "budget": (snapshot.get("result") or {}).get("budget"),
             "verification": verification_data,
             "artifacts": [redact(artifact) for artifact in artifacts],
             "feature_status": {
@@ -84,6 +85,7 @@ class EvidencePackExporter:
         return redact({
             "answer": answer,
             "request_attempts": _attempts(snapshot),
+            "budget": (snapshot.get("result") or {}).get("budget"),
             "public_summary": summary,
             "stage": snapshot.get("stage"),
             "asset_refs": snapshot.get("asset_refs", []),

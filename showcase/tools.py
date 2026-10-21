@@ -188,7 +188,12 @@ class ToolRegistry:
             return _result("rejected", "tool_input_too_large", started, arguments, tool_call_id)
         if schema_error(arguments, spec.parameters_schema):
             return _result("rejected", "tool_schema_invalid", started, arguments, tool_call_id)
-        if self._call_count >= self.max_calls:
+        from .run_budget import current_budget
+
+        budget = current_budget()
+        if budget is not None:
+            budget.ledger.reserve(budget.run_id, "tool")
+        if budget is None and self._call_count >= self.max_calls:
             return _result("rejected", "tool_budget_exhausted", started, arguments, tool_call_id)
         self._call_count += 1
         executor = ThreadPoolExecutor(max_workers=1)

@@ -16,6 +16,7 @@ from typing import Any, Protocol
 
 from .graph import AgentDecision
 from .request_attempts import record_attempts
+from .run_budget import current_budget
 from .run_service import AgentResult, RunRequest
 from .tool_protocol import ToolProtocol, ToolRequest, parse_tool_requests
 
@@ -151,6 +152,11 @@ class InternModelAdapter:
             kwargs["thinking_mode"] = self.thinking_mode
         try:
             transport = getattr(client, "chat_response", client.chat)
+            budget = current_budget()
+            if budget is not None:
+                call_budget = budget.model_call((metadata or {}).get("role"))
+                if _accepts_keyword(client.chat, "_attempt_budget"):
+                    kwargs["_attempt_budget"] = call_budget
             raw = transport(normalized, **kwargs)
         except Exception as exc:  # noqa: BLE001 - provider details stay out of events
             attempts = record_attempts(getattr(exc, "attempts", ()), metadata)
