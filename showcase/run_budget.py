@@ -315,9 +315,10 @@ def freeze_budget(connection, run_id):
     """Freeze elapsed Run execution in the caller's terminal transaction."""
     if not connection.execute("SELECT 1 FROM sqlite_master WHERE name='run_budgets'").fetchone():
         return
+    connection.execute(
+        "UPDATE run_budgets SET ledger_json=json_set(ledger_json,'$.ended_at',?) "
+        "WHERE run_id=? AND json_extract(ledger_json,'$.ended_at') IS NULL",
+        (time.time(), run_id),
+    )
     row = connection.execute("SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)).fetchone()
-    if row is not None:
-        state = json.loads(row[0])
-        state.setdefault("ended_at", time.time())
-        connection.execute("UPDATE run_budgets SET ledger_json=? WHERE run_id=?", (json.dumps(state), run_id))
-        return _summary(state)
+    return _summary(json.loads(row[0])) if row is not None else None
