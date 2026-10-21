@@ -76,3 +76,6 @@
 - 安全参数摘要显示六次 `domain` 均为字符串，工具 schema 要求对象；同一 Registry 用对象 `{"kind":"real"}` 离线复核成功。现有证据指向模型参数形状不符合 schema，未复现校验器缺陷；未读取或公开参数字符串值、原始响应或隐藏推理。
 - 六次 provider usage 合计 prompt 4048、completion 1393、total 5441；reasoning/cached 和费用仍未知。该合计仅用于本次验收消耗记录，不是 S3 的 Run 预算账本。
 - 脱敏归档：ignored `artifacts/g2-live-ce9766241c9b4193b4ef988db2db50ee/g2-report.json`，SHA-256 `0aa3044d513da90bef1db7646175b42810753e3c4853f7ead88c3febbb1272b3`。失败不补跑；剩余 attempt 上限不自动授权替换失败 Run。再次 live 验收须明确新增预算。
+- 用户另批预算后，用提示版本 `g2-native-tool-v2`（`a971919`）执行第二批 6 Run / 6 attempts；均仍为 `tool_schema_invalid`，未进入 continuation。安全摘要再次显示 `domain` 为字符串。仅强化提示未解决问题，不能区分模型生成不合规与托管服务处理嵌套 `oneOf` 的影响。
+- 第二批 provider usage 合计 prompt 4870、completion 1494、total 6364；费用未知。归档为 ignored `artifacts/g2-live-c8a6c159a3404373aa9d6c6cb3588429/g2-report.json`，SHA-256 `31435d58bd10854b8f55ce9cc59c87e682a59eb06ed615336832ceb9bcc7f829`。
+- `3cd4151` 在权威 schema 的 `domain.oneOf` 外显式增加 `type: object`，保留原分支与全部约束，并记录 schema 身份。此修正仅完成离线合同验证，托管服务效果未知；未执行第三批生成。
