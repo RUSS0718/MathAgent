@@ -56,4 +56,14 @@
 - 五个方向的算法开发与实验分支启动、组合消融、学术结论。
 - GitHub Issues、远端推送、PR 和合并。没有预造 Issue/PR 编号。
 
-本地没有配置 INTERN_API_KEY，也没有仓库 .env 文件；仅检查是否存在，没有读取密钥。API 计量、账号额度和费用均未实测。配置文件中的预算是后续调度合同，不是已实施的在线限额控制。
+上述为 setup 时点记录；后续配置与阶段验收以以下增量记录为准。配置文件中的全局预算仍不是已实施的 Run 级在线限额控制。
+
+## S1 Request Attempt 验收（2026-10-21）
+
+- 权威规格为 GitHub [#23](https://github.com/RUSS0718/MathAgent/issues/23)，S1 ticket [#24](https://github.com/RUSS0718/MathAgent/issues/24) 已完成。实现提交 `92609ac` 已合入当前集成分支。
+- 请求作用域 envelope 保留每个实际 HTTP attempt，包括失败和重试；Workspace report / Evidence 公开白名单计量，缺失或非法 usage 保持 null，不合成 total，金额保持 null。
+- 离线重点合同、完整仓库检查（111 tests）、Showcase release gate、Ruff 与 diff check 通过。
+- 当前环境仅检查到凭证配置存在，未读取或输出其值。使用 `uv run --frozen --no-sync python scripts/run_s1_probe.py --live` 执行已批准的唯一 G1 attempt，无重试：`thinking_mode=true`、`max_tokens=256`、HTTP 200、`finish_reason=stop`。
+- requested model 为 `intern-s2`，returned model 为 `Intern-S2`；provider usage 为 prompt 123、completion 77、total 200；reasoning/cached token、provider request ID 和费用为 null。该次工程合同通过且基础 usage 可见，不证明完整内部思考计量、精确费用或数学能力提升。
+- Run 为 `run_06e62b864a53bb4f0f5b9bb748d80e0e`，本地 attempt ID 为 `da9db60afa174cfda93224b4c535df5f`。脱敏计量归档：ignored `artifacts/s1-g1-e12e1e757962489183641d55966e14c9/g1-report.json`；不提交运行数据库或原始响应。
+- S2–S6 尚未验收。G2 已独立批准最多 6 Run / 12 HTTP attempts、每 Run 两次生成、每次 max_tokens≤512、无重试、串行、失败不补跑；额度确认见 [#26 评论](https://github.com/RUSS0718/MathAgent/issues/26#issuecomment-6311481669)。PR #22 保持 Draft/Open。
