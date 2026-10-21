@@ -90,3 +90,10 @@
 - 发布检查与完整测试并发运行时曾出现 SSE 时序失败；顺序独立重跑发布检查后通过。该次暂态失败保留为环境与时序证据，不表述为首次检查全部通过。
 - 相对 S3 前集成提交 `facd137`，`user_agent.py`、`implementations/` 与 `BASELINE.json` 无差异。此次未调用模型 API，离线合同通过不证明在线预算效果、精确费用或数学能力提升；S4–S6 尚未验收。PR #22 保持 Draft/Open。
 - CI 后续暴露干净环境下的测试隔离缺陷：同步预算测试在设置替身凭证前构造客户端。本地 `.env` 曾掩盖该前提；测试现显式设置 dummy key。清除 provider 环境后的单项回归先失败后通过，重点 12 项、完整离线 146 项（83.305 秒）、顺序 release gate 和全部 pre-commit hooks 通过；没有读取或输出凭证值，也未联网调用模型。此处仅记录本地修复验收，远端 CI 状态另行核对。
+
+## S3 Run 控制与恢复验收（2026-10-21）
+
+- [#28](https://github.com/RUSS0718/MathAgent/issues/28) 已合入集成分支，代码验证提交 `f49ca22`，最终风险记录提交 `0f5f3a9`；完整证据见 [S3 控制风险验证](s3-control-risk-validation.md)。新增取消、截止时间、持久 LangGraph checkpoint、安全 waiting_input 恢复、重启待复核与审计保留合同。
+- 预算预留与取消通过 SQLite 事务确定动作准入；已准入请求按在途处理，取消停止后续调度。终态 checkpoint 封存并冻结结束时间与耗时，迟到 usage 继续结算；安全 waiting_input 可在重启后恢复，其他不明 active checkpoint 进入 needs_review 并拒绝公开 resume。
+- 双轴审查发现的问题均已修复并复核关闭。最终顺序执行：控制重点 11 项通过；`uv run python scripts/check.py --offline` 157 项测试通过（109.687 秒）；`uv run python scripts/check_showcase_release.py` 返回 `showcase_release=PASS`；`uv run ruff check showcase tests`、`uv run pre-commit run --all-files` 与 `git diff --check` 通过。check-json 无匹配文件而跳过。
+- 相对前一集成提交 `d595ef9`，`user_agent.py`、`implementations/` 与 `BASELINE.json` 无差异。此次仅完成离线工程验收，未调用模型 API，不证明远端请求可撤销、精确费用或数学正确率提升。PR #22 保持 Draft/Open。
