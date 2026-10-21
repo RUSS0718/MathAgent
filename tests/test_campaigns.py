@@ -103,6 +103,7 @@ class CampaignContractTest(CampaignFixture):
             self.assertEqual(0, arm["usage"]["http_attempts"])
             self.assertIsNone(arm["cost"])
             self.assertEqual(200, self.client.get(arm["evidence_url"]).status_code)
+            self.assertEqual('fake', self.client.get(arm['report_url']).get_json()['mode'])
             self.assertEqual(report["common"]["budget"], arm["budget"]["limits"])
         listed = self.client.get("/api/experiments/campaigns").get_json()
         self.assertEqual(campaign_id, listed["campaigns"][0]["campaign_id"])

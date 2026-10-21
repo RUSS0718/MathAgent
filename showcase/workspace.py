@@ -309,7 +309,7 @@ class WorkspaceStore:
                     self._connection.rollback()
                     return
                 now = _utc_now()
-                result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response)}
+                result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response), "execution_mode": (_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable")}
                 result["budget"] = freeze_budget(self._connection, job_id)
                 self._connection.execute(
                     "UPDATE workspace_jobs SET status='succeeded',result_json=?,updated_at=? WHERE job_id=?",
@@ -324,7 +324,7 @@ class WorkspaceStore:
                 )
                 self._connection.execute(
                     "UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?",
-                    (_json(_run_snapshot(job_id, "COMPLETED", now, result, asset_refs=self._asset_refs(job_id))), now, job_id),
+                    (_json(_run_snapshot(job_id, "COMPLETED", now, result, execution_mode=result["execution_mode"], asset_refs=self._asset_refs(job_id))), now, job_id),
                 )
                 self._insert_event(
                     job_id,
