@@ -25,7 +25,7 @@
 | uv run --frozen --no-sync ruff format --check scripts/check_experiment_setup.py tests/test_experiment_setup.py | PASS | 两文件格式符合配置；AST 对照通过 |
 | 六项预检 CLI 测试 | PASS；最终修复回合 0.481 秒 | 包含 profile/model、联网、预算、路径、基线与成功报告合同 |
 
-前端代码未变，本轮未重新安装或执行前端构建；上述结果也不代表 GitHub 托管 CI 已经运行。后续修改前端时按仓库既有 Node 与 npm 门执行。
+在本轮离线设置的 detached 检查中，前端代码未变，未重新安装或执行前端构建；这不代表 GitHub 托管 CI 已经运行。PR #22 的 audit 修复和后续验证另见下文。
 
 ## 检查环境说明
 
@@ -41,6 +41,13 @@
 | final-release-check.log | 6b5ec07ad2519a0751d83c798d76c7f44a43c9baa303677e19b7f70a58926c16 |
 | integer-budget-red.log | 1e2d20a8fe081478a8c425980ac2a72f1db62c37c266da7aa16cd845c298c047 |
 | integer-budget-green.log | b02f0a8f2a2441cc95304a720e90a49439104f0a03f5a60582f6549e00881997 |
+
+## PR #22 frontend audit follow-up
+
+- Base 与 PR head 原本锁定相同的 Vite `8.1.5`；audit 失败来自既有依赖被新发布的 advisory 命中，不是 PR 引入。将 Vite 和锁文件更新到修复版 `8.1.6`，提交 `ed45443`。
+- 本地 `npm ci --no-audit --no-fund`、`npm audit --audit-level=high` 和 `npm run check` 均通过；audit 报告 0 项，前端 6 项测试通过，生产构建成功。
+- 推送后 GitHub Actions run `39562361569` 的 `quality` 与 `frontend` jobs 均通过。PR 仍为 Draft/Open；未合并、关闭或归档分支。
+- 本次没有调用 Intern API；官方评分基线与默认入口未修改。
 
 ## 尚未完成
 
