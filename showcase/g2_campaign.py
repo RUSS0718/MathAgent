@@ -118,10 +118,21 @@ def run_g2_campaign(
                     break
                 time.sleep(max(0.001, poll_interval_seconds))
             timed_out = job.get("status") not in {"succeeded", "failed", "canceled"}
-            job_report = _json_payload(client.get(f"/api/agent/jobs/{run_id}/report"))
-            run_snapshot = _json_payload(client.get(f"/api/runs/{run_id}"))
-            run_report = _json_payload(client.get(f"/api/runs/{run_id}/report"))
-            evidence = _json_payload(client.get(f"/api/runs/{run_id}/evidence"))
+            job_report_response = client.get(f"/api/agent/jobs/{run_id}/report")
+            run_snapshot_response = client.get(f"/api/runs/{run_id}")
+            run_report_response = client.get(f"/api/runs/{run_id}/report")
+            evidence_response = client.get(f"/api/runs/{run_id}/evidence")
+            job_report = _json_payload(job_report_response)
+            run_snapshot = _json_payload(run_snapshot_response)
+            run_report = _json_payload(run_report_response)
+            evidence = _json_payload(evidence_response)
+            attempt_report_issue = _attempt_report_issue(
+                run_id,
+                job_report_response,
+                job_report,
+                run_report_response,
+                run_report,
+            )
             row.update(
                 _run_evidence_summary(
                     run_id, job, job_report, run_snapshot, run_report, evidence
@@ -131,6 +142,9 @@ def run_g2_campaign(
             if timed_out:
                 row["attempts_complete"] = False
                 row["error_category"] = "workspace_run_timeout"
+            elif attempt_report_issue:
+                row["attempts_complete"] = False
+                row["error_category"] = attempt_report_issue
             protocol_passed = _protocol_evidence_passes(row)
             row["protocol_evidence"] = (
                 ("pass" if provider_live else "simulated")
@@ -139,12 +153,16 @@ def run_g2_campaign(
             )
             rows.append(row)
             http_attempt_count += len(row["attempts"])
-            if timed_out or _requires_stop(row):
+            if timed_out or attempt_report_issue or _requires_stop(row):
                 stopped_reason = row.get("error_category") or "workspace_run_unresolved"
 
     http_attempt_count = sum(len(row["attempts"]) for row in rows)
     if all(_protocol_evidence_passes(row) for row in rows):
         contract_result = "pass"
+    elif any(_authentication_stop(row) for row in rows):
+        contract_result = "blocked"
+    elif any(row["protocol_evidence"] == "needs_review" for row in rows):
+        contract_result = "needs_review"
     elif any(row["protocol_evidence"] == "blocked" for row in rows):
         contract_result = "blocked"
     else:
@@ -167,7 +185,7 @@ def run_g2_campaign(
         "run_count": len(rows),
         "executed_run_count": sum(row["run_id"] is not None for row in rows),
         "http_attempt_count": http_attempt_count if attempts_complete else None,
-        "known_http_attempt_count": http_attempt_count,
+        "known_http_attempt_count": http_attempt_count if attempts_complete else None,
         "attempts_complete": attempts_complete,
         "budget": {
             "max_runs": len(G2_CASES) * G2_REPEATS,
@@ -230,7 +248,12 @@ def _run_evidence_summary(
 ) -> dict[str, Any]:
     job_data = job_report.get("report") if isinstance(job_report.get("report"), Mapping) else {}
     run_data = run_report.get("report") if isinstance(run_report.get("report"), Mapping) else {}
-    attempts = job_data.get("request_attempts") if isinstance(job_data.get("request_attempts"), list) else []
+    job_attempts = job_data.get("request_attempts")
+    run_attempts = run_data.get("request_attempts")
+    valid_attempt_sources = [
+        items for items in (job_attempts, run_attempts) if _valid_attempt_list(items, run_id)
+    ]
+    attempts = max(valid_attempt_sources, key=len, default=[])
     tools = job_data.get("tool_summaries") if isinstance(job_data.get("tool_summaries"), list) else []
     tool = tools[0] if len(tools) == 1 and isinstance(tools[0], Mapping) else {}
     call_id = tool.get("tool_call_id") if isinstance(tool, Mapping) else None
@@ -283,7 +306,11 @@ def _run_evidence_summary(
 
 def _protocol_evidence_passes(row: Mapping[str, Any]) -> bool:
     attempts = row.get("attempts")
-    if not isinstance(attempts, list) or len(attempts) != G2_MAX_GENERATIONS_PER_RUN:
+    if (
+        row.get("attempts_complete") is not True
+        or not isinstance(attempts, list)
+        or len(attempts) != G2_MAX_GENERATIONS_PER_RUN
+    ):
         return False
     if any(
         not isinstance(attempt, Mapping)
@@ -314,11 +341,63 @@ def _protocol_evidence_passes(row: Mapping[str, Any]) -> bool:
 
 
 def _requires_stop(row: Mapping[str, Any]) -> bool:
-    if row.get("error_category") == "configuration":
+    if row.get("error_category") in {
+        "configuration",
+        "tool_schema_invalid",
+        "attempt_report_unavailable",
+        "attempt_report_malformed",
+    }:
         return True
     return any(
         isinstance(attempt, Mapping) and attempt.get("http_status") in {401, 402, 403, 429}
         for attempt in row.get("attempts", [])
+    )
+
+
+def _authentication_stop(row: Mapping[str, Any]) -> bool:
+    return row.get("error_category") == "configuration" or any(
+        isinstance(attempt, Mapping) and attempt.get("http_status") in {401, 402, 403, 429}
+        for attempt in row.get("attempts", [])
+    )
+
+
+def _attempt_report_issue(
+    run_id: str,
+    job_response: Any,
+    job_report: Mapping[str, Any],
+    run_response: Any,
+    run_report: Mapping[str, Any],
+) -> str | None:
+    if getattr(job_response, "status_code", None) != 200 or getattr(run_response, "status_code", None) != 200:
+        return "attempt_report_unavailable"
+    job_data = job_report.get("report")
+    run_data = run_report.get("report")
+    if not isinstance(job_data, Mapping) or not isinstance(run_data, Mapping):
+        return "attempt_report_unavailable"
+    job_attempts = job_data.get("request_attempts")
+    run_attempts = run_data.get("request_attempts")
+    if not isinstance(job_attempts, list) or not isinstance(run_attempts, list):
+        return "attempt_report_unavailable"
+    if job_attempts != run_attempts or not _valid_attempt_list(job_attempts, run_id):
+        return "attempt_report_malformed"
+    return None
+
+
+def _valid_attempt_list(attempts: Any, run_id: str) -> bool:
+    return isinstance(attempts, list) and all(_valid_attempt(item, run_id) for item in attempts)
+
+
+def _valid_attempt(attempt: Any, run_id: str) -> bool:
+    return (
+        isinstance(attempt, Mapping)
+        and attempt.get("run_id") == run_id
+        and isinstance(attempt.get("attempt_id"), str)
+        and bool(attempt.get("attempt_id"))
+        and type(attempt.get("attempt_index")) is int
+        and attempt.get("attempt_index", 0) > 0
+        and attempt.get("status") in {"success", "error"}
+        and isinstance(attempt.get("requested_model"), str)
+        and type(attempt.get("max_tokens")) is int
     )
 
 

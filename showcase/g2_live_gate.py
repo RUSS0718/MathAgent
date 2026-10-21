@@ -134,6 +134,14 @@ class G2LivePipeline:
             {"role": "user", "content": problem},
         ]
         try:
+            client = self.model._get_client()
+        except AdapterError:
+            return _fail(state, sink, run_id, "configuration", "G2 transport client unavailable")
+        if not _g2_transport_is_bounded(client, self.model):
+            return _fail(
+                state, sink, run_id, "configuration", "G2 transport settings are not verified"
+            )
+        try:
             response = self.model.complete(
                 messages,
                 tools=registry.provider_schemas(),
@@ -233,6 +241,22 @@ def _fail(
         "message": category,
     })
     return state
+
+
+def _g2_transport_is_bounded(client: Any, model: InternModelAdapter) -> bool:
+    from llm_client import InternChatClient
+
+    if (
+        type(client) is not InternChatClient
+        or model.thinking_mode is not True
+        or getattr(client, "model", None) != G2_MODEL
+        or type(getattr(client, "retry", None)) is not int
+        or client.retry != 1
+        or type(getattr(client, "timeout", None)) is not int
+        or client.timeout != G2_CLIENT_TIMEOUT_SECONDS
+    ):
+        return False
+    return True
 
 
 def _emit_node(

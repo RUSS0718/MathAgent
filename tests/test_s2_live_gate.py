@@ -73,6 +73,61 @@ class FakeHTTPProvider:
         return outcome
 
 
+class InjectedInternClient:
+    def __init__(self):
+        self.model = G2_MODEL
+        self.retry = 1
+        self.timeout = G2_CLIENT_TIMEOUT_SECONDS
+        self.thinking_mode = True
+        self.calls = 0
+        self.chat = self._chat
+
+    def _chat(self, messages, temperature=0.2, max_tokens=512, tools=None, thinking_mode=None):
+        self.calls += 1
+        raise AssertionError("invalid injected client must be rejected before call")
+
+class MissingJsonResponse:
+    status_code = 503
+
+    def get_json(self, silent=False):
+        del silent
+        return None
+
+
+class StaticJsonResponse:
+    status_code = 200
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    def get_json(self, silent=False):
+        del silent
+        return self.payload
+
+
+class MissingJobReportClient:
+    def __init__(self, client):
+        self.client = client
+
+    def get(self, path, *args, **kwargs):
+        if path.startswith("/api/agent/jobs/") and path.endswith("/report"):
+            return MissingJsonResponse()
+        return self.client.get(path, *args, **kwargs)
+
+    def post(self, *args, **kwargs):
+        return self.client.post(*args, **kwargs)
+
+
+class MalformedJobReportClient(MissingJobReportClient):
+    def get(self, path, *args, **kwargs):
+        response = self.client.get(path, *args, **kwargs)
+        if path.startswith("/api/agent/jobs/") and path.endswith("/report"):
+            payload = response.get_json()
+            payload["report"]["request_attempts"] = [{"status": "partial"}]
+            return StaticJsonResponse(payload)
+        return response
+
+
 ARGUMENTS = (
     {
         "schema_version": 1,
@@ -126,7 +181,15 @@ def _successful_outcomes(start_index=0):
 
 
 class G2LiveGateContractTest(unittest.TestCase):
-    def _run_campaign(self, provider, *, run_timeout_seconds=5):
+    def _run_campaign(
+        self,
+        provider,
+        *,
+        run_timeout_seconds=5,
+        injected_client=None,
+        missing_job_report=False,
+        malformed_job_report=False,
+    ):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         root = Path(directory.name) / "g2"
@@ -143,6 +206,7 @@ class G2LiveGateContractTest(unittest.TestCase):
             ExitStack() as cleanup,
         ):
             model = InternModelAdapter(
+                client=injected_client,
                 model_id=G2_MODEL,
                 max_tokens=G2_MAX_TOKENS_PER_ATTEMPT,
                 client_retry=1,
@@ -163,8 +227,13 @@ class G2LiveGateContractTest(unittest.TestCase):
             cleanup.callback(app.extensions["showcase_workspace_service"].close)
             cleanup.callback(app.extensions["showcase_run_service"].close)
             cleanup.callback(app.extensions["loopback_store"].close)
+            client = app.test_client()
+            if missing_job_report:
+                client = MissingJobReportClient(client)
+            if malformed_job_report:
+                client = MalformedJobReportClient(client)
             report = run_g2_campaign(
-                app.test_client(),
+                client,
                 poll_interval_seconds=0.005,
                 run_timeout_seconds=run_timeout_seconds,
             )
@@ -375,6 +444,68 @@ class G2LiveGateContractTest(unittest.TestCase):
         self.assertEqual(401, report["runs"][0]["attempts"][0]["http_status"])
         self.assertTrue(all(row["protocol_evidence"] == "blocked" for row in report["runs"][1:]))
         self.assertTrue(all(row["run_id"] is None for row in report["runs"][1:]))
+
+    def test_tool_schema_rejection_stops_batch_and_keeps_gate_needs_review(self):
+        invalid_arguments = {**ARGUMENTS[0], "domain": "real"}
+        provider = FakeHTTPProvider([_tool_response("g2-invalid-domain", invalid_arguments)])
+
+        report = self._run_campaign(provider)
+
+        self.assertEqual("simulated", report["status"])
+        self.assertEqual("needs_review", report["contract_result"])
+        self.assertEqual(6, len(report["runs"]))
+        self.assertEqual(1, len(provider.requests))
+        first = report["runs"][0]
+        self.assertEqual("tool_schema_invalid", first["error_category"])
+        self.assertEqual("needs_review", first["protocol_evidence"])
+        self.assertEqual(1, len(first["attempts"]))
+        self.assertFalse(first["continuation_response_received"])
+        self.assertTrue(all(row["protocol_evidence"] == "blocked" for row in report["runs"][1:]))
+        self.assertTrue(all(row["run_id"] is None for row in report["runs"][1:]))
+
+    def test_unavailable_attempt_report_marks_counts_unknown_and_blocks_batch(self):
+        provider = FakeHTTPProvider(_successful_outcomes())
+        report = self._run_campaign(provider, missing_job_report=True)
+
+        self.assertEqual("simulated", report["status"])
+        self.assertEqual("needs_review", report["contract_result"])
+        self.assertFalse(report["attempts_complete"])
+        self.assertIsNone(report["http_attempt_count"])
+        self.assertIsNone(report["known_http_attempt_count"])
+        self.assertEqual(2, len(provider.requests))
+        self.assertEqual("attempt_report_unavailable", report["runs"][0]["error_category"])
+        self.assertFalse(report["runs"][0]["attempts_complete"])
+        self.assertEqual(2, len(report["runs"][0]["attempts"]))
+        self.assertTrue(all(row["protocol_evidence"] == "blocked" for row in report["runs"][1:]))
+        self.assertTrue(all(row["run_id"] is None for row in report["runs"][1:]))
+
+    def test_malformed_attempt_report_marks_counts_unknown_and_blocks_batch(self):
+        provider = FakeHTTPProvider(_successful_outcomes())
+        report = self._run_campaign(provider, malformed_job_report=True)
+
+        self.assertEqual("needs_review", report["contract_result"])
+        self.assertFalse(report["attempts_complete"])
+        self.assertIsNone(report["http_attempt_count"])
+        self.assertIsNone(report["known_http_attempt_count"])
+        self.assertEqual(2, len(provider.requests))
+        self.assertEqual("attempt_report_malformed", report["runs"][0]["error_category"])
+        self.assertFalse(report["runs"][0]["attempts_complete"])
+        self.assertEqual(2, len(report["runs"][0]["attempts"]))
+        self.assertTrue(all(row["protocol_evidence"] == "blocked" for row in report["runs"][1:]))
+        self.assertTrue(all(row["run_id"] is None for row in report["runs"][1:]))
+
+    def test_unprovable_injected_client_is_rejected_before_request(self):
+        provider = FakeHTTPProvider([])
+        client = InjectedInternClient()
+        report = self._run_campaign(provider, injected_client=client)
+
+        self.assertEqual("blocked", report["contract_result"])
+        self.assertEqual(6, len(report["runs"]))
+        self.assertEqual("configuration", report["runs"][0]["error_category"])
+        self.assertEqual([], report["runs"][0]["attempts"])
+        self.assertEqual([], provider.requests)
+        self.assertEqual(0, client.calls)
+        self.assertTrue(all(row["protocol_evidence"] == "blocked" for row in report["runs"][1:]))
 
     def test_cli_defaults_to_offline_without_an_http_request(self):
         output = io.StringIO()
