@@ -71,6 +71,9 @@ def create_app(
         app.config.from_mapping(dict(config))
 
     storage_root, resolved_database = _storage_paths(app.config, database_path)
+    service_database = getattr(getattr(service, '_store', None), 'database_path', ':memory:')
+    if service is not None and ((service_database == ':memory:' and app.config.get('SHOWCASE_LIVE_PIPELINE') is not None) or (service_database != ':memory:' and Path(service_database).resolve() != resolved_database.resolve())):
+        raise ValueError('service_database_mismatch')
     storage_root.mkdir(parents=True, exist_ok=True)
     (storage_root / "attachments").mkdir(exist_ok=True)
     (storage_root / "events").mkdir(exist_ok=True)
@@ -198,8 +201,8 @@ def create_app(
                 "verification_mode": VERIFICATION_MODES,
                 "files": {"upload": upload},
                 "execution": {
-                    "mode": str(app.config.get("SHOWCASE_MODE", "fake")),
-                    "provider": "intern",
+                    "mode": getattr(live_pipeline, "execution_mode", str(app.config.get("SHOWCASE_MODE", "fake"))),
+                    "provider": "fake" if getattr(live_pipeline, "execution_mode", app.config.get("SHOWCASE_MODE")) == "fake" else "intern",
                     "status": "configured" if os.getenv("INTERN_API_KEY") else "missing_credentials",
                 },
                 "capabilities": {
@@ -554,7 +557,7 @@ def create_app(
             "run_id": job_id,
             "execution_mode": result.get(
                 "execution_mode",
-                "live" if app.config.get("SHOWCASE_MODE") == "live" else "fake",
+                "unavailable",
             ),
             "status": str(job.get("status", "unavailable")).upper(),
             "stage": _job_stage(events),

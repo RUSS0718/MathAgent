@@ -151,6 +151,9 @@ def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
     }
     value = result.get("value")
     if result.get("name") == "polynomial_check" and isinstance(value, Mapping):
+        candidates = value.get('candidates', [])
+        observations = [item.get('in_domain') for item in candidates if isinstance(item, Mapping)]
+        summary['domain_status'] = 'out_of_domain' if any(item is False for item in observations) else ('in_domain' if observations and all(item is True for item in observations) else 'unknown')
         summary["candidate_status"] = value.get("candidate_status", "unknown")
         summary["coverage_status"] = value.get("coverage_status", "unknown")
         summary["limitations"] = value.get("limitations", [])

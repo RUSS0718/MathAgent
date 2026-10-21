@@ -84,6 +84,7 @@ v0.2 PRD 是待评审提案；不覆盖这些 accepted ADR，也不授权修改�
 - [实际 setup 状态](experiments/setup-status.md)：只记录已执行检查；proposed 文档、离线合同与 live 能力分开标记。
 - [S4 最终答案 Evidence 合同](experiments/s4-final-evidence.md)：文本身份、检查范围、追加历史和离线验收接缝；不代表数学证明或能力提升。
 - [S5 同题配对 Runner 合同](experiments/s5-paired-runner.md)：批次入口、独立子 Run、预算与不可变归档；离线 180 项测试及本地门禁通过，托管 CI 待核对，不代表策略效果。
+- [S6 Workbench 审阅合同](experiments/s6-workbench.md)：持久配对报告、子 Run、脱敏请求与工具闭环、最终验证范围、故障恢复和导出。
 - [实验配置](../experiments/campaign.json)：默认 offline、五方向关闭；配置预检不代表在线调度器已实现。
 
 ## 早期方案与时效说明

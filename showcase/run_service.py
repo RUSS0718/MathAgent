@@ -310,6 +310,7 @@ class RunService:
         if budget is not None and not (snapshot.get("result") or {}).get("budget"):
             snapshot["result"] = {**(snapshot.get("result") or {}), "budget": budget}
         attempts = [event["attempt"] for event in self._store.get_events(run_id) if event.get("type") == "request_attempt"]
+        attempts = list({item["attempt_id"]: item for item in [*attempts, *self._budget_ledger.attempts(run_id)]}.values())
         if attempts:
             snapshot["result"] = {**(snapshot.get("result") or {}), "request_attempts": attempts}
         return self._copy_snapshot(snapshot)

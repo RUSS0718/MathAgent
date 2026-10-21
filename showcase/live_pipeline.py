@@ -92,7 +92,7 @@ class LiveAgentPipeline:
             "status": "RUNNING",
             "stage": "intake",
             "final_response": None,
-            "summary": "实时模型流水线已完成",
+            "summary": "离线 fake 流水线已完成" if self.execution_mode == "fake" else "实时模型流水线已完成",
             "error": None,
             "tool_results": [],
             "verification": {"status": "unknown", "findings": ["verification_not_run"]},

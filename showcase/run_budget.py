@@ -14,7 +14,7 @@ from functools import wraps
 from typing import Any
 from uuid import uuid4
 
-from llm_response import provider_usage
+from llm_response import provider_usage, public_attempt
 
 from .run_control import assert_dispatch_allowed, check_control, controlled_action
 
@@ -104,6 +104,7 @@ class RunBudgetLedger:
         output_cap=0,
         role=None,
         tool_call_id=None,
+        attempt_event=None,
     ):
         if kind not in {"logical", "http", "tool"}:
             raise ValueError("run_budget_kind_invalid")
@@ -139,6 +140,7 @@ class RunBudgetLedger:
                     "tool_call_id": tool_call_id,
                     "input_estimate": input_estimate,
                     "output_cap": output_cap,
+                    "public_attempt": ({**public_attempt(attempt_event, run_id=run_id, role=role), "started_at_utc": attempt_event.get("started_at_utc"), "dispatch_status": "reserved_dispatch_unconfirmed"} if attempt_event is not None else None),
                     "status": "reserved",
                     "usage": provider_usage(None),
                 }
@@ -149,12 +151,20 @@ class RunBudgetLedger:
         with self._transaction(run_id) as state:
             for action in state["actions"]:
                 if action["id"] == action_id:
+                    if action["kind"] == "http":
+                        action["public_attempt"] = {**public_attempt(event, run_id=run_id, role=action["role"]), "started_at_utc": event.get("started_at_utc"), "dispatch_status": "transport_observed"}
                     action.update(
                         status=event.get("status", "unknown"),
                         usage=provider_usage(event),
                         duration_seconds=event.get("duration_seconds"),
                     )
                     break
+
+    def attempts(self, run_id):
+        with self.lock:
+            row = self.connection.execute('SELECT ledger_json FROM run_budgets WHERE run_id=?', (run_id,)).fetchone()
+        state = json.loads(row[0]) if row else {"actions": []}
+        return [action['public_attempt'] for action in state['actions'] if action.get('public_attempt')]
 
     def snapshot(self, run_id):
         with self.lock:
@@ -182,6 +192,7 @@ class RunBudget:
             input_estimate=input_estimate,
             output_cap=event["max_tokens"],
             role=event.get("role"),
+            attempt_event=event,
         )[1]
 
     def after_attempt(self, event):

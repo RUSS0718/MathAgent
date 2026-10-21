@@ -44,7 +44,7 @@ export const useJobsStore = defineStore('jobs', {
     },
     observe(job: ActiveJobResponse): JobRecord {
       const existing = this.records[job.job_id]
-      const cursor = existing?.events.length ? job.last_event_id ?? 0 : 0
+      const cursor = existing?.lastEventId ?? 0
       const record = this.start(job.job_id, job.session_id, job.status, cursor)
       record.error = typeof job.error === 'string' ? job.error : null
       return record
@@ -61,9 +61,9 @@ export const useJobsStore = defineStore('jobs', {
       else if (!terminal && type === 'running') record.status = 'running'
       else if (!terminal && type === 'interrupt') record.status = 'waiting_input'
       else if (!terminal && type === 'final_result') record.status = 'succeeded'
-      else if (!terminal && type === 'error') {
+      else if (!terminal && (type === 'error' || type === 'timeout' || type === 'needs_review')) {
         record.status = 'failed'
-        record.error = typeof event.data.message === 'string' ? event.data.message : 'job_failed'
+        record.error = typeof event.data.message === 'string' ? event.data.message : type === 'timeout' ? 'run_deadline_exhausted' : type === 'needs_review' ? 'needs_review' : 'job_failed'
       } else if (!terminal && type === 'canceled') {
         record.status = 'canceled'
         record.error = typeof event.data.message === 'string' ? event.data.message : 'job_canceled'

@@ -209,6 +209,7 @@ class WorkspaceStore:
         problem: str,
         idempotency_key: str,
         request_digest: str,
+        execution_mode: str = "fake",
         verification_mode: str = "auto",
         input_user_file_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
@@ -240,13 +241,13 @@ class WorkspaceStore:
                 self._connection.execute(
                     "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,input_user_file_id,verification_mode,idempotency_key,request_digest,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (job_id, session_id, user_id, problem, "queued", None, None, input_user_file_id, verification_mode, idempotency_key, request_digest, now, now),
+                    (job_id, session_id, user_id, problem, "queued", _json({"execution_mode": execution_mode}), None, input_user_file_id, verification_mode, idempotency_key, request_digest, now, now),
                 )
                 self._connection.execute(
                     "INSERT INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
                     (session_id, "user", problem, job_id, now),
                 )
-                self._insert_run(job_id, problem, now)
+                self._insert_run(job_id, problem, now, execution_mode)
                 self._insert_event(
                     job_id,
                     "queued",
@@ -308,7 +309,7 @@ class WorkspaceStore:
                     self._connection.rollback()
                     return
                 now = _utc_now()
-                result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response)}
+                result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response), "execution_mode": (_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable")}
                 result["budget"] = freeze_budget(self._connection, job_id)
                 self._connection.execute(
                     "UPDATE workspace_jobs SET status='succeeded',result_json=?,updated_at=? WHERE job_id=?",
@@ -323,7 +324,7 @@ class WorkspaceStore:
                 )
                 self._connection.execute(
                     "UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?",
-                    (_json(_run_snapshot(job_id, "COMPLETED", now, result, asset_refs=self._asset_refs(job_id))), now, job_id),
+                    (_json(_run_snapshot(job_id, "COMPLETED", now, result, execution_mode=result["execution_mode"], asset_refs=self._asset_refs(job_id))), now, job_id),
                 )
                 self._insert_event(
                     job_id,
@@ -389,7 +390,7 @@ class WorkspaceStore:
                         now = _utc_now()
                         freeze_budget(self._connection, job_id)
                         self._connection.execute("UPDATE workspace_jobs SET status='canceled',updated_at=? WHERE job_id=?", (now, job_id))
-                        self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "CANCELED", now, asset_refs=self._asset_refs(job_id))), now, job_id))
+                        self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "CANCELED", now, execution_mode=(_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable"), asset_refs=self._asset_refs(job_id))), now, job_id))
                         self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled", "scope": "future_dispatch", "remote_request": "cannot_revoke"})
                     result = {"success": True, "job_id": job_id, "status": "canceled"}
                 else:
@@ -412,14 +413,14 @@ class WorkspaceStore:
     def recover_incomplete_jobs(self, checkpointer=None) -> int:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
-            rows = self._connection.execute("SELECT job_id,status FROM workspace_jobs WHERE status IN ('queued','running','waiting_input')").fetchall()
+            rows = self._connection.execute("SELECT job_id,status,result_json FROM workspace_jobs WHERE status IN ('queued','running','waiting_input')").fetchall()
             for row in rows:
                 job_id = row["job_id"]
                 if row["status"] == "waiting_input" and checkpointer is not None and checkpointer.is_interrupted(job_id):
                     continue
                 now = _utc_now()
                 self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code='needs_review',updated_at=? WHERE job_id=?", (now, job_id))
-                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, error={"category": "needs_review"}, asset_refs=self._asset_refs(job_id))), now, job_id))
+                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, execution_mode=(_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable"), error={"category": "needs_review"}, asset_refs=self._asset_refs(job_id))), now, job_id))
                 self._insert_event(job_id, "needs_review", {"type": "needs_review", "job_id": job_id, "status": "failed", "reason": "process_restart"})
             self._connection.commit()
             if checkpointer is not None:
@@ -436,6 +437,8 @@ class WorkspaceStore:
             if updated.rowcount == 0:
                 self._connection.commit()
                 return
+            stored = self._connection.execute('SELECT result_json FROM workspace_jobs WHERE job_id=?', (job_id,)).fetchone()
+            execution_mode = (_loads(stored['result_json']) if stored['result_json'] else {}).get('execution_mode', 'unavailable')
             freeze_budget(self._connection, job_id)
             self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "FAILED", now, execution_mode=execution_mode, error={"category": code}, asset_refs=self._asset_refs(job_id))), now, job_id))
             self._insert_event(
@@ -659,10 +662,10 @@ class WorkspaceStore:
             (job_id, event_payload["sequence"], _json(event_payload), created_at),
         )
 
-    def _insert_run(self, job_id: str, problem: str, now: str) -> None:
+    def _insert_run(self, job_id: str, problem: str, now: str, execution_mode: str) -> None:
         self._connection.execute(
             "INSERT OR IGNORE INTO runs(run_id,snapshot_json,created_at,updated_at) VALUES(?,?,?,?)",
-            (job_id, _json(_run_snapshot(job_id, "QUEUED", now, input_text=problem, asset_refs=self._asset_refs(job_id))), now, now),
+            (job_id, _json(_run_snapshot(job_id, "QUEUED", now, execution_mode=execution_mode, input_text=problem, asset_refs=self._asset_refs(job_id))), now, now),
         )
 
     def _asset_refs(self, job_id: str) -> list[dict[str, Any]]:
@@ -763,6 +766,7 @@ class WorkspaceService:
             problem=problem,
             idempotency_key=idempotency_key,
             request_digest=digest,
+            execution_mode=getattr(self.pipeline, "execution_mode", self.execution_mode),
             verification_mode=verification_mode,
             input_user_file_id=input_user_file_id,
         )
@@ -805,7 +809,7 @@ class WorkspaceService:
 
     def _execute(self, job_id: str) -> None:
         try:
-            if not self.store.start_job(job_id, execution_mode=self.execution_mode):
+            if not self.store.start_job(job_id, execution_mode=getattr(self.pipeline, "execution_mode", self.execution_mode)):
                 return
             # Keep the worker asynchronous even for the deterministic adapter so
             # the HTTP contract never waits for execution.
@@ -858,6 +862,7 @@ class WorkspaceService:
             if budget is not None and not (payload.get("result") or {}).get("budget"):
                 payload["result"] = {**(payload.get("result") or {}), "budget": budget}
         attempts = [event["data"]["attempt"] for event in self.store.events(job_id, user_id) if event["event"] == "request_attempt"]
+        attempts = list({item["attempt_id"]: item for item in [*attempts, *self.budget_ledger.attempts(job_id)]}.values())
         if attempts:
             payload["result"] = {**(payload.get("result") or {}), "request_attempts": attempts}
         return payload
