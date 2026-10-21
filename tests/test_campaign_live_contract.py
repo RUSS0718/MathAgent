@@ -105,6 +105,19 @@ class LiveCampaignContractTest(CampaignFixture):
         self.assertEqual("fake", self.client.get(f"/api/agent/jobs/{job_id}/report").get_json()["mode"])
         self.assertEqual("fake", self.client.get(f"/api/runs/{job_id}/evidence").get_json()["mode"])
 
+    def test_terminal_campaign_metrics_and_archive_remain_frozen_in_future(self):
+        import time
+        payload = campaign_input()
+        payload["allow_network"] = True
+        payload["budget"].update(max_model_calls=6, max_http_attempts=6, max_tokens=20_000)
+        with patch("llm_client.requests.post", return_value=Response()):
+            before = self.finished(self.submit(payload).get_json()["campaign_id"])
+        with patch("showcase.run_budget.time.time", return_value=time.time() + 3600):
+            after = self.detail(before["campaign_id"])
+        self.assertEqual(before, after)
+        for arm in after["pairs"][0]["arms"].values():
+            self.assertIsNotNone(arm["budget"]["ended_at"])
+
     def test_offline_cannot_dispatch_through_a_live_workspace(self):
         with patch("llm_client.requests.post", side_effect=AssertionError("network forbidden")):
             response = self.submit()

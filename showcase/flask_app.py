@@ -71,6 +71,9 @@ def create_app(
         app.config.from_mapping(dict(config))
 
     storage_root, resolved_database = _storage_paths(app.config, database_path)
+    service_database = getattr(getattr(service, '_store', None), 'database_path', ':memory:')
+    if service is not None and service_database != ':memory:' and Path(service_database).resolve() != resolved_database.resolve():
+        raise ValueError('service_database_mismatch')
     storage_root.mkdir(parents=True, exist_ok=True)
     (storage_root / "attachments").mkdir(exist_ok=True)
     (storage_root / "events").mkdir(exist_ok=True)

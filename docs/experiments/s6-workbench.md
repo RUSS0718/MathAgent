@@ -25,3 +25,21 @@
 - `tests/test_campaign_live_contract.py`、`tests/test_s6_report.py` 与前端 DTO/SSE/store 合同覆盖上述公开接缝。真实浏览器验收使用本地持久 SQLite、现有 pipeline 与拦截后的确定性假 HTTP；运行输入、脚本及产物留在 ignored artifacts，不提交题集或 raw。
 
 浏览器检查应包括：campaign 全部 arm、子 Run 请求/工具/最终验证、域外、工具失败、timeout、cancel、needs_review、断开服务后刷新及恢复重连、两种 JSON 下载。fake HTTP provider 的 returned model 明确带 fake 标记；这些验收不证明真实 provider 或数学能力提升。
+
+## 2026-10-21 浏览器验收记录
+
+执行面：Codex in-app browser / CUA；本机 `127.0.0.1:8096`，内置 Flask 静态构建。fixture 通过既有公共 campaign/Job 接口提交，再从持久 SQLite 报告和 Evidence 读取；HTTP provider 由确定性 fake 拦截，真实 provider 请求为 0。脚本和 store 位于 ignored `artifacts/s6-browser/`，未提交运行输入或 raw。
+
+| 场景 | 实际观察 |
+| --- | --- |
+| 成功配对 | baseline/candidate、attempt usage unknown、native 协议和 fake transport 可见；未标成真实模型能力 |
+| 域外 | 显示“域外：候选不满足定义域”，保留最终 unknown 与范围限制 |
+| 工具失败 / timeout | 公开失败类别可见，失败 pair 保留 |
+| 取消 / 重启复核 | 实际慢任务通过 UI 取消，mode 始终 fake；待执行 pair 经真实服务重启后保留 canceled / needs_review |
+| 服务断开和恢复 | 刷新显示“无法连接服务器。”且保留报告；恢复服务后重连清除告警，仍为 10 个节点 / 23 个事件，无重复 |
+| 导出 | campaign JSON 保留完整公共来源和子 Run 字段；按 S5 规范计算 SHA 与 archive 一致；Evidence JSON 实际下载成功 |
+| 布局 | 新审阅页在 320 / 768 / 1024 / 1440 宽度可读，768 / 1024 无水平溢出 |
+
+浏览器验证了服务重启和终态重连；断开期间新事件的缺口回放另由前端 store/transport 合同验证：实际消费到 10 后，服务器快照为 20 也不能跳过 11–20。上述记录不代表对真实 live provider、数学正确率或既有 ChatWorkspace 全面重设计的验收。
+
+验收期间发现首个 fixture 的注入 RunService 使用 `workspace.sqlite3`，而工厂默认配置使用 `showcase.sqlite3`，导致借用连接与预算账本不一致。旧 fixture 的终态时延/冻结结论无效。已改为同一显式数据库的全新 store-v3；工厂现在拒绝持久注入服务与配置数据库不一致（保留测试用 `:memory:` 服务注入）。公开合同在模拟未来一小时后确认终态报告、预算时延和归档身份完全相同，`ended_at` 非空。
