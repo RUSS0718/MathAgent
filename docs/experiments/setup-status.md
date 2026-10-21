@@ -103,3 +103,10 @@
 - 托管 CI 暴露 LoopbackStore 共享 SQLite connection 的并发事务缺陷，独立复现出现 `InterfaceError`。`dc2bb35` 为连接上的事务增加 RLock 作用域，并补公开接口并发回归；未改认证合同。
 - 最终顺序验证：重点 23 项通过；完整离线 158 项测试通过（136.245 秒），`repository_check=PASS`；独立 Showcase release gate、全部适用 pre-commit hooks、直接 Ruff 格式与静态检查、`git diff --check` 均通过。官方 `user_agent.py`、`implementations/` 与 `BASELINE.json` 无差异；未调用模型 API。
 - 此处仅记录本地修复验收。#28 在新的托管 CI 通过前保持重新打开状态，S4 暂停；不能由本地通过推断远端 CI 已通过。PR #22 保持 Draft/Open。
+
+## S4 最终答案与验证 Evidence 验收（2026-10-21）
+
+- [#29](https://github.com/RUSS0718/MathAgent/issues/29) 实现已合入集成分支，代码验证提交 `05c5190`，验收记录提交 `496f934`；合同与证据见 [S4 最终答案与验证 Evidence](s4-final-evidence.md)。最终公开文本以脱敏、NFC/LF 规范化后的 SHA-256 绑定验证对象；改写后保留历史并降为 unknown / needs_review。
+- checker scope 与完整答案验收分离：候选代回通过不证明完整解集，轻量结构一致性通过不证明数学正确。terminal Job 的检查历史通过事务追加，保留并发请求、原答案及事件；同步 Run、Job、report 与 Evidence 持久状态一致。
+- 最终顺序验证：`uv run python scripts/check.py --offline` 165 项测试通过（126.072 秒），workspace/test-seams 与两个服务帮助入口通过；release gate、`uv run ruff check .`、全部适用 pre-commit hooks 和 `git diff --check` 均通过，check-json 无匹配文件而跳过。公开回归覆盖最终改写、同步 required 模式、跨连接并发追加、重开和重复查询。
+- 相对前一集成提交 `6e25ee0`，`user_agent.py`、`implementations/`、`BASELINE.json` 与 `requirements.txt` 无差异。未调用真实 provider，不构成数学效果证据。#29 在新托管 CI 通过前不关闭，下一阶段暂缓；PR #22 保持 Draft/Open。
