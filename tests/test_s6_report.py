@@ -29,3 +29,15 @@ class FactoryDatabaseTest(unittest.TestCase):
                     create_app({'SHOWCASE_DATA_DIR': str(root / 'app')}, service=service)
             finally:
                 service.close()
+
+    def test_memory_service_with_pipeline_cannot_split_persistent_budget(self):
+        import tempfile
+        from showcase.flask_app import create_app
+        from showcase.run_service import RunService
+        with tempfile.TemporaryDirectory() as directory:
+            service = RunService()
+            try:
+                with self.assertRaisesRegex(ValueError, 'service_database_mismatch'):
+                    create_app({'SHOWCASE_DATA_DIR': directory, 'SHOWCASE_LIVE_PIPELINE': object()}, service=service)
+            finally:
+                service.close()
