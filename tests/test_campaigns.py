@@ -82,6 +82,12 @@ class CampaignFixture(unittest.TestCase):
 
 
 class CampaignContractTest(CampaignFixture):
+    def test_closing_fake_workspace_keeps_borrowed_run_connection_available(self):
+        report = self.finished(self.submit().get_json()["campaign_id"])
+        job_id = report["pairs"][0]["arms"]["baseline"]["job_id"]
+        self.app.extensions["showcase_workspace_service"].close()
+        self.assertEqual(200, self.client.get(f"/api/runs/{job_id}").status_code)
+
     def test_fake_pair_is_durable_and_links_existing_runs_and_evidence(self):
         key = str(uuid.uuid4())
         response = self.submit(key=key)

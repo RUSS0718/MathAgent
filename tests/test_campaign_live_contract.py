@@ -53,6 +53,16 @@ class LiveCampaignContractTest(CampaignFixture):
         self.assertEqual(409, response.status_code)
         self.assertEqual("campaign_network_disabled", response.get_json()["error"])
 
+    def test_closing_pipeline_workspace_keeps_borrowed_run_connection_available(self):
+        payload = campaign_input()
+        payload["allow_network"] = True
+        payload["budget"].update(max_model_calls=6, max_http_attempts=6, max_tokens=20_000)
+        with patch("llm_client.requests.post", return_value=Response()):
+            report = self.finished(self.submit(payload).get_json()["campaign_id"])
+        job_id = report["pairs"][0]["arms"]["baseline"]["job_id"]
+        self.app.extensions["showcase_workspace_service"].close()
+        self.assertEqual(200, self.client.get(f"/api/runs/{job_id}").status_code)
+
     def test_opt_in_fake_http_retains_unknown_usage_and_actual_common_limits(self):
         payload = campaign_input()
         payload["allow_network"] = True

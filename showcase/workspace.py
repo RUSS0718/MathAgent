@@ -709,7 +709,7 @@ class WorkspaceService:
         self.pipeline = pipeline
         self.budget_ledger = (
             RunBudgetLedger(self.store._connection, self.store._lock)
-            if str(database_path) == ":memory:" else RunBudgetLedger(database_path=database_path)
+            if pipeline is None or str(database_path) == ":memory:" else RunBudgetLedger(database_path=database_path)
         )
         self.checkpointer = None
         if pipeline is not None and hasattr(pipeline, "checkpointer"):
