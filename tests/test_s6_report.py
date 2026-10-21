@@ -19,8 +19,10 @@ class FactoryDatabaseTest(unittest.TestCase):
     def test_persistent_service_database_must_match_factory_database(self):
         import tempfile
         from pathlib import Path
+
         from showcase.flask_app import create_app
         from showcase.run_service import RunService
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             service = RunService(database_path=root / 'service.sqlite3')
@@ -32,8 +34,10 @@ class FactoryDatabaseTest(unittest.TestCase):
 
     def test_memory_service_with_pipeline_cannot_split_persistent_budget(self):
         import tempfile
+
         from showcase.flask_app import create_app
         from showcase.run_service import RunService
+
         with tempfile.TemporaryDirectory() as directory:
             service = RunService()
             try:
