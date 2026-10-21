@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { api } from '../api/client'
+import { downloadJson } from '../runtime/reports/download'
 import type { Campaign } from '../api/campaigns.schemas'
 const items = ref<Awaited<ReturnType<typeof api.campaigns>>['campaigns']>([])
 const detail = ref<Campaign | null>(null)
@@ -15,7 +16,7 @@ async function load(id?: string): Promise<void> {
   finally { loading.value = false }
 }
 async function select(id: string): Promise<void> { globalThis.history.replaceState({}, '', '?campaign=' + encodeURIComponent(id)); await load(id) }
-function download(): void { if (!detail.value) return; const url = URL.createObjectURL(new Blob([JSON.stringify(detail.value, null, 2)], { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = detail.value.campaign_id + '.json'; link.click(); URL.revokeObjectURL(url) }
+function download(): void { if (detail.value) downloadJson(detail.value.campaign_id + '.json', detail.value) }
 onMounted(() => { const id = new URLSearchParams(globalThis.location.search).get('campaign'); void load(id ?? undefined) })
 </script>
 <template>

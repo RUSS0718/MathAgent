@@ -1,5 +1,6 @@
 """Public report review labels derive from structured checker observations."""
 import unittest
+
 from showcase.evidence import EvidencePackExporter
 
 

@@ -5,4 +5,3 @@ export const campaignSummarySchema = z.object({ campaign_id: z.string(), mode, s
 export const campaignSchema = campaignSummarySchema.extend({ pairs: z.array(z.object({ pair_id: z.string(), problem_hash: z.string(), arms: z.object({ baseline: arm, candidate: arm }) }).passthrough()), archive: z.object({ path: z.string(), sha256: z.string() }).optional(), config_hash: z.string().optional() }).passthrough()
 export const campaignsSchema = z.object({ campaigns: z.array(campaignSummarySchema), offset: z.number(), limit: z.number() })
 export type Campaign = z.infer<typeof campaignSchema>
-

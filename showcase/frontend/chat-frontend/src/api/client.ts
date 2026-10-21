@@ -59,5 +59,3 @@ export const api = {
   evidence: (jobId: string) => requestJson('/api/runs/' + encodeURIComponent(jobId) + '/evidence', {}, z.object({ evidence_id: z.string(), mode: z.string(), run: z.record(z.string(), z.unknown()) }).passthrough()),
   capabilities: () => requestJson('/api/capabilities', {}, capabilitiesResponseSchema),
 }
-
-

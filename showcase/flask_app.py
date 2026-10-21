@@ -554,7 +554,7 @@ def create_app(
             "run_id": job_id,
             "execution_mode": result.get(
                 "execution_mode",
-                "live" if app.config.get("SHOWCASE_MODE") == "live" else "fake",
+                "unavailable",
             ),
             "status": str(job.get("status", "unavailable")).upper(),
             "stage": _job_stage(events),
@@ -757,4 +757,3 @@ def _dashboard_page() -> str:
 
 if __name__ == "__main__":
     main()
-

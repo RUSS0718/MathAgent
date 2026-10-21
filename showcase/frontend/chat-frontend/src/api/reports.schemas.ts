@@ -17,4 +17,3 @@ export const reportSchema = z.object({
 })
 
 export type JobReport = z.infer<typeof reportSchema>
-

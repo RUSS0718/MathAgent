@@ -132,4 +132,3 @@ onMounted(async () => {
     <WorkspaceInspector :open="inspectorOpen" :job="selectedJob" :report="report" @close="inspectorOpen = false" />
   </div>
 </template>
-

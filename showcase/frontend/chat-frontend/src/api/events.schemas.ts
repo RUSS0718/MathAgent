@@ -143,7 +143,10 @@ function validatePublicEvent(event: string, data: Record<string, unknown>, raw: 
   } else if (event === 'interrupt') {
     requireString('message')
     requireString('question_id')
-  } else if (event === 'error' || event === 'canceled') {
+  } else if (event === 'canceled') {
+    requireString('job_id')
+    requireString('status')
+  } else if (event === 'error') {
     requireString('message')
   } else if (!knownPublicEventTypes.has(event)) {
     // Unknown events are intentionally accepted after the generic type check.

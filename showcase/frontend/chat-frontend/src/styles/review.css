@@ -12,6 +12,7 @@
 .campaign-workbench :focus-visible, .run-review :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .campaign-workbench dt, .run-review dt { color: var(--muted); font-size: .84rem; }
 .campaign-workbench dd, .run-review dd { font-size: .86rem; line-height: 1.5; }
-.campaign-workbench [role=alert], .run-review [role=alert] { border-left: 3px solid #b45309; background: #fffbeb; padding: 12px; }
+.campaign-workbench [role=alert], .run-review [role=alert] { border-left: 3px solid var(--warning); background: var(--warning-wash); padding: 12px; }
 .campaign-arms article { border-top: 1px solid var(--border); padding-top: 16px; }
 .run-review details { border-bottom: 1px solid var(--border); }
+

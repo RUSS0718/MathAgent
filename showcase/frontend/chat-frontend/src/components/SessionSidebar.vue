@@ -39,4 +39,3 @@ const emit = defineEmits<{
     <div class="sidebar-footer"><button type="button" class="settings-link" @click="emit('settings')"><span aria-hidden="true">⚙</span> 设置</button><span class="profile-dot" aria-hidden="true"></span><span class="profile-label">本机用户</span></div>
   </aside>
 </template>
-

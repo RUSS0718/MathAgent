@@ -44,7 +44,7 @@ export const useJobsStore = defineStore('jobs', {
     },
     observe(job: ActiveJobResponse): JobRecord {
       const existing = this.records[job.job_id]
-      const cursor = existing?.events.length ? job.last_event_id ?? 0 : 0
+      const cursor = existing?.lastEventId ?? 0
       const record = this.start(job.job_id, job.session_id, job.status, cursor)
       record.error = typeof job.error === 'string' ? job.error : null
       return record

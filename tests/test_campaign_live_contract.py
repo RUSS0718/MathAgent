@@ -52,6 +52,25 @@ class LiveCampaignContractTest(CampaignFixture):
         self.assertEqual('fake', execution['mode'])
         self.assertEqual('fake', execution['provider'])
 
+    def test_restart_keeps_fake_identity_for_unstarted_job_report_and_evidence(self):
+        self.app.extensions["showcase_workspace_service"].worker_enabled = False
+        payload = campaign_input()
+        payload["allow_network"] = True
+        created = self.submit(payload).get_json()
+        job_id = created["pairs"][0]["arms"]["candidate"]["job_id"]
+        second = create_app({**self.app.config, "SHOWCASE_WORKER_ENABLED": False})
+        try:
+            browser = second.test_client()
+            browser.get("/api/check_auth")
+            job = browser.get(f"/api/agent/jobs/{job_id}").get_json()
+            self.assertEqual("needs_review", job["error"])
+            self.assertEqual("fake", browser.get(f"/api/agent/jobs/{job_id}/report").get_json()["mode"])
+            self.assertEqual("fake", browser.get(f"/api/runs/{job_id}/evidence").get_json()["mode"])
+        finally:
+            second.extensions["showcase_workspace_service"].close()
+            second.extensions["showcase_run_service"].close()
+            second.extensions["loopback_store"].close()
+
     def test_offline_cannot_dispatch_through_a_live_workspace(self):
         with patch("llm_client.requests.post", side_effect=AssertionError("network forbidden")):
             response = self.submit()
@@ -100,5 +119,3 @@ class LiveCampaignContractTest(CampaignFixture):
         for arm in report["pairs"][0]["arms"].values():
             self.assertEqual("failed", arm["status"])
             self.assertEqual(1, arm["usage"]["http_attempts"])
-
-

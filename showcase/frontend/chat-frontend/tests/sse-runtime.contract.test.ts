@@ -64,3 +64,8 @@ test('timeout and restart review remain readable terminal events', async () => {
     assert.equal(isTerminalEvent(event), true)
   }
 })
+
+test('public canceled scope event is a readable terminal notification', () => {
+  const event = decodeSseBlock({ event: 'canceled', id: '11', hasIdField: true, data: JSON.stringify({ type: 'canceled', job_id: 'run_cancel', status: 'canceled', scope: 'future_dispatch', remote_request: 'cannot_revoke' }) })
+  assert.equal(event.data.remote_request, 'cannot_revoke')
+})

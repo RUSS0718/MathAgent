@@ -21,4 +21,3 @@ export function readDashboardRoute(pathname: string): DashboardRoute {
 export function sessionHref(id: string): string { return `${DASHBOARD_BASE}/session/${id}` }
 export function settingsHref(): string { return DASHBOARD_SETTINGS_PATH }
 export function workspaceHref(): string { return DASHBOARD_BASE }
-
