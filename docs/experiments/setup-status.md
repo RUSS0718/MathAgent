@@ -110,3 +110,10 @@
 - checker scope 与完整答案验收分离：候选代回通过不证明完整解集，轻量结构一致性通过不证明数学正确。terminal Job 的检查历史通过事务追加，保留并发请求、原答案及事件；同步 Run、Job、report 与 Evidence 持久状态一致。
 - 最终顺序验证：`uv run python scripts/check.py --offline` 165 项测试通过（126.072 秒），workspace/test-seams 与两个服务帮助入口通过；release gate、`uv run ruff check .`、全部适用 pre-commit hooks 和 `git diff --check` 均通过，check-json 无匹配文件而跳过。公开回归覆盖最终改写、同步 required 模式、跨连接并发追加、重开和重复查询。
 - 相对前一集成提交 `6e25ee0`，`user_agent.py`、`implementations/`、`BASELINE.json` 与 `requirements.txt` 无差异。未调用真实 provider，不构成数学效果证据。#29 在新托管 CI 通过前不关闭，下一阶段暂缓；PR #22 保持 Draft/Open。
+
+## S5 同题配对 Runner 验收（2026-10-21）
+
+- [#30](https://github.com/RUSS0718/MathAgent/issues/30) 实现已合入集成分支，最终代码提交 `6bda99f`；入口与边界见 [S5 同题配对 Runner 合同](s5-paired-runner.md)。Flask / CLI 持久创建 baseline 与 candidate 独立子 Job，默认离线，显式预算写入 S3 账本；仅支持已实现的 verification_mode 差异，不实现 R1–R5。
+- 批次保留失败、取消、不明与 incomplete，不自动补跑；查询关联既有 Run/report/Evidence，未知 usage 与费用保持未知。内容 hash 归档原子发布并保留旧版本；运行产物写入 ignored artifacts，不提交题集、答案或 raw。
+- 审查修复后顺序执行最终检查：`uv run python scripts/check.py --offline` 180 项测试通过（139.822 秒），repository/contracts 与服务 help 入口通过；直接 Showcase release gate、全仓 Ruff、全部适用 pre-commit hooks 和 diff check 通过。没有 artifacts 被跟踪。
+- 相对前一集成提交 `d6bdf09`，`user_agent.py`、`implementations/`、`BASELINE.json` 与 `requirements.txt` 无差异。本轮仅使用离线替身，未调用真实模型，不证明数学能力或策略效果；托管 CI 待核对。PR #22 保持 Draft/Open。
