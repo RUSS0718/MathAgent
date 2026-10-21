@@ -28,11 +28,18 @@ def _git(*arguments: str) -> subprocess.CompletedProcess[bytes]:
     # Do not inherit credentials/configuration; even partial clones cannot fetch.
     try:
         return subprocess.run(
-            ["git", "-c", "core.fsmonitor=false", *arguments], cwd=ROOT,
-            capture_output=True, check=False, timeout=15,
-            env={"GIT_ALLOW_PROTOCOL": "", "GIT_NO_LAZY_FETCH": "1",
-                 "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1",
-                 "GIT_CONFIG_GLOBAL": devnull},
+            ["git", "-c", "core.fsmonitor=false", *arguments],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+            timeout=15,
+            env={
+                "GIT_ALLOW_PROTOCOL": "",
+                "GIT_NO_LAZY_FETCH": "1",
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": devnull,
+            },
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise SetupError("git_unavailable") from exc
@@ -61,13 +68,19 @@ def _artifact_path(value: object) -> Path:
 
 def _check_directions(config: dict) -> int:
     directions = config.get("directions")
-    if (not isinstance(directions, list) or len(directions) != 5
-            or any(not isinstance(item, dict) for item in directions)):
+    if (
+        not isinstance(directions, list)
+        or len(directions) != 5
+        or any(not isinstance(item, dict) for item in directions)
+    ):
         raise SetupError("directions_invalid")
     ids = [item.get("id") for item in directions]
     branches = [item.get("branch") for item in directions]
-    if (any(not isinstance(value, str) or not value.strip() for value in ids + branches)
-            or set(ids) != DIRECTIONS or len(set(branches)) != 5):
+    if (
+        any(not isinstance(value, str) or not value.strip() for value in ids + branches)
+        or set(ids) != DIRECTIONS
+        or len(set(branches)) != 5
+    ):
         raise SetupError("directions_invalid")
     documents = set()
     for direction in directions:
@@ -106,10 +119,15 @@ def _check_baseline(config: dict) -> dict:
         if source.stdout != current:
             raise SetupError("baseline_mismatch")
         for name, expected in files.items():
-            if (not isinstance(name, str)
-                    or not (name in {"user_agent.py", "requirements.txt"}
-                            or (name.startswith("implementations/") and name.endswith(".py")))
-                    or not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected)):
+            if (
+                not isinstance(name, str)
+                or not (
+                    name in {"user_agent.py", "requirements.txt"}
+                    or (name.startswith("implementations/") and name.endswith(".py"))
+                )
+                or not isinstance(expected, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", expected)
+            ):
                 raise SetupError("baseline_invalid")
             path = _repo_path(name, "baseline_invalid")
             if path != ROOT / name or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
@@ -157,9 +175,12 @@ def _check_budgets(config: dict) -> None:
     if not isinstance(stages, dict) or set(stages) != {"offline", *required}:
         raise SetupError("budget_invalid")
     offline = stages["offline"]
-    if (not isinstance(offline, dict) or set(offline) != {"max_generation_attempts"}
-            or type(offline["max_generation_attempts"]) is not int
-            or offline["max_generation_attempts"] != 0):
+    if (
+        not isinstance(offline, dict)
+        or set(offline) != {"max_generation_attempts"}
+        or type(offline["max_generation_attempts"]) is not int
+        or offline["max_generation_attempts"] != 0
+    ):
         raise SetupError("budget_invalid")
     for stage_name, fields in required.items():
         stage = stages[stage_name]
@@ -176,9 +197,13 @@ def _check_budgets(config: dict) -> None:
     probe_retries = stages["api_probe"].get("automatic_retries")
     retries = stages["calibration"].get("automatic_retries_per_logical_call")
     money_limit = stages["calibration"].get("money_limit")
-    if (type(probe_retries) is not int or probe_retries != 0
-            or type(retries) is not int or retries < 0
-            or (money_limit is not None and not _positive(money_limit))):
+    if (
+        type(probe_retries) is not int
+        or probe_retries != 0
+        or type(retries) is not int
+        or retries < 0
+        or (money_limit is not None and not _positive(money_limit))
+    ):
         raise SetupError("budget_invalid")
 
 
@@ -202,8 +227,11 @@ def main() -> int:
         if not config_path.is_relative_to(ROOT) or config_path.suffix != ".json":
             raise SetupError("config_path_invalid")
         config = json.loads(config_path.read_text(encoding="utf-8"))
-        if (not isinstance(config, dict) or type(config.get("schema_version")) is not int
-                or config["schema_version"] != 1):
+        if (
+            not isinstance(config, dict)
+            or type(config.get("schema_version")) is not int
+            or config["schema_version"] != 1
+        ):
             raise SetupError("config_invalid")
         if config.get("allow_network") is not False:
             raise SetupError("network_not_allowed")
@@ -212,8 +240,11 @@ def main() -> int:
         if config.get("thinking_mode") is not True:
             raise SetupError("thinking_required")
         features = config.get("features")
-        if (not isinstance(features, dict) or set(features) != DIRECTIONS
-                or any(value is not False for value in features.values())):
+        if (
+            not isinstance(features, dict)
+            or set(features) != DIRECTIONS
+            or any(value is not False for value in features.values())
+        ):
             raise SetupError("features_must_be_disabled")
         _check_budgets(config)
         document_count = _check_directions(config)
@@ -232,7 +263,9 @@ def main() -> int:
     if output_path is not None:
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+            output_path.write_text(
+                json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8"
+            )
         except OSError:
             report.update(status="error", category="output_write_failed")
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))

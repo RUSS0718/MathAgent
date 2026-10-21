@@ -103,10 +103,15 @@ class ExperimentSetupCLITests(unittest.TestCase):
         if report["branch"] is not None:
             self.assertIsInstance(report["branch"], str)
             self.assertTrue(report["branch"])
-        self.assertEqual(report["counts"], {
-            "directions": 5, "direction_documents": 15,
-            "disabled_features": 5, "protected_files": 11,
-        })
+        self.assertEqual(
+            report["counts"],
+            {
+                "directions": 5,
+                "direction_documents": 15,
+                "disabled_features": 5,
+                "protected_files": 11,
+            },
+        )
         self.assertEqual(report["network_requests"], 0)
         self.assertTrue(report["planned_not_implemented"])
         self.assertEqual(result.stderr, "")
