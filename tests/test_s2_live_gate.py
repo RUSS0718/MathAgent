@@ -26,10 +26,14 @@ from showcase.g2_live_gate import (
     G2_MAX_HTTP_ATTEMPTS,
     G2_MAX_TOKENS_PER_ATTEMPT,
     G2_MODEL,
+    G2_PROMPT_ARGUMENT_EXAMPLE,
+    G2_PROTOCOL_PROMPT_VERSION,
     G2_REPEATS,
     G2LivePipeline,
 )
 from showcase.run_service import RunService
+from showcase.tool_schemas import schema_error
+from showcase.tools import ToolRegistry
 
 
 class FakeResponse:
@@ -173,6 +177,12 @@ class G2LiveGateContractTest(unittest.TestCase):
         self.assertEqual("pass", report["contract_result"])
         self.assertEqual("fake", report["mode"])
         self.assertEqual("fake_http", report["execution_source"])
+        self.assertEqual(G2_PROTOCOL_PROMPT_VERSION, report["protocol_prompt_version"])
+        registry = ToolRegistry(max_calls=1)
+        registry.register_polynomial_check()
+        self.assertIsNone(
+            schema_error(G2_PROMPT_ARGUMENT_EXAMPLE, registry.allowed_schemas()[0]["parameters"])
+        )
         self.assertEqual(G2_MAX_HTTP_ATTEMPTS, report["http_attempt_count"])
         self.assertEqual(G2_REPEATS * len(G2_CASES), len(report["runs"]))
         self.assertEqual(G2_MAX_HTTP_ATTEMPTS, len(provider.requests))
@@ -190,6 +200,7 @@ class G2LiveGateContractTest(unittest.TestCase):
                 self.assertEqual("fake", row["mode"])
                 self.assertEqual("live", row["workspace_mode"])
                 self.assertEqual("fake_http", row["execution_source"])
+                self.assertEqual(G2_PROTOCOL_PROMPT_VERSION, row["protocol_prompt_version"])
                 self.assertEqual(2, len(row["attempts"]))
                 self.assertEqual(["tool_calls", "stop"], row["finish_reasons"])
                 for attempt in row["attempts"]:
@@ -208,6 +219,10 @@ class G2LiveGateContractTest(unittest.TestCase):
             self.assertEqual(G2_MODEL, request["model"])
             self.assertEqual(512, request["max_tokens"])
             self.assertIs(request["thinking_mode"], True)
+            self.assertIn(
+                G2_PROTOCOL_PROMPT_VERSION,
+                request["messages"][0]["content"],
+            )
             if index % 2 == 0:
                 self.assertEqual("polynomial_check", request["tools"][0]["function"]["name"])
             else:

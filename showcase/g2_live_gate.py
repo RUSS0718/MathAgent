@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -19,6 +20,14 @@ G2_MAX_HTTP_ATTEMPTS = 12
 G2_MAX_TOKENS_PER_ATTEMPT = 512
 G2_CLIENT_TIMEOUT_SECONDS = 30
 G2_RUN_TIMEOUT_SECONDS = 75
+G2_PROTOCOL_PROMPT_VERSION = "g2-native-tool-v2"
+G2_PROMPT_ARGUMENT_EXAMPLE = {
+    "schema_version": 1,
+    "variable": "x",
+    "coefficients": ["1", "-1"],
+    "domain": {"kind": "real"},
+    "candidates": ["1", "2"],
+}
 
 
 @dataclass(frozen=True)
@@ -91,13 +100,24 @@ class G2LivePipeline:
         _emit_node(sink, run_id, "solver", "模型工具请求", "请求一次原生工具调用", "start")
         registry = ToolRegistry(max_calls=1)
         registry.register_polynomial_check()
+        example = json.dumps(
+            G2_PROMPT_ARGUMENT_EXAMPLE, ensure_ascii=False, separators=(",", ":")
+        )
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "Use the provided native polynomial_check function once for the stated "
-                    "candidate check. Do not emit a text_action envelope. After the tool result "
-                    "is returned, answer briefly without hidden reasoning."
+                    f"G2 protocol prompt {G2_PROTOCOL_PROMPT_VERSION}. Use the registered native "
+                    "polynomial_check function once for the stated candidate check, following "
+                    "its registry schema exactly. The schema in the native tool declaration is "
+                    "the authority. For real numbers, domain must be the JSON object "
+                    '`{"kind":"real"}`, never a quoted string. For example, schema_version '
+                    "is integer 1, variable is a string, and coefficients and candidates are "
+                    f"arrays of rational strings; this is a valid shape example: `{example}`. "
+                    "Use the example's structure and types, but derive the values from the "
+                    "current problem. Do not emit a text_action envelope or repair arguments "
+                    "after generation. After the tool result is returned, answer briefly without "
+                    "hidden reasoning."
                 ),
             },
             {"role": "user", "content": problem},
@@ -236,6 +256,8 @@ __all__ = [
     "G2_MAX_HTTP_ATTEMPTS",
     "G2_MAX_TOKENS_PER_ATTEMPT",
     "G2_MODEL",
+    "G2_PROMPT_ARGUMENT_EXAMPLE",
+    "G2_PROTOCOL_PROMPT_VERSION",
     "G2_REPEATS",
     "G2_RUN_TIMEOUT_SECONDS",
     "G2Case",
