@@ -16,6 +16,8 @@ from uuid import uuid4
 
 from llm_response import provider_usage
 
+from .run_control import assert_dispatch_allowed, check_control, controlled_action
+
 
 @dataclass(frozen=True)
 class RunBudgetLimits:
@@ -110,6 +112,7 @@ class RunBudgetLedger:
         with self._transaction(run_id) as state:
             if state is None:
                 raise BudgetExhausted("budget_uninitialized")
+            assert_dispatch_allowed(self.connection, run_id)
             summary = _summary(state)
             limits = state["limits"]
             if time.time() >= state["deadline_at"]:
@@ -155,7 +158,7 @@ class RunBudgetLedger:
 
     def snapshot(self, run_id):
         with self._transaction(run_id) as state:
-            return _summary(state)
+            return _summary(state) if state is not None else None
 
 
 class RunBudget:
@@ -167,6 +170,7 @@ class RunBudget:
         return ModelCallBudget(self.ledger, self.run_id, action_id, role)
 
     def before_attempt(self, event, input_estimate):
+        check_control()
         return self.ledger.reserve(
             self.run_id,
             "http",
@@ -270,6 +274,7 @@ def budgeted_tool(function):
     """Apply the current Run ledger to every registry path, including graph nodes."""
 
     @wraps(function)
+    @controlled_action
     def invoke(self, name, arguments, **kwargs):
         budget = current_budget()
         if budget is None:

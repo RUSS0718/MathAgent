@@ -17,6 +17,7 @@ from typing import Any, Protocol
 from .graph import AgentDecision
 from .request_attempts import record_attempts
 from .run_budget import current_budget
+from .run_control import controlled_action
 from .run_service import AgentResult, RunRequest
 from .tool_protocol import ToolProtocol, ToolRequest, parse_tool_requests
 
@@ -129,6 +130,7 @@ class InternModelAdapter:
         self.client_retry = client_retry
         self.thinking_mode = thinking_mode
 
+    @controlled_action
     def complete(
         self,
         messages: Sequence[Mapping[str, Any]],

@@ -289,6 +289,12 @@ class RunService:
         snapshot = self._store.get_run(run_id)
         if snapshot is None:
             raise RunNotFoundError(run_id)
+        budget = self._budget_ledger.snapshot(run_id)
+        if budget is not None and not (snapshot.get("result") or {}).get("budget"):
+            snapshot["result"] = {**(snapshot.get("result") or {}), "budget": budget}
+        attempts = [event["attempt"] for event in self._store.get_events(run_id) if event.get("type") == "request_attempt"]
+        if attempts:
+            snapshot["result"] = {**(snapshot.get("result") or {}), "request_attempts": attempts}
         return self._copy_snapshot(snapshot)
 
     def get_events(self, run_id: str) -> list[dict[str, Any]]:

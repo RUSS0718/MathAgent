@@ -18,9 +18,11 @@ from .adapters import (
     InternModelAdapter,
     ModelResponse,
 )
+from .live_graph import execute_live_graph
 from .redaction import redact_text
 from .request_attempts import capture_pipeline_attempts
 from .run_budget import BudgetExhausted, RunBudgetLedger, RunBudgetLimits, current_budget
+from .run_control import RunStopped
 from .tool_loop import run_tool_roundtrip
 from .tool_protocol import ToolProtocol
 from .tools import ToolRegistry
@@ -57,6 +59,8 @@ class LiveAgentPipeline:
         tool_protocol: ToolProtocol = "native",
         execution_mode: str = "live",
     ) -> None:
+        self.checkpointer = None
+        self.pause_after_planner = False
         self.model = model
         self.registry = registry
         self.verifier = verifier or LightweightVerificationHook()
@@ -81,8 +85,6 @@ class LiveAgentPipeline:
         """Execute one bounded live run and return JSON-compatible product state."""
 
         sink = emit or (lambda _event: None)
-        started = time.monotonic()
-        model_calls = [0]
         state: dict[str, Any] = {
             "run_id": run_id,
             "execution_mode": self.execution_mode,
@@ -96,35 +98,10 @@ class LiveAgentPipeline:
             "active_node": "intake",
         }
         try:
-            clean_problem = self._intake(run_id, problem, sink)
-            state["active_node"] = "planner"
-            plan = self._planner(run_id, clean_problem, sink, started, model_calls)
-            state["active_node"] = "solver"
-            solver_response, _solver_messages = self._solver(
-                run_id, clean_problem, plan, sink, started, state, model_calls
-            )
-            state["active_node"] = "verifier"
-            verification = self._verifier(
-                run_id,
-                solver_response,
-                state["tool_results"],
-                verification_mode,
-                sink,
-                started,
-            )
-            state["verification"] = verification
-            state["active_node"] = "synthesizer"
-            final_response = self._synthesizer(
-                run_id,
-                clean_problem,
-                plan,
-                solver_response,
-                verification,
-                sink,
-                started,
-                model_calls,
-            )
-            state["final_response"] = final_response
+            state.update(execute_live_graph(self, state, problem, verification_mode, sink))
+            if state["status"] == "WAITING_INPUT":
+                return state
+            verification = state["verification"]
             if verification_mode == "required" and verification.get("status") != "pass":
                 raise PipelineFailure(
                     "verification_needs_review",
@@ -144,6 +121,10 @@ class LiveAgentPipeline:
                 "title": "任务完成",
                 "data": {"type": "text", "summary": "公开答案已生成"},
             })
+        except RunStopped as exc:
+            state["status"] = "CANCELED" if exc.category == "run_canceled" else "NEEDS_REVIEW"
+            state["stage"] = "stopped"
+            state["error"] = {"category": exc.category, "summary": "运行已停止"}
         except PipelineFailure as exc:
             state["status"] = "NEEDS_REVIEW" if exc.review else "FAILED"
             state["stage"] = "failed"

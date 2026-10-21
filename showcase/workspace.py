@@ -22,6 +22,8 @@ from typing import Any
 
 from .redaction import redact
 from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget
+from .run_checkpoints import RunCheckpointSaver
+from .run_control import RunControl, RunStopped, bind_control
 
 ACTIVE_JOB_STATUSES = ("queued", "running", "waiting_input")
 TERMINAL_JOB_STATUSES = ("succeeded", "failed", "canceled")
@@ -375,7 +377,7 @@ class WorkspaceStore:
                         now = _utc_now()
                         self._connection.execute("UPDATE workspace_jobs SET status='canceled',updated_at=? WHERE job_id=?", (now, job_id))
                         self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "CANCELED", now, asset_refs=self._asset_refs(job_id))), now, job_id))
-                        self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled"})
+                        self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled", "scope": "future_dispatch", "remote_request": "cannot_revoke"})
                     result = {"success": True, "job_id": job_id, "status": "canceled"}
                 else:
                     if status != "waiting_input":
@@ -394,12 +396,14 @@ class WorkspaceStore:
                 self._connection.rollback()
                 raise
 
-    def recover_incomplete_jobs(self) -> int:
+    def recover_incomplete_jobs(self, checkpointer=None) -> int:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
-            rows = self._connection.execute("SELECT job_id FROM workspace_jobs WHERE status IN ('queued','running','waiting_input')").fetchall()
+            rows = self._connection.execute("SELECT job_id,status FROM workspace_jobs WHERE status IN ('queued','running','waiting_input')").fetchall()
             for row in rows:
                 job_id = row["job_id"]
+                if row["status"] == "waiting_input" and checkpointer is not None and checkpointer.is_interrupted(job_id):
+                    continue
                 now = _utc_now()
                 self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code='needs_review',updated_at=? WHERE job_id=?", (now, job_id))
                 self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, error={"category": "needs_review"}, asset_refs=self._asset_refs(job_id))), now, job_id))
@@ -417,9 +421,9 @@ class WorkspaceStore:
             self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "FAILED", now, execution_mode=execution_mode, error={"category": code}, asset_refs=self._asset_refs(job_id))), now, job_id))
             self._insert_event(
                 job_id,
-                "error",
+                "timeout" if code == "run_deadline_exhausted" else "error",
                 {
-                    "type": "error",
+                    "type": "timeout" if code == "run_deadline_exhausted" else "error",
                     "job_id": job_id,
                     "status": "failed",
                     "message": code,
@@ -436,7 +440,7 @@ class WorkspaceStore:
             ).fetchone()
             if row is None:
                 raise WorkspaceError("job_not_found", status=404)
-            if row["status"] in TERMINAL_JOB_STATUSES:
+            if row["status"] in TERMINAL_JOB_STATUSES and event.get("type") not in {"request_attempt", "tool_call_result"}:
                 return
             payload = redact(dict(event))
             payload.setdefault("job_id", job_id)
@@ -446,6 +450,9 @@ class WorkspaceStore:
     def finish_live_job(self, job_id: str, state: Mapping[str, Any]) -> None:
         """Persist a live pipeline result without exposing private model values."""
 
+        if state.get("status") == "WAITING_INPUT":
+            self.mark_waiting_input(job_id)
+            return
         status = str(state.get("status", "FAILED"))
         terminal_status = "succeeded" if status == "COMPLETED" else "failed"
         final_response = state.get("final_response")
@@ -685,8 +692,12 @@ class WorkspaceService:
                 RunBudgetLedger(self.store._connection, self.store._lock)
                 if str(database_path) == ":memory:" else RunBudgetLedger(database_path=database_path)
             )
+        self.checkpointer = None
+        if pipeline is not None and hasattr(pipeline, "checkpointer"):
+            self.checkpointer = RunCheckpointSaver(database_path)
+            pipeline.checkpointer = self.checkpointer
         self._waiting_input_jobs: set[str] = set()
-        self.store.recover_incomplete_jobs()
+        self.store.recover_incomplete_jobs(self.checkpointer)
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="showcase-job")
         self._submitted: set[str] = set()
         self._submit_lock = threading.Lock()
@@ -780,7 +791,8 @@ class WorkspaceService:
                     self.store.fail_job(job_id, "unavailable", execution_mode="live")
                     return
                 limits = getattr(self.pipeline, "budget", RunBudgetLimits())
-                with bind_budget(self.budget_ledger.ensure(job_id, limits)):
+                with bind_budget(self.budget_ledger.ensure(job_id, limits)) as budget, bind_control(RunControl(self.store, job_id, budget)) as control:
+                    control.check()
                     state = self.pipeline.run(
                         job_id,
                         self._problem(job_id),
@@ -801,11 +813,21 @@ class WorkspaceService:
                 self.store.fail_job(job_id, "needs_review")
             else:
                 self.store.complete_job(job_id, "Fake Agent completed a deterministic showcase run.", "fake adapter")
+        except RunStopped:
+            return
         except Exception:
             self.store.fail_job(job_id, "job_execution_failed", execution_mode=self.execution_mode)
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
-        return self.store.get_job(job_id, user_id)
+        payload = self.store.get_job(job_id, user_id)
+        if self.budget_ledger is not None:
+            budget = self.budget_ledger.snapshot(job_id)
+            if budget is not None and not (payload.get("result") or {}).get("budget"):
+                payload["result"] = {**(payload.get("result") or {}), "budget": budget}
+        attempts = [event["data"]["attempt"] for event in self.store.events(job_id, user_id) if event["event"] == "request_attempt"]
+        if attempts:
+            payload["result"] = {**(payload.get("result") or {}), "request_attempts": attempts}
+        return payload
 
     def _problem(self, job_id: str) -> str:
         return self.store.problem(job_id)
@@ -874,6 +896,8 @@ class WorkspaceService:
         self._executor.shutdown(wait=True)
         if self.budget_ledger is not None:
             self.budget_ledger.close()
+        if self.checkpointer is not None:
+            self.checkpointer.close()
         self.store.close()
 
 
