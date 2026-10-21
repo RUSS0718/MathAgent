@@ -17,6 +17,7 @@ from .graph import ToolExecutionResult
 from .polynomial import PolynomialChecker
 from .profile import SHOWCASE_PROFILE
 from .redaction import summarize_parameters
+from .run_budget import budgeted_tool, current_budget
 from .tool_schemas import POLYNOMIAL_CHECK_SCHEMA, PYTHON_MATH_SCHEMA, schema_error
 
 MAX_TOOL_INPUT_BYTES = 32_000
@@ -162,6 +163,7 @@ class ToolRegistry:
             for schema in self.allowed_schemas()
         ]
 
+    @budgeted_tool
     def invoke(
         self,
         name: str,
@@ -188,18 +190,15 @@ class ToolRegistry:
             return _result("rejected", "tool_input_too_large", started, arguments, tool_call_id)
         if schema_error(arguments, spec.parameters_schema):
             return _result("rejected", "tool_schema_invalid", started, arguments, tool_call_id)
-        from .run_budget import current_budget
-
-        budget = current_budget()
-        if budget is not None:
-            budget.ledger.reserve(budget.run_id, "tool")
-        if budget is None and self._call_count >= self.max_calls:
+        if current_budget() is None and self._call_count >= self.max_calls:
             return _result("rejected", "tool_budget_exhausted", started, arguments, tool_call_id)
         self._call_count += 1
         executor = ThreadPoolExecutor(max_workers=1)
         try:
             future = executor.submit(handler, dict(arguments))
-            value = future.result(timeout=spec.timeout_seconds)
+            budget = current_budget()
+            timeout = min(spec.timeout_seconds, budget.remaining_seconds()) if budget else spec.timeout_seconds
+            value = future.result(timeout=timeout)
         except FutureTimeoutError:
             future.cancel()
             executor.shutdown(wait=False, cancel_futures=True)

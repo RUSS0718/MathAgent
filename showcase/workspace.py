@@ -679,7 +679,12 @@ class WorkspaceService:
         self.worker_enabled = worker_enabled
         self.waiting_input_marker = waiting_input_marker
         self.pipeline = pipeline
-        self.budget_ledger = RunBudgetLedger(self.store._connection, self.store._lock)
+        self.budget_ledger = None
+        if pipeline is not None:
+            self.budget_ledger = (
+                RunBudgetLedger(self.store._connection, self.store._lock)
+                if str(database_path) == ":memory:" else RunBudgetLedger(database_path=database_path)
+            )
         self._waiting_input_jobs: set[str] = set()
         self.store.recover_incomplete_jobs()
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="showcase-job")
@@ -867,6 +872,8 @@ class WorkspaceService:
 
     def close(self) -> None:
         self._executor.shutdown(wait=True)
+        if self.budget_ledger is not None:
+            self.budget_ledger.close()
         self.store.close()
 
 

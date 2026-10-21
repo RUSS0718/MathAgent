@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
+from .run_budget import RunBudgetLedger, RunBudgetLimits, execute_graph
 from .storage import SQLiteStore
 
 MAX_PROBLEM_CHARS = 10_000
@@ -91,12 +92,18 @@ class RunService:
         profile: str = SHOWCASE_PROFILE,
         database_path: str | Any = ":memory:",
         execution_loop: Any | None = None,
+        run_budget_limits: RunBudgetLimits | None = None,
     ) -> None:
         ensure_showcase_profile(profile)
         self.profile = profile
         self._agent = agent or FakeAgentAdapter()
         self._store = SQLiteStore(database_path)
         self._execution_loop = execution_loop
+        self._run_budget_limits = run_budget_limits or RunBudgetLimits()
+        self._budget_ledger = (
+            RunBudgetLedger(self._store._connection)
+            if str(database_path) == ":memory:" else RunBudgetLedger(database_path=database_path)
+        )
         self.execution_mode = "live" if execution_loop is not None else "fake"
 
     def create_run(self, request: RunRequest | Mapping[str, Any]) -> dict[str, Any]:
@@ -212,7 +219,7 @@ class RunService:
         }
         self._configure_execution_loop()
         try:
-            state = self._execution_loop.run(initial_state, thread_id=run_id)
+            state = execute_graph(self._budget_ledger, self._run_budget_limits, self._execution_loop, initial_state, run_id=run_id)
         except Exception as exc:  # noqa: BLE001 - graph failures become safe Run state
             snapshot.update(
                 {
@@ -238,7 +245,7 @@ class RunService:
         if checkpoint is None:
             raise RunResumeUnavailable()
         self._configure_execution_loop()
-        state = self._execution_loop.resume(checkpoint, thread_id=run_id)
+        state = execute_graph(self._budget_ledger, self._run_budget_limits, self._execution_loop, checkpoint, run_id=run_id, resume=True)
         return self._persist_graph_result(snapshot, state)
 
     def _configure_execution_loop(self) -> None:
@@ -263,6 +270,7 @@ class RunService:
                 "result": {
                     "final_response": state.get("final_response"),
                     "summary": "langgraph execution",
+                    "budget": state.get("budget"),
                     "tool_results": copy.deepcopy(state.get("tool_results", [])),
                 },
                 "updated_at": _utc_now(),
@@ -326,6 +334,7 @@ class RunService:
     def close(self) -> None:
         """Release the product persistence connection."""
 
+        self._budget_ledger.close()
         self._store.close()
 
     def _require_run(self, run_id: str) -> dict[str, Any]:

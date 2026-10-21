@@ -20,7 +20,7 @@ from .adapters import (
 )
 from .redaction import redact_text
 from .request_attempts import capture_pipeline_attempts
-from .run_budget import RunBudgetLimits, current_budget
+from .run_budget import BudgetExhausted, RunBudgetLedger, RunBudgetLimits, current_budget
 from .tool_loop import run_tool_roundtrip
 from .tool_protocol import ToolProtocol
 from .tools import ToolRegistry
@@ -61,6 +61,7 @@ class LiveAgentPipeline:
         self.registry = registry
         self.verifier = verifier or LightweightVerificationHook()
         self.budget = budget or PipelineBudget()
+        self._run_ledger = RunBudgetLedger()
         if tool_protocol not in {"native", "text_action"}:
             raise ValueError("tool_protocol_invalid")
         if execution_mode not in {"live", "fake"}:
@@ -168,7 +169,7 @@ class LiveAgentPipeline:
                 "title": "任务需要复核",
                 "message": exc.category,
             })
-        except AdapterError as exc:
+        except (AdapterError, BudgetExhausted) as exc:
             state["status"] = "NEEDS_REVIEW"
             state["stage"] = "failed"
             state["error"] = {
