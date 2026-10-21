@@ -52,7 +52,7 @@
       "input_price_per_million": null,
       "output_price_per_million": null,
       "usage_missing_policy": "retain_unknown_stop_on_request_and_time_caps",
-      "status": "planned_requires_s1_to_s5"
+      "status": "planned_requires_s1_to_s5_offline_contracts_and_g1"
     }
   },
   "directions": [
