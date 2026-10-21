@@ -30,6 +30,10 @@ class EvidencePackExporter:
     ) -> dict[str, Any]:
         """Return a JSON-compatible, redacted Evidence Pack."""
 
+        if not tool_results:
+            result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
+            stored_tools = result.get("tool_results", [])
+            tool_results = [item for item in stored_tools if isinstance(item, Mapping)]
         verification_data = _verification_dict(verification)
         pack = {
             "version": self.version,
@@ -108,7 +112,7 @@ def _verification_dict(value: VerificationResult | Mapping[str, Any] | None) -> 
 
 
 def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
-    return {
+    summary = {
         "evidence_id": f"event_{index}",
         "type": event.get("type", "unknown"),
         "sequence": event.get("sequence", index),
@@ -117,12 +121,21 @@ def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
         "summary": event.get("summary", ""),
         "error_category": event.get("error_category"),
     }
+    for key in ("tool_call_id", "protocol", "tool_name"):
+        if event.get(key) is not None:
+            summary[key] = event[key]
+    return summary
 
 
 def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
     summary = {
         "evidence_id": result.get("evidence_id", result.get("name", "tool")),
         "request_id": result.get("request_id"),
+        "tool_call_id": result.get("tool_call_id"),
+        "protocol": result.get("protocol"),
+        "continuation_tool_call_id": result.get("continuation_tool_call_id"),
+        "continuation_status": result.get("continuation_status"),
+        "continuation_response_received": result.get("continuation_response_received"),
         "continuation_request_id": result.get("continuation_request_id"),
         "transport_mode": result.get("transport_mode", "unavailable"),
         "name": result.get("name"),

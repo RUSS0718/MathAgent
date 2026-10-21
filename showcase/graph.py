@@ -99,6 +99,7 @@ class ToolExecutionResult:
     value: Any = None
     error_category: str | None = None
     duration_seconds: float = 0.0
+    tool_call_id: str | None = None
 
     @classmethod
     def success(cls, value: Any = None, result_summary: str = "") -> ToolExecutionResult:

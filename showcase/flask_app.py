@@ -549,7 +549,10 @@ def create_app(
         result = job.get("result") if isinstance(job.get("result"), Mapping) else {}
         snapshot = {
             "run_id": job_id,
-            "execution_mode": "live" if app.config.get("SHOWCASE_MODE") == "live" else "fake",
+            "execution_mode": result.get(
+                "execution_mode",
+                "live" if app.config.get("SHOWCASE_MODE") == "live" else "fake",
+            ),
             "status": str(job.get("status", "unavailable")).upper(),
             "stage": _job_stage(events),
             "result": result,

@@ -29,7 +29,7 @@ class FakeClient:
 
 class AdapterTest(unittest.TestCase):
     def test_intern_response_can_request_registered_tool(self):
-        client = FakeClient(['{"tool_call":{"name":"python_math","arguments":{"code":"1+1"}}}'])
+        client = FakeClient(['{"protocol":"text_action","tool_call":{"id":"call_python_1","name":"python_math","arguments":{"code":"1+1"}}}'])
         adapter = InternAgentAdapter(InternModelAdapter(client))
         decision = adapter.decide({"problem": "计算 1+1"})
         self.assertEqual("tool", decision.kind)
@@ -53,7 +53,7 @@ class AdapterTest(unittest.TestCase):
     def test_deepagents_adapter_runs_product_tool_request_then_continues(self):
         client = FakeClient(
             [
-                '{"tool_call":{"name":"double","arguments":{"value":2}}}',
+                '{"protocol":"text_action","tool_call":{"id":"call_double_1","name":"double","arguments":{"value":2}}}',
                 "工具结果已收到，最终答案是 4",
             ]
         )

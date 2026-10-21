@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import wraps
@@ -18,6 +17,7 @@ from typing import Any, Protocol
 from .graph import AgentDecision
 from .request_attempts import record_attempts
 from .run_service import AgentResult, RunRequest
+from .tool_protocol import ToolProtocol, ToolRequest, parse_tool_requests
 
 
 class AdapterError(RuntimeError):
@@ -27,14 +27,6 @@ class AdapterError(RuntimeError):
         super().__init__(category)
         self.category = category
         self.detail = detail
-
-
-@dataclass(frozen=True)
-class ToolRequest:
-    """Normalized model-requested tool call."""
-
-    name: str
-    arguments: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -49,6 +41,8 @@ class ModelResponse:
     request_attempts: tuple[Mapping[str, Any], ...] = ()
     returned_model: str | None = None
     finish_reason: str | None = None
+    tool_protocol: ToolProtocol | None = None
+    tool_request_error: str | None = None
 
 
 class ContinuationTransport(Protocol):
@@ -76,13 +70,39 @@ class ModelContinuationTransport:
     def continue_(
         self,
         messages: Sequence[Mapping[str, Any]],
-        _tool_request: ToolRequest,
+        tool_request: ToolRequest,
         tool_result: Mapping[str, Any],
     ) -> ModelResponse:
-        continuation = list(messages) + [{
-            "role": "tool",
-            "content": json.dumps(dict(tool_result), ensure_ascii=False, default=str),
-        }]
+        if tool_request.protocol == "native":
+            call = {
+                "id": tool_request.tool_call_id,
+                "type": "function",
+                "function": {
+                    "name": tool_request.name,
+                    "arguments": json.dumps(
+                        dict(tool_request.arguments), ensure_ascii=False, separators=(",", ":")
+                    ),
+                },
+            }
+            continuation = list(messages) + [
+                {"role": "assistant", "content": None, "tool_calls": [call]},
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_request.tool_call_id,
+                    "name": tool_request.name,
+                    "content": json.dumps(dict(tool_result), ensure_ascii=False, default=str),
+                },
+            ]
+        else:
+            continuation = list(messages) + [
+                {"role": "assistant", "content": tool_request.assistant_content},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"tool_result": dict(tool_result)}, ensure_ascii=False, default=str
+                    ),
+                },
+            ]
         return self.model.complete(continuation, metadata={"role": "continuation"})
 
 
@@ -137,15 +157,20 @@ class InternModelAdapter:
             error.request_attempts = attempts
             raise error from exc
         text, usage = _extract_response(raw)
+        parsed = parse_tool_requests(
+            text, raw.get("tool_calls") if isinstance(raw, Mapping) else None
+        )
         attempts = record_attempts(raw.get("attempts", ()), metadata) if isinstance(raw, Mapping) else ()
         return ModelResponse(
             text=text,
-            tool_requests=tuple(_parse_tool_requests(text)),
+            tool_requests=parsed.requests,
             usage=usage,
             request_attempts=attempts,
             returned_model=raw.get("model") if isinstance(raw, Mapping) else None,
             finish_reason=raw.get("finish_reason") if isinstance(raw, Mapping) else None,
             model_id=getattr(client, "model", self.model_id) or self.model_id,
+            tool_protocol=parsed.protocol,
+            tool_request_error=parsed.error_category,
         )
 
     def _get_client(self) -> Any:
@@ -204,6 +229,8 @@ class InternAgentAdapter:
                 request = ToolRequest(
                     str(last.get("name", "")),
                     last.get("arguments", {}) if isinstance(last.get("arguments"), Mapping) else {},
+                    tool_call_id=str(last.get("tool_call_id", last.get("request_id", ""))),
+                    protocol=last.get("protocol", "text_action"),
                 )
                 response = self.continuation_transport.continue_(messages, request, last)
                 transport_mode = getattr(self.continuation_transport, "mode", "unavailable")
@@ -216,10 +243,17 @@ class InternAgentAdapter:
                 f"Intern adapter unavailable: {exc.category}",
                 error_category=exc.category,
             )
+        if response.tool_request_error:
+            return AgentDecision.review(
+                "Intern tool request could not be parsed",
+                response.tool_request_error,
+            )
         if response.tool_requests:
+            if len(response.tool_requests) != 1:
+                return AgentDecision.review("Intern requested multiple tools", "multiple_tool_requests")
             request = response.tool_requests[0]
-            if request.name == "polynomial_check" and not _valid_polynomial_request(request.arguments):
-                return AgentDecision.review("Intern polynomial_check request does not match the registered schema", "tool_request_invalid")
+            if request.error_category:
+                return AgentDecision.review("Intern tool request is invalid", request.error_category)
             return AgentDecision.tool(request.name, request.arguments, summary="Intern requested a tool")
         if not response.text.strip():
             return AgentDecision.failure("Intern returned an empty response", "empty_model_response")
@@ -271,15 +305,22 @@ class InternChatModel:
                 ]
                 text = self.client.chat(payload, temperature=0.2, max_tokens=16_384)
                 text = str(text)
-                requests = _parse_tool_requests(text)
+                requests = parse_tool_requests(text).requests
                 if requests:
                     message = AIMessage(
                         content="",
                         tool_calls=[
-                            {"name": request.name, "args": dict(request.arguments), "id": f"call_{index}"}
+                            {
+                                "name": request.name,
+                                "args": dict(request.arguments),
+                                "id": request.tool_call_id or f"call_{index}",
+                            }
                             for index, request in enumerate(requests, 1)
+                            if request.error_category is None
                         ],
                     )
+                    if not message.tool_calls:
+                        message = AIMessage(content=text)
                 else:
                     message = AIMessage(content=text)
                 return ChatResult(generations=[ChatGeneration(message=message)])
@@ -328,9 +369,21 @@ class DeepAgentsAdapter:
 def _normalize_message(message: Mapping[str, Any]) -> dict[str, Any]:
     role = message.get("role")
     content = message.get("content")
-    if not isinstance(role, str) or not isinstance(content, (str, list, tuple)):
+    if not isinstance(role, str) or not isinstance(content, (str, list, tuple, type(None))):
         raise AdapterError("message_invalid")
-    return {"role": role, "content": content}
+    normalized = {"role": role, "content": content}
+    tool_calls = message.get("tool_calls")
+    if tool_calls is not None:
+        if not isinstance(tool_calls, Sequence) or isinstance(tool_calls, (str, bytes)):
+            raise AdapterError("message_invalid")
+        normalized["tool_calls"] = [dict(call) for call in tool_calls if isinstance(call, Mapping)]
+    for key in ("tool_call_id", "name"):
+        value = message.get(key)
+        if value is not None:
+            if not isinstance(value, str):
+                raise AdapterError("message_invalid")
+            normalized[key] = value
+    return normalized
 
 
 def _prepare_deep_tool(tool: Callable[..., Any]) -> Callable[..., Any]:
@@ -353,39 +406,8 @@ def _extract_response(raw: Any) -> tuple[str, dict[str, Any]]:
     if isinstance(raw, Mapping):
         content = raw.get("content", raw.get("text", ""))
         usage = raw.get("usage") if isinstance(raw.get("usage"), Mapping) else {}
-        return str(content), dict(usage)
+        return content if isinstance(content, str) else "", dict(usage)
     return str(raw), {}
-
-
-def _parse_tool_requests(text: str) -> list[ToolRequest]:
-    candidate = text.strip()
-    if candidate.startswith("```"):
-        candidate = re.sub(r"^```(?:json)?\s*|\s*```$", "", candidate, flags=re.IGNORECASE)
-    try:
-        payload = json.loads(candidate)
-    except (TypeError, ValueError):
-        return []
-    if not isinstance(payload, Mapping):
-        return []
-    raw_calls = payload.get("tool_calls")
-    if raw_calls is None and payload.get("tool_call") is not None:
-        raw_calls = [payload.get("tool_call")]
-    if not isinstance(raw_calls, Sequence) or isinstance(raw_calls, (str, bytes)):
-        return []
-    requests: list[ToolRequest] = []
-    for call in raw_calls:
-        if not isinstance(call, Mapping) or not isinstance(call.get("name"), str):
-            continue
-        arguments = call.get("arguments", {})
-        if isinstance(arguments, str):
-            try:
-                arguments = json.loads(arguments)
-            except (TypeError, ValueError):
-                arguments = {}
-        if not isinstance(arguments, Mapping):
-            arguments = {}
-        requests.append(ToolRequest(name=call["name"], arguments=dict(arguments)))
-    return requests
 
 
 def _accepts_keyword(function: Callable[..., Any], name: str) -> bool:
@@ -398,19 +420,6 @@ def _accepts_keyword(function: Callable[..., Any], name: str) -> bool:
         )
     except (TypeError, ValueError):
         return False
-
-
-def _valid_polynomial_request(arguments: Mapping[str, Any]) -> bool:
-    required = {"schema_version", "variable", "coefficients", "domain", "candidates"}
-    return (
-        isinstance(arguments, Mapping)
-        and required.issubset(arguments)
-        and arguments.get("schema_version") == 1
-        and isinstance(arguments.get("variable"), str)
-        and isinstance(arguments.get("coefficients"), list)
-        and isinstance(arguments.get("domain"), Mapping)
-        and isinstance(arguments.get("candidates"), list)
-    )
 
 
 def _message_role(message: Any) -> str:

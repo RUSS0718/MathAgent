@@ -90,6 +90,14 @@ class WorkspaceStore:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (job_id) REFERENCES workspace_jobs(job_id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS events (
+                run_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                event_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (run_id, sequence),
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+            );
             CREATE TABLE IF NOT EXISTS workspace_actions (
                 user_id TEXT NOT NULL,
                 idempotency_key TEXT NOT NULL,
@@ -233,6 +241,7 @@ class WorkspaceStore:
                     "INSERT INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
                     (session_id, "user", problem, job_id, now),
                 )
+                self._insert_run(job_id, problem, now)
                 self._insert_event(
                     job_id,
                     "queued",
@@ -247,7 +256,6 @@ class WorkspaceStore:
                         "asset_ref": ({"file_id": input_user_file_id, "vision_status": "unavailable"} if input_user_file_id else None),
                     },
                 )
-                self._insert_run(job_id, problem, now)
                 self._connection.commit()
             except Exception:
                 self._connection.rollback()
@@ -441,6 +449,7 @@ class WorkspaceStore:
         terminal_status = "succeeded" if status == "COMPLETED" else "failed"
         final_response = state.get("final_response")
         result = {
+            "execution_mode": str(state.get("execution_mode", "live")),
             "final_response": final_response if isinstance(final_response, str) else "",
             "summary": str(state.get("summary", "live pipeline")),
             "request_attempts": list(state.get("request_attempts", [])),
@@ -484,9 +493,9 @@ class WorkspaceStore:
                         _json(
                             _run_snapshot(
                                 job_id,
-                                "COMPLETED" if terminal_status == "succeeded" else "FAILED",
+                                status if status in {"COMPLETED", "NEEDS_REVIEW"} else "FAILED",
                                 now,
-                                execution_mode="live",
+                                execution_mode=str(state.get("execution_mode", "live")),
                                 result=result,
                                 error=error,
                                 input_text=str(row["problem"]),
@@ -601,9 +610,23 @@ class WorkspaceStore:
             raise WorkspaceError("session_not_found", status=404)
 
     def _insert_event(self, job_id: str, event_type: str, payload: Mapping[str, Any]) -> None:
+        created_at = _utc_now()
+        event_payload = redact(dict(payload))
+        event_payload.setdefault("job_id", job_id)
+        event_payload.setdefault("created_at", created_at)
         self._connection.execute(
             "INSERT INTO workspace_events(job_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
-            (job_id, event_type, _json(payload), _utc_now()),
+            (job_id, event_type, _json(event_payload), created_at),
+        )
+        row = self._connection.execute(
+            "SELECT COALESCE(MAX(sequence), 0) AS last_sequence FROM events WHERE run_id=?",
+            (job_id,),
+        ).fetchone()
+        event_payload["run_id"] = job_id
+        event_payload["sequence"] = int(row["last_sequence"]) + 1
+        self._connection.execute(
+            "INSERT INTO events(run_id,sequence,event_json,created_at) VALUES(?,?,?,?)",
+            (job_id, event_payload["sequence"], _json(event_payload), created_at),
         )
 
     def _insert_run(self, job_id: str, problem: str, now: str) -> None:

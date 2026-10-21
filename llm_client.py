@@ -100,14 +100,17 @@ class InternChatClient:
 
     def chat(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float = 0.2,
         max_tokens: int = 4096,
         *,
         reasoning_mode: ReasoningMode = "inherit",
         thinking_mode: bool | None = None,
+        tools: list[dict[str, Any]] | None = None,
         timeout_seconds: int | None = None,
         _attempt_records: list[dict[str, Any]] | None = None,
+        _tool_calls_capture: list[Any] | None = None,
+        _allow_empty_content: bool = False,
     ) -> str:
         """Send a request; explicit reasoning_mode wins over thinking_mode and defaults."""
         effective_timeout = self.timeout if timeout_seconds is None else int(timeout_seconds)
@@ -119,6 +122,8 @@ class InternChatClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if tools:
+            payload["tools"] = tools
         effective_thinking_mode = self._resolve_reasoning_mode(reasoning_mode)
         if reasoning_mode == "inherit" and thinking_mode is not None:
             effective_thinking_mode = thinking_mode
@@ -191,8 +196,17 @@ class InternChatClient:
                 completion_tokens = usage["completion_tokens"]
                 self.completion_tokens.append(completion_tokens)
                 message = choice["message"]
-                content = message["content"]
-                if not isinstance(content, str) or not content.strip():
+                content = message.get("content")
+                tool_calls = message.get("tool_calls")
+                if _tool_calls_capture is not None and tool_calls is not None:
+                    _tool_calls_capture.append(tool_calls)
+                if content is None:
+                    content = ""
+                if not isinstance(content, str) or (
+                    not content.strip()
+                    and not _allow_empty_content
+                    and not (_tool_calls_capture is not None and tool_calls)
+                ):
                     raise ValueError("invalid_content")
                 reasoning_content = (
                     message.get("reasoning_content") if isinstance(message, Mapping) else None
@@ -284,19 +298,29 @@ class InternChatClient:
     def chat_response(self, messages, **kwargs) -> dict[str, Any]:
         """Return one request-scoped envelope; never read shared last-response state."""
         attempts: list[dict[str, Any]] = []
+        tool_calls: list[Any] = []
         try:
-            content = self.chat(messages, _attempt_records=attempts, **kwargs)
+            content = self.chat(
+                messages,
+                _attempt_records=attempts,
+                _tool_calls_capture=tool_calls,
+                _allow_empty_content=True,
+                **kwargs,
+            )
         except Exception as exc:
             exc.attempts = tuple(attempts)
             raise
         last = attempts[-1]
-        return {
+        response = {
             "content": content,
             "usage": {key: last.get(key) for key in provider_usage(None)},
             "model": last.get("response_model_id"),
             "finish_reason": last.get("finish_reason"),
             "attempts": tuple(attempts),
         }
+        if tool_calls:
+            response["tool_calls"] = tool_calls[-1]
+        return response
 
     def _resolve_reasoning_mode(self, reasoning_mode: ReasoningMode) -> bool | None:
         """Resolve an explicit request mode against the unchanged client default."""
