@@ -1,7 +1,7 @@
 # develop 基线审计：Intern S2 数学智能体研究与主观展示
 
-审计日期：2026-10-21（UTC）  
-固定基线：`5b0e1912e1cc82d7ab1ecd3bcb8ea5ffc10933ae`（`develop`）  
+审计日期：2026-10-21（UTC）
+固定基线：`5b0e1912e1cc82d7ab1ecd3bcb8ea5ffc10933ae`（`develop`）
 状态：源码审计与建议；不是新能力验收报告，也不是实现计划。
 
 ## 1. 范围与证据口径

@@ -10,6 +10,8 @@
 
 具体类与文件名以实施时复核为准；不得从旧路径的 mock 合同推断当前 Workspace live 已就绪。
 
+公共预算、停止和归档规则以 [总计划](../experiments/research-program-plan.md) 与 [ADR-0007](../adr/0007-experiment-boundary-and-budget.md) 为权威入口；本文件公共内容为便于独立审查的摘要，各方向不得自行放宽。
+
 ## 数据与接口合同
 
 VerificationOutcome 包含 verified/refuted/unknown/skipped、reason_code、claim_hash、scope、environment_version、certificate_ref；ActionTarget 包含 retranslate/prove_more/add_verified_premise/rederive/defer。
@@ -46,7 +48,7 @@ Run 身份、动作、证据和请求记录通过稳定引用关联。请求的�
 | R3-01 | 验证分型和用户可理解的回退 | S2–S5 | 一个工具题与一个域外题都产生正确范围的报告。 |
 | R3-02 | 可信命题上的预算干预 spike | R3-01 | 固定形式环境，对相同 UNKNOWN 比较翻译或求证追加预算。 |
 | R3-03 | 原因规则与学习分诊 | R3-02 | 只在可恢复失败上比较成本和可信证据，保留所有域外案例。 |
-| R3-04 | 端到端复核和归档 | R3-03 | 确认最终数学效果和语义忠实，不将编译率作为完整成功。 |
+| R3-04 | 端到端复核和归档 | R3-01 的工程出口；研究验证需 R3-03 | 工程出口确认分型、回退与报告合同；研究出口另行确认最终数学效果与语义忠实。 |
 
 这些是拟发布到既有 GitHub tracker 的 ticket 正文摘要，不是已创建的 Issue。每个切片完成后再走下一个有效依赖，不批量先写所有实现。
 
@@ -69,5 +71,7 @@ Run 身份、动作、证据和请求记录通过稳定引用关联。请求的�
 性能门参考总计划的同成本质量提升或质量非劣下成本节约，并要求相应置信区间支持。未达到性能门不自动否定接口或可靠性能力的工程价值；它们可默认关闭合入 develop。
 
 ## 归档与 PR
+
+任一完整工程切片通过共同验收后，可独立归档并 PR 到 develop，后续学习、形式化或理论 ticket 保留 planned/blocked/inconclusive；不把研究成功设为工程保留的前置条件。
 
 每个确认批次保存脱敏 summary、manifest、环境/配置/数据版本、请求与工具成本、失败摘要、统计与消融、保留决定和复现说明。raw 在 ignored artifacts 或指定外部证据位置；分支归档提交仅存允许材料与哈希。PR 按 Summary/Evidence/Merge Danger 组织，附默认开关、回归与已撤回主张。

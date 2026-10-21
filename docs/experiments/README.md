@@ -7,6 +7,22 @@
 3. [Intern S2 合同](intern-s2-api-contract.md)：官方来源、待探测能力、计量与公开字段。
 4. [本轮设置状态](setup-status.md)：实际运行的检查与尚未完成的事项。
 5. [机器可读实验配置](../../experiments/campaign.json)：默认 offline，各研究策略关闭；不是在线调度器。
+6. [研究近邻来源](research-prior-sources.md)：正式论文与预印本状态分开记录。
+7. [审查与交接](review-and-handoff.md)：两条审查轴的发现、修复和下一切片。
+8. [setup PR 正文草案](setup-pr-draft.md)：面向 develop 的可审查说明，尚未创建远端 PR。
+
+## 离线预检入口
+
+```bash
+uv sync --locked --all-groups
+uv run python scripts/check_experiment_setup.py --offline
+uv run python scripts/check.py --offline
+uv run python scripts/check_showcase_release.py
+```
+
+预检 stdout 为 JSON；成功退出码为 0，合同错误为 2。需要保存时添加 `--output artifacts/<run_id>/experiment-preflight.json`。检查固定模型、关闭开关、有限且类型正确的预算、五方向文档和指定提交的官方哈希；不读取凭证、不发出网络请求。输出中的 `planned_not_implemented=true` 表示在线调度与研究算法尚待开发。
+
+需保留配置中的基线提交对象；浅克隆先在安装步骤补齐历史，预检自身不会联网补拉。质量 CI 的 checkout 已配置完整历史，支持 detached HEAD。
 
 ## 各方向开发前材料
 

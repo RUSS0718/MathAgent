@@ -60,3 +60,5 @@ Tool invoke、Run 恢复与 Evidence 报告：捕捉前提变化后的命中/失
 评价：无效复用率、真实命中率、最终 kernel/任务通过率、全部维护成本、恢复时延、有效片段保留率与跨前提变更正确性。
 
 依赖：公共 setup S1–S5 的对应能力通过；实际依赖按技术文档中的 ticket 图执行。PR 目标为 develop，默认启用与学术晋升另行判定。
+
+原始论文来源见 [近邻来源索引](../experiments/research-prior-sources.md)；详细差异沿用前序文献审计，并在正式实验前复核。

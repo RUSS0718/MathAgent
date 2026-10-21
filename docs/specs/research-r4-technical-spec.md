@@ -10,6 +10,8 @@
 
 具体类与文件名以实施时复核为准；不得从旧路径的 mock 合同推断当前 Workspace live 已就绪。
 
+公共预算、停止和归档规则以 [总计划](../experiments/research-program-plan.md) 与 [ADR-0007](../adr/0007-experiment-boundary-and-budget.md) 为权威入口；本文件公共内容为便于独立审查的摘要，各方向不得自行放宽。
+
 ## 数据与接口合同
 
 ScopedEvidenceKey 包含 input_digest、premise_digest、domain_digest、dependency_digest、tool_version、environment_digest；CacheResult 包含 hit/miss/invalidated、evidence_id、scope、recheck_status。
@@ -46,7 +48,7 @@ Tool invoke、Run 恢复与 Evidence 报告：捕捉前提变化后的命中/失
 | R4-01 | 同范围确定性工具复用 | S4–S5 | 重复受限工具请求展示可追溯命中并核对正确性。 |
 | R4-02 | 前提变更与保守失效 | R4-01 | 修改定义域或版本后结果失效并重新计算。 |
 | R4-03 | 真实恢复中的优化比较 | R4-02、稳定验证接口 | 普通依赖缓存与预算优化在真实问题中比较总成本。 |
-| R4-04 | 组合消融与归档 | R4-03 | 与 R2 或 R3 的冻结版本组合，验证维护成本和可靠性。 |
+| R4-04 | 组合消融与归档 | R4-02 的工程出口；优化验证需 R4-03 | 工程出口确认作用域缓存正确；优化出口与冻结 R2/R3 组合，验证维护成本和可靠性。 |
 
 这些是拟发布到既有 GitHub tracker 的 ticket 正文摘要，不是已创建的 Issue。每个切片完成后再走下一个有效依赖，不批量先写所有实现。
 
@@ -69,5 +71,7 @@ Tool invoke、Run 恢复与 Evidence 报告：捕捉前提变化后的命中/失
 性能门参考总计划的同成本质量提升或质量非劣下成本节约，并要求相应置信区间支持。未达到性能门不自动否定接口或可靠性能力的工程价值；它们可默认关闭合入 develop。
 
 ## 归档与 PR
+
+任一完整工程切片通过共同验收后，可独立归档并 PR 到 develop，后续学习、形式化或理论 ticket 保留 planned/blocked/inconclusive；不把研究成功设为工程保留的前置条件。
 
 每个确认批次保存脱敏 summary、manifest、环境/配置/数据版本、请求与工具成本、失败摘要、统计与消融、保留决定和复现说明。raw 在 ignored artifacts 或指定外部证据位置；分支归档提交仅存允许材料与哈希。PR 按 Summary/Evidence/Merge Danger 组织，附默认开关、回归与已撤回主张。

@@ -10,6 +10,8 @@
 
 具体类与文件名以实施时复核为准；不得从旧路径的 mock 合同推断当前 Workspace live 已就绪。
 
+公共预算、停止和归档规则以 [总计划](../experiments/research-program-plan.md) 与 [ADR-0007](../adr/0007-experiment-boundary-and-budget.md) 为权威入口；本文件公共内容为便于独立审查的摘要，各方向不得自行放宽。
+
 ## 数据与接口合同
 
 PlanRecord 包含 plan_hash、key_constructions、subgoals、premise_refs、visible_prefix_hash；InterventionRecord 包含 intended_action、audit_status、audit_source、budget_id；UNKNOWN 样本保留但不强制赋认知标签。
@@ -69,5 +71,7 @@ Run 身份、动作、证据和请求记录通过稳定引用关联。请求的�
 性能门参考总计划的同成本质量提升或质量非劣下成本节约，并要求相应置信区间支持。未达到性能门不自动否定接口或可靠性能力的工程价值；它们可默认关闭合入 develop。
 
 ## 归档与 PR
+
+任一完整工程切片通过共同验收后，可独立归档并 PR 到 develop，后续学习、形式化或理论 ticket 保留 planned/blocked/inconclusive；不把研究成功设为工程保留的前置条件。
 
 每个确认批次保存脱敏 summary、manifest、环境/配置/数据版本、请求与工具成本、失败摘要、统计与消融、保留决定和复现说明。raw 在 ignored artifacts 或指定外部证据位置；分支归档提交仅存允许材料与哈希。PR 按 Summary/Evidence/Merge Danger 组织，附默认开关、回归与已撤回主张。
