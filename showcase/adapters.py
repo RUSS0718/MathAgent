@@ -118,6 +118,7 @@ class InternModelAdapter:
         max_tokens: int = 16_384,
         client_timeout: int | None = None,
         client_retry: int | None = None,
+        thinking_mode: bool | None = None,
     ) -> None:
         self._client = client
         self.model_id = model_id or os.environ.get("INTERN_MODEL", "intern-s2")
@@ -125,6 +126,7 @@ class InternModelAdapter:
         self.max_tokens = max_tokens
         self.client_timeout = client_timeout
         self.client_retry = client_retry
+        self.thinking_mode = thinking_mode
 
     def complete(
         self,
@@ -145,6 +147,8 @@ class InternModelAdapter:
         # clients may opt in; old clients continue to receive the official text shape.
         if tools and _accepts_keyword(client.chat, "tools"):
             kwargs["tools"] = [dict(tool) for tool in tools]
+        if self.thinking_mode is not None and _accepts_keyword(client.chat, "thinking_mode"):
+            kwargs["thinking_mode"] = self.thinking_mode
         try:
             transport = getattr(client, "chat_response", client.chat)
             raw = transport(normalized, **kwargs)

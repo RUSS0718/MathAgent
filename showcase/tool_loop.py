@@ -163,6 +163,7 @@ def run_tool_roundtrip(
         record["continuation_error_category"] = category
         return ToolLoopOutcome("", (record,), category, "工具 continuation 未在 Run 时限内完成")
     record["continuation_response_received"] = True
+    record["continuation_finish_reason"] = continuation_response.finish_reason
 
     try:
         ensure_runtime()

@@ -136,6 +136,7 @@ def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         "continuation_tool_call_id": result.get("continuation_tool_call_id"),
         "continuation_status": result.get("continuation_status"),
         "continuation_response_received": result.get("continuation_response_received"),
+        "continuation_finish_reason": result.get("continuation_finish_reason"),
         "continuation_request_id": result.get("continuation_request_id"),
         "transport_mode": result.get("transport_mode", "unavailable"),
         "name": result.get("name"),
