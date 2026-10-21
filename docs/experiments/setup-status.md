@@ -67,3 +67,12 @@
 - requested model 为 `intern-s2`，returned model 为 `Intern-S2`；provider usage 为 prompt 123、completion 77、total 200；reasoning/cached token、provider request ID 和费用为 null。该次工程合同通过且基础 usage 可见，不证明完整内部思考计量、精确费用或数学能力提升。
 - Run 为 `run_06e62b864a53bb4f0f5b9bb748d80e0e`，本地 attempt ID 为 `da9db60afa174cfda93224b4c535df5f`。脱敏计量归档：ignored `artifacts/s1-g1-e12e1e757962489183641d55966e14c9/g1-report.json`；不提交运行数据库或原始响应。
 - S2–S6 尚未验收。G2 已独立批准最多 6 Run / 12 HTTP attempts、每 Run 两次生成、每次 max_tokens≤512、无重试、串行、失败不补跑；额度确认见 [#26 评论](https://github.com/RUSS0718/MathAgent/issues/26#issuecomment-6311481669)。PR #22 保持 Draft/Open。
+
+## S2 离线闭环与 G2 失败证据（2026-10-21）
+
+- [#25](https://github.com/RUSS0718/MathAgent/issues/25) 离线闭环通过，提交 `ad69ff5`；后续规格复核发现 Run report/Evidence 事件筛选不一致，已用 `da8b101` 修复并补成功/失败 HTTP 回归。native/text action、注册权限、schema、call ID、continuation 和 fake 来源均可查询。
+- G2 辅助入口提交 `4532822`，默认离线零请求，显式 `--live` 才联网。128 项 unittest、23 项重点检查及 Ruff 通过；这些是离线工程证据。
+- 执行唯一批准的 G2 批次后，6/6 Run 全部保留，实际使用 6 次 HTTP attempt。均为 HTTP 200、requested model `intern-s2`、returned model `Intern-S2`、finish reason `tool_calls`；均在 Registry 以 `tool_schema_invalid` 拒绝，未发起 continuation。G2 为 `needs_review`，[#26](https://github.com/RUSS0718/MathAgent/issues/26) 未完成，S3–S6 未启动。
+- 安全参数摘要显示六次 `domain` 均为字符串，工具 schema 要求对象；同一 Registry 用对象 `{"kind":"real"}` 离线复核成功。现有证据指向模型参数形状不符合 schema，未复现校验器缺陷；未读取或公开参数字符串值、原始响应或隐藏推理。
+- 六次 provider usage 合计 prompt 4048、completion 1393、total 5441；reasoning/cached 和费用仍未知。该合计仅用于本次验收消耗记录，不是 S3 的 Run 预算账本。
+- 脱敏归档：ignored `artifacts/g2-live-ce9766241c9b4193b4ef988db2db50ee/g2-report.json`，SHA-256 `0aa3044d513da90bef1db7646175b42810753e3c4853f7ead88c3febbb1272b3`。失败不补跑；剩余 attempt 上限不自动授权替换失败 Run。再次 live 验收须明确新增预算。
