@@ -173,17 +173,21 @@ def run_tool_roundtrip(
         return ToolLoopOutcome("", (record,), category, "工具 continuation 超出 Run 时限")
 
     if continuation_response.tool_request_error or continuation_response.tool_requests:
-        record["continuation_status"] = "unconsumed"
-        record["continuation_error_category"] = "tool_result_not_consumed"
+        record["continuation_status"] = (
+            "another_tool_requested"
+            if continuation_response.tool_requests and not continuation_response.tool_request_error
+            else "incomplete"
+        )
+        record["continuation_error_category"] = "tool_continuation_incomplete"
         return ToolLoopOutcome(
-            "", (record,), "tool_result_not_consumed", "模型没有消费工具结果并请求了另一个工具"
+            "", (record,), "tool_continuation_incomplete", "模型 continuation 未完成当前工具回路"
         )
     solver_text = continuation_response.text.strip()
     if not solver_text:
-        record["continuation_status"] = "unconsumed"
-        record["continuation_error_category"] = "tool_result_not_consumed"
+        record["continuation_status"] = "empty_response"
+        record["continuation_error_category"] = "tool_continuation_incomplete"
         return ToolLoopOutcome(
-            "", (record,), "tool_result_not_consumed", "模型未消费工具结果并返回答案"
+            "", (record,), "tool_continuation_incomplete", "工具结果 continuation 返回空文本"
         )
     record.update(
         continuation_tool_call_id=request.tool_call_id,

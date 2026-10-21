@@ -115,6 +115,7 @@ class LiveToolWorkspaceContractTest(unittest.TestCase):
                 "job": job,
                 "run": client.get(f"/api/runs/{job_id}").get_json(),
                 "run_events": client.get(f"/api/runs/{job_id}/events").get_json()["events"],
+                "run_report": client.get(f"/api/runs/{job_id}/report").get_json(),
                 "workspace_events": client.get(
                     f"/api/agent/jobs/{job_id}/events?last_event_id=0"
                 ).data.decode(),
@@ -194,6 +195,23 @@ class LiveToolWorkspaceContractTest(unittest.TestCase):
                 self.assertEqual(call_id or "", tool["tool_call_id"])
                 self.assertEqual(2, len(result["provider_requests"]))
                 self.assertEqual(call_id or "", result["evidence"]["tools"][0]["tool_call_id"])
+                self.assertEqual(
+                    result["job_report"]["report"]["tool_summaries"],
+                    result["run_report"]["report"]["tool_summaries"],
+                )
+                self.assertEqual(
+                    result["job_report"]["report"]["tool_summaries"][0]["tool_call_id"],
+                    result["run_report"]["report"]["tool_summaries"][0]["tool_call_id"],
+                )
+                self.assertEqual(
+                    result["job_report"]["report"]["checks"],
+                    result["run_report"]["report"]["checks"],
+                )
+                self.assertEqual(result["job"]["job_id"], result["run_report"]["evidence_id"])
+                self.assertEqual(
+                    result["job_report"]["report"]["checks"],
+                    result["evidence"]["verification"],
+                )
 
     def test_multiple_native_calls_are_rejected_without_executing_either(self):
         handler_calls = []
@@ -349,7 +367,7 @@ class LiveToolWorkspaceContractTest(unittest.TestCase):
         self.assertEqual(call_id, result["provider_requests"][2]["messages"][-1]["tool_call_id"])
         self.assertEqual(call_id, result["evidence"]["tools"][0]["tool_call_id"])
 
-    def test_empty_continuation_is_marked_unconsumed(self):
+    def test_empty_continuation_is_reported_without_claiming_non_consumption(self):
         registry = ToolRegistry()
         registry.register_polynomial_check()
         call_id = "call_empty_continuation"
@@ -369,11 +387,36 @@ class LiveToolWorkspaceContractTest(unittest.TestCase):
         result = self._run_job(provider, registry)
 
         self.assertEqual("failed", result["job"]["status"])
-        self.assertEqual("tool_result_not_consumed", result["run"]["error"]["category"])
+        self.assertEqual("tool_continuation_incomplete", result["run"]["error"]["category"])
         tool = result["job"]["result"]["tool_results"][0]
-        self.assertEqual("unconsumed", tool["continuation_status"])
+        self.assertEqual("empty_response", tool["continuation_status"])
         self.assertTrue(tool["continuation_response_received"])
         self.assertEqual(call_id, result["evidence"]["tools"][0]["tool_call_id"])
+
+    def test_another_continuation_tool_request_is_reported_as_incomplete(self):
+        registry = ToolRegistry()
+        registry.register_polynomial_check()
+        call_id = "call_second_tool"
+        arguments = {
+            "schema_version": 1,
+            "variable": "x",
+            "coefficients": ["1", "-1"],
+            "domain": {"kind": "real"},
+            "candidates": ["1"],
+        }
+        provider = DeterministicHTTPProvider([
+            ProviderResponse({"content": "Plan."}),
+            _native_tool_response(call_id, "polynomial_check", arguments),
+            _native_tool_response("call_extra", "polynomial_check", arguments),
+        ])
+
+        result = self._run_job(provider, registry)
+
+        self.assertEqual("failed", result["job"]["status"])
+        self.assertEqual("tool_continuation_incomplete", result["run"]["error"]["category"])
+        tool = result["job"]["result"]["tool_results"][0]
+        self.assertEqual("another_tool_requested", tool["continuation_status"])
+        self.assertTrue(tool["continuation_response_received"])
 
     def test_native_tool_call_id_reaches_execution_continuation_events_and_evidence(self):
         tool_call_id = "call_poly_9f4a"
@@ -442,6 +485,24 @@ class LiveToolWorkspaceContractTest(unittest.TestCase):
         self.assertTrue(evidence["tools"][0]["checker_evidence_id"])
         self.assertTrue(evidence["tools"][0]["continuation_response_received"])
         self.assertEqual("fake", result["job_report"]["mode"])
+        self.assertEqual(
+            result["job_report"]["report"]["tool_summaries"],
+            result["run_report"]["report"]["tool_summaries"],
+        )
+        self.assertEqual(
+            result["job_report"]["report"]["tool_summaries"][0]["tool_call_id"],
+            result["run_report"]["report"]["tool_summaries"][0]["tool_call_id"],
+        )
+        self.assertEqual(
+            result["job_report"]["report"]["checks"],
+            result["run_report"]["report"]["checks"],
+        )
+        self.assertEqual(result["job"]["job_id"], result["run_report"]["evidence_id"])
+        self.assertEqual(result["job"]["job_id"], result["evidence"]["evidence_id"])
+        self.assertEqual(
+            result["job_report"]["report"]["checks"],
+            result["evidence"]["verification"],
+        )
 
 
 if __name__ == "__main__":

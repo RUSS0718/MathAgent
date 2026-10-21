@@ -480,8 +480,10 @@ def create_app(
             events = service.get_events(run_id)
         except RunNotFoundError as exc:
             return _json_error(exc.category, 404)
-        tool_results = [event for event in events if event.get("type") == "tool_completed"]
-        verification = app.extensions["showcase_verifier"].verify(snapshot, tool_results)
+        tool_results = _stored_tool_results(snapshot, events)
+        verification = _stored_verification(
+            snapshot, tool_results, app.extensions["showcase_verifier"]
+        )
         pack = app.extensions["showcase_evidence_exporter"].export(
             snapshot,
             events=events,
@@ -499,19 +501,17 @@ def create_app(
             events = service.get_events(run_id)
         except RunNotFoundError as exc:
             return _json_error(exc.category, 404)
-        tool_results = [event for event in events if event.get("type") == "tool_completed"]
-        verification = app.extensions["showcase_verifier"].verify(snapshot, tool_results)
+        tool_results = _stored_tool_results(snapshot, events)
+        verification = _stored_verification(
+            snapshot, tool_results, app.extensions["showcase_verifier"]
+        )
         return jsonify({
             "version": app.extensions["showcase_evidence_exporter"].report_version,
             "evidence_id": run_id,
             "status": snapshot.get("status"),
             "mode": snapshot.get("execution_mode", "unavailable"),
             "report": app.extensions["showcase_evidence_exporter"].report(
-                snapshot, tool_results=tool_results, verification={
-                    "status": verification.status,
-                    "findings": list(verification.findings),
-                    "checker": verification.checker,
-                }
+                snapshot, tool_results=tool_results, verification=verification
             ),
         })
 
@@ -714,6 +714,37 @@ def _job_stage(events: list[Mapping[str, Any]]) -> str:
         return "unknown"
     latest = events[-1].get("data", {})
     return str(latest.get("stage") or latest.get("node_name") or latest.get("type") or "unknown")
+
+
+def _stored_tool_results(
+    snapshot: Mapping[str, Any], events: list[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    result = snapshot.get("result")
+    stored = result.get("tool_results") if isinstance(result, Mapping) else None
+    if isinstance(stored, list):
+        return [dict(item) for item in stored if isinstance(item, Mapping)]
+    return [
+        dict(event)
+        for event in events
+        if event.get("type") in {"tool_completed", "tool_call_result"}
+    ]
+
+
+def _stored_verification(
+    snapshot: Mapping[str, Any],
+    tool_results: list[dict[str, Any]],
+    verifier: Any,
+) -> dict[str, Any]:
+    result = snapshot.get("result")
+    stored = result.get("verification") if isinstance(result, Mapping) else None
+    if isinstance(stored, Mapping):
+        return dict(stored)
+    checked = verifier.verify(dict(snapshot), tool_results)
+    return {
+        "status": checked.status,
+        "findings": list(checked.findings),
+        "checker": checked.checker,
+    }
 
 
 def _dashboard_page() -> str:
