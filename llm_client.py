@@ -172,7 +172,9 @@ class InternChatClient:
             attempt_timeout = effective_timeout
             if _attempt_budget is not None:
                 estimate = len(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"))
-                attempt_timeout = min(effective_timeout, _attempt_budget.before_attempt(request_event, estimate))
+                attempt_timeout = min(
+                    effective_timeout, _attempt_budget.before_attempt(request_event, estimate)
+                )
             response = None
             failure: BaseException | None = None
             try:
