@@ -79,3 +79,5 @@
 - 用户另批预算后，用提示版本 `g2-native-tool-v2`（`a971919`）执行第二批 6 Run / 6 attempts；均仍为 `tool_schema_invalid`，未进入 continuation。安全摘要再次显示 `domain` 为字符串。仅强化提示未解决问题，不能区分模型生成不合规与托管服务处理嵌套 `oneOf` 的影响。
 - 第二批 provider usage 合计 prompt 4870、completion 1494、total 6364；费用未知。归档为 ignored `artifacts/g2-live-c8a6c159a3404373aa9d6c6cb3588429/g2-report.json`，SHA-256 `31435d58bd10854b8f55ce9cc59c87e682a59eb06ed615336832ceb9bcc7f829`。
 - `3cd4151` 在权威 schema 的 `domain.oneOf` 外显式增加 `type: object`，保留原分支与全部约束，并记录 schema 身份。此修正仅完成离线合同验证，托管服务效果未知；未执行第三批生成。
+- 用户批准第三个独立批次后，在 `bcf1a20` 执行 G2：6/6 Run、12 HTTP attempts 全部形成 native 请求 → Registry success → 匹配 call ID 的 continuation 响应，G2 PASS，#26 完成。每次 thinking=true、max_tokens=512，无重试；前两批失败继续保留。候选集刻意含错误值，checker conflict 符合设计；通过只证明协议闭环，不证明数学能力提升、候选完备性或语义消费。
+- 第三批归档：ignored `artifacts/g2-live-f5c14b5852474a7b85feb00b3428301f/g2-report.json`，SHA-256 `6d8f32818a8b50135a4ee7d8f26bae9ae42a8276b6d295b64eed63842b252f49`。此前“未执行第三批”是修正准备时点记录；当前 S2 live 硬门已通过，可进入 S3。
