@@ -126,7 +126,6 @@ class CampaignService:
             }
             document.pop("archive", None)
             document["archive"] = self.store.archive(campaign_id, "report", document)
-            self.store.save(document, user_id)
             return document
 
     def _refresh_arm(self, arm, user_id):

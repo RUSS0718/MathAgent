@@ -1,7 +1,9 @@
 """Durable batch intents and content addressed local archives."""
 
 import json
+import os
 import sqlite3
+import tempfile
 import threading
 import uuid
 from contextlib import contextmanager
@@ -124,6 +126,18 @@ class CampaignStore:
         directory.mkdir(parents=True, exist_ok=True)
         name = f"{kind}-{content_hash}.json"
         target = directory / name
-        if not target.exists():
-            target.write_bytes(payload)
+        if not target.exists() or target.read_bytes() != payload:
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    dir=directory, prefix=".archive-", delete=False
+                ) as stream:
+                    temporary = Path(stream.name)
+                    stream.write(payload)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(temporary, target)
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
         return {"path": f"{campaign_id}/{name}", "sha256": content_hash}
