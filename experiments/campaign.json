@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "study_id": "mathagent-intern-s2-20261021",
+  "base_commit": "5b0e1912e1cc82d7ab1ecd3bcb8ea5ffc10933ae",
+  "setup_branch": "chore/experiment-setup-intern-s2",
+  "profile": "research_experimental",
+  "model": "intern-s2",
+  "thinking_mode": true,
+  "allow_network": false,
+  "features": {
+    "r1": false,
+    "r2": false,
+    "r3": false,
+    "r4": false,
+    "r5": false
+  },
+  "archive": {
+    "raw_root": "artifacts",
+    "raw_in_git": false,
+    "external_uri": null
+  },
+  "stages": {
+    "offline": {
+      "max_generation_attempts": 0
+    },
+    "api_probe": {
+      "max_models_queries": 1,
+      "max_generation_attempts": 8,
+      "max_tokens_per_attempt": 512,
+      "automatic_retries": 0,
+      "max_inflight": 1,
+      "requests_per_minute": 20
+    },
+    "calibration": {
+      "independent_problems": 12,
+      "strategies": 2,
+      "paired_repeats_for_tool_problems": 3,
+      "max_runs": 30,
+      "max_generation_attempts": 128,
+      "max_logical_calls_per_run": 4,
+      "max_tokens_per_attempt": 8192,
+      "max_requested_output_tokens_per_run": 16384,
+      "max_input_tokens_estimate_per_attempt": 4096,
+      "accounted_plus_reserved_tokens_limit": 1000000,
+      "max_runtime_seconds_per_run": 600,
+      "max_batch_active_seconds": 7200,
+      "automatic_retries_per_logical_call": 1,
+      "max_inflight": 1,
+      "requests_per_minute": 20,
+      "currency": null,
+      "money_limit": null,
+      "input_price_per_million": null,
+      "output_price_per_million": null,
+      "usage_missing_policy": "retain_unknown_stop_on_request_and_time_caps",
+      "status": "planned_requires_s1_to_s5"
+    }
+  },
+  "directions": [
+    {
+      "id": "r1",
+      "branch": "feat/r1-action-value-routing",
+      "prd": "docs/prd/research-r1-prd.md",
+      "technical_spec": "docs/specs/research-r1-technical-spec.md",
+      "adr": "docs/adr/0008-r1-same-model-actions.md",
+      "status": "planned"
+    },
+    {
+      "id": "r2",
+      "branch": "feat/r2-de-counterfactual-control",
+      "prd": "docs/prd/research-r2-prd.md",
+      "technical_spec": "docs/specs/research-r2-technical-spec.md",
+      "adr": "docs/adr/0009-r2-observable-plan-interventions.md",
+      "status": "planned"
+    },
+    {
+      "id": "r3",
+      "branch": "feat/r3-unknown-triage",
+      "prd": "docs/prd/research-r3-prd.md",
+      "technical_spec": "docs/specs/research-r3-technical-spec.md",
+      "adr": "docs/adr/0010-r3-typed-verification-unknown.md",
+      "status": "planned"
+    },
+    {
+      "id": "r4",
+      "branch": "feat/r4-scoped-evidence-reuse",
+      "prd": "docs/prd/research-r4-prd.md",
+      "technical_spec": "docs/specs/research-r4-technical-spec.md",
+      "adr": "docs/adr/0011-r4-scoped-evidence-identity.md",
+      "status": "planned"
+    },
+    {
+      "id": "r5",
+      "branch": "feat/r5-final-acceptance-risk",
+      "prd": "docs/prd/research-r5-prd.md",
+      "technical_spec": "docs/specs/research-r5-technical-spec.md",
+      "adr": "docs/adr/0012-r5-final-artifact-risk-target.md",
+      "status": "planned"
+    }
+  ]
+}

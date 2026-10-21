@@ -78,6 +78,12 @@ v0.2 PRD 是待评审提案；不覆盖这些 accepted ADR，也不授权修改�
 - [Issue tracker](agents/issue-tracker.md)、[状态标签](agents/triage-labels.md)、[领域文档约定](agents/domain.md)
 - [示例目录说明](../examples/README.md)、[比赛仓库调研](research/hackathon-winning-repo-landscape.md)
 
+## Intern S2 五方向实验计划
+
+- [实验开发入口](experiments/README.md)：总计划、固定 develop 审计、Intern S2 合同及五组 PRD、技术规格和 ADR。
+- [实际 setup 状态](experiments/setup-status.md)：只记录已执行检查；proposed 文档、离线合同与 live 能力分开标记。
+- [实验配置](../experiments/campaign.json)：默认 offline、五方向关闭；配置预检不代表在线调度器已实现。
+
 ## 早期方案与时效说明
 
 | 文档 | 阅读方式 |
