@@ -39,6 +39,7 @@ class RunBudgetContractTest(unittest.TestCase):
                 self.calls += 1
                 return "2"
 
+        self.enterContext(patch.dict(os.environ, {"INTERN_API_KEY": "fake-key"}))
         unsupported = UnsupportedClient()
         cases = [
             (InternChatClient(retry=1), PipelineBudget(max_model_calls=0)),
