@@ -443,6 +443,7 @@ class WorkspaceStore:
         result = {
             "final_response": final_response if isinstance(final_response, str) else "",
             "summary": str(state.get("summary", "live pipeline")),
+            "request_attempts": list(state.get("request_attempts", [])),
             "tool_results": [
                 {key: value for key, value in item.items() if key != "_value"}
                 for item in state.get("tool_results", [])

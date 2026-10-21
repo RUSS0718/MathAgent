@@ -7,6 +7,8 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from llm_response import public_attempt
+
 from .redaction import redact
 from .verification import VerificationResult
 
@@ -46,6 +48,7 @@ class EvidencePackExporter:
             "timeline": [_event_summary(event, index) for index, event in enumerate(events, 1)],
             "agent": {"summary": snapshot.get("agent_summary", "")},
             "tools": [_tool_summary(result) for result in tool_results],
+            "request_attempts": _attempts(snapshot),
             "verification": verification_data,
             "artifacts": [redact(artifact) for artifact in artifacts],
             "feature_status": {
@@ -76,6 +79,7 @@ class EvidencePackExporter:
         check = verification or {"status": "unknown", "findings": ["verification_not_run"]}
         return redact({
             "answer": answer,
+            "request_attempts": _attempts(snapshot),
             "public_summary": summary,
             "stage": snapshot.get("stage"),
             "asset_refs": snapshot.get("asset_refs", []),
@@ -163,3 +167,9 @@ def replay_evidence(pack: Mapping[str, Any]) -> dict[str, Any]:
 
 
 __all__ = ["EvidencePackExporter", "replay_evidence"]
+
+
+def _attempts(snapshot):
+    result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
+    records = snapshot.get("request_attempts", result.get("request_attempts", []))
+    return [public_attempt(item, run_id=item.get("run_id"), role=item.get("role")) for item in records if isinstance(item, Mapping)]

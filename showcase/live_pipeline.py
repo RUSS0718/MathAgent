@@ -23,6 +23,7 @@ from .adapters import (
 )
 from .graph import ToolExecutionResult
 from .redaction import redact_text
+from .request_attempts import capture_pipeline_attempts
 from .tools import ToolRegistry
 from .verification import LightweightVerificationHook
 
@@ -64,6 +65,7 @@ class LiveAgentPipeline:
         self.verifier = verifier or LightweightVerificationHook()
         self.budget = budget or PipelineBudget()
 
+    @capture_pipeline_attempts
     def run(
         self,
         run_id: str,

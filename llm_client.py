@@ -9,8 +9,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import requests
+
+from llm_response import provider_usage, safe_identifier
 
 DEFAULT_API_BASE = "https://chat.intern-ai.org.cn/api/v1/chat/completions"
 # The provider's API identifier for the current Intern-S2 model.
@@ -75,12 +78,12 @@ class InternChatClient:
         self.retry = retry if retry is not None else _positive_int_env("INTERN_RETRY_COUNT", 1)
         # P0.1: per-call finish_reason log (local diagnostic only; the official
         # client keeps its own counters).  Appended in call order for serial runs.
-        self.finish_reasons: list[str] = []
+        self.finish_reasons: list[str | None] = []
         # 13.2 A/B diagnostics: per-call completion token count and raw content,
         # so the evaluator can measure thinking-leak rate / marker rate / output
         # tokens without re-requesting.  Local-only; the official client is
         # untouched and never sees these lists.
-        self.completion_tokens: list[int] = []
+        self.completion_tokens: list[int | None] = []
         self.raw_contents: list[str] = []
         self.response_metadata: list[dict[str, Any]] = []
         self.last_response_metadata: dict[str, Any] | None = None
@@ -104,6 +107,7 @@ class InternChatClient:
         reasoning_mode: ReasoningMode = "inherit",
         thinking_mode: bool | None = None,
         timeout_seconds: int | None = None,
+        _attempt_records: list[dict[str, Any]] | None = None,
     ) -> str:
         """Send a request; explicit reasoning_mode wins over thinking_mode and defaults."""
         effective_timeout = self.timeout if timeout_seconds is None else int(timeout_seconds)
@@ -128,10 +132,12 @@ class InternChatClient:
         message_bytes = json.dumps(
             messages, ensure_ascii=False, sort_keys=True, default=str
         ).encode("utf-8")
+        logical_call_id = uuid4().hex
         logical_call_index = self._logical_call_count
         self._logical_call_count += 1
         request_metadata = {
             "logical_call_index": logical_call_index,
+            "logical_call_id": logical_call_id,
             "request_model_id": self.model,
             "api_host": urlparse(self.api_base).netloc,
             "reasoning_mode": reasoning_mode,
@@ -152,6 +158,7 @@ class InternChatClient:
             request_event: dict[str, Any] = {
                 **request_metadata,
                 "request_sequence": self._request_sequence,
+                "attempt_id": uuid4().hex,
                 "attempt_index": attempt + 1,
                 "started_at_utc": datetime.now(UTC).isoformat(),
                 "status": "pending",
@@ -168,7 +175,7 @@ class InternChatClient:
                 response.raise_for_status()
                 data = response.json()
                 choice = data["choices"][0]
-                finish_reason = choice.get("finish_reason") or ""
+                finish_reason = safe_identifier(choice.get("finish_reason"))
                 request_event.update(
                     status="success",
                     http_status=getattr(response, "status_code", None),
@@ -179,20 +186,14 @@ class InternChatClient:
                     finish_reason=finish_reason,
                 )
                 self.finish_reasons.append(finish_reason)
-                usage = data.get("usage") or {}
-                try:
-                    completion_tokens = int(usage.get("completion_tokens") or 0)
-                except (TypeError, ValueError):
-                    completion_tokens = 0
+                usage = provider_usage(data.get("usage"))
+                request_event.update(usage)
+                completion_tokens = usage["completion_tokens"]
                 self.completion_tokens.append(completion_tokens)
-                for usage_field in ("prompt_tokens", "total_tokens"):
-                    try:
-                        request_event[usage_field] = int(usage.get(usage_field) or 0)
-                    except (TypeError, ValueError):
-                        request_event[usage_field] = None
-                request_event["completion_tokens"] = completion_tokens
                 message = choice["message"]
                 content = message["content"]
+                if not isinstance(content, str) or not content.strip():
+                    raise ValueError("invalid_content")
                 reasoning_content = (
                     message.get("reasoning_content") if isinstance(message, Mapping) else None
                 )
@@ -242,7 +243,7 @@ class InternChatClient:
                 last_category = "http_status"
                 failure = exc
                 self._record_failure(last_category, exc)
-            except (KeyError, TypeError, ValueError) as exc:
+            except (KeyError, IndexError, AttributeError, TypeError, ValueError) as exc:
                 last_category = "invalid_response"
                 failure = exc
                 self._record_failure(last_category, exc)
@@ -272,11 +273,30 @@ class InternChatClient:
                         ),
                     )
                 self.request_diagnostics.append(request_event)
+                if _attempt_records is not None:
+                    _attempt_records.append(dict(request_event))
                 self._request_sequence += 1
             if attempt + 1 < self.retry:
                 time.sleep(2**attempt)
 
         raise ChatClientError(last_category, self.last_failure_type)
+
+    def chat_response(self, messages, **kwargs) -> dict[str, Any]:
+        """Return one request-scoped envelope; never read shared last-response state."""
+        attempts: list[dict[str, Any]] = []
+        try:
+            content = self.chat(messages, _attempt_records=attempts, **kwargs)
+        except Exception as exc:
+            exc.attempts = tuple(attempts)
+            raise
+        last = attempts[-1]
+        return {
+            "content": content,
+            "usage": {key: last.get(key) for key in provider_usage(None)},
+            "model": last.get("response_model_id"),
+            "finish_reason": last.get("finish_reason"),
+            "attempts": tuple(attempts),
+        }
 
     def _resolve_reasoning_mode(self, reasoning_mode: ReasoningMode) -> bool | None:
         """Resolve an explicit request mode against the unchanged client default."""

@@ -16,6 +16,7 @@ from functools import wraps
 from typing import Any, Protocol
 
 from .graph import AgentDecision
+from .request_attempts import record_attempts
 from .run_service import AgentResult, RunRequest
 
 
@@ -45,6 +46,9 @@ class ModelResponse:
     usage: Mapping[str, Any] = field(default_factory=dict)
     model_id: str = ""
     error_category: str | None = None
+    request_attempts: tuple[Mapping[str, Any], ...] = ()
+    returned_model: str | None = None
+    finish_reason: str | None = None
 
 
 class ContinuationTransport(Protocol):
@@ -79,7 +83,7 @@ class ModelContinuationTransport:
             "role": "tool",
             "content": json.dumps(dict(tool_result), ensure_ascii=False, default=str),
         }]
-        return self.model.complete(continuation)
+        return self.model.complete(continuation, metadata={"role": "continuation"})
 
 
 class InternModelAdapter:
@@ -122,17 +126,25 @@ class InternModelAdapter:
         if tools and _accepts_keyword(client.chat, "tools"):
             kwargs["tools"] = [dict(tool) for tool in tools]
         try:
-            raw = client.chat(normalized, **kwargs)
+            transport = getattr(client, "chat_response", client.chat)
+            raw = transport(normalized, **kwargs)
         except Exception as exc:  # noqa: BLE001 - provider details stay out of events
+            attempts = record_attempts(getattr(exc, "attempts", ()), metadata)
             category = getattr(exc, "category", None) or (
                 "configuration" if type(exc).__name__ == "ChatClientError" else "adapter_error"
             )
-            raise AdapterError(str(category), type(exc).__name__) from exc
+            error = AdapterError(str(category), type(exc).__name__)
+            error.request_attempts = attempts
+            raise error from exc
         text, usage = _extract_response(raw)
+        attempts = record_attempts(raw.get("attempts", ()), metadata) if isinstance(raw, Mapping) else ()
         return ModelResponse(
             text=text,
             tool_requests=tuple(_parse_tool_requests(text)),
             usage=usage,
+            request_attempts=attempts,
+            returned_model=raw.get("model") if isinstance(raw, Mapping) else None,
+            finish_reason=raw.get("finish_reason") if isinstance(raw, Mapping) else None,
             model_id=getattr(client, "model", self.model_id) or self.model_id,
         )
 
