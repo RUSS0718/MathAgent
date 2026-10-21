@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .redaction import redact
-from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget
+from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, freeze_budget
 from .run_checkpoints import RunCheckpointSaver
 from .run_control import RunControl, RunStopped, bind_control
 
@@ -497,6 +497,7 @@ class WorkspaceStore:
                     self._connection.rollback()
                     return
                 now = _utc_now()
+                result["budget"] = freeze_budget(self._connection, job_id) or result.get("budget")
                 self._connection.execute(
                     "UPDATE workspace_jobs SET status=?,result_json=?,error_code=?,updated_at=? WHERE job_id=?",
                     (terminal_status, _json(result), error_code, now, job_id),
@@ -634,6 +635,9 @@ class WorkspaceStore:
 
     def _insert_event(self, job_id: str, event_type: str, payload: Mapping[str, Any]) -> None:
         created_at = _utc_now()
+        status = self._connection.execute("SELECT status FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+        if status is not None and status[0] in TERMINAL_JOB_STATUSES:
+            freeze_budget(self._connection, job_id)
         event_payload = redact(dict(payload))
         event_payload.setdefault("job_id", job_id)
         event_payload.setdefault("created_at", created_at)

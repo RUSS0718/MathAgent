@@ -352,3 +352,38 @@ class RunControlContractTest(unittest.TestCase):
         evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
         self.assertEqual(2, evidence["budget"]["http_attempts"])
         self.assertEqual("CANCELED", evidence["run"]["status"])
+
+    def test_deadline_cancel_race_seals_winner_and_freezes_elapsed_time(self):
+        job_id = self.create_job()
+        self.assertTrue(self.entered.wait(2))
+        deadline = self.client.get(f"/api/agent/jobs/{job_id}/report").get_json()["report"][
+            "budget"
+        ]["deadline_at"]
+        blocked, continue_check = threading.Event(), threading.Event()
+        self.addCleanup(continue_check.set)
+
+        def clock():
+            if threading.current_thread().name.startswith("showcase-job") and not blocked.is_set():
+                blocked.set()
+                continue_check.wait(3)
+            return deadline + 10
+
+        with patch("showcase.run_control.time.time", side_effect=clock):
+            self.release.set()
+            self.assertTrue(blocked.wait(2))
+            canceled = self.client.post(
+                f"/api/agent/jobs/{job_id}/cancel", json={}, headers=self.headers()
+            )
+            self.assertEqual("canceled", canceled.get_json()["status"])
+            continue_check.set()
+            first = self.wait_attempt_audit(job_id)["budget"]
+        with patch("showcase.run_control.time.time", return_value=deadline + 100):
+            second = self.client.get(f"/api/agent/jobs/{job_id}/report").get_json()["report"][
+                "budget"
+            ]
+        self.assertEqual(first["wall_time_seconds"], second["wall_time_seconds"])
+        self.assertEqual(first["ended_at"], second["ended_at"])
+        checkpoint = self.app.extensions["showcase_run_service"].get_checkpoint(job_id)
+        self.assertEqual("CANCELED", checkpoint["status"])
+        self.assertEqual("CANCELED", self.client.get(f"/api/runs/{job_id}").get_json()["status"])
+        self.assertEqual(1, self.post.call_count)

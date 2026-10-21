@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 
@@ -146,6 +147,19 @@ class RunCheckpointSaver(BaseCheckpointSaver):
                 "SELECT 1 FROM run_graph_terminals WHERE thread=?", (run_id,)
             ).fetchone():
                 return
+            # A competing control may already have won the durable terminal
+            # transition. Seal that winner, never the caller's stale proposal.
+            if self.connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='workspace_jobs'"
+            ).fetchone():
+                winner = self.connection.execute(
+                    "SELECT j.status,r.snapshot_json FROM workspace_jobs j JOIN runs r ON r.run_id=j.job_id WHERE j.job_id=?",
+                    (run_id,),
+                ).fetchone()
+                if winner and winner[0] in {"canceled", "failed", "succeeded"}:
+                    snapshot = json.loads(winner[1])
+                    status = snapshot["status"]
+                    category = (snapshot.get("error") or {}).get("category")
             builder = StateGraph(dict)
             builder.add_node("terminal", lambda state: state)
             builder.add_edge(START, "terminal")

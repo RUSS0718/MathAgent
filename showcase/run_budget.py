@@ -249,7 +249,8 @@ def _summary(state):
         ),
         "started_at": state["started_at"],
         "deadline_at": state["deadline_at"],
-        "wall_time_seconds": max(0, time.time() - state["started_at"]),
+        "ended_at": state.get("ended_at"),
+        "wall_time_seconds": max(0, state.get("ended_at", time.time()) - state["started_at"]),
         "cost": None,
     }
 
@@ -308,3 +309,15 @@ def execute_graph(ledger, limits, loop, state, *, run_id, resume=False):
         result = execute(state, thread_id=run_id)
         result["budget"] = budget.snapshot()
         return result
+
+
+def freeze_budget(connection, run_id):
+    """Freeze elapsed Run execution in the caller's terminal transaction."""
+    if not connection.execute("SELECT 1 FROM sqlite_master WHERE name='run_budgets'").fetchone():
+        return
+    row = connection.execute("SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)).fetchone()
+    if row is not None:
+        state = json.loads(row[0])
+        state.setdefault("ended_at", time.time())
+        connection.execute("UPDATE run_budgets SET ledger_json=? WHERE run_id=?", (json.dumps(state), run_id))
+        return _summary(state)
