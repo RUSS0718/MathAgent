@@ -47,5 +47,3 @@ onUnmounted(() => controller.stopAll())
 <style scoped>
 .run-review { max-width: 1000px; margin: auto; padding: 24px; overflow-wrap: anywhere; } button, a { margin-right: 12px; } button { padding: 8px; } dl { display: grid; grid-template-columns: minmax(130px, 1fr) 2fr; gap: 8px; } dd { margin: 0; } summary { cursor: pointer; padding: 10px 0; }
 </style>
-
-

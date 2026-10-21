@@ -71,6 +71,40 @@ class LiveCampaignContractTest(CampaignFixture):
             second.extensions["showcase_run_service"].close()
             second.extensions["loopback_store"].close()
 
+    def test_deadline_keeps_fake_identity_in_report_and_evidence(self):
+        payload = campaign_input()
+        payload["allow_network"] = True
+        payload["budget"]["max_runtime_seconds"] = 0
+        report = self.finished(self.submit(payload).get_json()["campaign_id"])
+        for arm in report["pairs"][0]["arms"].values():
+            self.assertEqual("run_deadline_exhausted", arm["error"])
+            self.assertEqual("fake", self.client.get(arm["report_url"]).get_json()["mode"])
+            self.assertEqual("fake", self.client.get(arm["evidence_url"]).get_json()["mode"])
+
+    def test_generic_fake_pipeline_failure_keeps_persisted_mode(self):
+        import time
+        import uuid
+
+        class FailingPipeline:
+            execution_mode = "fake"
+
+            def run(self, *args, **kwargs):
+                raise RuntimeError("private failure must not reach report")
+
+        self.app.extensions["showcase_workspace_service"].pipeline = FailingPipeline()
+        headers = {"X-CSRF-Token": self.csrf}
+        session_id = self.client.post("/api/new_chat", headers=headers).get_json()["new_session_id"]
+        created = self.client.post("/api/agent/jobs", json={"message": "Compute 1+1.", "session_id": session_id}, headers={**headers, "Idempotency-Key": str(uuid.uuid4())}).get_json()
+        job_id = created["job_id"]
+        for _ in range(200):
+            job = self.client.get(f"/api/agent/jobs/{job_id}").get_json()
+            if job["status"] == "failed":
+                break
+            time.sleep(0.01)
+        self.assertEqual("job_execution_failed", job["error"])
+        self.assertEqual("fake", self.client.get(f"/api/agent/jobs/{job_id}/report").get_json()["mode"])
+        self.assertEqual("fake", self.client.get(f"/api/runs/{job_id}/evidence").get_json()["mode"])
+
     def test_offline_cannot_dispatch_through_a_live_workspace(self):
         with patch("llm_client.requests.post", side_effect=AssertionError("network forbidden")):
             response = self.submit()

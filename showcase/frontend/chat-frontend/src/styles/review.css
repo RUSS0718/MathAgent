@@ -15,4 +15,3 @@
 .campaign-workbench [role=alert], .run-review [role=alert] { border-left: 3px solid var(--warning); background: var(--warning-wash); padding: 12px; }
 .campaign-arms article { border-top: 1px solid var(--border); padding-top: 16px; }
 .run-review details { border-bottom: 1px solid var(--border); }
-

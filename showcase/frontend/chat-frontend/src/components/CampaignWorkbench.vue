@@ -50,4 +50,3 @@ onMounted(() => { const id = new URLSearchParams(globalThis.location.search).get
 dl { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; } dd { margin: 0; }
 @media (max-width: 700px) { .campaign-arms { grid-template-columns: 1fr; } }
 </style>
-

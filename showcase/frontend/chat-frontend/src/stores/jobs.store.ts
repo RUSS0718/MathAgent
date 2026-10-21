@@ -85,4 +85,3 @@ export const useJobsStore = defineStore('jobs', {
     },
   },
 })
-

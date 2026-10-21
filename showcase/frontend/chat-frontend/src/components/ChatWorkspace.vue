@@ -52,12 +52,13 @@ async function send(): Promise<void> {
   }
 }
 async function cancelCurrent(): Promise<void> {
-  if (!current.value) return
+  const target = current.value
+  if (!target) return
   try {
-    const result = await api.cancelJob(current.value.jobId, createIdempotencyKey())
-    jobs.start(current.value.jobId, current.value.sessionId, result.status ?? 'canceled')
-    if (result.status && !['canceled', 'failed', 'succeeded'].includes(result.status)) void jobController.subscribe(current.value.jobId)
-    await loadReport(current.value.jobId)
+    const result = await api.cancelJob(target.jobId, createIdempotencyKey())
+    jobs.start(target.jobId, target.sessionId, result.status ?? 'canceled')
+    if (result.status && !['canceled', 'failed', 'succeeded'].includes(result.status)) void jobController.subscribe(target.jobId)
+    await loadReport(target.jobId)
     notice.value = result.existing ? '已重放取消结果。' : '任务已取消。'
   } catch (error) { notice.value = error instanceof Error ? error.message : '取消失败。' }
 }
