@@ -198,8 +198,8 @@ def create_app(
                 "verification_mode": VERIFICATION_MODES,
                 "files": {"upload": upload},
                 "execution": {
-                    "mode": str(app.config.get("SHOWCASE_MODE", "fake")),
-                    "provider": "intern",
+                    "mode": getattr(live_pipeline, "execution_mode", str(app.config.get("SHOWCASE_MODE", "fake"))),
+                    "provider": "fake" if getattr(live_pipeline, "execution_mode", app.config.get("SHOWCASE_MODE")) == "fake" else "intern",
                     "status": "configured" if os.getenv("INTERN_API_KEY") else "missing_credentials",
                 },
                 "capabilities": {
@@ -757,3 +757,4 @@ def _dashboard_page() -> str:
 
 if __name__ == "__main__":
     main()
+

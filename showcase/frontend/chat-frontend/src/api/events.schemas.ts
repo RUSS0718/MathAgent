@@ -41,6 +41,8 @@ const knownPublicEventTypes = new Set([
   'interrupt',
   'error',
   'canceled',
+  'timeout',
+  'needs_review',
   'heartbeat',
 ])
 
@@ -229,5 +231,6 @@ export class SseParser {
 }
 
 export function isTerminalEvent(event: DecodedSseEvent): boolean {
-  return event.event === 'final_result' || event.event === 'error' || event.event === 'canceled'
+  return event.event === 'final_result' || event.event === 'error' || event.event === 'canceled' || event.event === 'timeout' || event.event === 'needs_review'
 }
+

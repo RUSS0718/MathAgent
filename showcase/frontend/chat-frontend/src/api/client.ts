@@ -1,3 +1,4 @@
+import { campaignSchema, campaignsSchema } from './campaigns.schemas'
 import { z } from 'zod'
 import { ApiError } from './errors'
 import { checkAuthResponseSchema, logoutResponseSchema } from './auth.schemas'
@@ -37,6 +38,8 @@ async function requestJson<T>(input: string, init: RequestInit, schema: z.ZodTyp
 const json = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
 export const api = {
+  campaigns: (offset = 0) => requestJson('/api/experiments/campaigns?offset=' + offset + '&limit=20', {}, campaignsSchema),
+  campaign: (id: string) => requestJson('/api/experiments/campaigns/' + encodeURIComponent(id), {}, campaignSchema),
   checkAuth: () => requestJson('/api/check_auth', {}, checkAuthResponseSchema),
   logout: () => requestJson('/api/logout', json({}), logoutResponseSchema),
   listSessions: () => requestJson('/api/sessions', {}, sessionsResponseSchema),
@@ -53,5 +56,8 @@ export const api = {
   activeJobs: (sessionId?: string) => requestJson(`/api/agent/jobs/active${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`, {}, activeJobsResponseSchema),
   getJob: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}`, {}, jobResponseSchema),
   jobReport: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/report`, {}, reportSchema),
+  evidence: (jobId: string) => requestJson('/api/runs/' + encodeURIComponent(jobId) + '/evidence', {}, z.object({ evidence_id: z.string(), mode: z.string(), run: z.record(z.string(), z.unknown()) }).passthrough()),
   capabilities: () => requestJson('/api/capabilities', {}, capabilitiesResponseSchema),
 }
+
+

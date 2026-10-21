@@ -56,3 +56,11 @@ test('transport sends query cursor first, Last-Event-ID on retry, and ignores du
   assert.equal(requests[1].url, '/api/agent/jobs/job%2F1/events')
   assert.equal(requests[1].lastEventId, '2')
 })
+
+test('timeout and restart review remain readable terminal events', async () => {
+  const { isTerminalEvent } = await import('../src/api/events.schemas.ts')
+  for (const type of ['timeout', 'needs_review']) {
+    const event = decodeSseBlock({ event: type, id: '9', hasIdField: true, data: JSON.stringify({ type, job_id: 'job_fault', status: 'failed', reason: type }) })
+    assert.equal(isTerminalEvent(event), true)
+  }
+})

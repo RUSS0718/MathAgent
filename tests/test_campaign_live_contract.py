@@ -47,6 +47,11 @@ class LiveCampaignContractTest(CampaignFixture):
         self.client = self.app.test_client()
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
 
+    def test_capabilities_identify_fake_provider_in_live_orchestration(self):
+        execution = self.client.get('/api/capabilities').get_json()['execution']
+        self.assertEqual('fake', execution['mode'])
+        self.assertEqual('fake', execution['provider'])
+
     def test_offline_cannot_dispatch_through_a_live_workspace(self):
         with patch("llm_client.requests.post", side_effect=AssertionError("network forbidden")):
             response = self.submit()
@@ -74,6 +79,8 @@ class LiveCampaignContractTest(CampaignFixture):
         self.assertEqual("fake", report["mode"])
         for arm in report["pairs"][0]["arms"].values():
             self.assertEqual("succeeded", arm["status"], arm)
+            public_report = self.client.get(arm['report_url']).get_json()
+            self.assertIn('离线 fake', public_report['report']['public_summary'])
             self.assertEqual(payload["budget"], arm["budget"]["limits"])
             self.assertGreater(arm["usage"]["unknown_attempts"], 0)
             self.assertIsNone(arm["usage"]["provider_known"]["total_tokens"])
@@ -93,3 +100,5 @@ class LiveCampaignContractTest(CampaignFixture):
         for arm in report["pairs"][0]["arms"].values():
             self.assertEqual("failed", arm["status"])
             self.assertEqual(1, arm["usage"]["http_attempts"])
+
+

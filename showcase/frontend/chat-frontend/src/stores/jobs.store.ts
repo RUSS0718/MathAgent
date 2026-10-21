@@ -61,9 +61,9 @@ export const useJobsStore = defineStore('jobs', {
       else if (!terminal && type === 'running') record.status = 'running'
       else if (!terminal && type === 'interrupt') record.status = 'waiting_input'
       else if (!terminal && type === 'final_result') record.status = 'succeeded'
-      else if (!terminal && type === 'error') {
+      else if (!terminal && (type === 'error' || type === 'timeout' || type === 'needs_review')) {
         record.status = 'failed'
-        record.error = typeof event.data.message === 'string' ? event.data.message : 'job_failed'
+        record.error = typeof event.data.message === 'string' ? event.data.message : type === 'timeout' ? 'run_deadline_exhausted' : type === 'needs_review' ? 'needs_review' : 'job_failed'
       } else if (!terminal && type === 'canceled') {
         record.status = 'canceled'
         record.error = typeof event.data.message === 'string' ? event.data.message : 'job_canceled'
@@ -85,3 +85,4 @@ export const useJobsStore = defineStore('jobs', {
     },
   },
 })
+

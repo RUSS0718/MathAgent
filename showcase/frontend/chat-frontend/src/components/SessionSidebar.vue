@@ -23,7 +23,7 @@ const emit = defineEmits<{
       <button class="icon-button mobile-only" type="button" aria-label="关闭会话栏" @click="emit('close')">×</button>
     </div>
     <button class="new-session-button" type="button" @click="emit('new')"><span aria-hidden="true">＋</span> 新建会话</button>
-    <div class="sidebar-section-label"><span>最近会话</span><span>{{ items.length }}</span></div>
+    <a class="settings-link" href="/dashboard/campaigns">配对实验 / Campaigns</a><div class="sidebar-section-label"><span>最近会话</span><span>{{ items.length }}</span></div>
     <div v-if="!items.length" class="sidebar-empty">还没有数学题记录</div>
     <nav v-else class="session-list" aria-label="数学会话">
       <div v-for="item in items" :key="item.id" class="session-row" :class="{ selected: item.id === currentId }">
@@ -39,3 +39,4 @@ const emit = defineEmits<{
     <div class="sidebar-footer"><button type="button" class="settings-link" @click="emit('settings')"><span aria-hidden="true">⚙</span> 设置</button><span class="profile-dot" aria-hidden="true"></span><span class="profile-label">本机用户</span></div>
   </aside>
 </template>
+
