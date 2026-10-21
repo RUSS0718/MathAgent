@@ -8,7 +8,7 @@
 
 `verification.artifact` 是当前对象；`history[]` 保留每次检查的对象身份、checker、checker_version、Python 环境版本、scope、limitations 和稳定 check_id。`binding=artifact_changed` 时，历史检查仍保留，当前 status 降为 unknown、acceptance 为 needs_review。`same_artifact` 只允许沿用同一对象上的同一检查范围。
 
-`polynomial_check` v1 仅支持候选代回、定义域与重复检查。candidate_status=pass 与 coverage_status=unknown 独立保留；即使文本身份相同也不接受完整最终答案证明。轻量结构检查的 pass 仅覆盖 shape_and_tool_consistency，并明确不证明数学正确性或完整解集。
+`polynomial_check` v1 仅支持候选代回、定义域与重复检查。candidate_status=pass 与 coverage_status=unknown 独立保留；即使文本身份相同也不接受完整最终答案证明。轻量结构检查的 pass 仅作为 history 中 shape_and_tool_consistency 范围的观察保留，最终 status 仍为 unknown、acceptance 为 needs_review；不证明数学正确性或完整解集。
 
 ## 追加与查询
 

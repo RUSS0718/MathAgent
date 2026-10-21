@@ -61,5 +61,22 @@ class FinalEvidenceContractTest(unittest.TestCase):
         self.assertEqual("unknown", check["history"][0]["coverage_status"])
         self.assertEqual("polynomial-check-v1", check["history"][0]["checker_version"])
 
+    def test_shape_consistency_pass_cannot_accept_unsupported_final_claim(self):
+        registry = ToolRegistry()
+        registry.register("constant", lambda _: 1)
+        provider = DeterministicHTTPProvider([
+            ProviderResponse({"content": "Plan"}),
+            _native_tool_response("shape", "constant", {}),
+            ProviderResponse({"content": "x=1 或 x=999"}),
+            ProviderResponse({"content": "x=1 或 x=999"}),
+        ])
+        result = self._run_job(provider, registry)
+        check = result["evidence"]["verification"]
+        self.assertEqual("pass", check["history"][0]["status"])
+        self.assertEqual("shape_and_tool_consistency", check["history"][0]["scope"])
+        self.assertEqual("unknown", check["status"])
+        self.assertEqual("needs_review", check["acceptance"])
+        self.assertEqual(check, result["job_report"]["report"]["checks"])
+
 
 del LiveToolWorkspaceContractTest

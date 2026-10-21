@@ -45,6 +45,7 @@ class GraphServiceTest(unittest.TestCase):
             resumed = service.resume_run(first["run_id"])
             self.assertEqual("COMPLETED", resumed["status"])
             self.assertEqual("recovered", resumed["final_response"])
+            self.assertEqual(first["result"]["verification"]["history"], resumed["result"]["verification"]["history"][:-1])
             events = service.get_events(first["run_id"])
             self.assertIn("tool_completed", [event["type"] for event in events])
             self.assertIn("run_resumed", [event["type"] for event in events])

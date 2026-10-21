@@ -58,7 +58,8 @@ class VerificationEvidenceTest(unittest.TestCase):
         self.assertNotIn("hidden", serialized)
         self.assertNotIn("FULL_IMAGE", serialized)
         self.assertNotIn("FULL_IMAGE_VARIANT", serialized)
-        self.assertEqual("pass", pack["verification"]["status"])
+        self.assertEqual("unknown", pack["verification"]["status"])
+        self.assertEqual("pass", pack["verification"]["history"][0]["status"])
         self.assertEqual("event_1", pack["timeline"][0]["evidence_id"])
         self.assertEqual("planned", pack["feature_status"]["multimodal"])
 

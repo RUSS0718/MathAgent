@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from .final_evidence import checked_verification
+from .final_evidence import bind_verification, checked_verification
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
 from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, execute_graph
 from .storage import SQLiteStore
@@ -267,6 +267,7 @@ class RunService:
     def _persist_graph_result(
         self, snapshot: dict[str, Any], state: Mapping[str, Any]
     ) -> dict[str, Any]:
+        previous_history = ((snapshot.get("result") or {}).get("verification") or {}).get("history", [])
         snapshot.update(
             {
                 "status": state.get("status", "FAILED"),
@@ -283,6 +284,7 @@ class RunService:
             }
         )
         self._bind_final_verification(snapshot)
+        snapshot["result"]["verification"]["history"] = [*previous_history, *snapshot["result"]["verification"]["history"]]
         self._store.save_run(snapshot)
         self._store.save_checkpoint(snapshot["run_id"], state)
         return self._copy_snapshot(snapshot)
@@ -291,6 +293,9 @@ class RunService:
     def _bind_final_verification(snapshot: dict[str, Any]) -> None:
         result = snapshot.get("result")
         if not isinstance(result, dict):
+            return
+        if isinstance(result.get("verification"), Mapping):
+            result["verification"] = bind_verification(snapshot.get("final_response") or "", result["verification"])
             return
         checked = LightweightVerificationHook().verify(snapshot, result.get("tool_results", []))
         result["verification"] = checked_verification(snapshot.get("final_response") or "", checked, result.get("tool_results", []))

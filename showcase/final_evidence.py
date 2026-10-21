@@ -44,8 +44,8 @@ def bind_verification(answer: str, check: Mapping[str, Any] | None = None) -> di
     latest = history[-1]
     same = latest.get("artifact") == current
     status = latest.get("status", "unknown") if same else "unknown"
-    if latest.get("scope") == "polynomial_candidates":
-        status = "unknown"  # Substitution does not establish completeness of the final claim.
+    if latest.get("scope") in {"polynomial_candidates", "shape_and_tool_consistency"} and status == "pass":
+        status = "unknown"  # Scoped consistency/candidate checks cannot accept a final mathematical claim.
     return {**source, "status": status, "artifact": current, "history": history,
             "acceptance": "accepted" if same and status == "pass" else "needs_review",
             "binding": "same_artifact" if same else "artifact_changed"}
