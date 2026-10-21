@@ -81,3 +81,11 @@
 - `3cd4151` 在权威 schema 的 `domain.oneOf` 外显式增加 `type: object`，保留原分支与全部约束，并记录 schema 身份。此修正仅完成离线合同验证，托管服务效果未知；未执行第三批生成。
 - 用户批准第三个独立批次后，在 `bcf1a20` 执行 G2：6/6 Run、12 HTTP attempts 全部形成 native 请求 → Registry success → 匹配 call ID 的 continuation 响应，G2 PASS，#26 完成。每次 thinking=true、max_tokens=512，无重试；前两批失败继续保留。候选集刻意含错误值，checker conflict 符合设计；通过只证明协议闭环，不证明数学能力提升、候选完备性或语义消费。
 - 第三批归档：ignored `artifacts/g2-live-f5c14b5852474a7b85feb00b3428301f/g2-report.json`，SHA-256 `6d8f32818a8b50135a4ee7d8f26bae9ae42a8276b6d295b64eed63842b252f49`。此前“未执行第三批”是修正准备时点记录；当前 S2 live 硬门已通过，可进入 S3。
+
+## S3 Run 预算隔离验收（2026-10-21）
+
+- [#27](https://github.com/RUSS0718/MathAgent/issues/27) 的离线实现已合入集成分支，实现提交为 `9893438`、`93cf070`、`4819168`。Run 预算持久化并在每次 HTTP attempt 前原子预留，计量未知时保持未知；报告与 Evidence 提供脱敏预算快照。
+- 双轴审查发现的两项 P1 已修复并复核关闭，包括并发预留与图执行计量边界、同步入口及不支持计量传输的预算绕过。Evidence 装饰器与预算实现的局部耦合作为本切片取舍保留。
+- 最终重点合同 12 项通过；`uv run --frozen --no-sync python scripts/check.py --offline` 通过，146 项测试耗时 86.897 秒；`uv run --frozen --no-sync python scripts/check_showcase_release.py` 返回 `showcase_release=PASS`；`uv run --frozen --no-sync ruff check .` 与 `git diff --check` 通过。
+- 发布检查与完整测试并发运行时曾出现 SSE 时序失败；顺序独立重跑发布检查后通过。该次暂态失败保留为环境与时序证据，不表述为首次检查全部通过。
+- 相对 S3 前集成提交 `facd137`，`user_agent.py`、`implementations/` 与 `BASELINE.json` 无差异。此次未调用模型 API，离线合同通过不证明在线预算效果、精确费用或数学能力提升；S4–S6 尚未验收。PR #22 保持 Draft/Open。
