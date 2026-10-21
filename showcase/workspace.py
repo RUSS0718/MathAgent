@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .evidence_store import append_check
 from .redaction import redact
 from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, freeze_budget
 from .run_checkpoints import RunCheckpointSaver
@@ -538,14 +539,11 @@ class WorkspaceStore:
 
     def record_verification(self, job_id: str, result: Mapping[str, Any]) -> None:
         with self._lock:
-            row = self._connection.execute("SELECT 1 FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
-            if row is None:
-                raise WorkspaceError("job_not_found", status=404)
-            now = _utc_now()
             payload = {"checker": "polynomial_check", "result": dict(result)}
-            self._connection.execute("UPDATE workspace_jobs SET result_json=?,updated_at=? WHERE job_id=?", (_json(payload), now, job_id))
-            self._insert_event(job_id, "verification_completed", {"type": "verification_completed", "job_id": job_id, "status": result.get("candidate_status", "unknown"), "data": payload})
-            self._connection.commit()
+            append_check(
+                self._connection, job_id, result, _utc_now(), WorkspaceError,
+                lambda: self._insert_event(job_id, "verification_completed", {"type": "verification_completed", "job_id": job_id, "status": result.get("candidate_status", "unknown"), "data": payload}),
+            )
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
         with self._lock:

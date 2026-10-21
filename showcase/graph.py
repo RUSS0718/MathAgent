@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, TypedDict
 
 from .redaction import redact_text, summarize_parameters
+from .verification import LightweightVerificationHook
 
 try:
     from langgraph.checkpoint.memory import InMemorySaver
@@ -355,18 +356,8 @@ class LangGraphExecutionLoop:
             _finish_with_error(updated, "tool_evidence_missing", "Required verification has no valid tool event")
             updated["status"] = "NEEDS_REVIEW"
             return updated
-        verification_status = "pass"
-        for item in results:
-            if item.get("name") != "polynomial_check":
-                continue
-            try:
-                summary = json.loads(str(item.get("result_summary", "")))
-            except (TypeError, ValueError):
-                summary = {}
-            candidate_status = summary.get("candidate_status")
-            if candidate_status in {"conflict", "unknown"}:
-                verification_status = candidate_status
-                break
+        checked = LightweightVerificationHook().verify(updated, results)
+        verification_status = checked.status
         updated["stage"] = "synthesizing"
         updated["status"] = "SYNTHESIZING"
         self._record_and_emit(updated, "verification_completed", {"status": verification_status})

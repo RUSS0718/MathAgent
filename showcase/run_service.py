@@ -10,9 +10,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from .final_evidence import checked_verification
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
 from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, execute_graph
 from .storage import SQLiteStore
+from .verification import LightweightVerificationHook
 
 MAX_PROBLEM_CHARS = 10_000
 MAX_ASSET_REFS = 32
@@ -185,6 +187,7 @@ class RunService:
             )
 
         snapshot["result"] = {**(snapshot["result"] or {}), "budget": budget.snapshot()}
+        self._bind_final_verification(snapshot)
         self._store.save_run(snapshot)
         self._store.save_checkpoint(run_id, snapshot)
         return self._copy_snapshot(snapshot)
@@ -279,9 +282,18 @@ class RunService:
                 "updated_at": _utc_now(),
             }
         )
+        self._bind_final_verification(snapshot)
         self._store.save_run(snapshot)
         self._store.save_checkpoint(snapshot["run_id"], state)
         return self._copy_snapshot(snapshot)
+
+    @staticmethod
+    def _bind_final_verification(snapshot: dict[str, Any]) -> None:
+        result = snapshot.get("result")
+        if not isinstance(result, dict):
+            return
+        checked = LightweightVerificationHook().verify(snapshot, result.get("tool_results", []))
+        result["verification"] = checked_verification(snapshot.get("final_response") or "", checked, result.get("tool_results", []))
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         """Return an isolated snapshot so callers cannot mutate service state."""
@@ -346,6 +358,7 @@ class RunService:
         snapshot["stage"] = stage
         snapshot["error"] = dict(error) if error is not None else None
         snapshot["updated_at"] = _utc_now()
+        self._bind_final_verification(snapshot)
         self._store.save_run(snapshot)
         self._store.save_checkpoint(run_id, snapshot)
         return self._copy_snapshot(snapshot)

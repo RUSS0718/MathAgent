@@ -9,6 +9,7 @@ from typing import Any
 
 from llm_response import public_attempt
 
+from .final_evidence import bind_verification
 from .redaction import redact
 from .verification import VerificationResult
 
@@ -34,7 +35,7 @@ class EvidencePackExporter:
             result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
             stored_tools = result.get("tool_results", [])
             tool_results = [item for item in stored_tools if isinstance(item, Mapping)]
-        verification_data = _verification_dict(verification)
+        verification_data = bind_verification(str(snapshot.get("final_response") or ""), _verification_dict(verification))
         pack = {
             "version": self.version,
             # A Run's update timestamp makes repeated reads byte-stable.
@@ -81,7 +82,7 @@ class EvidencePackExporter:
         result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
         answer = snapshot.get("final_response") or result.get("final_response") or ""
         summary = snapshot.get("agent_summary") or result.get("summary") or ""
-        check = verification or {"status": "unknown", "findings": ["verification_not_run"]}
+        check = bind_verification(str(answer), verification)
         return redact({
             "answer": answer,
             "request_attempts": _attempts(snapshot),

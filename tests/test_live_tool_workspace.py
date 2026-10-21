@@ -458,7 +458,7 @@ class LiveToolWorkspaceContractTest(unittest.TestCase):
         self.assertEqual(tool_call_id, tool["continuation_tool_call_id"])
         self.assertTrue(tool["continuation_response_received"])
         self.assertEqual("pass", tool["value"]["candidate_status"])
-        self.assertEqual("pass", result["job"]["result"]["verification"]["status"])
+        self.assertEqual("unknown", result["job"]["result"]["verification"]["status"])
 
         continuation_messages = result["provider_requests"][2]["messages"]
         self.assertEqual("assistant", continuation_messages[-2]["role"])

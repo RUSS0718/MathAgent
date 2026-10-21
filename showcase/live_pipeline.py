@@ -18,6 +18,7 @@ from .adapters import (
     InternModelAdapter,
     ModelResponse,
 )
+from .final_evidence import checked_verification
 from .live_graph import execute_live_graph
 from .redaction import redact_text
 from .request_attempts import capture_pipeline_attempts
@@ -330,11 +331,7 @@ class LiveAgentPipeline:
         self._emit_node(sink, run_id, "verifier", "验证器", "检查答案与工具证据", "start")
         public_results = [{key: value for key, value in item.items() if key != "_value"} for item in tool_results]
         result = self.verifier.verify({"final_response": candidate}, public_results)
-        verification = {
-            "status": result.status,
-            "findings": list(result.findings),
-            "checker": result.checker,
-        }
+        verification = checked_verification(candidate, result, public_results)
         summary = f"验证状态：{result.status}"
         if verification_mode == "required" and result.status != "pass":
             summary += "（required 模式将进入复核）"

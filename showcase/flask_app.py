@@ -23,6 +23,7 @@ else:
     load_dotenv()
 
 from .evidence import EvidencePackExporter, replay_evidence
+from .final_evidence import checked_verification
 from .loopback import AuthSession, LoopbackStore
 from .polynomial import PolynomialChecker
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
@@ -740,11 +741,7 @@ def _stored_verification(
     if isinstance(stored, Mapping):
         return dict(stored)
     checked = verifier.verify(dict(snapshot), tool_results)
-    return {
-        "status": checked.status,
-        "findings": list(checked.findings),
-        "checker": checked.checker,
-    }
+    return checked_verification(str(snapshot.get("final_response") or ""), checked, tool_results)
 
 
 def _dashboard_page() -> str:

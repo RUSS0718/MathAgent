@@ -8,6 +8,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from .final_evidence import bind_verification
 from .run_control import check_control
 
 
@@ -35,12 +36,14 @@ def execute_live_graph(pipeline, initial, problem, verification_mode, sink):
         return {"status": "RUNNING", "stage": "solving"}
 
     def terminal(state):
+        verification = bind_verification(state.get("final_response") or "", state["verification"])
         required_review = (
-            verification_mode == "required" and state["verification"].get("status") != "pass"
+            verification_mode == "required" and verification.get("status") != "pass"
         )
         return {
             "status": "NEEDS_REVIEW" if required_review else "COMPLETED",
             "stage": "completed",
+            "verification": verification,
             "error": {"category": "verification_needs_review"} if required_review else None,
         }
 

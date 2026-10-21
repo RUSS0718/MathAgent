@@ -20,6 +20,7 @@ class PolynomialChecker:
         evidence_id = _evidence_id(payload)
         result: dict[str, Any] = {
             "checker": "polynomial_check",
+            "checker_version": "polynomial-check-v1",
             "evidence_id": evidence_id,
             "input_summary": _input_summary(payload),
             "candidates": [],
