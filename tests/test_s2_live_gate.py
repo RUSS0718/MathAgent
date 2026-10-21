@@ -30,6 +30,7 @@ from showcase.g2_live_gate import (
     G2_PROTOCOL_PROMPT_VERSION,
     G2_REPEATS,
     G2LivePipeline,
+    g2_protocol_schema_sha256,
 )
 from showcase.run_service import RunService
 from showcase.tool_schemas import schema_error
@@ -178,10 +179,24 @@ class G2LiveGateContractTest(unittest.TestCase):
         self.assertEqual("fake", report["mode"])
         self.assertEqual("fake_http", report["execution_source"])
         self.assertEqual(G2_PROTOCOL_PROMPT_VERSION, report["protocol_prompt_version"])
+        self.assertEqual(g2_protocol_schema_sha256(), report["protocol_schema_sha256"])
         registry = ToolRegistry(max_calls=1)
         registry.register_polynomial_check()
-        self.assertIsNone(
-            schema_error(G2_PROMPT_ARGUMENT_EXAMPLE, registry.allowed_schemas()[0]["parameters"])
+        parameters = registry.allowed_schemas()[0]["parameters"]
+        self.assertIsNone(schema_error(G2_PROMPT_ARGUMENT_EXAMPLE, parameters))
+        self.assertEqual("object", parameters["properties"]["domain"]["type"])
+        self.assertEqual(2, len(parameters["properties"]["domain"]["oneOf"]))
+        transmitted_parameters = provider.requests[0]["tools"][0]["function"]["parameters"]
+        self.assertEqual(
+            report["protocol_schema_sha256"],
+            hashlib.sha256(
+                json.dumps(
+                    transmitted_parameters,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest(),
         )
         self.assertEqual(G2_MAX_HTTP_ATTEMPTS, report["http_attempt_count"])
         self.assertEqual(G2_REPEATS * len(G2_CASES), len(report["runs"]))
@@ -201,6 +216,7 @@ class G2LiveGateContractTest(unittest.TestCase):
                 self.assertEqual("live", row["workspace_mode"])
                 self.assertEqual("fake_http", row["execution_source"])
                 self.assertEqual(G2_PROTOCOL_PROMPT_VERSION, row["protocol_prompt_version"])
+                self.assertEqual(report["protocol_schema_sha256"], row["protocol_schema_sha256"])
                 self.assertEqual(2, len(row["attempts"]))
                 self.assertEqual(["tool_calls", "stop"], row["finish_reasons"])
                 for attempt in row["attempts"]:
@@ -234,6 +250,35 @@ class G2LiveGateContractTest(unittest.TestCase):
         for case in G2_CASES:
             self.assertNotIn(case.problem, serialized)
         self.assertNotIn("reasoning_content", serialized)
+
+    def test_registry_accepts_both_domain_objects_and_rejects_domain_string(self):
+        registry = ToolRegistry(max_calls=2)
+        registry.register_polynomial_check()
+        base = {
+            "schema_version": 1,
+            "variable": "x",
+            "coefficients": ["1", "-1"],
+            "candidates": ["1"],
+        }
+        real = registry.invoke(
+            "polynomial_check", {**base, "domain": {"kind": "real"}}, tool_call_id="real"
+        )
+        interval = registry.invoke(
+            "polynomial_check",
+            {**base, "domain": {"kind": "interval", "left": "0", "right": "2"}},
+            tool_call_id="interval",
+        )
+        invalid = registry.invoke(
+            "polynomial_check", {**base, "domain": "real"}, tool_call_id="invalid"
+        )
+
+        self.assertEqual("success", real.status)
+        self.assertEqual("success", interval.status)
+        self.assertEqual("rejected", invalid.status)
+        self.assertEqual("tool_schema_invalid", invalid.error_category)
+        tool_parameters = registry.provider_schemas()[0]["function"]["parameters"]
+        self.assertEqual("object", tool_parameters["properties"]["domain"]["type"])
+        self.assertEqual(2, len(tool_parameters["properties"]["domain"]["oneOf"]))
 
     def test_truncated_first_generation_is_retained_without_retry_or_tool_execution(self):
         provider = FakeHTTPProvider([

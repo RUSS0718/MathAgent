@@ -20,6 +20,7 @@ POLYNOMIAL_CHECK_SCHEMA: dict[str, Any] = {
             "items": {"type": "string", "pattern": _RATIONAL},
         },
         "domain": {
+            "type": "object",
             "oneOf": [
                 {
                     "type": "object",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -28,6 +29,16 @@ G2_PROMPT_ARGUMENT_EXAMPLE = {
     "domain": {"kind": "real"},
     "candidates": ["1", "2"],
 }
+
+
+def g2_protocol_schema_sha256() -> str:
+    """Fingerprint the exact registered parameter schema sent with G2 calls."""
+
+    registry = ToolRegistry(max_calls=1)
+    registry.register_polynomial_check()
+    parameters = registry.provider_schemas()[0]["function"]["parameters"]
+    encoded = json.dumps(parameters, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -262,4 +273,5 @@ __all__ = [
     "G2_RUN_TIMEOUT_SECONDS",
     "G2Case",
     "G2LivePipeline",
+    "g2_protocol_schema_sha256",
 ]

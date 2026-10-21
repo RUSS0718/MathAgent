@@ -20,6 +20,7 @@ from .g2_live_gate import (
     G2_REPEATS,
     G2_RUN_TIMEOUT_SECONDS,
     G2Case,
+    g2_protocol_schema_sha256,
 )
 
 
@@ -36,6 +37,7 @@ def run_g2_campaign(
         raise ValueError("g2_execution_source_invalid")
     provider_live = execution_source == "provider_live"
     rows: list[dict[str, Any]] = []
+    protocol_schema_sha256 = g2_protocol_schema_sha256()
     auth = client.get("/api/check_auth")
     csrf = _json_payload(auth).get("csrf_token")
     session = client.post("/api/new_chat", headers={"X-CSRF-Token": csrf or ""})
@@ -45,7 +47,12 @@ def run_g2_campaign(
 
     for case in G2_CASES:
         for repeat in range(1, G2_REPEATS + 1):
-            row = _new_run_row(case, repeat, execution_source=execution_source)
+            row = _new_run_row(
+                case,
+                repeat,
+                execution_source=execution_source,
+                protocol_schema_sha256=protocol_schema_sha256,
+            )
             if stopped_reason:
                 row.update(
                     mode="unavailable",
@@ -155,6 +162,7 @@ def run_g2_campaign(
         "contract_result": contract_result,
         "dataset_version": G2_DATASET_VERSION,
         "protocol_prompt_version": G2_PROTOCOL_PROMPT_VERSION,
+        "protocol_schema_sha256": protocol_schema_sha256,
         "requested_model": G2_MODEL,
         "run_count": len(rows),
         "executed_run_count": sum(row["run_id"] is not None for row in rows),
@@ -182,13 +190,20 @@ def run_g2_campaign(
     }
 
 
-def _new_run_row(case: G2Case, repeat: int, *, execution_source: str) -> dict[str, Any]:
+def _new_run_row(
+    case: G2Case,
+    repeat: int,
+    *,
+    execution_source: str,
+    protocol_schema_sha256: str,
+) -> dict[str, Any]:
     return {
         "problem_id": case.problem_id,
         "repeat": repeat,
         "input_version": G2_DATASET_VERSION,
         "input_sha256": hashlib.sha256(case.problem.encode("utf-8")).hexdigest(),
         "protocol_prompt_version": G2_PROTOCOL_PROMPT_VERSION,
+        "protocol_schema_sha256": protocol_schema_sha256,
         "run_id": None,
         "evidence_id": None,
         "run_evidence_id": None,
