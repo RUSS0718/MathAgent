@@ -76,4 +76,3 @@ class EvidenceHistoryContractTest(unittest.TestCase):
         self.assertEqual(409, response.status_code)
         self.assertEqual("verification_requires_terminal_job", response.get_json()["error"])
         self.assertEqual(before, self.client.get(f"/api/runs/{job_id}/events").get_json()["events"])
-
