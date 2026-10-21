@@ -42,4 +42,18 @@
 
 浏览器验证了服务重启和终态重连；断开期间新事件的缺口回放另由前端 store/transport 合同验证：实际消费到 10 后，服务器快照为 20 也不能跳过 11–20。上述记录不代表对真实 live provider、数学正确率或既有 ChatWorkspace 全面重设计的验收。
 
-验收期间发现首个 fixture 的注入 RunService 使用 `workspace.sqlite3`，而工厂默认配置使用 `showcase.sqlite3`，导致借用连接与预算账本不一致。旧 fixture 的终态时延/冻结结论无效。已改为同一显式数据库的全新 store-v3；工厂现在拒绝持久注入服务与配置数据库不一致（保留测试用 `:memory:` 服务注入）。公开合同在模拟未来一小时后确认终态报告、预算时延和归档身份完全相同，`ended_at` 非空。
+验收期间发现首个 fixture 的注入 RunService 使用 `workspace.sqlite3`，而工厂默认配置使用 `showcase.sqlite3`，导致借用连接与预算账本不一致。旧 fixture 的终态时延/冻结结论无效。已改为同一显式数据库的全新 store-v3；工厂现在拒绝持久注入服务与配置数据库不一致（仅保留无 pipeline 的测试用 `:memory:` 服务注入；memory 服务与 pipeline 组合明确拒绝）。公开合同在模拟未来一小时后确认终态报告、预算时延和归档身份完全相同，`ended_at` 非空。
+
+store-v3 浏览器复核：成功批次在异步结束后刷新，时延、归档和页面内容保持一致；下载后的 campaign 规范 hash 与 archive 一致，两臂 `ended_at` 非空，fake 与 usage unknown 标记保留。
+
+进程中断合同：HTTP 预算预留的同一事务保存脱敏 attempt ID、逻辑调用、role、请求模型、序号和开始时间。worker 在假 HTTP 内 `os._exit(73)` 后，另一个进程重开同一 SQLite，公开报告 / Evidence 仍保留该 attempt 与未知 usage。`reserved_dispatch_unconfirmed` 仅证明本地预留，不能证明远端已接收或计费；正常返回后按 attempt ID 结算为 `transport_observed`，查询合并事件与账本时不重复计数。此合同使用真实子进程退出，未发真实 provider 请求。
+
+## 最终代码评审
+
+### Standards
+
+固定范围 `ed45443` → `2c29822`。完整标准评审及 audit 增量无阻塞项；工厂 guard 微小增量经复核无新增问题。未执行运行时调用。
+
+### Spec
+
+固定范围 `ed45443` → `2c29822`。规格评审发现并解决 2 类 P1：真实 worker 退出后未决 HTTP attempt 身份丢失，以及注入服务与预算/checkpoint 数据库不一致。`1430cd5` 通过原子预留投影和真实子进程退出回归修复前者；`ef09466` / `2c29822` 通过工厂配置拒绝和终态冻结回归修复后者。最终复核无剩余可执行发现。评审本身为静态检查，未调用模型或运行时 provider。
