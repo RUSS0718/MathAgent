@@ -117,3 +117,12 @@
 - 批次保留失败、取消、不明与 incomplete，不自动补跑；查询关联既有 Run/report/Evidence，未知 usage 与费用保持未知。内容 hash 归档原子发布并保留旧版本；运行产物写入 ignored artifacts，不提交题集、答案或 raw。
 - 审查修复后顺序执行最终检查：`uv run python scripts/check.py --offline` 180 项测试通过（139.822 秒），repository/contracts 与服务 help 入口通过；直接 Showcase release gate、全仓 Ruff、全部适用 pre-commit hooks 和 diff check 通过。没有 artifacts 被跟踪。
 - 相对前一集成提交 `d6bdf09`，`user_agent.py`、`implementations/`、`BASELINE.json` 与 `requirements.txt` 无差异。本轮仅使用离线替身，未调用真实模型，不证明数学能力或策略效果；托管 CI 待核对。PR #22 保持 Draft/Open。
+
+## S6 Workbench 展示与故障验收（2026-10-21）
+
+- [#31](https://github.com/RUSS0718/MathAgent/issues/31) 已完成。S6 代码验证提交为 `2c29822`，最终测试与文档提交为 `f990bbb`；实现与验收边界见 [S6 Workbench 审阅合同](s6-workbench.md)。
+- Workbench 提供 campaign 列表与详情，以及 Run 深链；详情并排展示每个 baseline / candidate pair 的 Attempt、工具、验证范围和 Evidence。Job 保留实际 live / fake / replay 模式身份，缺失身份显示 unavailable；失败、timeout、cancel 和 needs_review 状态均保留可见。
+- 浏览器验收覆盖 success、domain、tool failure、timeout、cancel 与 needs_review；断网后刷新保留报告，恢复后重连不产生重复事件；布局在 320、768、1024、1440 宽度通过检查。真实子进程 `os._exit(73)` 后，attempt 身份与 unknown usage 仍然保留。
+- 最终顺序验证：190 项测试通过（156.584 秒），`repository_check=PASS`，Showcase release gate PASS，Ruff check PASS，pre-commit PASS；前端 `npm audit` 为 0 项，`npm run check` PASS（12 项测试，生产构建成功）。
+- 相对 `cd73679`，冻结文件 `user_agent.py`、`implementations/`、`BASELINE.json` 与 `requirements.txt` 无差异。未新增真实 provider；fake / replay 验收不证明真实模型能力、数学正确率或成本。
+- 托管 CI 待核对，PR #22 保持 Draft/Open；本文不声称托管 CI 已通过。
