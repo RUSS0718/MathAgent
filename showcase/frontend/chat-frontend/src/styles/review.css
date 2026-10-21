@@ -1,0 +1,17 @@
+/* Campaign and Run review reuse the Workbench palette and interaction treatment. */
+.campaign-workbench, .run-review { color: var(--text); }
+.campaign-workbench nav, .run-review nav { margin-bottom: 28px; color: var(--muted); font-size: .88rem; }
+.campaign-workbench h1, .run-review h1 { font-size: 1.65rem; letter-spacing: -.03em; margin-bottom: 12px; }
+.campaign-workbench h2, .run-review h2 { font-size: 1.08rem; margin: 18px 0 12px; }
+.campaign-workbench h3 { font-size: 1rem; color: var(--accent-strong); margin-bottom: 12px; }
+.campaign-workbench p, .run-review p { margin: 12px 0; line-height: 1.65; }
+.campaign-workbench a, .run-review a { color: var(--accent-strong); text-underline-offset: 3px; }
+.campaign-workbench button, .run-review button { border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: .86rem; font-weight: 600; cursor: pointer; }
+.campaign-workbench button:hover, .run-review button:hover { background: var(--accent-wash); border-color: var(--accent-soft); }
+.campaign-workbench button:disabled, .run-review button:disabled { opacity: .5; cursor: default; }
+.campaign-workbench :focus-visible, .run-review :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.campaign-workbench dt, .run-review dt { color: var(--muted); font-size: .84rem; }
+.campaign-workbench dd, .run-review dd { font-size: .86rem; line-height: 1.5; }
+.campaign-workbench [role=alert], .run-review [role=alert] { border-left: 3px solid var(--warning); background: var(--warning-wash); padding: 12px; }
+.campaign-arms article { border-top: 1px solid var(--border); padding-top: 16px; }
+.run-review details { border-bottom: 1px solid var(--border); }

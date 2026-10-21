@@ -77,8 +77,13 @@ class LivePipelineContractTest(unittest.TestCase):
         model = ScriptedModel([
             ModelResponse(text="先检查候选根。", model_id="intern-test"),
             ModelResponse(
-                text='{"tool_call":{"name":"polynomial_check","arguments":{"schema_version":1,"variable":"x","coefficients":["1","-1"],"domain":{"kind":"real"},"candidates":["1"]}}}',
-                tool_requests=(ToolRequest("polynomial_check", {"schema_version": 1, "variable": "x", "coefficients": ["1", "-1"], "domain": {"kind": "real"}, "candidates": ["1"]}),),
+                text="native tool request",
+                tool_requests=(ToolRequest(
+                    "polynomial_check",
+                    {"schema_version": 1, "variable": "x", "coefficients": ["1", "-1"], "domain": {"kind": "real"}, "candidates": ["1"]},
+                    tool_call_id="call_pipeline_1",
+                    protocol="native",
+                ),),
                 model_id="intern-test",
             ),
             ModelResponse(text="候选根通过。", model_id="intern-test"),

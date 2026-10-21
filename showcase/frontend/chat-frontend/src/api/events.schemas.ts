@@ -41,6 +41,8 @@ const knownPublicEventTypes = new Set([
   'interrupt',
   'error',
   'canceled',
+  'timeout',
+  'needs_review',
   'heartbeat',
 ])
 
@@ -141,7 +143,10 @@ function validatePublicEvent(event: string, data: Record<string, unknown>, raw: 
   } else if (event === 'interrupt') {
     requireString('message')
     requireString('question_id')
-  } else if (event === 'error' || event === 'canceled') {
+  } else if (event === 'canceled') {
+    requireString('job_id')
+    requireString('status')
+  } else if (event === 'error') {
     requireString('message')
   } else if (!knownPublicEventTypes.has(event)) {
     // Unknown events are intentionally accepted after the generic type check.
@@ -229,5 +234,5 @@ export class SseParser {
 }
 
 export function isTerminalEvent(event: DecodedSseEvent): boolean {
-  return event.event === 'final_result' || event.event === 'error' || event.event === 'canceled'
+  return event.event === 'final_result' || event.event === 'error' || event.event === 'canceled' || event.event === 'timeout' || event.event === 'needs_review'
 }

@@ -7,6 +7,9 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+from llm_response import public_attempt
+
+from .final_evidence import bind_verification
 from .redaction import redact
 from .verification import VerificationResult
 
@@ -28,7 +31,11 @@ class EvidencePackExporter:
     ) -> dict[str, Any]:
         """Return a JSON-compatible, redacted Evidence Pack."""
 
-        verification_data = _verification_dict(verification)
+        if not tool_results:
+            result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
+            stored_tools = result.get("tool_results", [])
+            tool_results = [item for item in stored_tools if isinstance(item, Mapping)]
+        verification_data = bind_verification(str(snapshot.get("final_response") or ""), _verification_dict(verification))
         pack = {
             "version": self.version,
             # A Run's update timestamp makes repeated reads byte-stable.
@@ -46,6 +53,8 @@ class EvidencePackExporter:
             "timeline": [_event_summary(event, index) for index, event in enumerate(events, 1)],
             "agent": {"summary": snapshot.get("agent_summary", "")},
             "tools": [_tool_summary(result) for result in tool_results],
+            "request_attempts": _attempts(snapshot),
+            "budget": (snapshot.get("result") or {}).get("budget"),
             "verification": verification_data,
             "artifacts": [redact(artifact) for artifact in artifacts],
             "feature_status": {
@@ -73,9 +82,11 @@ class EvidencePackExporter:
         result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
         answer = snapshot.get("final_response") or result.get("final_response") or ""
         summary = snapshot.get("agent_summary") or result.get("summary") or ""
-        check = verification or {"status": "unknown", "findings": ["verification_not_run"]}
+        check = bind_verification(str(answer), verification)
         return redact({
             "answer": answer,
+            "request_attempts": _attempts(snapshot),
+            "budget": (snapshot.get("result") or {}).get("budget"),
             "public_summary": summary,
             "stage": snapshot.get("stage"),
             "asset_refs": snapshot.get("asset_refs", []),
@@ -104,7 +115,7 @@ def _verification_dict(value: VerificationResult | Mapping[str, Any] | None) -> 
 
 
 def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
-    return {
+    summary = {
         "evidence_id": f"event_{index}",
         "type": event.get("type", "unknown"),
         "sequence": event.get("sequence", index),
@@ -113,12 +124,22 @@ def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
         "summary": event.get("summary", ""),
         "error_category": event.get("error_category"),
     }
+    for key in ("tool_call_id", "protocol", "tool_name"):
+        if event.get(key) is not None:
+            summary[key] = event[key]
+    return summary
 
 
 def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
     summary = {
         "evidence_id": result.get("evidence_id", result.get("name", "tool")),
         "request_id": result.get("request_id"),
+        "tool_call_id": result.get("tool_call_id"),
+        "protocol": result.get("protocol"),
+        "continuation_tool_call_id": result.get("continuation_tool_call_id"),
+        "continuation_status": result.get("continuation_status"),
+        "continuation_response_received": result.get("continuation_response_received"),
+        "continuation_finish_reason": result.get("continuation_finish_reason"),
         "continuation_request_id": result.get("continuation_request_id"),
         "transport_mode": result.get("transport_mode", "unavailable"),
         "name": result.get("name"),
@@ -130,6 +151,9 @@ def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
     }
     value = result.get("value")
     if result.get("name") == "polynomial_check" and isinstance(value, Mapping):
+        candidates = value.get('candidates', [])
+        observations = [item.get('in_domain') for item in candidates if isinstance(item, Mapping)]
+        summary['domain_status'] = 'out_of_domain' if any(item is False for item in observations) else ('in_domain' if observations and all(item is True for item in observations) else 'unknown')
         summary["candidate_status"] = value.get("candidate_status", "unknown")
         summary["coverage_status"] = value.get("coverage_status", "unknown")
         summary["limitations"] = value.get("limitations", [])
@@ -163,3 +187,9 @@ def replay_evidence(pack: Mapping[str, Any]) -> dict[str, Any]:
 
 
 __all__ = ["EvidencePackExporter", "replay_evidence"]
+
+
+def _attempts(snapshot):
+    result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
+    records = snapshot.get("request_attempts", result.get("request_attempts", []))
+    return [public_attempt(item, run_id=item.get("run_id"), role=item.get("role")) for item in records if isinstance(item, Mapping)]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -103,6 +104,10 @@ class FlaskShowcaseContractTest(unittest.TestCase):
         created = self.client.post("/api/agent/jobs", json={"message": "校验", "session_id": session}, headers={"X-CSRF-Token": csrf, "Idempotency-Key": "00000000-0000-4000-8000-000000000001"})
         self.assertIn(created.status_code, (200, 202))
         job_id = created.get_json()["job_id"]
+        for _ in range(200):
+            if self.client.get(f"/api/agent/jobs/{job_id}").get_json()["status"] == "succeeded":
+                break
+            time.sleep(0.01)
         payload = {"schema_version": 1, "variable": "x", "coefficients": ["1", "0", "-1"], "domain": {"kind": "real"}, "candidates": ["1"]}
         response = self.client.post(f"/api/agent/jobs/{job_id}/polynomial-check", json=payload, headers={"X-CSRF-Token": csrf})
         self.assertEqual(200, response.status_code)

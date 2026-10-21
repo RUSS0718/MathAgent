@@ -34,7 +34,7 @@ class LiveToolContinuationContractTest(unittest.TestCase):
         continuation = DeterministicContinuation()
         adapter = InternAgentAdapter(
             InternModelAdapter(FakeClient([
-                '{"tool_call":{"name":"polynomial_check","arguments":{"schema_version":1,"variable":"x","coefficients":["1","-1"],"domain":{"kind":"real"},"candidates":["1"]}}}',
+                '{"protocol":"text_action","tool_call":{"id":"call_graph_1","name":"polynomial_check","arguments":{"schema_version":1,"variable":"x","coefficients":["1","-1"],"domain":{"kind":"real"},"candidates":["1"]}}}',
             ])),
             continuation_transport=continuation,
         )

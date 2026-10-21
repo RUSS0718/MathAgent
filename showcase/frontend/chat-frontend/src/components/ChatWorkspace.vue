@@ -20,7 +20,7 @@ const files = useFilesStore()
 const draft = ref('')
 const notice = ref('')
 const visionEnabled = ref(false)
-const executionMode = ref('live')
+const executionMode = ref('unavailable')
 const selectedFile = ref<string | undefined>()
 const selectedFileName = ref<string | undefined>()
 const sidebarOpen = ref(false)
@@ -52,12 +52,13 @@ async function send(): Promise<void> {
   }
 }
 async function cancelCurrent(): Promise<void> {
-  if (!current.value) return
+  const target = current.value
+  if (!target) return
   try {
-    const result = await api.cancelJob(current.value.jobId, createIdempotencyKey())
-    jobs.start(current.value.jobId, current.value.sessionId, result.status ?? 'canceled')
-    if (result.status && !['canceled', 'failed', 'succeeded'].includes(result.status)) void jobController.subscribe(current.value.jobId)
-    await loadReport(current.value.jobId)
+    const result = await api.cancelJob(target.jobId, createIdempotencyKey())
+    jobs.start(target.jobId, target.sessionId, result.status ?? 'canceled')
+    if (result.status && !['canceled', 'failed', 'succeeded'].includes(result.status)) void jobController.subscribe(target.jobId)
+    await loadReport(target.jobId)
     notice.value = result.existing ? '已重放取消结果。' : '任务已取消。'
   } catch (error) { notice.value = error instanceof Error ? error.message : '取消失败。' }
 }
@@ -91,7 +92,7 @@ function observeJob(jobId: string): void {
 onMounted(async () => {
   try {
     const capabilities = await api.capabilities()
-    executionMode.value = capabilities.execution?.mode ?? 'live'
+    executionMode.value = capabilities.execution?.mode ?? 'unavailable'
     if (capabilities.execution?.mode === 'live' && capabilities.execution.status !== 'configured') {
       notice.value = 'live 模式未检测到 Intern API 凭证。'
     }
@@ -125,7 +126,7 @@ onMounted(async () => {
   <div class="workspace-shell" :class="{ 'sidebar-open': sidebarOpen, 'inspector-open': inspectorOpen }">
     <SessionSidebar :items="sessions.items" :current-id="sessions.currentId" :open="sidebarOpen" @new="newSession" @select="selectSession" @rename="rename" @remove="remove" @settings="openSettings" @close="sidebarOpen = false" />
     <main>
-      <div class="workspace-topbar"><button class="icon-button mobile-only" type="button" aria-label="打开会话栏" @click="sidebarOpen = true">☰</button><div class="topbar-title"><span class="topbar-kicker">MATHAGENT</span><strong>{{ sessions.items.find((item) => item.id === sessions.currentId)?.preview ?? '新数学会话' }}</strong></div><div class="topbar-actions"><span class="live-pill" :class="{ 'is-fake': executionMode === 'fake' }"><i></i>{{ executionMode === 'fake' ? 'FAKE' : 'LIVE' }}</span><button class="inspector-toggle" type="button" :aria-pressed="inspectorOpen" @click="inspectorOpen = !inspectorOpen">{{ inspectorOpen ? '隐藏运行观察' : '显示运行观察' }}</button></div></div>
+      <div class="workspace-topbar"><button class="icon-button mobile-only" type="button" aria-label="打开会话栏" @click="sidebarOpen = true">☰</button><div class="topbar-title"><span class="topbar-kicker">MATHAGENT</span><strong>{{ sessions.items.find((item) => item.id === sessions.currentId)?.preview ?? '新数学会话' }}</strong></div><div class="topbar-actions"><span class="live-pill" :class="{ 'is-fake': executionMode === 'fake' }"><i></i>{{ (report?.mode ?? executionMode).toUpperCase() }}</span><button class="inspector-toggle" type="button" :aria-pressed="inspectorOpen" @click="inspectorOpen = !inspectorOpen">{{ inspectorOpen ? '隐藏运行观察' : '显示运行观察' }}</button></div></div>
       <p v-if="notice" class="workspace-notice" role="status">{{ notice }}</p>
       <section class="conversation-area"><div class="conversation-scroll"><MessageList :messages="sessions.messages" @starter="useStarter" /><ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" /></div><ComposerBar v-model="draft" :disabled="Boolean(current)" :running="Boolean(current && !['succeeded','failed','canceled'].includes(current.status))" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile" /></section>
     </main>

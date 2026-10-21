@@ -17,6 +17,8 @@ from .graph import ToolExecutionResult
 from .polynomial import PolynomialChecker
 from .profile import SHOWCASE_PROFILE
 from .redaction import summarize_parameters
+from .run_budget import budgeted_tool, current_budget
+from .tool_schemas import POLYNOMIAL_CHECK_SCHEMA, PYTHON_MATH_SCHEMA, schema_error
 
 MAX_TOOL_INPUT_BYTES = 32_000
 MAX_SUMMARY_CHARS = 1_000
@@ -49,6 +51,7 @@ class ToolSpec:
     allowed_profiles: tuple[str, ...]
     timeout_seconds: float
     experimental: bool
+    parameters_schema: Mapping[str, Any]
 
 
 class ToolRegistry:
@@ -76,6 +79,7 @@ class ToolRegistry:
         allowed_profiles: tuple[str, ...] = (SHOWCASE_PROFILE,),
         timeout_seconds: float = 3.0,
         experimental: bool = False,
+        parameters_schema: Mapping[str, Any] | None = None,
     ) -> ToolSpec:
         """Register a callable and return its observable declaration."""
 
@@ -89,6 +93,7 @@ class ToolRegistry:
             allowed_profiles=tuple(allowed_profiles),
             timeout_seconds=float(timeout_seconds),
             experimental=experimental,
+            parameters_schema=dict(parameters_schema or {"type": "object"}),
         )
         self._handlers[name] = (spec, handler)
         return spec
@@ -102,6 +107,7 @@ class ToolRegistry:
             capabilities=("calculation", "symbolic_math"),
             timeout_seconds=timeout_seconds,
             experimental=True,
+            parameters_schema=PYTHON_MATH_SCHEMA,
         )
 
     def register_polynomial_check(self, *, timeout_seconds: float = 3.0) -> ToolSpec:
@@ -112,6 +118,7 @@ class ToolRegistry:
             PolynomialChecker().check,
             capabilities=("verification", "polynomial_candidates"),
             timeout_seconds=timeout_seconds,
+            parameters_schema=POLYNOMIAL_CHECK_SCHEMA,
         )
 
     def describe(self) -> list[dict[str, Any]]:
@@ -128,35 +135,74 @@ class ToolRegistry:
             for spec, _handler in self._handlers.values()
         ]
 
-    def invoke(self, name: str, arguments: Mapping[str, Any]) -> ToolExecutionResult:
-        """Invoke one registered tool and normalize all outcomes."""
+    def allowed_schemas(self) -> list[dict[str, Any]]:
+        """Return argument schemas for registered tools allowed by this Profile."""
+
+        return [
+            {
+                "name": spec.name,
+                "description": ", ".join(spec.capabilities) or spec.name,
+                "parameters": json.loads(json.dumps(spec.parameters_schema)),
+            }
+            for spec, _handler in self._handlers.values()
+            if self.profile in spec.allowed_profiles
+        ]
+
+    def provider_schemas(self) -> list[dict[str, Any]]:
+        """Wrap the authoritative schemas in provider-native function declarations."""
+
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": schema["name"],
+                    "description": schema["description"],
+                    "parameters": schema["parameters"],
+                },
+            }
+            for schema in self.allowed_schemas()
+        ]
+
+    @budgeted_tool
+    def invoke(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        tool_call_id: str | None = None,
+    ) -> ToolExecutionResult:
+        """Invoke one registered, permitted tool after checking its schema."""
 
         started = time.monotonic()
         entry = self._handlers.get(name)
         if entry is None:
-            return _result("rejected", "tool_not_registered", started, arguments)
+            return _result("rejected", "tool_not_registered", started, arguments, tool_call_id)
         spec, handler = entry
         if self.profile not in spec.allowed_profiles:
-            return _result("rejected", "tool_not_permitted_for_profile", started, arguments)
+            return _result("rejected", "tool_not_permitted_for_profile", started, arguments, tool_call_id)
         if not isinstance(arguments, Mapping):
-            return _result("rejected", "tool_arguments_must_be_object", started)
+            return _result("rejected", "tool_arguments_must_be_object", started, tool_call_id=tool_call_id)
         try:
             encoded = json.dumps(arguments, ensure_ascii=False, default=str).encode("utf-8")
         except (TypeError, ValueError):
-            return _result("rejected", "tool_arguments_not_serializable", started, arguments)
+            return _result("rejected", "tool_arguments_not_serializable", started, arguments, tool_call_id)
         if len(encoded) > self.max_input_bytes:
-            return _result("rejected", "tool_input_too_large", started, arguments)
-        if self._call_count >= self.max_calls:
-            return _result("rejected", "tool_budget_exhausted", started, arguments)
+            return _result("rejected", "tool_input_too_large", started, arguments, tool_call_id)
+        if schema_error(arguments, spec.parameters_schema):
+            return _result("rejected", "tool_schema_invalid", started, arguments, tool_call_id)
+        if current_budget() is None and self._call_count >= self.max_calls:
+            return _result("rejected", "tool_budget_exhausted", started, arguments, tool_call_id)
         self._call_count += 1
         executor = ThreadPoolExecutor(max_workers=1)
         try:
             future = executor.submit(handler, dict(arguments))
-            value = future.result(timeout=spec.timeout_seconds)
+            budget = current_budget()
+            timeout = min(spec.timeout_seconds, budget.remaining_seconds()) if budget else spec.timeout_seconds
+            value = future.result(timeout=timeout)
         except FutureTimeoutError:
             future.cancel()
             executor.shutdown(wait=False, cancel_futures=True)
-            return _result("timeout", "tool_timeout", started, arguments)
+            return _result("timeout", "tool_timeout", started, arguments, tool_call_id)
         except Exception as exc:  # noqa: BLE001 - tool failures become product data
             executor.shutdown(wait=False, cancel_futures=True)
             return ToolExecutionResult(
@@ -165,6 +211,7 @@ class ToolRegistry:
                 result_summary=type(exc).__name__,
                 error_category="tool_execution_error",
                 duration_seconds=_duration(started),
+                tool_call_id=tool_call_id,
             )
         else:
             executor.shutdown(wait=True)
@@ -176,6 +223,7 @@ class ToolRegistry:
                 value=value.value,
                 error_category=value.error_category,
                 duration_seconds=value.duration_seconds or _duration(started),
+                tool_call_id=tool_call_id,
             )
         return ToolExecutionResult(
             status="success",
@@ -183,6 +231,7 @@ class ToolRegistry:
             value=value,
             result_summary=_summary(value),
             duration_seconds=_duration(started),
+            tool_call_id=tool_call_id,
         )
 
 
@@ -283,6 +332,7 @@ def _result(
     category: str,
     started: float,
     arguments: Mapping[str, Any] | None = None,
+    tool_call_id: str | None = None,
 ) -> ToolExecutionResult:
     return ToolExecutionResult(
         status=status,  # type: ignore[arg-type]
@@ -290,6 +340,7 @@ def _result(
         error_category=category,
         result_summary=category,
         duration_seconds=_duration(started),
+        tool_call_id=tool_call_id,
     )
 
 

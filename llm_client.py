@@ -9,8 +9,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import requests
+
+from llm_response import provider_usage, safe_identifier
 
 DEFAULT_API_BASE = "https://chat.intern-ai.org.cn/api/v1/chat/completions"
 # The provider's API identifier for the current Intern-S2 model.
@@ -75,12 +78,12 @@ class InternChatClient:
         self.retry = retry if retry is not None else _positive_int_env("INTERN_RETRY_COUNT", 1)
         # P0.1: per-call finish_reason log (local diagnostic only; the official
         # client keeps its own counters).  Appended in call order for serial runs.
-        self.finish_reasons: list[str] = []
+        self.finish_reasons: list[str | None] = []
         # 13.2 A/B diagnostics: per-call completion token count and raw content,
         # so the evaluator can measure thinking-leak rate / marker rate / output
         # tokens without re-requesting.  Local-only; the official client is
         # untouched and never sees these lists.
-        self.completion_tokens: list[int] = []
+        self.completion_tokens: list[int | None] = []
         self.raw_contents: list[str] = []
         self.response_metadata: list[dict[str, Any]] = []
         self.last_response_metadata: dict[str, Any] | None = None
@@ -97,13 +100,18 @@ class InternChatClient:
 
     def chat(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float = 0.2,
         max_tokens: int = 4096,
         *,
         reasoning_mode: ReasoningMode = "inherit",
         thinking_mode: bool | None = None,
+        tools: list[dict[str, Any]] | None = None,
         timeout_seconds: int | None = None,
+        _attempt_records: list[dict[str, Any]] | None = None,
+        _tool_calls_capture: list[Any] | None = None,
+        _allow_empty_content: bool = False,
+        _attempt_budget: Any = None,
     ) -> str:
         """Send a request; explicit reasoning_mode wins over thinking_mode and defaults."""
         effective_timeout = self.timeout if timeout_seconds is None else int(timeout_seconds)
@@ -115,6 +123,8 @@ class InternChatClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if tools:
+            payload["tools"] = tools
         effective_thinking_mode = self._resolve_reasoning_mode(reasoning_mode)
         if reasoning_mode == "inherit" and thinking_mode is not None:
             effective_thinking_mode = thinking_mode
@@ -128,10 +138,12 @@ class InternChatClient:
         message_bytes = json.dumps(
             messages, ensure_ascii=False, sort_keys=True, default=str
         ).encode("utf-8")
+        logical_call_id = uuid4().hex
         logical_call_index = self._logical_call_count
         self._logical_call_count += 1
         request_metadata = {
             "logical_call_index": logical_call_index,
+            "logical_call_id": logical_call_id,
             "request_model_id": self.model,
             "api_host": urlparse(self.api_base).netloc,
             "reasoning_mode": reasoning_mode,
@@ -152,10 +164,17 @@ class InternChatClient:
             request_event: dict[str, Any] = {
                 **request_metadata,
                 "request_sequence": self._request_sequence,
+                "attempt_id": uuid4().hex,
                 "attempt_index": attempt + 1,
                 "started_at_utc": datetime.now(UTC).isoformat(),
                 "status": "pending",
             }
+            attempt_timeout = effective_timeout
+            if _attempt_budget is not None:
+                estimate = len(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"))
+                attempt_timeout = min(
+                    effective_timeout, _attempt_budget.before_attempt(request_event, estimate)
+                )
             response = None
             failure: BaseException | None = None
             try:
@@ -163,12 +182,12 @@ class InternChatClient:
                     self.api_base,
                     headers=headers,
                     data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                    timeout=effective_timeout,
+                    timeout=attempt_timeout,
                 )
                 response.raise_for_status()
                 data = response.json()
                 choice = data["choices"][0]
-                finish_reason = choice.get("finish_reason") or ""
+                finish_reason = safe_identifier(choice.get("finish_reason"))
                 request_event.update(
                     status="success",
                     http_status=getattr(response, "status_code", None),
@@ -179,20 +198,23 @@ class InternChatClient:
                     finish_reason=finish_reason,
                 )
                 self.finish_reasons.append(finish_reason)
-                usage = data.get("usage") or {}
-                try:
-                    completion_tokens = int(usage.get("completion_tokens") or 0)
-                except (TypeError, ValueError):
-                    completion_tokens = 0
+                usage = provider_usage(data.get("usage"))
+                request_event.update(usage)
+                completion_tokens = usage["completion_tokens"]
                 self.completion_tokens.append(completion_tokens)
-                for usage_field in ("prompt_tokens", "total_tokens"):
-                    try:
-                        request_event[usage_field] = int(usage.get(usage_field) or 0)
-                    except (TypeError, ValueError):
-                        request_event[usage_field] = None
-                request_event["completion_tokens"] = completion_tokens
                 message = choice["message"]
-                content = message["content"]
+                content = message.get("content")
+                tool_calls = message.get("tool_calls")
+                if _tool_calls_capture is not None and tool_calls is not None:
+                    _tool_calls_capture.append(tool_calls)
+                if content is None:
+                    content = ""
+                if not isinstance(content, str) or (
+                    not content.strip()
+                    and not _allow_empty_content
+                    and not (_tool_calls_capture is not None and tool_calls)
+                ):
+                    raise ValueError("invalid_content")
                 reasoning_content = (
                     message.get("reasoning_content") if isinstance(message, Mapping) else None
                 )
@@ -242,7 +264,7 @@ class InternChatClient:
                 last_category = "http_status"
                 failure = exc
                 self._record_failure(last_category, exc)
-            except (KeyError, TypeError, ValueError) as exc:
+            except (KeyError, IndexError, AttributeError, TypeError, ValueError) as exc:
                 last_category = "invalid_response"
                 failure = exc
                 self._record_failure(last_category, exc)
@@ -271,12 +293,43 @@ class InternChatClient:
                             else None
                         ),
                     )
+                if _attempt_budget is not None:
+                    _attempt_budget.after_attempt(request_event)
                 self.request_diagnostics.append(request_event)
+                if _attempt_records is not None:
+                    _attempt_records.append(dict(request_event))
                 self._request_sequence += 1
             if attempt + 1 < self.retry:
                 time.sleep(2**attempt)
 
         raise ChatClientError(last_category, self.last_failure_type)
+
+    def chat_response(self, messages, **kwargs) -> dict[str, Any]:
+        """Return one request-scoped envelope; never read shared last-response state."""
+        attempts: list[dict[str, Any]] = []
+        tool_calls: list[Any] = []
+        try:
+            content = self.chat(
+                messages,
+                _attempt_records=attempts,
+                _tool_calls_capture=tool_calls,
+                _allow_empty_content=True,
+                **kwargs,
+            )
+        except Exception as exc:
+            exc.attempts = tuple(attempts)
+            raise
+        last = attempts[-1]
+        response = {
+            "content": content,
+            "usage": {key: last.get(key) for key in provider_usage(None)},
+            "model": last.get("response_model_id"),
+            "finish_reason": last.get("finish_reason"),
+            "attempts": tuple(attempts),
+        }
+        if tool_calls:
+            response["tool_calls"] = tool_calls[-1]
+        return response
 
     def _resolve_reasoning_mode(self, reasoning_mode: ReasoningMode) -> bool | None:
         """Resolve an explicit request mode against the unchanged client default."""

@@ -62,7 +62,7 @@ class LightweightVerificationHook:
                 findings.append(f"polynomial_candidate_status:{status}")
                 coverage = check.get("coverage_status", "unknown")
                 findings.append(f"polynomial_coverage_status:{coverage}")
-                return VerificationResult(status, tuple(findings), checker="polynomial_check")
+                return VerificationResult("unknown", tuple(findings), checker="polynomial_check")
         failed_tools = [
             str(result.get("name", "unknown"))
             for result in results

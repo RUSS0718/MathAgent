@@ -20,7 +20,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .evidence_store import append_check
+from .final_evidence import bind_verification
 from .redaction import redact
+from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, freeze_budget
+from .run_checkpoints import RunCheckpointSaver
+from .run_control import RunControl, RunStopped, bind_control
 
 ACTIVE_JOB_STATUSES = ("queued", "running", "waiting_input")
 TERMINAL_JOB_STATUSES = ("succeeded", "failed", "canceled")
@@ -89,6 +94,14 @@ class WorkspaceStore:
                 payload_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (job_id) REFERENCES workspace_jobs(job_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS events (
+                run_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                event_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (run_id, sequence),
+                FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS workspace_actions (
                 user_id TEXT NOT NULL,
@@ -196,6 +209,7 @@ class WorkspaceStore:
         problem: str,
         idempotency_key: str,
         request_digest: str,
+        execution_mode: str = "fake",
         verification_mode: str = "auto",
         input_user_file_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
@@ -227,12 +241,13 @@ class WorkspaceStore:
                 self._connection.execute(
                     "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,input_user_file_id,verification_mode,idempotency_key,request_digest,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (job_id, session_id, user_id, problem, "queued", None, None, input_user_file_id, verification_mode, idempotency_key, request_digest, now, now),
+                    (job_id, session_id, user_id, problem, "queued", _json({"execution_mode": execution_mode}), None, input_user_file_id, verification_mode, idempotency_key, request_digest, now, now),
                 )
                 self._connection.execute(
                     "INSERT INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
                     (session_id, "user", problem, job_id, now),
                 )
+                self._insert_run(job_id, problem, now, execution_mode)
                 self._insert_event(
                     job_id,
                     "queued",
@@ -247,7 +262,6 @@ class WorkspaceStore:
                         "asset_ref": ({"file_id": input_user_file_id, "vision_status": "unavailable"} if input_user_file_id else None),
                     },
                 )
-                self._insert_run(job_id, problem, now)
                 self._connection.commit()
             except Exception:
                 self._connection.rollback()
@@ -295,7 +309,8 @@ class WorkspaceStore:
                     self._connection.rollback()
                     return
                 now = _utc_now()
-                result = {"final_response": final_response, "summary": summary}
+                result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response), "execution_mode": (_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable")}
+                result["budget"] = freeze_budget(self._connection, job_id)
                 self._connection.execute(
                     "UPDATE workspace_jobs SET status='succeeded',result_json=?,updated_at=? WHERE job_id=?",
                     (_json(result), now, job_id),
@@ -309,7 +324,7 @@ class WorkspaceStore:
                 )
                 self._connection.execute(
                     "UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?",
-                    (_json(_run_snapshot(job_id, "COMPLETED", now, result, asset_refs=self._asset_refs(job_id))), now, job_id),
+                    (_json(_run_snapshot(job_id, "COMPLETED", now, result, execution_mode=result["execution_mode"], asset_refs=self._asset_refs(job_id))), now, job_id),
                 )
                 self._insert_event(
                     job_id,
@@ -326,6 +341,11 @@ class WorkspaceStore:
                 self._connection.rollback()
                 raise
 
+    def control_status(self, job_id: str):
+        with self._lock:
+            row = self._connection.execute("SELECT status,error_code FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+        return dict(row) if row else None
+
     def mark_waiting_input(self, job_id: str) -> None:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
@@ -338,6 +358,10 @@ class WorkspaceStore:
                 raise WorkspaceError("job_not_waiting_input", status=409)
             now = _utc_now()
             self._connection.execute("UPDATE workspace_jobs SET status='waiting_input',updated_at=? WHERE job_id=?", (now, job_id))
+            snapshot_row = self._connection.execute("SELECT snapshot_json FROM runs WHERE run_id=?", (job_id,)).fetchone()
+            snapshot = _loads(snapshot_row["snapshot_json"])
+            snapshot.update(status="WAITING_INPUT", stage="planned", updated_at=now)
+            self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(snapshot), now, job_id))
             self._insert_event(job_id, "interrupt", {"type": "interrupt", "job_id": job_id, "status": "waiting_input"})
             self._connection.commit()
 
@@ -364,9 +388,10 @@ class WorkspaceStore:
                         raise WorkspaceError("job_not_cancelable", status=409)
                     if status != "canceled":
                         now = _utc_now()
+                        freeze_budget(self._connection, job_id)
                         self._connection.execute("UPDATE workspace_jobs SET status='canceled',updated_at=? WHERE job_id=?", (now, job_id))
-                        self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "CANCELED", now, asset_refs=self._asset_refs(job_id))), now, job_id))
-                        self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled"})
+                        self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "CANCELED", now, execution_mode=(_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable"), asset_refs=self._asset_refs(job_id))), now, job_id))
+                        self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled", "scope": "future_dispatch", "remote_request": "cannot_revoke"})
                     result = {"success": True, "job_id": job_id, "status": "canceled"}
                 else:
                     if status != "waiting_input":
@@ -385,17 +410,24 @@ class WorkspaceStore:
                 self._connection.rollback()
                 raise
 
-    def recover_incomplete_jobs(self) -> int:
+    def recover_incomplete_jobs(self, checkpointer=None) -> int:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
-            rows = self._connection.execute("SELECT job_id FROM workspace_jobs WHERE status IN ('queued','running','waiting_input')").fetchall()
+            rows = self._connection.execute("SELECT job_id,status,result_json FROM workspace_jobs WHERE status IN ('queued','running','waiting_input')").fetchall()
             for row in rows:
                 job_id = row["job_id"]
+                if row["status"] == "waiting_input" and checkpointer is not None and checkpointer.is_interrupted(job_id):
+                    continue
                 now = _utc_now()
                 self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code='needs_review',updated_at=? WHERE job_id=?", (now, job_id))
-                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, error={"category": "needs_review"}, asset_refs=self._asset_refs(job_id))), now, job_id))
+                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, execution_mode=(_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable"), error={"category": "needs_review"}, asset_refs=self._asset_refs(job_id))), now, job_id))
                 self._insert_event(job_id, "needs_review", {"type": "needs_review", "job_id": job_id, "status": "failed", "reason": "process_restart"})
             self._connection.commit()
+            if checkpointer is not None:
+                for row in rows:
+                    state = self.control_status(row["job_id"])
+                    if state["status"] == "failed":
+                        checkpointer.stop(row["job_id"], "NEEDS_REVIEW", "needs_review")
             return len(rows)
 
     def fail_job(self, job_id: str, code: str, *, execution_mode: str = "fake") -> None:
@@ -405,12 +437,15 @@ class WorkspaceStore:
             if updated.rowcount == 0:
                 self._connection.commit()
                 return
+            stored = self._connection.execute('SELECT result_json FROM workspace_jobs WHERE job_id=?', (job_id,)).fetchone()
+            execution_mode = (_loads(stored['result_json']) if stored['result_json'] else {}).get('execution_mode', 'unavailable')
+            freeze_budget(self._connection, job_id)
             self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "FAILED", now, execution_mode=execution_mode, error={"category": code}, asset_refs=self._asset_refs(job_id))), now, job_id))
             self._insert_event(
                 job_id,
-                "error",
+                "timeout" if code == "run_deadline_exhausted" else "error",
                 {
-                    "type": "error",
+                    "type": "timeout" if code == "run_deadline_exhausted" else "error",
                     "job_id": job_id,
                     "status": "failed",
                     "message": code,
@@ -427,7 +462,7 @@ class WorkspaceStore:
             ).fetchone()
             if row is None:
                 raise WorkspaceError("job_not_found", status=404)
-            if row["status"] in TERMINAL_JOB_STATUSES:
+            if row["status"] in TERMINAL_JOB_STATUSES and event.get("type") not in {"request_attempt", "tool_call_result"}:
                 return
             payload = redact(dict(event))
             payload.setdefault("job_id", job_id)
@@ -437,12 +472,18 @@ class WorkspaceStore:
     def finish_live_job(self, job_id: str, state: Mapping[str, Any]) -> None:
         """Persist a live pipeline result without exposing private model values."""
 
+        if state.get("status") == "WAITING_INPUT":
+            self.mark_waiting_input(job_id)
+            return
         status = str(state.get("status", "FAILED"))
         terminal_status = "succeeded" if status == "COMPLETED" else "failed"
         final_response = state.get("final_response")
         result = {
+            "execution_mode": str(state.get("execution_mode", "live")),
             "final_response": final_response if isinstance(final_response, str) else "",
             "summary": str(state.get("summary", "live pipeline")),
+            "request_attempts": list(state.get("request_attempts", [])),
+            "budget": state.get("budget"),
             "tool_results": [
                 {key: value for key, value in item.items() if key != "_value"}
                 for item in state.get("tool_results", [])
@@ -452,6 +493,7 @@ class WorkspaceStore:
             if isinstance(state.get("verification"), Mapping)
             else {"status": "unknown"},
         }
+        result["verification"] = bind_verification(result["final_response"], result["verification"])
         error = state.get("error") if isinstance(state.get("error"), Mapping) else None
         error_code = str(error.get("category")) if error else None
         with self._lock:
@@ -464,6 +506,7 @@ class WorkspaceStore:
                     self._connection.rollback()
                     return
                 now = _utc_now()
+                result["budget"] = freeze_budget(self._connection, job_id) or result.get("budget")
                 self._connection.execute(
                     "UPDATE workspace_jobs SET status=?,result_json=?,error_code=?,updated_at=? WHERE job_id=?",
                     (terminal_status, _json(result), error_code, now, job_id),
@@ -483,9 +526,9 @@ class WorkspaceStore:
                         _json(
                             _run_snapshot(
                                 job_id,
-                                "COMPLETED" if terminal_status == "succeeded" else "FAILED",
+                                status if status in {"COMPLETED", "NEEDS_REVIEW"} else "FAILED",
                                 now,
-                                execution_mode="live",
+                                execution_mode=str(state.get("execution_mode", "live")),
                                 result=result,
                                 error=error,
                                 input_text=str(row["problem"]),
@@ -504,14 +547,11 @@ class WorkspaceStore:
 
     def record_verification(self, job_id: str, result: Mapping[str, Any]) -> None:
         with self._lock:
-            row = self._connection.execute("SELECT 1 FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
-            if row is None:
-                raise WorkspaceError("job_not_found", status=404)
-            now = _utc_now()
             payload = {"checker": "polynomial_check", "result": dict(result)}
-            self._connection.execute("UPDATE workspace_jobs SET result_json=?,updated_at=? WHERE job_id=?", (_json(payload), now, job_id))
-            self._insert_event(job_id, "verification_completed", {"type": "verification_completed", "job_id": job_id, "status": result.get("candidate_status", "unknown"), "data": payload})
-            self._connection.commit()
+            append_check(
+                self._connection, job_id, result, _utc_now(), WorkspaceError,
+                lambda: self._insert_event(job_id, "verification_completed", {"type": "verification_completed", "job_id": job_id, "status": result.get("candidate_status", "unknown"), "data": payload}),
+            )
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
         with self._lock:
@@ -600,15 +640,32 @@ class WorkspaceStore:
             raise WorkspaceError("session_not_found", status=404)
 
     def _insert_event(self, job_id: str, event_type: str, payload: Mapping[str, Any]) -> None:
+        created_at = _utc_now()
+        status = self._connection.execute("SELECT status FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+        if status is not None and status[0] in TERMINAL_JOB_STATUSES:
+            freeze_budget(self._connection, job_id)
+        event_payload = redact(dict(payload))
+        event_payload.setdefault("job_id", job_id)
+        event_payload.setdefault("created_at", created_at)
         self._connection.execute(
             "INSERT INTO workspace_events(job_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
-            (job_id, event_type, _json(payload), _utc_now()),
+            (job_id, event_type, _json(event_payload), created_at),
+        )
+        row = self._connection.execute(
+            "SELECT COALESCE(MAX(sequence), 0) AS last_sequence FROM events WHERE run_id=?",
+            (job_id,),
+        ).fetchone()
+        event_payload["run_id"] = job_id
+        event_payload["sequence"] = int(row["last_sequence"]) + 1
+        self._connection.execute(
+            "INSERT INTO events(run_id,sequence,event_json,created_at) VALUES(?,?,?,?)",
+            (job_id, event_payload["sequence"], _json(event_payload), created_at),
         )
 
-    def _insert_run(self, job_id: str, problem: str, now: str) -> None:
+    def _insert_run(self, job_id: str, problem: str, now: str, execution_mode: str) -> None:
         self._connection.execute(
             "INSERT OR IGNORE INTO runs(run_id,snapshot_json,created_at,updated_at) VALUES(?,?,?,?)",
-            (job_id, _json(_run_snapshot(job_id, "QUEUED", now, input_text=problem, asset_refs=self._asset_refs(job_id))), now, now),
+            (job_id, _json(_run_snapshot(job_id, "QUEUED", now, execution_mode=execution_mode, input_text=problem, asset_refs=self._asset_refs(job_id))), now, now),
         )
 
     def _asset_refs(self, job_id: str) -> list[dict[str, Any]]:
@@ -653,8 +710,16 @@ class WorkspaceService:
         self.worker_enabled = worker_enabled
         self.waiting_input_marker = waiting_input_marker
         self.pipeline = pipeline
+        self.budget_ledger = (
+            RunBudgetLedger(self.store._connection, self.store._lock)
+            if pipeline is None or str(database_path) == ":memory:" else RunBudgetLedger(database_path=database_path)
+        )
+        self.checkpointer = None
+        if pipeline is not None and hasattr(pipeline, "checkpointer"):
+            self.checkpointer = RunCheckpointSaver(database_path)
+            pipeline.checkpointer = self.checkpointer
         self._waiting_input_jobs: set[str] = set()
-        self.store.recover_incomplete_jobs()
+        self.store.recover_incomplete_jobs(self.checkpointer)
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="showcase-job")
         self._submitted: set[str] = set()
         self._submit_lock = threading.Lock()
@@ -684,6 +749,7 @@ class WorkspaceService:
         web_search_enabled: bool = False,
         input_user_file_id: Any = None,
         verification_mode: str = "auto",
+        budget_limits: RunBudgetLimits | None = None,
     ) -> tuple[dict[str, Any], bool]:
         if web_search_enabled:
             raise WorkspaceError("capability_unavailable", status=503)
@@ -700,9 +766,12 @@ class WorkspaceService:
             problem=problem,
             idempotency_key=idempotency_key,
             request_digest=digest,
+            execution_mode=getattr(self.pipeline, "execution_mode", self.execution_mode),
             verification_mode=verification_mode,
             input_user_file_id=input_user_file_id,
         )
+        if budget_limits is not None:
+            self.budget_ledger.ensure(payload["job_id"], budget_limits)
         if not existing:
             self._submit(payload["job_id"])
         return payload, existing
@@ -726,6 +795,8 @@ class WorkspaceService:
         result, existing = self.store.control_job(
             user_id=user_id, job_id=job_id, operation="cancel", idempotency_key=idempotency_key, request_digest=_request_digest("cancel", job_id, "")
         )
+        if self.checkpointer is not None:
+            self.checkpointer.stop(job_id, "CANCELED", "run_canceled")
         return result, existing
 
     def _submit(self, job_id: str) -> None:
@@ -738,22 +809,32 @@ class WorkspaceService:
 
     def _execute(self, job_id: str) -> None:
         try:
-            if not self.store.start_job(job_id, execution_mode=self.execution_mode):
+            if not self.store.start_job(job_id, execution_mode=getattr(self.pipeline, "execution_mode", self.execution_mode)):
                 return
             # Keep the worker asynchronous even for the deterministic adapter so
             # the HTTP contract never waits for execution.
             time.sleep(self.execution_delay)
+            if self.execution_mode == "fake" and self.budget_ledger.snapshot(job_id) is not None:
+                budget = self.budget_ledger.ensure(job_id, RunBudgetLimits())
+                RunControl(self.store, job_id, budget).check()
             if self.execution_mode == "live":
                 if self.pipeline is None:
                     self.store.fail_job(job_id, "unavailable", execution_mode="live")
                     return
-                state = self.pipeline.run(
-                    job_id,
-                    self._problem(job_id),
-                    verification_mode=self.store.verification_mode(job_id),
-                    emit=lambda event: self.store.append_event(job_id, event),
-                )
+                limits = getattr(self.pipeline, "budget", RunBudgetLimits())
+                with bind_budget(self.budget_ledger.ensure(job_id, limits)) as budget, bind_control(RunControl(self.store, job_id, budget, self.checkpointer)) as control:
+                    control.check()
+                    state = self.pipeline.run(
+                        job_id,
+                        self._problem(job_id),
+                        verification_mode=self.store.verification_mode(job_id),
+                        emit=lambda event: self.store.append_event(job_id, event),
+                    )
                 self.store.finish_live_job(job_id, state)
+                if self.checkpointer is not None and state.get("status") != "WAITING_INPUT":
+                    job = self.store.control_status(job_id)
+                    status = "CANCELED" if job["status"] == "canceled" else ("COMPLETED" if job["status"] == "succeeded" else str(state.get("status", "FAILED")))
+                    self.checkpointer.stop(job_id, status, job["error_code"])
                 return
             if (
                 self.waiting_input_marker
@@ -767,11 +848,24 @@ class WorkspaceService:
                 self.store.fail_job(job_id, "needs_review")
             else:
                 self.store.complete_job(job_id, "Fake Agent completed a deterministic showcase run.", "fake adapter")
+        except RunStopped:
+            return
         except Exception:
             self.store.fail_job(job_id, "job_execution_failed", execution_mode=self.execution_mode)
+            if self.checkpointer is not None:
+                self.checkpointer.stop(job_id, "FAILED", "job_execution_failed")
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
-        return self.store.get_job(job_id, user_id)
+        payload = self.store.get_job(job_id, user_id)
+        if self.budget_ledger is not None:
+            budget = self.budget_ledger.snapshot(job_id)
+            if budget is not None and not (payload.get("result") or {}).get("budget"):
+                payload["result"] = {**(payload.get("result") or {}), "budget": budget}
+        attempts = [event["data"]["attempt"] for event in self.store.events(job_id, user_id) if event["event"] == "request_attempt"]
+        attempts = list({item["attempt_id"]: item for item in [*attempts, *self.budget_ledger.attempts(job_id)]}.values())
+        if attempts:
+            payload["result"] = {**(payload.get("result") or {}), "request_attempts": attempts}
+        return payload
 
     def _problem(self, job_id: str) -> str:
         return self.store.problem(job_id)
@@ -838,6 +932,10 @@ class WorkspaceService:
 
     def close(self) -> None:
         self._executor.shutdown(wait=True)
+        if self.budget_ledger is not None:
+            self.budget_ledger.close()
+        if self.checkpointer is not None:
+            self.checkpointer.close()
         self.store.close()
 
 

@@ -16,13 +16,16 @@ from typing import Any
 from .adapters import (
     AdapterError,
     InternModelAdapter,
-    ModelContinuationTransport,
     ModelResponse,
-    ToolRequest,
-    _valid_polynomial_request,
 )
-from .graph import ToolExecutionResult
+from .final_evidence import checked_verification
+from .live_graph import execute_live_graph
 from .redaction import redact_text
+from .request_attempts import capture_pipeline_attempts
+from .run_budget import BudgetExhausted, RunBudgetLedger, RunBudgetLimits, current_budget
+from .run_control import RunStopped
+from .tool_loop import run_tool_roundtrip
+from .tool_protocol import ToolProtocol
 from .tools import ToolRegistry
 from .verification import LightweightVerificationHook
 
@@ -30,12 +33,8 @@ EventSink = Callable[[Mapping[str, Any]], None]
 
 
 @dataclass(frozen=True)
-class PipelineBudget:
-    """Independent live budget aligned with the long Showcase evaluation slot."""
-
-    max_model_calls: int = 6
-    max_tool_calls: int = 2
-    max_runtime_seconds: float = 1_100.0
+class PipelineBudget(RunBudgetLimits):
+    """Finite Run limits shared with every HTTP retry and tool dispatch."""
 
 
 class PipelineFailure(RuntimeError):
@@ -58,12 +57,24 @@ class LiveAgentPipeline:
         *,
         verifier: LightweightVerificationHook | None = None,
         budget: PipelineBudget | None = None,
+        tool_protocol: ToolProtocol = "native",
+        execution_mode: str = "live",
     ) -> None:
+        self.checkpointer = None
+        self.pause_after_planner = False
         self.model = model
         self.registry = registry
         self.verifier = verifier or LightweightVerificationHook()
         self.budget = budget or PipelineBudget()
+        self._run_ledger = RunBudgetLedger()
+        if tool_protocol not in {"native", "text_action"}:
+            raise ValueError("tool_protocol_invalid")
+        if execution_mode not in {"live", "fake"}:
+            raise ValueError("execution_mode_invalid")
+        self.tool_protocol = tool_protocol
+        self.execution_mode = execution_mode
 
+    @capture_pipeline_attempts
     def run(
         self,
         run_id: str,
@@ -75,49 +86,23 @@ class LiveAgentPipeline:
         """Execute one bounded live run and return JSON-compatible product state."""
 
         sink = emit or (lambda _event: None)
-        started = time.monotonic()
-        model_calls = [0]
         state: dict[str, Any] = {
             "run_id": run_id,
+            "execution_mode": self.execution_mode,
             "status": "RUNNING",
             "stage": "intake",
             "final_response": None,
-            "summary": "实时模型流水线已完成",
+            "summary": "离线 fake 流水线已完成" if self.execution_mode == "fake" else "实时模型流水线已完成",
             "error": None,
             "tool_results": [],
             "verification": {"status": "unknown", "findings": ["verification_not_run"]},
             "active_node": "intake",
         }
         try:
-            clean_problem = self._intake(run_id, problem, sink)
-            state["active_node"] = "planner"
-            plan = self._planner(run_id, clean_problem, sink, started, model_calls)
-            state["active_node"] = "solver"
-            solver_response, _solver_messages = self._solver(
-                run_id, clean_problem, plan, sink, started, state, model_calls
-            )
-            state["active_node"] = "verifier"
-            verification = self._verifier(
-                run_id,
-                solver_response,
-                state["tool_results"],
-                verification_mode,
-                sink,
-                started,
-            )
-            state["verification"] = verification
-            state["active_node"] = "synthesizer"
-            final_response = self._synthesizer(
-                run_id,
-                clean_problem,
-                plan,
-                solver_response,
-                verification,
-                sink,
-                started,
-                model_calls,
-            )
-            state["final_response"] = final_response
+            state.update(execute_live_graph(self, state, problem, verification_mode, sink))
+            if state["status"] == "WAITING_INPUT":
+                return state
+            verification = state["verification"]
             if verification_mode == "required" and verification.get("status") != "pass":
                 raise PipelineFailure(
                     "verification_needs_review",
@@ -137,6 +122,10 @@ class LiveAgentPipeline:
                 "title": "任务完成",
                 "data": {"type": "text", "summary": "公开答案已生成"},
             })
+        except RunStopped as exc:
+            state["status"] = "CANCELED" if exc.category == "run_canceled" else "NEEDS_REVIEW"
+            state["stage"] = "stopped"
+            state["error"] = {"category": exc.category, "summary": "运行已停止"}
         except PipelineFailure as exc:
             state["status"] = "NEEDS_REVIEW" if exc.review else "FAILED"
             state["stage"] = "failed"
@@ -162,7 +151,7 @@ class LiveAgentPipeline:
                 "title": "任务需要复核",
                 "message": exc.category,
             })
-        except AdapterError as exc:
+        except (AdapterError, BudgetExhausted) as exc:
             state["status"] = "NEEDS_REVIEW"
             state["stage"] = "failed"
             state["error"] = {
@@ -281,107 +270,53 @@ class LiveAgentPipeline:
                 "role": "system",
                 "content": (
                     "You are the Solver role in a math agent. Return a concise candidate answer. "
-                    "When exact polynomial candidate checking is useful, return one JSON tool_call "
-                    "using the registered schema. Do not reveal hidden reasoning."
+                    "When a registered tool is useful, request it using the provided protocol. "
+                    "Do not reveal hidden reasoning."
                 ),
             },
             {"role": "user", "content": f"题目：{problem}\n计划摘要：{plan}"},
         ]
+        tools = self.registry.provider_schemas() if self.tool_protocol == "native" else ()
+        if self.tool_protocol == "text_action":
+            messages[0]["content"] += (
+                " Use only the text_action protocol: return JSON with protocol='text_action' "
+                "and tool_call containing id, name, and arguments. Registered schemas: "
+                + json.dumps(self.registry.allowed_schemas(), ensure_ascii=False, separators=(",", ":"))
+            )
         response = self._complete(
             role="solver",
             messages=messages,
-            tools=self.registry.describe(),
+            tools=tools,
             call_counter=model_calls,
         )
-        requests = list(response.tool_requests)
-        if len(requests) > 1:
-            raise PipelineFailure("multiple_tool_requests", "Solver 一次只能请求一个工具", review=True)
-        if requests:
-            request = requests[0]
-            if request.name == "polynomial_check" and not _valid_polynomial_request(request.arguments):
-                raise PipelineFailure("tool_request_invalid", "Solver 的多项式工具请求不符合 schema", review=True)
-            if len(state["tool_results"]) >= self.budget.max_tool_calls:
-                raise PipelineFailure("tool_budget_exhausted", "工具调用超出 live pipeline 预算", review=True)
-            state["active_node"] = "tool"
-            tool_record, tool_value = self._run_tool(run_id, request, sink, started)
-            state["tool_results"].append(tool_record)
-            continuation = ModelContinuationTransport(self.model)
-            if model_calls[0] >= self.budget.max_model_calls:
-                raise PipelineFailure("model_budget_exhausted", "模型调用超出 live pipeline 预算", review=True)
-            model_calls[0] += 1
-            state["active_node"] = "solver"
-            continuation_response = continuation.continue_(
-                messages,
-                request,
-                {
-                    "name": request.name,
-                    "status": tool_record["status"],
-                    "value": tool_value,
-                    "result_summary": tool_record.get("result_summary", ""),
-                },
-            )
-            if continuation_response.tool_requests:
-                raise PipelineFailure(
-                    "continuation_tool_request_exceeded",
-                    "Solver continuation 又请求了工具",
-                    review=True,
-                )
-            solver_text = continuation_response.text.strip()
-            tool_record["continuation_request_id"] = tool_record["request_id"]
-            tool_record["transport_mode"] = continuation.mode
-        else:
-            solver_text = response.text.strip()
+        outcome = run_tool_roundtrip(
+            run_id=run_id,
+            response=response,
+            messages=messages,
+            registry=self.registry,
+            model=self.model,
+            tool_protocol=self.tool_protocol,
+            execution_mode=self.execution_mode,
+            tool_count=len(state["tool_results"]),
+            max_tool_calls=self.budget.max_tool_calls,
+            model_calls=model_calls,
+            max_model_calls=self.budget.max_model_calls,
+            sink=sink,
+            ensure_runtime=lambda: self._ensure_runtime(started),
+            emit_node=lambda node_name, title, summary, phase, **kwargs: self._emit_node(
+                sink, run_id, node_name, title, summary, phase, **kwargs
+            ),
+        )
+        state["tool_results"].extend(outcome.tool_results)
+        if outcome.tool_results:
+            state["active_node"] = "tool" if outcome.error_category else "solver"
+        if outcome.error_category:
+            raise PipelineFailure(outcome.error_category, outcome.error_summary, review=True)
+        solver_text = outcome.solver_text
         if not solver_text:
             raise PipelineFailure("solver_empty", "Solver 返回空结果")
         self._emit_node(sink, run_id, "solver", "求解器", "已生成候选答案", "end", status="completed")
         return solver_text, messages
-
-    def _run_tool(
-        self,
-        run_id: str,
-        request: ToolRequest,
-        sink: EventSink,
-        started: float,
-    ) -> tuple[dict[str, Any], Any]:
-        self._ensure_runtime(started)
-        self._emit_node(sink, run_id, "tool", "数学工具", f"调用 {request.name}", "start")
-        sink({
-            "type": "tool_call_start",
-            "job_id": run_id,
-            "step_id": "tool-1",
-            "node_name": "tool",
-            "title": "数学工具调用",
-            "tool_name": request.name,
-            "argument_keys": sorted(str(key) for key in request.arguments),
-        })
-        result = self.registry.invoke(request.name, request.arguments)
-        if not isinstance(result, ToolExecutionResult):
-            raise PipelineFailure("tool_result_invalid", "工具返回结果不符合合同", review=True)
-        record: dict[str, Any] = {
-            "request_id": "tool_request_1",
-            "name": request.name,
-            "status": result.status,
-            "parameter_summary": result.parameter_summary,
-            "result_summary": _summary(result.result_summary, limit=1000),
-            "error_category": result.error_category,
-            "duration_seconds": result.duration_seconds,
-        }
-        if result.status != "success":
-            self._emit_node(sink, run_id, "tool", "数学工具", "工具调用失败，需要复核", "end", status="failed")
-            raise PipelineFailure(result.error_category or "tool_failed", "数学工具调用失败", review=True)
-        sink({
-            "type": "tool_call_result",
-            "job_id": run_id,
-            "step_id": "tool-1",
-            "node_name": "tool",
-            "title": "数学工具结果",
-            "tool_name": request.name,
-            "name": request.name,
-            "summary": _summary(result.result_summary, limit=200),
-            "status": result.status,
-        })
-        self._emit_node(sink, run_id, "tool", "数学工具", "工具调用完成", "end", status="completed")
-        return record, result.value
 
     def _verifier(
         self,
@@ -396,11 +331,7 @@ class LiveAgentPipeline:
         self._emit_node(sink, run_id, "verifier", "验证器", "检查答案与工具证据", "start")
         public_results = [{key: value for key, value in item.items() if key != "_value"} for item in tool_results]
         result = self.verifier.verify({"final_response": candidate}, public_results)
-        verification = {
-            "status": result.status,
-            "findings": list(result.findings),
-            "checker": result.checker,
-        }
+        verification = checked_verification(candidate, result, public_results)
         summary = f"验证状态：{result.status}"
         if verification_mode == "required" and result.status != "pass":
             summary += "（required 模式将进入复核）"
@@ -460,7 +391,7 @@ class LiveAgentPipeline:
         tools: Sequence[Mapping[str, Any]] = (),
         call_counter: list[int],
     ) -> ModelResponse:
-        if call_counter[0] >= self.budget.max_model_calls:
+        if current_budget() is None and call_counter[0] >= self.budget.max_model_calls:
             raise PipelineFailure("model_budget_exhausted", "模型调用超出 live pipeline 预算", review=True)
         call_counter[0] += 1
         response = self.model.complete(messages, tools=tools, metadata={"role": role})

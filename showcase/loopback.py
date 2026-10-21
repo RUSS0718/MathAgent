@@ -8,6 +8,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import RLock
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class LoopbackStore:
 
     def __init__(self, database_path: str | Path = ":memory:") -> None:
         self.database_path = str(database_path)
+        self._lock = RLock()
         self._connection = sqlite3.connect(self.database_path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA foreign_keys = ON")
@@ -65,59 +67,60 @@ class LoopbackStore:
     def get_or_create(self, session_id: str | None) -> tuple[AuthSession, bool]:
         """Return a valid session, creating one when the Cookie is absent or revoked."""
 
-        if session_id:
-            session = self._get(session_id)
-            if session is not None:
-                self._connection.execute(
-                    "UPDATE auth_sessions SET last_seen_at = ? WHERE session_id = ?",
-                    (_utc_now(), session.session_id),
-                )
-                self._connection.commit()
-                return session, False
+        with self._lock, self._connection:
+            if session_id:
+                session = self._get(session_id)
+                if session is not None:
+                    self._connection.execute(
+                        "UPDATE auth_sessions SET last_seen_at = ? WHERE session_id = ?",
+                        (_utc_now(), session.session_id),
+                    )
+                    return session, False
 
-        now = _utc_now()
-        new_session = AuthSession(
-            session_id=secrets.token_urlsafe(32),
-            user_id=self.user_id,
-            username=self.username,
-            csrf_token=secrets.token_urlsafe(32),
-            permissions=self.permissions,
-        )
-        self._connection.execute(
-            """
-            INSERT INTO auth_sessions(
-                session_id, user_id, csrf_token, created_at, last_seen_at, revoked_at
-            ) VALUES (?, ?, ?, ?, ?, NULL)
-            """,
-            (
-                new_session.session_id,
-                new_session.user_id,
-                new_session.csrf_token,
-                now,
-                now,
-            ),
-        )
-        self._connection.commit()
-        return new_session, True
+            now = _utc_now()
+            new_session = AuthSession(
+                session_id=secrets.token_urlsafe(32),
+                user_id=self.user_id,
+                username=self.username,
+                csrf_token=secrets.token_urlsafe(32),
+                permissions=self.permissions,
+            )
+            self._connection.execute(
+                """
+                INSERT INTO auth_sessions(
+                    session_id, user_id, csrf_token, created_at, last_seen_at, revoked_at
+                ) VALUES (?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    new_session.session_id,
+                    new_session.user_id,
+                    new_session.csrf_token,
+                    now,
+                    now,
+                ),
+            )
+            return new_session, True
 
     def get(self, session_id: str | None) -> AuthSession | None:
         """Return a non-revoked session without creating a new Cookie."""
 
-        return self._get(session_id)
+        with self._lock:
+            return self._get(session_id)
 
     def revoke(self, session_id: str) -> None:
         """Revoke one Cookie while retaining all user and Run history."""
 
-        self._connection.execute(
-            "UPDATE auth_sessions SET revoked_at = ? WHERE session_id = ?",
-            (_utc_now(), session_id),
-        )
-        self._connection.commit()
+        with self._lock, self._connection:
+            self._connection.execute(
+                "UPDATE auth_sessions SET revoked_at = ? WHERE session_id = ?",
+                (_utc_now(), session_id),
+            )
 
     def close(self) -> None:
         """Close the SQLite connection used by the identity boundary."""
 
-        self._connection.close()
+        with self._lock:
+            self._connection.close()
 
     def _get(self, session_id: str | None) -> AuthSession | None:
         if not session_id:

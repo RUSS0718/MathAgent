@@ -22,7 +22,9 @@ except ImportError:  # pragma: no cover - showcase dependency installs python-do
 else:
     load_dotenv()
 
+from .campaign_api import register_campaigns
 from .evidence import EvidencePackExporter, replay_evidence
+from .final_evidence import checked_verification
 from .loopback import AuthSession, LoopbackStore
 from .polynomial import PolynomialChecker
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
@@ -69,6 +71,9 @@ def create_app(
         app.config.from_mapping(dict(config))
 
     storage_root, resolved_database = _storage_paths(app.config, database_path)
+    service_database = getattr(getattr(service, '_store', None), 'database_path', ':memory:')
+    if service is not None and ((service_database == ':memory:' and app.config.get('SHOWCASE_LIVE_PIPELINE') is not None) or (service_database != ':memory:' and Path(service_database).resolve() != resolved_database.resolve())):
+        raise ValueError('service_database_mismatch')
     storage_root.mkdir(parents=True, exist_ok=True)
     (storage_root / "attachments").mkdir(exist_ok=True)
     (storage_root / "events").mkdir(exist_ok=True)
@@ -107,6 +112,7 @@ def create_app(
         persisted_files = {}
     app.extensions["showcase_files"] = persisted_files if isinstance(persisted_files, dict) else {}
     app.extensions["showcase_files_index"] = files_index
+    register_campaigns(app, workspace_service, service, resolved_database, storage_root)
 
     @app.before_request
     def attach_request_context() -> Response | None:
@@ -195,8 +201,8 @@ def create_app(
                 "verification_mode": VERIFICATION_MODES,
                 "files": {"upload": upload},
                 "execution": {
-                    "mode": str(app.config.get("SHOWCASE_MODE", "fake")),
-                    "provider": "intern",
+                    "mode": getattr(live_pipeline, "execution_mode", str(app.config.get("SHOWCASE_MODE", "fake"))),
+                    "provider": "fake" if getattr(live_pipeline, "execution_mode", app.config.get("SHOWCASE_MODE")) == "fake" else "intern",
                     "status": "configured" if os.getenv("INTERN_API_KEY") else "missing_credentials",
                 },
                 "capabilities": {
@@ -480,8 +486,10 @@ def create_app(
             events = service.get_events(run_id)
         except RunNotFoundError as exc:
             return _json_error(exc.category, 404)
-        tool_results = [event for event in events if event.get("type") == "tool_completed"]
-        verification = app.extensions["showcase_verifier"].verify(snapshot, tool_results)
+        tool_results = _stored_tool_results(snapshot, events)
+        verification = _stored_verification(
+            snapshot, tool_results, app.extensions["showcase_verifier"]
+        )
         pack = app.extensions["showcase_evidence_exporter"].export(
             snapshot,
             events=events,
@@ -499,19 +507,17 @@ def create_app(
             events = service.get_events(run_id)
         except RunNotFoundError as exc:
             return _json_error(exc.category, 404)
-        tool_results = [event for event in events if event.get("type") == "tool_completed"]
-        verification = app.extensions["showcase_verifier"].verify(snapshot, tool_results)
+        tool_results = _stored_tool_results(snapshot, events)
+        verification = _stored_verification(
+            snapshot, tool_results, app.extensions["showcase_verifier"]
+        )
         return jsonify({
             "version": app.extensions["showcase_evidence_exporter"].report_version,
             "evidence_id": run_id,
             "status": snapshot.get("status"),
             "mode": snapshot.get("execution_mode", "unavailable"),
             "report": app.extensions["showcase_evidence_exporter"].report(
-                snapshot, tool_results=tool_results, verification={
-                    "status": verification.status,
-                    "findings": list(verification.findings),
-                    "checker": verification.checker,
-                }
+                snapshot, tool_results=tool_results, verification=verification
             ),
         })
 
@@ -549,7 +555,10 @@ def create_app(
         result = job.get("result") if isinstance(job.get("result"), Mapping) else {}
         snapshot = {
             "run_id": job_id,
-            "execution_mode": "live" if app.config.get("SHOWCASE_MODE") == "live" else "fake",
+            "execution_mode": result.get(
+                "execution_mode",
+                "unavailable",
+            ),
             "status": str(job.get("status", "unavailable")).upper(),
             "stage": _job_stage(events),
             "result": result,
@@ -711,6 +720,33 @@ def _job_stage(events: list[Mapping[str, Any]]) -> str:
         return "unknown"
     latest = events[-1].get("data", {})
     return str(latest.get("stage") or latest.get("node_name") or latest.get("type") or "unknown")
+
+
+def _stored_tool_results(
+    snapshot: Mapping[str, Any], events: list[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    result = snapshot.get("result")
+    stored = result.get("tool_results") if isinstance(result, Mapping) else None
+    if isinstance(stored, list):
+        return [dict(item) for item in stored if isinstance(item, Mapping)]
+    return [
+        dict(event)
+        for event in events
+        if event.get("type") in {"tool_completed", "tool_call_result"}
+    ]
+
+
+def _stored_verification(
+    snapshot: Mapping[str, Any],
+    tool_results: list[dict[str, Any]],
+    verifier: Any,
+) -> dict[str, Any]:
+    result = snapshot.get("result")
+    stored = result.get("verification") if isinstance(result, Mapping) else None
+    if isinstance(stored, Mapping):
+        return dict(stored)
+    checked = verifier.verify(dict(snapshot), tool_results)
+    return checked_verification(str(snapshot.get("final_response") or ""), checked, tool_results)
 
 
 def _dashboard_page() -> str:

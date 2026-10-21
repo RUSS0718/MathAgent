@@ -10,8 +10,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from .final_evidence import bind_verification, checked_verification
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
+from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, execute_graph
 from .storage import SQLiteStore
+from .verification import LightweightVerificationHook
 
 MAX_PROBLEM_CHARS = 10_000
 MAX_ASSET_REFS = 32
@@ -91,12 +94,18 @@ class RunService:
         profile: str = SHOWCASE_PROFILE,
         database_path: str | Any = ":memory:",
         execution_loop: Any | None = None,
+        run_budget_limits: RunBudgetLimits | None = None,
     ) -> None:
         ensure_showcase_profile(profile)
         self.profile = profile
         self._agent = agent or FakeAgentAdapter()
         self._store = SQLiteStore(database_path)
         self._execution_loop = execution_loop
+        self._run_budget_limits = run_budget_limits or RunBudgetLimits()
+        self._budget_ledger = (
+            RunBudgetLedger(self._store._connection)
+            if str(database_path) == ":memory:" else RunBudgetLedger(database_path=database_path)
+        )
         self.execution_mode = "live" if execution_loop is not None else "fake"
 
     def create_run(self, request: RunRequest | Mapping[str, Any]) -> dict[str, Any]:
@@ -128,8 +137,10 @@ class RunService:
         )
         self._store.save_checkpoint(run_id, snapshot)
 
+        budget = self._budget_ledger.ensure(run_id, self._run_budget_limits)
         try:
-            result = self._normalize_result(self._agent.run(normalized))
+            with bind_budget(budget):
+                result = self._normalize_result(self._agent.run(normalized))
         except Exception as exc:  # noqa: BLE001 - adapter errors become safe Run state
             snapshot.update(
                 {
@@ -175,6 +186,8 @@ class RunService:
                 {"type": "run_completed", "status": snapshot["status"], "stage": snapshot["stage"]},
             )
 
+        snapshot["result"] = {**(snapshot["result"] or {}), "budget": budget.snapshot()}
+        self._bind_final_verification(snapshot)
         self._store.save_run(snapshot)
         self._store.save_checkpoint(run_id, snapshot)
         return self._copy_snapshot(snapshot)
@@ -212,7 +225,7 @@ class RunService:
         }
         self._configure_execution_loop()
         try:
-            state = self._execution_loop.run(initial_state, thread_id=run_id)
+            state = execute_graph(self._budget_ledger, self._run_budget_limits, self._execution_loop, initial_state, run_id=run_id)
         except Exception as exc:  # noqa: BLE001 - graph failures become safe Run state
             snapshot.update(
                 {
@@ -238,7 +251,7 @@ class RunService:
         if checkpoint is None:
             raise RunResumeUnavailable()
         self._configure_execution_loop()
-        state = self._execution_loop.resume(checkpoint, thread_id=run_id)
+        state = execute_graph(self._budget_ledger, self._run_budget_limits, self._execution_loop, checkpoint, run_id=run_id, resume=True)
         return self._persist_graph_result(snapshot, state)
 
     def _configure_execution_loop(self) -> None:
@@ -254,6 +267,7 @@ class RunService:
     def _persist_graph_result(
         self, snapshot: dict[str, Any], state: Mapping[str, Any]
     ) -> dict[str, Any]:
+        previous_history = ((snapshot.get("result") or {}).get("verification") or {}).get("history", [])
         snapshot.update(
             {
                 "status": state.get("status", "FAILED"),
@@ -263,14 +277,28 @@ class RunService:
                 "result": {
                     "final_response": state.get("final_response"),
                     "summary": "langgraph execution",
+                    "budget": state.get("budget"),
                     "tool_results": copy.deepcopy(state.get("tool_results", [])),
                 },
                 "updated_at": _utc_now(),
             }
         )
+        self._bind_final_verification(snapshot)
+        snapshot["result"]["verification"]["history"] = [*previous_history, *snapshot["result"]["verification"]["history"]]
         self._store.save_run(snapshot)
         self._store.save_checkpoint(snapshot["run_id"], state)
         return self._copy_snapshot(snapshot)
+
+    @staticmethod
+    def _bind_final_verification(snapshot: dict[str, Any]) -> None:
+        result = snapshot.get("result")
+        if not isinstance(result, dict):
+            return
+        if isinstance(result.get("verification"), Mapping):
+            result["verification"] = bind_verification(snapshot.get("final_response") or "", result["verification"])
+            return
+        checked = LightweightVerificationHook().verify(snapshot, result.get("tool_results", []))
+        result["verification"] = checked_verification(snapshot.get("final_response") or "", checked, result.get("tool_results", []))
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         """Return an isolated snapshot so callers cannot mutate service state."""
@@ -278,6 +306,13 @@ class RunService:
         snapshot = self._store.get_run(run_id)
         if snapshot is None:
             raise RunNotFoundError(run_id)
+        budget = self._budget_ledger.snapshot(run_id)
+        if budget is not None and not (snapshot.get("result") or {}).get("budget"):
+            snapshot["result"] = {**(snapshot.get("result") or {}), "budget": budget}
+        attempts = [event["attempt"] for event in self._store.get_events(run_id) if event.get("type") == "request_attempt"]
+        attempts = list({item["attempt_id"]: item for item in [*attempts, *self._budget_ledger.attempts(run_id)]}.values())
+        if attempts:
+            snapshot["result"] = {**(snapshot.get("result") or {}), "request_attempts": attempts}
         return self._copy_snapshot(snapshot)
 
     def get_events(self, run_id: str) -> list[dict[str, Any]]:
@@ -296,6 +331,16 @@ class RunService:
         """Read the most recent recoverable checkpoint."""
 
         self._require_run(run_id)
+        has_graph = self._store._connection.execute("SELECT 1 FROM sqlite_master WHERE name='run_graph_checkpoints'").fetchone()
+        if has_graph:
+            from .run_checkpoints import RunCheckpointSaver
+            saver = RunCheckpointSaver(self._store.database_path)
+            try:
+                checkpoint = saver.get_tuple({"configurable": {"thread_id": run_id}})
+                if checkpoint:
+                    return copy.deepcopy(checkpoint.checkpoint["channel_values"].get("__root__"))
+            finally:
+                saver.close()
         return self._store.get_checkpoint(run_id)
 
     def save_checkpoint(self, run_id: str, checkpoint: Mapping[str, Any]) -> None:
@@ -319,6 +364,7 @@ class RunService:
         snapshot["stage"] = stage
         snapshot["error"] = dict(error) if error is not None else None
         snapshot["updated_at"] = _utc_now()
+        self._bind_final_verification(snapshot)
         self._store.save_run(snapshot)
         self._store.save_checkpoint(run_id, snapshot)
         return self._copy_snapshot(snapshot)
@@ -326,6 +372,7 @@ class RunService:
     def close(self) -> None:
         """Release the product persistence connection."""
 
+        self._budget_ledger.close()
         self._store.close()
 
     def _require_run(self, run_id: str) -> dict[str, Any]:

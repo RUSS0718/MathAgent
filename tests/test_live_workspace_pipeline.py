@@ -63,6 +63,10 @@ class LiveWorkspacePipelineTest(unittest.TestCase):
                     break
                 time.sleep(0.01)
             self.assertEqual("succeeded", job["status"])
+            check = job["result"]["verification"]
+            self.assertTrue(check["artifact"]["sha256"])
+            self.assertEqual(check, client.get(f"/api/runs/{job_id}").get_json()["result"]["verification"])
+            self.assertEqual(check, client.get(f"/api/runs/{job_id}/evidence").get_json()["verification"])
             stream = client.get(f"/api/agent/jobs/{job_id}/events?last_event_id=0").data.decode()
             self.assertIn("event: node_start", stream)
             self.assertIn("event: final_result", stream)
