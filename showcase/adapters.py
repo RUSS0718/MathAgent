@@ -154,9 +154,10 @@ class InternModelAdapter:
             transport = getattr(client, "chat_response", client.chat)
             budget = current_budget()
             if budget is not None:
+                if not _accepts_keyword(client.chat, "_attempt_budget") or not _accepts_keyword(transport, "_attempt_budget"):
+                    raise AdapterError("unsupported_budget_transport", "transport lacks attempt reservation")
                 call_budget = budget.model_call((metadata or {}).get("role"))
-                if _accepts_keyword(client.chat, "_attempt_budget"):
-                    kwargs["_attempt_budget"] = call_budget
+                kwargs["_attempt_budget"] = call_budget
             raw = transport(normalized, **kwargs)
         except Exception as exc:  # noqa: BLE001 - provider details stay out of events
             attempts = record_attempts(getattr(exc, "attempts", ()), metadata)

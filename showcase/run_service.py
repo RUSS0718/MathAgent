@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
-from .run_budget import RunBudgetLedger, RunBudgetLimits, execute_graph
+from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, execute_graph
 from .storage import SQLiteStore
 
 MAX_PROBLEM_CHARS = 10_000
@@ -135,8 +135,10 @@ class RunService:
         )
         self._store.save_checkpoint(run_id, snapshot)
 
+        budget = self._budget_ledger.ensure(run_id, self._run_budget_limits)
         try:
-            result = self._normalize_result(self._agent.run(normalized))
+            with bind_budget(budget):
+                result = self._normalize_result(self._agent.run(normalized))
         except Exception as exc:  # noqa: BLE001 - adapter errors become safe Run state
             snapshot.update(
                 {
@@ -182,6 +184,7 @@ class RunService:
                 {"type": "run_completed", "status": snapshot["status"], "stage": snapshot["stage"]},
             )
 
+        snapshot["result"] = {**(snapshot["result"] or {}), "budget": budget.snapshot()}
         self._store.save_run(snapshot)
         self._store.save_checkpoint(run_id, snapshot)
         return self._copy_snapshot(snapshot)

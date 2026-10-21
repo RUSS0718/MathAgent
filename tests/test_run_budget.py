@@ -28,6 +28,45 @@ class Response:
 
 
 class RunBudgetContractTest(unittest.TestCase):
+    def test_synchronous_run_blocks_unmetered_and_exhausted_transports(self):
+        from showcase.adapters import InternAgentAdapter
+        from showcase.run_service import RunService
+
+        class UnsupportedClient:
+            calls = 0
+
+            def chat(self, messages, *, temperature, max_tokens):
+                self.calls += 1
+                return "2"
+
+        unsupported = UnsupportedClient()
+        cases = [
+            (InternChatClient(retry=1), PipelineBudget(max_model_calls=0)),
+            (InternChatClient(retry=1), PipelineBudget(max_http_attempts=0)),
+            (InternChatClient(retry=1), PipelineBudget(max_tokens=0)),
+            (unsupported, PipelineBudget()),
+        ]
+        for transport, limits in cases:
+            with self.subTest(limits=limits, transport=type(transport).__name__), tempfile.TemporaryDirectory() as directory:
+                service = RunService(
+                    agent=InternAgentAdapter(InternModelAdapter(transport, max_tokens=256)),
+                    run_budget_limits=limits,
+                )
+                app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": directory}, service=service)
+                try:
+                    with patch("llm_client.requests.post", return_value=Response()) as post:
+                        client = app.test_client()
+                        csrf = client.get("/api/check_auth").get_json()["csrf_token"]
+                        run = client.post("/api/runs", json={"problem": "1+1"}, headers={"X-CSRF-Token": csrf}).get_json()
+                        self.assertEqual("FAILED", run["status"])
+                        evidence = client.get(f"/api/runs/{run['run_id']}/evidence").get_json()
+                        self.assertEqual(0, evidence["budget"]["http_attempts"])
+                        self.assertEqual(0, post.call_count)
+                        self.assertEqual(0, unsupported.calls)
+                finally:
+                    for key in ("showcase_workspace_service", "showcase_run_service", "loopback_store"):
+                        app.extensions[key].close()
+
     def run_job(self, *, budget=None, responses=None, pipeline_factory=None, registry=None):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
