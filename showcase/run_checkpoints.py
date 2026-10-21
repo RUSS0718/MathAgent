@@ -22,6 +22,7 @@ class RunCheckpointSaver(BaseCheckpointSaver):
                 checkpoint_type TEXT, checkpoint BLOB, metadata_type TEXT, metadata BLOB,
                 PRIMARY KEY(thread,namespace,id)
             );
+            CREATE TABLE IF NOT EXISTS run_graph_terminals (thread TEXT PRIMARY KEY, checkpoint_id TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS run_graph_writes (
                 thread TEXT, namespace TEXT, checkpoint_id TEXT, task TEXT, idx INTEGER,
                 channel TEXT, value_type TEXT, value BLOB,
@@ -32,6 +33,13 @@ class RunCheckpointSaver(BaseCheckpointSaver):
     def get_tuple(self, config):
         values = config["configurable"]
         thread, namespace = values["thread_id"], values.get("checkpoint_ns", "")
+        with self.lock:
+            sealed = self.connection.execute(
+                "SELECT checkpoint_id FROM run_graph_terminals WHERE thread=?", (thread,)
+            ).fetchone()
+        values = dict(values)
+        if sealed and not values.get("checkpoint_id"):
+            values["checkpoint_id"] = sealed[0]
         query = "SELECT * FROM run_graph_checkpoints WHERE thread=? AND namespace=?"
         params = [thread, namespace]
         if values.get("checkpoint_id"):
@@ -74,6 +82,17 @@ class RunCheckpointSaver(BaseCheckpointSaver):
         metadata_kind, metadata_data = self.serde.dumps_typed(metadata)
         thread, namespace = values["thread_id"], values.get("checkpoint_ns", "")
         with self.lock, self.connection:
+            sealed = self.connection.execute(
+                "SELECT checkpoint_id FROM run_graph_terminals WHERE thread=?", (thread,)
+            ).fetchone()
+            if sealed:
+                return {
+                    "configurable": {
+                        "thread_id": thread,
+                        "checkpoint_ns": namespace,
+                        "checkpoint_id": sealed[0],
+                    }
+                }
             self.connection.execute(
                 "INSERT OR REPLACE INTO run_graph_checkpoints VALUES (?,?,?,?,?,?,?,?)",
                 (
@@ -98,6 +117,10 @@ class RunCheckpointSaver(BaseCheckpointSaver):
     def put_writes(self, config, writes, task_id, task_path=""):
         values = config["configurable"]
         with self.lock, self.connection:
+            if self.connection.execute(
+                "SELECT 1 FROM run_graph_terminals WHERE thread=?", (values["thread_id"],)
+            ).fetchone():
+                return
             for index, (channel, value) in enumerate(writes):
                 kind, data = self.serde.dumps_typed(value)
                 self.connection.execute(
@@ -112,6 +135,36 @@ class RunCheckpointSaver(BaseCheckpointSaver):
                         kind,
                         data,
                     ),
+                )
+
+    def stop(self, run_id, status, category=None):
+        """Seal a terminal LangGraph checkpoint; late worker writes are ignored."""
+        from langgraph.graph import END, START, StateGraph
+
+        with self.lock:
+            if self.connection.execute(
+                "SELECT 1 FROM run_graph_terminals WHERE thread=?", (run_id,)
+            ).fetchone():
+                return
+            builder = StateGraph(dict)
+            builder.add_node("terminal", lambda state: state)
+            builder.add_edge(START, "terminal")
+            builder.add_edge("terminal", END)
+            graph = builder.compile(checkpointer=self)
+            config = {"configurable": {"thread_id": run_id}}
+            state = dict(graph.get_state(config).values or {})
+            state.update(
+                run_id=run_id,
+                status=status,
+                stage="completed" if status == "COMPLETED" else "stopped",
+            )
+            if status != "COMPLETED":
+                state.update(final_response=None, error={"category": category or status.lower()})
+            saved = graph.update_state(config, state, as_node="terminal")
+            with self.connection:
+                self.connection.execute(
+                    "INSERT OR IGNORE INTO run_graph_terminals VALUES (?,?)",
+                    (run_id, saved["configurable"]["checkpoint_id"]),
                 )
 
     def is_interrupted(self, run_id):

@@ -337,6 +337,11 @@ class WorkspaceStore:
                 self._connection.rollback()
                 raise
 
+    def control_status(self, job_id: str):
+        with self._lock:
+            row = self._connection.execute("SELECT status,error_code FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+        return dict(row) if row else None
+
     def mark_waiting_input(self, job_id: str) -> None:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
@@ -349,6 +354,10 @@ class WorkspaceStore:
                 raise WorkspaceError("job_not_waiting_input", status=409)
             now = _utc_now()
             self._connection.execute("UPDATE workspace_jobs SET status='waiting_input',updated_at=? WHERE job_id=?", (now, job_id))
+            snapshot_row = self._connection.execute("SELECT snapshot_json FROM runs WHERE run_id=?", (job_id,)).fetchone()
+            snapshot = _loads(snapshot_row["snapshot_json"])
+            snapshot.update(status="WAITING_INPUT", stage="planned", updated_at=now)
+            self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(snapshot), now, job_id))
             self._insert_event(job_id, "interrupt", {"type": "interrupt", "job_id": job_id, "status": "waiting_input"})
             self._connection.commit()
 
@@ -409,6 +418,11 @@ class WorkspaceStore:
                 self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, error={"category": "needs_review"}, asset_refs=self._asset_refs(job_id))), now, job_id))
                 self._insert_event(job_id, "needs_review", {"type": "needs_review", "job_id": job_id, "status": "failed", "reason": "process_restart"})
             self._connection.commit()
+            if checkpointer is not None:
+                for row in rows:
+                    state = self.control_status(row["job_id"])
+                    if state["status"] == "failed":
+                        checkpointer.stop(row["job_id"], "NEEDS_REVIEW", "needs_review")
             return len(rows)
 
     def fail_job(self, job_id: str, code: str, *, execution_mode: str = "fake") -> None:
@@ -769,6 +783,8 @@ class WorkspaceService:
         result, existing = self.store.control_job(
             user_id=user_id, job_id=job_id, operation="cancel", idempotency_key=idempotency_key, request_digest=_request_digest("cancel", job_id, "")
         )
+        if self.checkpointer is not None:
+            self.checkpointer.stop(job_id, "CANCELED", "run_canceled")
         return result, existing
 
     def _submit(self, job_id: str) -> None:
@@ -791,7 +807,7 @@ class WorkspaceService:
                     self.store.fail_job(job_id, "unavailable", execution_mode="live")
                     return
                 limits = getattr(self.pipeline, "budget", RunBudgetLimits())
-                with bind_budget(self.budget_ledger.ensure(job_id, limits)) as budget, bind_control(RunControl(self.store, job_id, budget)) as control:
+                with bind_budget(self.budget_ledger.ensure(job_id, limits)) as budget, bind_control(RunControl(self.store, job_id, budget, self.checkpointer)) as control:
                     control.check()
                     state = self.pipeline.run(
                         job_id,
@@ -800,6 +816,10 @@ class WorkspaceService:
                         emit=lambda event: self.store.append_event(job_id, event),
                     )
                 self.store.finish_live_job(job_id, state)
+                if self.checkpointer is not None and state.get("status") != "WAITING_INPUT":
+                    job = self.store.control_status(job_id)
+                    status = "CANCELED" if job["status"] == "canceled" else ("COMPLETED" if job["status"] == "succeeded" else str(state.get("status", "FAILED")))
+                    self.checkpointer.stop(job_id, status, job["error_code"])
                 return
             if (
                 self.waiting_input_marker
@@ -817,6 +837,8 @@ class WorkspaceService:
             return
         except Exception:
             self.store.fail_job(job_id, "job_execution_failed", execution_mode=self.execution_mode)
+            if self.checkpointer is not None:
+                self.checkpointer.stop(job_id, "FAILED", "job_execution_failed")
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
         payload = self.store.get_job(job_id, user_id)

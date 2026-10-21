@@ -313,6 +313,16 @@ class RunService:
         """Read the most recent recoverable checkpoint."""
 
         self._require_run(run_id)
+        has_graph = self._store._connection.execute("SELECT 1 FROM sqlite_master WHERE name='run_graph_checkpoints'").fetchone()
+        if has_graph:
+            from .run_checkpoints import RunCheckpointSaver
+            saver = RunCheckpointSaver(self._store.database_path)
+            try:
+                checkpoint = saver.get_tuple({"configurable": {"thread_id": run_id}})
+                if checkpoint:
+                    return copy.deepcopy(checkpoint.checkpoint["channel_values"].get("__root__"))
+            finally:
+                saver.close()
         return self._store.get_checkpoint(run_id)
 
     def save_checkpoint(self, run_id: str, checkpoint: Mapping[str, Any]) -> None:

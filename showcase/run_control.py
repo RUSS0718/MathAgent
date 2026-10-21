@@ -15,20 +15,20 @@ class RunStopped(RuntimeError):
 
 
 class RunControl:
-    def __init__(self, store, run_id, budget):
+    def __init__(self, store, run_id, budget, checkpointer=None):
         self.store, self.run_id, self.budget = store, run_id, budget
+        self.checkpointer = checkpointer
 
     def check(self):
-        with self.store._lock:
-            row = self.store._connection.execute(
-                "SELECT status,error_code FROM workspace_jobs WHERE job_id=?", (self.run_id,)
-            ).fetchone()
+        row = self.store.control_status(self.run_id)
         if row is None or row["status"] not in {"running", "queued"}:
             raise RunStopped(
                 "run_canceled" if row and row["status"] == "canceled" else "run_stopped"
             )
         if time.time() >= self.budget.snapshot()["deadline_at"]:
             self.store.fail_job(self.run_id, "run_deadline_exhausted", execution_mode="live")
+            if self.checkpointer is not None:
+                self.checkpointer.stop(self.run_id, "FAILED", "run_deadline_exhausted")
             raise RunStopped("run_deadline_exhausted")
 
 

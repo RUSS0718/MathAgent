@@ -32,7 +32,17 @@ def execute_live_graph(pipeline, initial, problem, verification_mode, sink):
     def gate(state):
         if pipeline.pause_after_planner:
             interrupt({"category": "waiting_input", "stage": "planned"})
-        return {}
+        return {"status": "RUNNING", "stage": "solving"}
+
+    def terminal(state):
+        required_review = (
+            verification_mode == "required" and state["verification"].get("status") != "pass"
+        )
+        return {
+            "status": "NEEDS_REVIEW" if required_review else "COMPLETED",
+            "stage": "completed",
+            "error": {"category": "verification_needs_review"} if required_review else None,
+        }
 
     def solver(state):
         candidate, _messages = pipeline._solver(
@@ -47,7 +57,9 @@ def execute_live_graph(pipeline, initial, problem, verification_mode, sink):
             "input_length": len(pipeline._intake(run_id, problem, sink)),
         },
         "planner": lambda state: {
-            "plan": pipeline._planner(run_id, problem.strip(), sink, started, calls)
+            "plan": pipeline._planner(run_id, problem.strip(), sink, started, calls),
+            "status": "WAITING_INPUT" if pipeline.pause_after_planner else "RUNNING",
+            "stage": "planned",
         },
         "input_gate": gate,
         "solver": solver,
@@ -69,6 +81,7 @@ def execute_live_graph(pipeline, initial, problem, verification_mode, sink):
             )
         },
     }
+    actions["terminal"] = terminal
     previous = START
     for name, action in actions.items():
         builder.add_node(name, node(name, action))

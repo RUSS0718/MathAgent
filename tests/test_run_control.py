@@ -99,6 +99,8 @@ class RunControlContractTest(unittest.TestCase):
         self.release.set()
         self.wait_attempt_audit(job_id)
         self.assertEqual(1, self.post.call_count)
+        checkpoint = self.app.extensions["showcase_run_service"].get_checkpoint(job_id)
+        self.assertEqual("CANCELED", checkpoint["status"])
         self.assertEqual(
             "canceled", self.client.get(f"/api/agent/jobs/{job_id}").get_json()["status"]
         )
@@ -110,6 +112,9 @@ class RunControlContractTest(unittest.TestCase):
         self.release.set()
         job_id = self.create_job()
         self.wait_job(job_id, "waiting_input")
+        self.assertEqual(
+            "WAITING_INPUT", self.client.get(f"/api/runs/{job_id}").get_json()["status"]
+        )
         before = self.client.get(f"/api/agent/jobs/{job_id}/report").get_json()["report"]["budget"]
         self.assertEqual(1, before["http_attempts"])
         response = self.client.post(
@@ -121,6 +126,8 @@ class RunControlContractTest(unittest.TestCase):
         self.assertEqual(3, report["budget"]["http_attempts"])
         self.assertEqual(before["deadline_at"], report["budget"]["deadline_at"])
         self.assertEqual(3, self.post.call_count)
+        checkpoint = self.app.extensions["showcase_run_service"].get_checkpoint(job_id)
+        self.assertEqual("COMPLETED", checkpoint["status"])
 
     def test_deadline_rejects_late_response_and_keeps_report(self):
         from showcase.live_pipeline import PipelineBudget
@@ -273,3 +280,75 @@ class RunControlContractTest(unittest.TestCase):
         self.assertEqual(
             "canceled", self.client.get(f"/api/agent/jobs/{job_id}").get_json()["status"]
         )
+
+    def test_late_known_usage_settles_without_reopening_canceled_run(self):
+        class MeteredReply(Reply):
+            def json(self):
+                return {
+                    **super().json(),
+                    "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+                }
+
+        def respond(*args, **kwargs):
+            self.entered.set()
+            self.release.wait(3)
+            return MeteredReply()
+
+        self.post.side_effect = respond
+        job_id = self.create_job()
+        self.assertTrue(self.entered.wait(2))
+        self.client.post(f"/api/agent/jobs/{job_id}/cancel", json={}, headers=self.headers())
+        self.release.set()
+        report = self.wait_attempt_audit(job_id)
+        self.assertEqual(10, report["budget"]["provider_known"]["total_tokens"])
+        self.assertEqual(0, report["budget"]["reserved_tokens"])
+        self.assertEqual(1, self.post.call_count)
+        self.assertEqual(
+            "canceled", self.client.get(f"/api/agent/jobs/{job_id}").get_json()["status"]
+        )
+
+    def test_concurrent_resume_sse_disconnect_cancel_preserves_audit(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        self.pipeline.pause_after_planner = True
+        self.release.set()
+        job_id = self.create_job()
+        self.wait_job(job_id, "waiting_input")
+        stream = self.client.get(f"/api/agent/jobs/{job_id}/events", buffered=False)
+        next(iter(stream.response))
+        stream.close()
+        before = self.client.get(f"/api/agent/jobs/{job_id}/report").get_json()["report"]["budget"]
+        self.entered.clear()
+        self.release.clear()
+        barrier = threading.Barrier(2)
+
+        def resume():
+            client = self.app.test_client()
+            csrf = client.get("/api/check_auth").get_json()["csrf_token"]
+            barrier.wait(2)
+            return client.post(
+                f"/api/agent/jobs/{job_id}/resume",
+                json={},
+                headers={"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())},
+            ).status_code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = list(pool.map(lambda _: resume(), range(2)))
+        self.assertEqual([202, 409], sorted(responses))
+        self.assertTrue(self.entered.wait(2))
+        self.client.post(f"/api/agent/jobs/{job_id}/cancel", json={}, headers=self.headers())
+        self.release.set()
+        for _ in range(300):
+            report = self.client.get(f"/api/agent/jobs/{job_id}/report").get_json()["report"]
+            if len(report["request_attempts"]) == 2:
+                break
+            time.sleep(0.01)
+        self.assertEqual(2, len(report["request_attempts"]))
+        self.assertEqual(2, self.post.call_count)
+        self.assertEqual(before["deadline_at"], report["budget"]["deadline_at"])
+        stream = self.client.get(f"/api/agent/jobs/{job_id}/events").get_data(as_text=True)
+        self.assertEqual(1, stream.count("event: resumed"))
+        self.assertIn("event: canceled", stream)
+        evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
+        self.assertEqual(2, evidence["budget"]["http_attempts"])
+        self.assertEqual("CANCELED", evidence["run"]["status"])
