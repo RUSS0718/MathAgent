@@ -17,7 +17,7 @@ const notice = ref('')
 const connected = ref(false)
 const cancelKey = createIdempotencyKey()
 const busy = ref(false)
-const fields = ['attempt_id', 'logical_call_id', 'attempt_index', 'action', 'requested_model', 'returned_model', 'status', 'http_status', 'finish_reason', 'duration_seconds', 'error_category', 'stop_category', 'metering_status', 'usage_source', 'usage']
+const fields = ['attempt_id', 'logical_call_id', 'attempt_index', 'started_at_utc', 'dispatch_status', 'action', 'requested_model', 'returned_model', 'status', 'http_status', 'finish_reason', 'duration_seconds', 'error_category', 'stop_category', 'metering_status', 'usage_source', 'usage']
 const toolFields = ['name', 'tool_call_id', 'protocol', 'transport_mode', 'status', 'error_category', 'continuation_status', 'continuation_tool_call_id', 'continuation_response_received', 'candidate_status', 'coverage_status', 'result_summary', 'limitations']
 function display(value: unknown): string { return value === null || value === undefined ? 'unknown（未知）' : typeof value === 'object' ? JSON.stringify(value) : String(value) }
 async function refresh(): Promise<void> { try { jobs.observe(await api.getJob(props.jobId)); report.value = await api.jobReport(props.jobId); notice.value = '' } catch (error) { notice.value = error instanceof Error ? error.message : '报告 unavailable（不可用）' } }
@@ -38,7 +38,7 @@ onUnmounted(() => controller.stopAll())
     <ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
     <p v-else role="status">报告 unavailable；请刷新重试，尚不能判断运行成功。</p>
     <section v-if="report" class="report-section"><h2>最终验证范围</h2><dl><template v-for="field in ['status', 'scope', 'checker', 'checker_version', 'acceptance', 'binding', 'artifact', 'candidate_status', 'coverage_status', 'limitations', 'findings']" :key="field"><dt>{{ field }}</dt><dd>{{ display(report.report.checks[field]) }}</dd></template></dl><p>候选检查通过不等于完整解集证明。</p>
-      <h2>脱敏 Request Attempts</h2><p v-if="!report.report.request_attempts.length">无已记录 HTTP attempt；详见预算与计量。</p><details v-for="(attempt, index) in report.report.request_attempts" :key="index"><summary>Attempt {{ index + 1 }} · {{ display(attempt.status) }}</summary><dl><template v-for="field in fields" :key="field"><dt>{{ field }}</dt><dd>{{ display(attempt[field]) }}</dd></template></dl></details>
+      <h2>脱敏 Request Attempts</h2><p>reserved_dispatch_unconfirmed：本地预留已提交，远端是否接收或计费尚未确认；transport_observed 表示本地传输返回了观测。</p><p v-if="!report.report.request_attempts.length">无已记录 HTTP attempt；详见预算与计量。</p><details v-for="(attempt, index) in report.report.request_attempts" :key="index"><summary>Attempt {{ index + 1 }} · {{ display(attempt.status) }}</summary><dl><template v-for="field in fields" :key="field"><dt>{{ field }}</dt><dd>{{ display(attempt[field]) }}</dd></template></dl></details>
       <h2>工具闭环</h2><p v-if="!report.report.tool_summaries.length">无已记录工具结果。</p><article v-for="(tool, index) in report.report.tool_summaries" :key="index"><p v-if="tool.domain_status === 'out_of_domain'" role="status"><strong>域外：候选不满足定义域，最终结论仍为 unknown。</strong></p><dl><template v-for="field in toolFields" :key="field"><dt>{{ field }}</dt><dd>{{ display(tool[field]) }}</dd></template></dl></article>
     </section>
     <AgentTimeline v-if="job" :events="job.events" />

@@ -54,6 +54,8 @@ def public_attempt(
         "role": safe_identifier(role),
         "action": safe_identifier(role),
         "attempt_index": _count(event.get("attempt_index")),
+        "started_at_utc": event.get("started_at_utc") if isinstance(event.get("started_at_utc"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}T[0-9:.]+(?:Z|[+-]\d{2}:\d{2})", event["started_at_utc"]) else None,
+        "dispatch_status": event.get("dispatch_status") if event.get("dispatch_status") in {"reserved_dispatch_unconfirmed", "transport_observed"} else None,
         "requested_model": safe_identifier(
             event.get("request_model_id", event.get("requested_model"))
         ),

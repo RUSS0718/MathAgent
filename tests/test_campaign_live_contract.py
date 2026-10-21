@@ -153,6 +153,9 @@ class LiveCampaignContractTest(CampaignFixture):
             self.assertIsNone(arm["cost"])
             self.assertEqual(["intern-s2-fixture"], arm["returned_models"])
             self.assertTrue(all(a["run_id"] == arm["job_id"] for a in arm["request_attempts"]))
+            self.assertEqual(arm['usage']['http_attempts'], len(arm['request_attempts']))
+            self.assertEqual(len(arm['request_attempts']), len({a['attempt_id'] for a in arm['request_attempts']}))
+            self.assertTrue(all(a['dispatch_status'] == 'transport_observed' for a in arm['request_attempts']))
 
     def test_http_attempt_cap_is_applied_to_each_arm_and_failure_retained(self):
         payload = campaign_input()

@@ -862,6 +862,7 @@ class WorkspaceService:
             if budget is not None and not (payload.get("result") or {}).get("budget"):
                 payload["result"] = {**(payload.get("result") or {}), "budget": budget}
         attempts = [event["data"]["attempt"] for event in self.store.events(job_id, user_id) if event["event"] == "request_attempt"]
+        attempts = list({item["attempt_id"]: item for item in [*attempts, *self.budget_ledger.attempts(job_id)]}.values())
         if attempts:
             payload["result"] = {**(payload.get("result") or {}), "request_attempts": attempts}
         return payload
