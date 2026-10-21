@@ -10,6 +10,7 @@
 6. [研究近邻来源](research-prior-sources.md)：正式论文与预印本状态分开记录。
 7. [审查与交接](review-and-handoff.md)：两条审查轴的发现、修复和下一切片。
 8. [setup PR 正文草案](setup-pr-draft.md)：面向 develop 的可审查说明，尚未创建远端 PR。
+9. [S5 同题配对 Runner](s5-paired-runner.md)：显式运行、公共 API、未知 / 失败保留和归档合同；不代表 live 或数学提升验收。
 
 ## 离线预检入口
 

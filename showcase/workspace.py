@@ -309,6 +309,7 @@ class WorkspaceStore:
                     return
                 now = _utc_now()
                 result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response)}
+                result["budget"] = freeze_budget(self._connection, job_id)
                 self._connection.execute(
                     "UPDATE workspace_jobs SET status='succeeded',result_json=?,updated_at=? WHERE job_id=?",
                     (_json(result), now, job_id),
@@ -386,6 +387,7 @@ class WorkspaceStore:
                         raise WorkspaceError("job_not_cancelable", status=409)
                     if status != "canceled":
                         now = _utc_now()
+                        freeze_budget(self._connection, job_id)
                         self._connection.execute("UPDATE workspace_jobs SET status='canceled',updated_at=? WHERE job_id=?", (now, job_id))
                         self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "CANCELED", now, asset_refs=self._asset_refs(job_id))), now, job_id))
                         self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled", "scope": "future_dispatch", "remote_request": "cannot_revoke"})
@@ -434,6 +436,7 @@ class WorkspaceStore:
             if updated.rowcount == 0:
                 self._connection.commit()
                 return
+            freeze_budget(self._connection, job_id)
             self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "FAILED", now, execution_mode=execution_mode, error={"category": code}, asset_refs=self._asset_refs(job_id))), now, job_id))
             self._insert_event(
                 job_id,
@@ -704,12 +707,10 @@ class WorkspaceService:
         self.worker_enabled = worker_enabled
         self.waiting_input_marker = waiting_input_marker
         self.pipeline = pipeline
-        self.budget_ledger = None
-        if pipeline is not None:
-            self.budget_ledger = (
-                RunBudgetLedger(self.store._connection, self.store._lock)
-                if str(database_path) == ":memory:" else RunBudgetLedger(database_path=database_path)
-            )
+        self.budget_ledger = (
+            RunBudgetLedger(self.store._connection, self.store._lock)
+            if str(database_path) == ":memory:" else RunBudgetLedger(database_path=database_path)
+        )
         self.checkpointer = None
         if pipeline is not None and hasattr(pipeline, "checkpointer"):
             self.checkpointer = RunCheckpointSaver(database_path)
@@ -745,6 +746,7 @@ class WorkspaceService:
         web_search_enabled: bool = False,
         input_user_file_id: Any = None,
         verification_mode: str = "auto",
+        budget_limits: RunBudgetLimits | None = None,
     ) -> tuple[dict[str, Any], bool]:
         if web_search_enabled:
             raise WorkspaceError("capability_unavailable", status=503)
@@ -764,6 +766,8 @@ class WorkspaceService:
             verification_mode=verification_mode,
             input_user_file_id=input_user_file_id,
         )
+        if budget_limits is not None:
+            self.budget_ledger.ensure(payload["job_id"], budget_limits)
         if not existing:
             self._submit(payload["job_id"])
         return payload, existing
@@ -806,6 +810,9 @@ class WorkspaceService:
             # Keep the worker asynchronous even for the deterministic adapter so
             # the HTTP contract never waits for execution.
             time.sleep(self.execution_delay)
+            if self.execution_mode == "fake" and self.budget_ledger.snapshot(job_id) is not None:
+                budget = self.budget_ledger.ensure(job_id, RunBudgetLimits())
+                RunControl(self.store, job_id, budget).check()
             if self.execution_mode == "live":
                 if self.pipeline is None:
                     self.store.fail_job(job_id, "unavailable", execution_mode="live")

@@ -14,6 +14,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, build_opener
 
+from .campaign_cli import add_campaign_parser, run_campaign
+
 
 class CliError(RuntimeError):
     def __init__(self, code: str, status: int | None = None) -> None:
@@ -120,6 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cookie-file", type=Path, default=Path("artifacts/showcase-v0.2/cli.cookies"))
     parser.add_argument("--timeout", type=float, default=1_200.0)
     subparsers = parser.add_subparsers(dest="command", required=True)
+    add_campaign_parser(subparsers)
 
     subparsers.add_parser("health")
     subparsers.add_parser("capabilities")
@@ -187,6 +190,8 @@ def run(args: argparse.Namespace) -> int:
         _run_file(client, args)
     elif args.command == "probe":
         _run_probe(client, args)
+    elif args.command == "campaign":
+        _print(run_campaign(client, args))
     else:  # pragma: no cover - argparse enforces the command set
         raise CliError("command_invalid")
     return 0

@@ -157,8 +157,11 @@ class RunBudgetLedger:
                     break
 
     def snapshot(self, run_id):
-        with self._transaction(run_id) as state:
-            return _summary(state) if state is not None else None
+        with self.lock:
+            row = self.connection.execute(
+                "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
+            ).fetchone()
+        return _summary(json.loads(row[0])) if row is not None else None
 
 
 class RunBudget:

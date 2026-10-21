@@ -22,6 +22,7 @@ except ImportError:  # pragma: no cover - showcase dependency installs python-do
 else:
     load_dotenv()
 
+from .campaign_api import register_campaigns
 from .evidence import EvidencePackExporter, replay_evidence
 from .final_evidence import checked_verification
 from .loopback import AuthSession, LoopbackStore
@@ -108,6 +109,7 @@ def create_app(
         persisted_files = {}
     app.extensions["showcase_files"] = persisted_files if isinstance(persisted_files, dict) else {}
     app.extensions["showcase_files_index"] = files_index
+    register_campaigns(app, workspace_service, service, resolved_database, storage_root)
 
     @app.before_request
     def attach_request_context() -> Response | None:
