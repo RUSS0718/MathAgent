@@ -20,6 +20,7 @@ def execute_tool_request(
     cross_run = any(key in args and args[key] != run_id for key in ("run_id", "target_run_id"))
     allowed = (
         enabled
+        and run["state"].get("reasoning_mode") != "reason_noncoding"
         and role in {"explore", "reasoner", "step_verifier", "whole_solution_verifier"}
         and tool in {"read_state", "read_ledger"}
         and not cross_run

@@ -19,6 +19,9 @@ ROLE_DEFINITIONS = {
 
 def compose_request(run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
     role = request["role"]
+    if role == "reasoner" and run["state"].get("reasoning_mode") == "reason_noncoding":
+        role = "reason_noncoding"
+        request = {**request, "role": role}
     definition = ROLE_DEFINITIONS.get(
         role,
         ROLE_DEFINITIONS["meta"] if role == "meta_strategist" else ROLE_DEFINITIONS["reasoner"],
