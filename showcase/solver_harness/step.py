@@ -125,7 +125,15 @@ def _normalize_report(reply: Any, step: Mapping[str, Any]) -> dict[str, Any]:
         if label == "easy-verify" and isinstance(claim.get("tool_request"), Mapping):
             claims[-1]["tool_request"] = dict(claim["tool_request"])
     argument = reply.get("argument", "")
+    candidate = reply.get("solution_candidate")
+    extra = {}
+    if isinstance(candidate, str):
+        extra = {
+            "solution_candidate": candidate,
+            "answer_completeness": reply.get("answer_completeness", "partial"),
+        }
     return {
+        **extra,
         "step_id": step["step_id"],
         "objective": step["objective"],
         "argument": argument if isinstance(argument, str) else "",
