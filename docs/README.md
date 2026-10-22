@@ -36,6 +36,8 @@
 | Quality / Release Gate | [验收门禁](ACCEPTANCE.md)、[合并边界](release-boundary.md)、[质量 CI](../.github/workflows/quality.yml)、[发布检查](../scripts/check_showcase_release.py) | 工程与官方隔离门禁；不能推导数学正确率 |
 | Scoring / Delivery | [评分证据矩阵](JUDGE_SCORECARD.md)、[评分材料清单](subjective-score-checklist.md) | 视频、技术报告、结果包的交付要求；清单勾选不是成绩证明 |
 
+[Solver v1.2 发布验收与 AC/SC 归属](evals/showcase-solver-v1.2-release.md) 区分离线工程门禁与受阻的完整 live 发布。
+
 ## v1.1 Solver Harness 规格入口
 
 - [v1.1 实现规格](https://github.com/RUSS0718/MathAgent/issues/32)：S1/S2 seam、验收合同、SC→AC 映射和 v1.1/v1.2 ticket 边界。
