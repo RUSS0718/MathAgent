@@ -8,7 +8,7 @@
 
 `showcase.solver_harness.paired.PairedRunner` 暴露 `run_pair(...)` 与 `get_report(pair_id)`。runner 复用 `SQLiteStore`、`SolverHarness` 和同一 SQLite 文件，不创建第二个网络服务。`solver_pairs` 保存配对 manifest、两条独立 Run ID、逐臂结果和最终报告。
 
-两臂使用相同原题、角色可用性、声明模型版本、Profile、工具权限、传输限制与硬预算。仅 `strategy_feature` 指定的一个布尔开关可以不同。当前允许 `skills`、`reexploration`、`candidate_registry`、`best_effort`。非开关配置、工具注册集合、执行来源或可观察模型不一致时，在任何调用前拒绝整对运行。跨臂复用 port 实例也会拒绝。
+两臂使用相同原题、角色可用性、声明模型版本、Profile、工具权限、传输限制与硬预算。仅 `strategy_feature` 指定的一个布尔开关可以不同。当前允许 `skills`、`reexplore_after_replan`、`candidate_registry`、`best_effort`。非开关配置、工具注册集合、执行来源或可观察模型不一致时，在任何调用前拒绝整对运行。跨臂复用 port 实例也会拒绝。
 
 可观察的客户端模型 ID 优先于 adapter 声明；若与声明不符，则拒绝运行。模型 revision 可观察时同样验证。服务通常不提供固定 revision，报告保留 `declared_only`，不声称提供了不存在的版本证据。脚本 port 没有可观察模型标识时，报告明确为 `identity_status=unknown`，只支持工程结论。
 

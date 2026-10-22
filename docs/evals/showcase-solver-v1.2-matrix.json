@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "release_status": "engineering-preview",
-  "source_commit": "ffa46b36c67ac5cc1a3c7b25574a6cb5b1f0db52",
+  "source_commit": "c37220b66558346213c392ea58820e19d9cb6a53",
   "labels": [
     "scripted",
     "replay",
@@ -30,7 +30,8 @@
         "tests.test_solver_harness_review.SolverHarnessReviewTest.test_accept_completes_without_plan_and_survives_recovery",
         "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_solved_polishes_same_explore_session_before_fresh_review",
         "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_retry_decision_and_persistent_polish_session_are_real",
-        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_polish_checks_budget_and_missing_hint_rejected_before_model"
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_polish_checks_budget_and_missing_hint_rejected_before_model",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_polished_candidate_keeps_draft_history_and_review_binds_exact_text"
       ],
       "limitation": "显式star_routing v1.2公开离线用例；不代表真实模型能力"
     },
@@ -510,7 +511,8 @@
         "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_solved_polishes_same_explore_session_before_fresh_review",
         "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_retry_decision_and_persistent_polish_session_are_real",
         "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_polish_checks_budget_and_missing_hint_rejected_before_model",
-        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_partial_meta_chooses_plan_instead_of_fixed_retry"
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_partial_meta_chooses_plan_instead_of_fixed_retry",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_polished_candidate_keeps_draft_history_and_review_binds_exact_text"
       ],
       "limitation": "最终责任归属；前置实现见父规格#32"
     },
@@ -820,7 +822,8 @@
       "tests": [
         "tests.test_solver_harness_candidates.CandidateTest.test_explore_registration_keeps_exact_answer_and_review_history",
         "tests.test_solver_harness_candidates.CandidateTest.test_concrete_review_counterexample_refutes_and_replay_is_idempotent",
-        "tests.test_solver_harness_candidates.CandidateTest.test_replan_invalidates_dependent_old_candidate_and_preserves_source_history"
+        "tests.test_solver_harness_candidates.CandidateTest.test_replan_invalidates_dependent_old_candidate_and_preserves_source_history",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_polished_candidate_keeps_draft_history_and_review_binds_exact_text"
       ],
       "limitation": "最终责任归属；前置实现见父规格#32"
     },
@@ -982,6 +985,43 @@
       "npm ci --no-audit --no-fund": "PASS:66packages",
       "npm audit --audit-level=high": "PASS:0vulnerabilities",
       "npm run check": "PASS:dependency/typecheck/13unit/build"
+    }
+  },
+  "verification": {
+    "date": "2026-10-23",
+    "code_commit": "c37220b66558346213c392ea58820e19d9cb6a53",
+    "offline": {
+      "command": "uv run python scripts/check.py --offline",
+      "status": "PASS",
+      "tests": 340,
+      "seconds": 199.013,
+      "skipped": 0
+    },
+    "product_release": {
+      "command": "uv run python scripts/check_showcase_release.py",
+      "status": "PASS"
+    },
+    "solver_release": {
+      "command": "uv run python scripts/check_solver_release.py",
+      "status": "PASS",
+      "mapped_tests": 66,
+      "skipped": 0,
+      "expected_failures": 0
+    },
+    "live_release": {
+      "command": "uv run python scripts/check_solver_release.py --require-live",
+      "status": "BLOCKED",
+      "exit_code": 1
+    },
+    "baseline": "PASS:11 frozen files",
+    "documentation_links": "PASS",
+    "ruff": "PASS",
+    "git_diff_check": "PASS",
+    "logs": {
+      "live-gate.log": "41374132c6836c2c34a968909217866521ada0ea49e6c927fe623dea0a23479d",
+      "offline.log": "867ba5d176fa4940e55d00efe25ad6aa79e95b50620240089d18ab408a3569b4",
+      "product-release.log": "4daf8e28a40c1fa01555cbbc6cde91459dd08f90cea5dc3f2a56696b445851c9",
+      "solver-gate.log": "9c6937104f4a8b67b1d9dac7cd84c094f6856984ca2f664dbadb3dfad37338db"
     }
   }
 }
