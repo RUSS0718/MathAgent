@@ -86,18 +86,17 @@ def review_solution(
         state_updates={"counters": counters},
     )
     try:
-        reply = verifier_port.verify(
-            harness.prepare_request(
-                reserved,
-                {
-                    "run_id": run_id,
-                    "call_id": f"{run_id}:whole-solution-review",
-                    "role": "whole_solution_verifier",
-                    "problem": problem,
-                    "solution_candidate": candidate,
-                    "state_revision": reserved["state_revision"],
-                },
-            )
+        reply = harness.dispatch(
+            reserved,
+            verifier_port.verify,
+            {
+                "run_id": run_id,
+                "call_id": f"{run_id}:whole-solution-review",
+                "role": "whole_solution_verifier",
+                "problem": problem,
+                "solution_candidate": candidate,
+                "state_revision": reserved["state_revision"],
+            },
         )
     except Exception:
         return harness.commit_event(

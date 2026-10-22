@@ -259,3 +259,28 @@ class ToolEvidenceTest(unittest.TestCase):
         self.assertEqual([], tool.requests)
         self.assertEqual("runtime_budget_exhausted", result["state"]["tool_receipts"][0]["reason"])
         self.assertEqual(0, result["state"]["counters"]["tool_calls"])
+
+    def test_sessions_skills_and_prechecks_share_latest_verifier_projection(self):
+        from showcase.solver_harness import ScriptedToolPort
+
+        tool = ScriptedToolPort([{"status": "success", "output": {"value": 4}, "exit_code": 0}])
+        verifier = ScriptedVerifierPort([])
+        config = {
+            **CONFIG,
+            "features": {"local_code_tool": True, "persistent_sessions": True, "skills": True},
+        }
+        with SolverHarness(
+            config=config,
+            tool_port=tool,
+            model_port=ScriptedModelPort([report()]),
+            verifier_port=verifier,
+        ) as harness:
+            result = harness.solve("2+2", {"plan": PLAN})
+            self.assertEqual(result, harness.get_run(result["run_id"]))
+        request = verifier.requests[0]
+        self.assertEqual("verified", request["report"]["claims"][0]["label"])
+        self.assertEqual(1, request["prompt_layers"][2]["state"]["counters"]["tool_calls"])
+        self.assertEqual(request["state_revision"], request["prompt_layers"][2]["state_revision"])
+        self.assertIn("polynomial_check", request["allowed_tools"])
+        self.assertEqual("local", request["session_backend"])
+        self.assertEqual(2, len(result["state"]["session_registry"]))

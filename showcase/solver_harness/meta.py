@@ -127,7 +127,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
     request = harness.prepare_request(run, request)
     request.update(allowed_tools=[], tool_policy={"allow": []})
     try:
-        decision = _parse(dict(meta_port.complete(deepcopy(request))), guidance is not None)
+        decision = _parse(dict(harness.dispatch(run, meta_port.complete, request)), guidance is not None)
         target = decision["trace_back_to"]
         if target is not None:
             steps = state.get("plan", {}).get("steps", [])
