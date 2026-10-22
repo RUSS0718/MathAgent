@@ -20,6 +20,8 @@ def session_identity(state, request):
     scope = [state["run_id"], state["run_salt"], role, plan, step, attempt]
     if role == "explore":
         scope.append(request.get("round", 1))
+    if role == "researcher":
+        scope.append(request.get("session_key", request["call_id"]))
     if role == "whole_solution_verifier":
         scope.append(request["call_id"])
     return {

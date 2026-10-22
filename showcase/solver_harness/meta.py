@@ -137,8 +137,6 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
             )
             if target > current_index:
                 raise ValueError("invalid_trace_back_target")
-        if decision.get("decision") == "APPROVE_REPLAN" and state.get("replan_count", 0) >= 3:
-            raise ValueError("replan_limit_reached")
     except Exception:
         return harness.commit_event(
             run["run_id"],
