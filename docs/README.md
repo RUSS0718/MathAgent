@@ -14,6 +14,8 @@
 | 修改官方入口或讨论合并 | [BASELINE.json](../BASELINE.json) → [官方架构](architecture/pre-v0.1-official-agent-architecture.md) → [合并边界](release-boundary.md) | 冻结文件、调用预算、输出合同及重新验收要求 |
 | 运行或演示 | [Demo 说明](demo.md) → [演示脚本](../DEMO_SCRIPT.md) → [验收门禁](ACCEPTANCE.md) | 入口、运行模式、回放和发布检查方式 |
 
+[Solver Harness 结果导出与离线重放](evals/showcase-solver-result-replay-sh20.md) 说明 SH20 的公开函数、字段白名单与快照审计边界。
+
 ## v0.1 开发与验收文档链
 
 下表按工程阶段导航；阶段设计、任务关闭和能力证据分别阅读。
