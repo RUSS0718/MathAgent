@@ -116,3 +116,25 @@ class ChallengeTest(unittest.TestCase):
             if event["type"] == "step_reviewed" and event.get("verdict") == "ACCEPT"
         ]
         self.assertEqual(1, len(accepted))
+
+    def test_exhausted_challenge_has_explicit_partial_result(self):
+        with SolverHarness(
+            model_port=ScriptedModelPort([{}]), verifier_port=ScriptedVerifierPort([CHALLENGE])
+        ) as harness:
+            state = harness.solve("prove", {"plan": PLAN})["state"]
+        self.assertEqual("partial_budget_exhausted", state["status"])
+        self.assertTrue(state["final_response"])
+        self.assertIsNone(state["finalization_reason"])
+
+    def test_missing_objection_stays_pending_without_reasoner_reply(self):
+        model = ScriptedModelPort([{}])
+        with SolverHarness(
+            model_port=model,
+            verifier_port=ScriptedVerifierPort([{**CHALLENGE, "objection": " "}]),
+            config={"max_model_calls": 4},
+        ) as harness:
+            state = harness.solve("prove", {"plan": PLAN})["state"]
+        self.assertEqual(1, len(model.requests))
+        self.assertEqual("STEP_VERIFY", state["phase"])
+        self.assertFalse(state["steps"]["s1"]["verification"]["valid"])
+        self.assertEqual([], state["accepted_results"])

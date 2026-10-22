@@ -42,10 +42,38 @@ def run_challenges(
                     "type": "budget_exhausted",
                     "reason": reason,
                 },
-                state_updates={"budget": {**state.get("budget", {}), "exhaustion_reason": reason}},
+                state_updates={
+                    "budget": {**state.get("budget", {}), "exhaustion_reason": reason},
+                    "status": "partial_budget_exhausted",
+                    "final_response": "Budget exhausted during challenge; no verified answer is available.",
+                },
             )
         step = next(s for s in state["plan"]["steps"] if s["step_id"] == step_id)
         objection = record["verification"]["objection"]
+        if not objection.strip():
+            return harness.commit_event(
+                run["run_id"],
+                expected_revision=run["state_revision"],
+                event={
+                    "event_id": f"challenge-invalid-{step_id}-{number}",
+                    "type": "challenge_invalid",
+                    "reason": "missing_objection",
+                },
+                state_updates={
+                    "phase": "STEP_VERIFY",
+                    "steps": {
+                        **state["steps"],
+                        step_id: {
+                            **record,
+                            "verification": {
+                                **record["verification"],
+                                "valid": False,
+                                "reason": "missing_objection",
+                            },
+                        },
+                    },
+                },
+            )
         counters = {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1}
         run = harness.commit_event(
             run["run_id"],
