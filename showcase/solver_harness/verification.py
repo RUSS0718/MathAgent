@@ -97,24 +97,23 @@ def verify_step(
     )
     report = state["steps"][step_id]["report"]
     try:
-        reply = verifier_port.verify(
-            harness.prepare_request(
-                reserved,
-                {
-                    "run_id": run["run_id"],
-                    "call_id": f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}",
-                    "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}"
-                    + (f"-attempt-{attempt}" if attempt else ""),
-                    "round": round_number,
-                    "challenge_history": state["steps"][step_id].get("challenge_history", []),
-                    "role": "step_verifier",
-                    "problem": problem,
-                    "step": step,
-                    "report": report,
-                    "current_step_index": index + 1,
-                    "state_revision": reserved["state_revision"],
-                },
-            )
+        reply = harness.dispatch(
+            reserved,
+            verifier_port.verify,
+            {
+                "run_id": run["run_id"],
+                "call_id": f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}",
+                "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}"
+                + (f"-attempt-{attempt}" if attempt else ""),
+                "round": round_number,
+                "challenge_history": state["steps"][step_id].get("challenge_history", []),
+                "role": "step_verifier",
+                "problem": problem,
+                "step": step,
+                "report": report,
+                "current_step_index": index + 1,
+                "state_revision": reserved["state_revision"],
+            },
         )
     except Exception:
         reply = None

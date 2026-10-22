@@ -36,6 +36,8 @@ class _HarnessOperations(Protocol):
         self, run: Mapping[str, Any], request: Mapping[str, Any]
     ) -> dict[str, Any]: ...
 
+    def dispatch(self, run, operation, request): ...
+
     def get_run(self, run_id: str) -> dict[str, Any]: ...
 
     def commit_event(
@@ -134,7 +136,7 @@ def run_exploration(
             "problem": state["problem"],
             "state_revision": current["state_revision"],
         }
-        return {"reply": state["model_port"].complete(harness.prepare_request(current, request))}
+        return {"reply": harness.dispatch(current, state["model_port"].complete, request)}
 
     def persist_assessment(state: _ExploreGraphState) -> dict[str, Any]:
         assessment_data = _normalize_assessment(state.get("reply", {}))

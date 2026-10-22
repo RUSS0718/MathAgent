@@ -112,7 +112,12 @@ class SolverHarness:
         existing = self._state_store.get_run(run_id)
         if existing is not None:
             self._validate_identity(existing, run_id, problem_hash)
-            if self._model_port is None or existing["state"].get("phase") != "SETUP":
+            resumable = existing["state"].get("phase") == "SETUP" or (
+                self._config.get("features", {}).get("persistent_sessions") is True
+                and existing["state"].get("phase") == "PLAN"
+                and metadata is not None and "plan" in metadata
+            )
+            if self._model_port is None or not resumable:
                 return self._run_meta(existing, metadata, problem)
             return self._run_meta(
                 self._run_supplied_plan_or_explore(existing, problem, metadata), metadata, problem
@@ -219,12 +224,25 @@ class SolverHarness:
 
     def prepare_request(self, run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
         """Compose opt-in protocols from the current persisted run projection."""
+        from copy import deepcopy
+
+        from .context_injection import prepare_role_context
         from .prompts import compose_request
 
-        if self._config.get("features", {}).get("skills") is not True:
-            return dict(request)
         latest = self.get_run(run["run_id"])
-        return compose_request(latest, request)
+        if self._config.get("features", {}).get("skills") is True:
+            return compose_request(latest, request)
+        prepared = deepcopy(dict(request))
+        if self._config.get("features", {}).get("persistent_sessions") is True:
+            prepared["role_context"] = prepare_role_context(latest, prepared)
+            prepared["state_revision"] = latest["state_revision"]
+        return prepared
+
+    def dispatch(self, run, operation, request):
+        """Invoke one model operation with optional audited session continuity."""
+        from .sessions import dispatch
+
+        return dispatch(self, run, operation, request)
 
     def execute_tool_request(
         self,
@@ -248,6 +266,8 @@ class SolverHarness:
         problem_hash: str | None,
     ) -> None:
         state = result["state"]
+        from .sessions import validate_registry
+        validate_registry(state)
         if result.get("run_id") != run_id or state.get("run_id") != run_id:
             raise SolverIdentityError("run_id does not match the persisted Solver Run")
         if problem_hash is not None and state.get("problem_hash") != problem_hash:
