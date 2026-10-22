@@ -1,6 +1,7 @@
 """Public invocation contracts for opt-in protocol composition."""
 
 import unittest
+
 from showcase.solver_harness import ScriptedModelPort, SolverHarness
 
 
