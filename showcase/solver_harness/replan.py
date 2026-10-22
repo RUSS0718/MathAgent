@@ -59,7 +59,7 @@ def _call(harness, run, port, request):
     try:
         request = harness.prepare_request(run, request)
         request.update(allowed_tools=[], tool_policy={"allow": []})
-        reply = deepcopy(dict(port.complete(deepcopy(request))))
+        reply = deepcopy(dict(harness.dispatch(run, port.complete, request)))
     except Exception:
         reply = {}
     return run, reply

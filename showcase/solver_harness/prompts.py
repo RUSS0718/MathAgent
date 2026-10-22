@@ -3,8 +3,10 @@
 import hashlib
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import Any
 
+from .context_injection import prepare_role_context
 from .skills import PROTOCOLS, select_skills
 
 ROLE_DEFINITIONS = {
@@ -18,6 +20,7 @@ ROLE_DEFINITIONS = {
 
 
 def compose_request(run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
+    request = deepcopy(dict(request))
     role = request["role"]
     if role == "reasoner" and run["state"].get("reasoning_mode") == "reason_noncoding":
         role = "reason_noncoding"
@@ -27,28 +30,13 @@ def compose_request(run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[
         ROLE_DEFINITIONS["meta"] if role == "meta_strategist" else ROLE_DEFINITIONS["reasoner"],
     )
     ids = select_skills(role, request)
-    state = run["state"]
-    projection = {
-        key: state[key]
-        for key in (
-            "phase",
-            "plan",
-            "current_step",
-            "accepted_results",
-            "failure_records",
-            "verified_results_ledger",
-            "confirmed_failures_ledger",
-            "budget",
-            "counters",
-        )
-        if key in state
-    }
+    projection = prepare_role_context(run, request)["state"]
     layers = [
         {"kind": "role", "version": "1", "definition": definition},
         {
             "kind": "protocols",
             "version": "1",
-            "protocols": [{"id": key, **PROTOCOLS[key]} for key in ids],
+            "protocols": [{"id": key, **deepcopy(PROTOCOLS[key])} for key in ids],
         },
         {
             "kind": "projection",
