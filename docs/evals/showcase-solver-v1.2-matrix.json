@@ -1,0 +1,942 @@
+{
+  "schema_version": 1,
+  "release_status": "engineering-preview",
+  "source_commit": "03a0d393dcc77f58c0a2ee9391cd32e18fcd562d",
+  "labels": [
+    "scripted",
+    "replay",
+    "live",
+    "unavailable"
+  ],
+  "live_gate": {
+    "status": "needs_review",
+    "legacy_v02_ac06": "unavailable",
+    "live_release": "blocked",
+    "model_calls": 8,
+    "tool_calls": 0,
+    "evidence": "docs/evals/showcase-solver-intern-live-sh21.md"
+  },
+  "star_ac": {
+    "AC-01": {
+      "owner": "SH-05",
+      "issue": 37,
+      "evidence_mode": "scripted",
+      "status": "needs_review",
+      "tests": [
+        "tests.test_solver_harness_review.SolverHarnessReviewTest.test_accept_completes_without_plan_and_survives_recovery"
+      ],
+      "limitation": "缺少同Explore会话润色"
+    },
+    "AC-02": {
+      "owner": "SH-05",
+      "issue": 37,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_review.SolverHarnessReviewTest.test_reject_preserves_findings_and_hands_off_to_plan"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-03": {
+      "owner": "SH-05",
+      "issue": 37,
+      "evidence_mode": "scripted",
+      "status": "needs_review",
+      "tests": [
+        "tests.test_solver_harness_explore.SolverHarnessExploreTest.test_partial_exploration_gets_one_retry_then_routes_to_plan"
+      ],
+      "limitation": "缺少Meta决定重试/规划"
+    },
+    "AC-04": {
+      "owner": "SH-07",
+      "issue": 39,
+      "evidence_mode": "scripted",
+      "status": "needs_review",
+      "tests": [
+        "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_invalid_plan_never_dispatches"
+      ],
+      "limitation": "非法计划拒绝已有覆盖，但有界修复待实现"
+    },
+    "AC-05": {
+      "owner": "SH-07",
+      "issue": 39,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_only_strict_double_gate_accept_advances_and_persists_evidence"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-06": {
+      "owner": "SH-06",
+      "issue": 38,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_missing_expectation_or_unexecuted_forged_tag_is_not_verified"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-07": {
+      "owner": "SH-08",
+      "issue": 40,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_challenge.ChallengeTest.test_three_objections_are_answered_in_one_session_before_accept"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-08": {
+      "owner": "SH-08",
+      "issue": 40,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_challenge.ChallengeTest.test_cap_escalates_without_acceptance"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-09": {
+      "owner": "SH-09",
+      "issue": 41,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_traceback.TracebackTest.test_result_dependencies_invalidate_transitively_and_rescue_evidence"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-10": {
+      "owner": "SH-09",
+      "issue": 41,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_traceback.TracebackTest.test_invalid_target_escalates_without_guessing"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-11": {
+      "owner": "SH-11",
+      "issue": 43,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_replan.ReplanTest.test_replacement_is_generated_archived_and_persisted"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-12": {
+      "owner": "SH-11",
+      "issue": 43,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_meta.MetaTest.test_history_survives_versions_and_new_harness_and_isolates_runs"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-13": {
+      "owner": "SH-15",
+      "issue": 47,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_finalize.FinalizeTest.test_reject_then_accept_uses_fresh_review_and_persists_attempts"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-14": {
+      "owner": "SH-14",
+      "issue": 46,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_failed_unknown_and_mismatched_results_never_promote_claim"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-15": {
+      "owner": "SH-03",
+      "issue": 35,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_events.SolverHarnessEventTest.test_replaying_the_same_event_does_not_add_a_revision_or_event"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-16": {
+      "owner": "SH-04",
+      "issue": 36,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_explore.SolverHarnessExploreTest.test_exhausted_budget_returns_explicit_result_without_dispatch"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-17": {
+      "owner": "SH-05",
+      "issue": 37,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_review.SolverHarnessReviewTest.test_extensions_stay_none_without_added_calls"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-18": {
+      "owner": "SH-23",
+      "issue": 55,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_baseline_snapshot.BaselineSnapshotTest.test_runtime_files_match_frozen_baseline"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-19": {
+      "owner": "SH-13",
+      "issue": 45,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_skills.SkillsTest.test_triggered_protocol_contracts_and_meta_runtime_policy"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-20": {
+      "owner": "SH-22",
+      "issue": 54,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_paired.PairedRunTest.test_pair_uses_independent_runs_and_recovers_exact_report_without_dispatch"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-21": {
+      "owner": "SH-12",
+      "issue": 44,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_sessions.SessionsTest.test_new_attempt_archives_reasoner_and_new_steps_split_verifier_sessions"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-22": {
+      "owner": "SH-12",
+      "issue": 44,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_sessions.SessionsTest.test_latest_authorized_context_copies_input_and_filters_invalid_facts"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-23": {
+      "owner": "SH-12",
+      "issue": 44,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_sessions.SessionsTest.test_recreation_continues_meta_history_and_completed_run_is_idempotent"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-24": {
+      "owner": "SH-10",
+      "issue": 42,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_meta.MetaTest.test_failures_get_actionable_guidance_without_state_access"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-25": {
+      "owner": "SH-10",
+      "issue": 42,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_meta.MetaTest.test_strict_decisions_route_without_replacing_plan"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-26": {
+      "owner": "SH-11",
+      "issue": 43,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_replan.ReplanTest.test_research_is_bounded_noncoding_and_only_unverified"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-27": {
+      "owner": "SH-14",
+      "issue": 46,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_successful_scripted_receipt_precedes_verifier_and_is_recoverable"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-28": {
+      "owner": "SH-09",
+      "issue": 41,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_traceback.TracebackTest.test_result_dependencies_invalidate_transitively_and_rescue_evidence"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-29": {
+      "owner": "SH-09",
+      "issue": 41,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_finalize.FinalizeTest.test_absent_final_verifier_and_invalid_fact_filter_at_recovery"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-30": {
+      "owner": "SH-15",
+      "issue": 47,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_finalize.FinalizeTest.test_failed_final_verifier_preserves_candidate_as_unverified"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-31": {
+      "owner": "SH-13",
+      "issue": 45,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_skills.SkillsTest.test_report_and_verifier_requests_load_both_review_protocols"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-32": {
+      "owner": "SH-16",
+      "issue": 48,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_streaming.StreamingTest.test_partial_output_survives_restart_and_requires_explicit_new_retry_call"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-33": {
+      "owner": "SH-22",
+      "issue": 54,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_paired.PairedRunTest.test_common_budget_permission_and_observable_model_mismatch_reject_before_dispatch"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-34": {
+      "owner": "SH-17",
+      "issue": 49,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_candidates.CandidateTest.test_explore_registration_keeps_exact_answer_and_review_history"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-35": {
+      "owner": "SH-17",
+      "issue": 49,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_candidates.CandidateTest.test_concrete_review_counterexample_refutes_and_replay_is_idempotent"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-36": {
+      "owner": "SH-17",
+      "issue": 49,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_candidates.CandidateTest.test_replan_invalidates_dependent_old_candidate_and_preserves_source_history"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-37": {
+      "owner": "SH-18",
+      "issue": 50,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_best_effort.BestEffortTest.test_recovery_selects_persisted_candidate_with_zero_additional_calls"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-38": {
+      "owner": "SH-18",
+      "issue": 50,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_best_effort.BestEffortTest.test_zero_budget_without_candidate_returns_explicit_unsolved"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-39": {
+      "owner": "SH-18",
+      "issue": 50,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_best_effort.BestEffortTest.test_invalid_candidates_are_excluded_and_ties_are_stable"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-40": {
+      "owner": "SH-19",
+      "issue": 51,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_evidence_grades.EvidenceGradeTest.test_whole_review_without_independent_evidence_is_medium_not_probability"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-41": {
+      "owner": "SH-20",
+      "issue": 52,
+      "evidence_mode": "replay",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_result_replay.ResultReplayTest.test_adapter_never_exposes_internal_decision_or_empty_answer"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-42": {
+      "owner": "SH-20",
+      "issue": 52,
+      "evidence_mode": "replay",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_result_replay.ResultReplayTest.test_empty_snapshot_replay_is_deterministic_without_optional_fields"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-43": {
+      "owner": "SH-16",
+      "issue": 48,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_streaming.StreamingTest.test_prior_process_inflight_stream_becomes_unknown_without_retry"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    },
+    "AC-44": {
+      "owner": "SH-19",
+      "issue": 51,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_evidence_grades.EvidenceGradeTest.test_whole_review_and_executed_applicable_computation_can_be_high_without_formal_claim"
+      ],
+      "limitation": "离线工程行为，不代表真实数学能力"
+    }
+  },
+  "sc": {
+    "SC-016": {
+      "owner": "SH-03",
+      "issue": 35,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_events.SolverHarnessEventTest.test_replaying_the_same_event_does_not_add_a_revision_or_event"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-018": {
+      "owner": "SH-04",
+      "issue": 36,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_explore.SolverHarnessExploreTest.test_exhausted_budget_returns_explicit_result_without_dispatch"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-003": {
+      "owner": "SH-05",
+      "issue": 37,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_review.SolverHarnessReviewTest.test_accept_completes_without_plan_and_survives_recovery",
+        "tests.test_solver_harness_review.SolverHarnessReviewTest.test_reject_preserves_findings_and_hands_off_to_plan",
+        "tests.test_solver_harness_explore.SolverHarnessExploreTest.test_partial_exploration_gets_one_retry_then_routes_to_plan",
+        "tests.test_solver_harness_review.SolverHarnessReviewTest.test_extensions_stay_none_without_added_calls"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-006": {
+      "owner": "SH-06",
+      "issue": 38,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_missing_expectation_or_unexecuted_forged_tag_is_not_verified"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-002": {
+      "owner": "SH-07",
+      "issue": 39,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_invalid_plan_never_dispatches",
+        "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_only_strict_double_gate_accept_advances_and_persists_evidence"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-005": {
+      "owner": "SH-07",
+      "issue": 39,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_invalid_plan_never_dispatches",
+        "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_only_strict_double_gate_accept_advances_and_persists_evidence"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-008": {
+      "owner": "SH-07",
+      "issue": 39,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_invalid_plan_never_dispatches",
+        "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_only_strict_double_gate_accept_advances_and_persists_evidence"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-009": {
+      "owner": "SH-08",
+      "issue": 40,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_challenge.ChallengeTest.test_three_objections_are_answered_in_one_session_before_accept",
+        "tests.test_solver_harness_challenge.ChallengeTest.test_cap_escalates_without_acceptance"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-010": {
+      "owner": "SH-09",
+      "issue": 41,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_traceback.TracebackTest.test_result_dependencies_invalidate_transitively_and_rescue_evidence",
+        "tests.test_solver_harness_traceback.TracebackTest.test_invalid_target_escalates_without_guessing",
+        "tests.test_solver_harness_finalize.FinalizeTest.test_absent_final_verifier_and_invalid_fact_filter_at_recovery"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-035": {
+      "owner": "SH-09",
+      "issue": 41,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_traceback.TracebackTest.test_result_dependencies_invalidate_transitively_and_rescue_evidence",
+        "tests.test_solver_harness_traceback.TracebackTest.test_invalid_target_escalates_without_guessing",
+        "tests.test_solver_harness_finalize.FinalizeTest.test_absent_final_verifier_and_invalid_fact_filter_at_recovery"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-011": {
+      "owner": "SH-10",
+      "issue": 42,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_meta.MetaTest.test_failures_get_actionable_guidance_without_state_access",
+        "tests.test_solver_harness_meta.MetaTest.test_strict_decisions_route_without_replacing_plan"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-031": {
+      "owner": "SH-10",
+      "issue": 42,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_meta.MetaTest.test_failures_get_actionable_guidance_without_state_access",
+        "tests.test_solver_harness_meta.MetaTest.test_strict_decisions_route_without_replacing_plan"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-032": {
+      "owner": "SH-10",
+      "issue": 42,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_meta.MetaTest.test_failures_get_actionable_guidance_without_state_access",
+        "tests.test_solver_harness_meta.MetaTest.test_strict_decisions_route_without_replacing_plan"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-004": {
+      "owner": "SH-11",
+      "issue": 43,
+      "evidence_mode": "scripted",
+      "status": "needs_review",
+      "tests": [
+        "tests.test_solver_harness_replan.ReplanTest.test_replacement_is_generated_archived_and_persisted",
+        "tests.test_solver_harness_meta.MetaTest.test_history_survives_versions_and_new_harness_and_isolates_runs",
+        "tests.test_solver_harness_replan.ReplanTest.test_research_is_bounded_noncoding_and_only_unverified"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-012": {
+      "owner": "SH-11",
+      "issue": 43,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_replan.ReplanTest.test_replacement_is_generated_archived_and_persisted",
+        "tests.test_solver_harness_meta.MetaTest.test_history_survives_versions_and_new_harness_and_isolates_runs",
+        "tests.test_solver_harness_replan.ReplanTest.test_research_is_bounded_noncoding_and_only_unverified"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-033": {
+      "owner": "SH-11",
+      "issue": 43,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_replan.ReplanTest.test_replacement_is_generated_archived_and_persisted",
+        "tests.test_solver_harness_meta.MetaTest.test_history_survives_versions_and_new_harness_and_isolates_runs",
+        "tests.test_solver_harness_replan.ReplanTest.test_research_is_bounded_noncoding_and_only_unverified"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-015": {
+      "owner": "SH-12",
+      "issue": 44,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_sessions.SessionsTest.test_new_attempt_archives_reasoner_and_new_steps_split_verifier_sessions",
+        "tests.test_solver_harness_sessions.SessionsTest.test_latest_authorized_context_copies_input_and_filters_invalid_facts",
+        "tests.test_solver_harness_sessions.SessionsTest.test_recreation_continues_meta_history_and_completed_run_is_idempotent"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-028": {
+      "owner": "SH-12",
+      "issue": 44,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_sessions.SessionsTest.test_new_attempt_archives_reasoner_and_new_steps_split_verifier_sessions",
+        "tests.test_solver_harness_sessions.SessionsTest.test_latest_authorized_context_copies_input_and_filters_invalid_facts",
+        "tests.test_solver_harness_sessions.SessionsTest.test_recreation_continues_meta_history_and_completed_run_is_idempotent"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-029": {
+      "owner": "SH-12",
+      "issue": 44,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_sessions.SessionsTest.test_new_attempt_archives_reasoner_and_new_steps_split_verifier_sessions",
+        "tests.test_solver_harness_sessions.SessionsTest.test_latest_authorized_context_copies_input_and_filters_invalid_facts",
+        "tests.test_solver_harness_sessions.SessionsTest.test_recreation_continues_meta_history_and_completed_run_is_idempotent"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-030": {
+      "owner": "SH-12",
+      "issue": 44,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_sessions.SessionsTest.test_new_attempt_archives_reasoner_and_new_steps_split_verifier_sessions",
+        "tests.test_solver_harness_sessions.SessionsTest.test_latest_authorized_context_copies_input_and_filters_invalid_facts",
+        "tests.test_solver_harness_sessions.SessionsTest.test_recreation_continues_meta_history_and_completed_run_is_idempotent"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-014": {
+      "owner": "SH-13",
+      "issue": 45,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_skills.SkillsTest.test_triggered_protocol_contracts_and_meta_runtime_policy",
+        "tests.test_solver_harness_skills.SkillsTest.test_report_and_verifier_requests_load_both_review_protocols"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-037": {
+      "owner": "SH-13",
+      "issue": 45,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_skills.SkillsTest.test_triggered_protocol_contracts_and_meta_runtime_policy",
+        "tests.test_solver_harness_skills.SkillsTest.test_report_and_verifier_requests_load_both_review_protocols"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-007": {
+      "owner": "SH-14",
+      "issue": 46,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_failed_unknown_and_mismatched_results_never_promote_claim",
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_successful_scripted_receipt_precedes_verifier_and_is_recoverable"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-017": {
+      "owner": "SH-14",
+      "issue": 46,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_failed_unknown_and_mismatched_results_never_promote_claim",
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_successful_scripted_receipt_precedes_verifier_and_is_recoverable"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-020": {
+      "owner": "SH-14",
+      "issue": 46,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_failed_unknown_and_mismatched_results_never_promote_claim",
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_successful_scripted_receipt_precedes_verifier_and_is_recoverable"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-034": {
+      "owner": "SH-14",
+      "issue": 46,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_failed_unknown_and_mismatched_results_never_promote_claim",
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_successful_scripted_receipt_precedes_verifier_and_is_recoverable"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-013": {
+      "owner": "SH-15",
+      "issue": 47,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_finalize.FinalizeTest.test_reject_then_accept_uses_fresh_review_and_persists_attempts",
+        "tests.test_solver_harness_finalize.FinalizeTest.test_failed_final_verifier_preserves_candidate_as_unverified"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-036": {
+      "owner": "SH-15",
+      "issue": 47,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_finalize.FinalizeTest.test_reject_then_accept_uses_fresh_review_and_persists_attempts",
+        "tests.test_solver_harness_finalize.FinalizeTest.test_failed_final_verifier_preserves_candidate_as_unverified"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-038": {
+      "owner": "SH-16",
+      "issue": 48,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_streaming.StreamingTest.test_partial_output_survives_restart_and_requires_explicit_new_retry_call",
+        "tests.test_solver_harness_streaming.StreamingTest.test_prior_process_inflight_stream_becomes_unknown_without_retry"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-039": {
+      "owner": "SH-17",
+      "issue": 49,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_candidates.CandidateTest.test_explore_registration_keeps_exact_answer_and_review_history",
+        "tests.test_solver_harness_candidates.CandidateTest.test_concrete_review_counterexample_refutes_and_replay_is_idempotent",
+        "tests.test_solver_harness_candidates.CandidateTest.test_replan_invalidates_dependent_old_candidate_and_preserves_source_history"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-040": {
+      "owner": "SH-18",
+      "issue": 50,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_best_effort.BestEffortTest.test_recovery_selects_persisted_candidate_with_zero_additional_calls",
+        "tests.test_solver_harness_best_effort.BestEffortTest.test_zero_budget_without_candidate_returns_explicit_unsolved",
+        "tests.test_solver_harness_best_effort.BestEffortTest.test_invalid_candidates_are_excluded_and_ties_are_stable"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-027": {
+      "owner": "SH-19",
+      "issue": 51,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_evidence_grades.EvidenceGradeTest.test_whole_review_without_independent_evidence_is_medium_not_probability",
+        "tests.test_solver_harness_evidence_grades.EvidenceGradeTest.test_whole_review_and_executed_applicable_computation_can_be_high_without_formal_claim"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-041": {
+      "owner": "SH-19",
+      "issue": 51,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_evidence_grades.EvidenceGradeTest.test_whole_review_without_independent_evidence_is_medium_not_probability",
+        "tests.test_solver_harness_evidence_grades.EvidenceGradeTest.test_whole_review_and_executed_applicable_computation_can_be_high_without_formal_claim"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-021": {
+      "owner": "SH-20",
+      "issue": 52,
+      "evidence_mode": "replay",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_result_replay.ResultReplayTest.test_adapter_never_exposes_internal_decision_or_empty_answer",
+        "tests.test_solver_harness_result_replay.ResultReplayTest.test_empty_snapshot_replay_is_deterministic_without_optional_fields"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-042": {
+      "owner": "SH-20",
+      "issue": 52,
+      "evidence_mode": "replay",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_result_replay.ResultReplayTest.test_adapter_never_exposes_internal_decision_or_empty_answer",
+        "tests.test_solver_harness_result_replay.ResultReplayTest.test_empty_snapshot_replay_is_deterministic_without_optional_fields"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-043": {
+      "owner": "SH-20",
+      "issue": 52,
+      "evidence_mode": "replay",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_result_replay.ResultReplayTest.test_adapter_never_exposes_internal_decision_or_empty_answer",
+        "tests.test_solver_harness_result_replay.ResultReplayTest.test_empty_snapshot_replay_is_deterministic_without_optional_fields"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-019": {
+      "owner": "SH-21",
+      "issue": 53,
+      "evidence_mode": "scripted",
+      "status": "needs_review",
+      "tests": [
+        "tests.test_solver_harness_intern.InternPortTest.test_original_problem_context_and_provider_metadata_survive_port"
+      ],
+      "limitation": "SH21真实调用存在但工具闭环未成立；不声称live通过"
+    },
+    "SC-022": {
+      "owner": "SH-22",
+      "issue": 54,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_paired.PairedRunTest.test_pair_uses_independent_runs_and_recovers_exact_report_without_dispatch",
+        "tests.test_solver_harness_paired.PairedRunTest.test_common_budget_permission_and_observable_model_mismatch_reject_before_dispatch"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-023": {
+      "owner": "SH-22",
+      "issue": 54,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_paired.PairedRunTest.test_pair_uses_independent_runs_and_recovers_exact_report_without_dispatch",
+        "tests.test_solver_harness_paired.PairedRunTest.test_common_budget_permission_and_observable_model_mismatch_reject_before_dispatch"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-026": {
+      "owner": "SH-22",
+      "issue": 54,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_solver_harness_paired.PairedRunTest.test_pair_uses_independent_runs_and_recovers_exact_report_without_dispatch",
+        "tests.test_solver_harness_paired.PairedRunTest.test_common_budget_permission_and_observable_model_mismatch_reject_before_dispatch"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-001": {
+      "owner": "SH-23",
+      "issue": 55,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_baseline_snapshot.BaselineSnapshotTest.test_runtime_files_match_frozen_baseline"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-024": {
+      "owner": "SH-23",
+      "issue": 55,
+      "evidence_mode": "scripted",
+      "status": "needs_review",
+      "tests": [
+        "tests.test_baseline_snapshot.BaselineSnapshotTest.test_runtime_files_match_frozen_baseline"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    },
+    "SC-025": {
+      "owner": "SH-23",
+      "issue": 55,
+      "evidence_mode": "scripted",
+      "status": "covered",
+      "tests": [
+        "tests.test_baseline_snapshot.BaselineSnapshotTest.test_runtime_files_match_frozen_baseline"
+      ],
+      "limitation": "最终责任归属；前置实现见父规格#32"
+    }
+  }
+}
