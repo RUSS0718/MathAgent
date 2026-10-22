@@ -154,10 +154,20 @@ class InternModelAdapter:
             kwargs["thinking_mode"] = self.thinking_mode
         try:
             transport = getattr(client, "chat_response", client.chat)
+            requested_timeout = (metadata or {}).get("timeout_seconds")
+            if requested_timeout is not None:
+                if not _accepts_keyword(transport, "timeout_seconds"):
+                    raise AdapterError("unsupported_timeout_transport")
+                configured = getattr(client, "timeout", self.client_timeout) or requested_timeout
+                kwargs["timeout_seconds"] = min(configured, requested_timeout)
             budget = current_budget()
             if budget is not None:
-                if not _accepts_keyword(client.chat, "_attempt_budget") or not _accepts_keyword(transport, "_attempt_budget"):
-                    raise AdapterError("unsupported_budget_transport", "transport lacks attempt reservation")
+                if not _accepts_keyword(client.chat, "_attempt_budget") or not _accepts_keyword(
+                    transport, "_attempt_budget"
+                ):
+                    raise AdapterError(
+                        "unsupported_budget_transport", "transport lacks attempt reservation"
+                    )
                 call_budget = budget.model_call((metadata or {}).get("role"))
                 kwargs["_attempt_budget"] = call_budget
             raw = transport(normalized, **kwargs)
@@ -173,7 +183,9 @@ class InternModelAdapter:
         parsed = parse_tool_requests(
             text, raw.get("tool_calls") if isinstance(raw, Mapping) else None
         )
-        attempts = record_attempts(raw.get("attempts", ()), metadata) if isinstance(raw, Mapping) else ()
+        attempts = (
+            record_attempts(raw.get("attempts", ()), metadata) if isinstance(raw, Mapping) else ()
+        )
         return ModelResponse(
             text=text,
             tool_requests=parsed.requests,
@@ -263,18 +275,28 @@ class InternAgentAdapter:
             )
         if response.tool_requests:
             if len(response.tool_requests) != 1:
-                return AgentDecision.review("Intern requested multiple tools", "multiple_tool_requests")
+                return AgentDecision.review(
+                    "Intern requested multiple tools", "multiple_tool_requests"
+                )
             request = response.tool_requests[0]
             if request.error_category:
-                return AgentDecision.review("Intern tool request is invalid", request.error_category)
-            return AgentDecision.tool(request.name, request.arguments, summary="Intern requested a tool")
+                return AgentDecision.review(
+                    "Intern tool request is invalid", request.error_category
+                )
+            return AgentDecision.tool(
+                request.name, request.arguments, summary="Intern requested a tool"
+            )
         if not response.text.strip():
-            return AgentDecision.failure("Intern returned an empty response", "empty_model_response")
+            return AgentDecision.failure(
+                "Intern returned an empty response", "empty_model_response"
+            )
         return AgentDecision(
             kind="final",
             final_response=response.text,
             summary=f"{summary_prefix}={response.model_id}",
-            transport_mode=(transport_mode if summary_prefix.startswith("continuation") else "live"),
+            transport_mode=(
+                transport_mode if summary_prefix.startswith("continuation") else "live"
+            ),
         )
 
     def run(self, request: RunRequest) -> AgentResult:
@@ -310,8 +332,13 @@ class InternChatModel:
             def _llm_type(self) -> str:
                 return "intern-showcase"
 
-            def _generate(self, messages: Sequence[Any], stop: Sequence[str] | None = None,
-                          run_manager: Any = None, **kwargs: Any) -> Any:
+            def _generate(
+                self,
+                messages: Sequence[Any],
+                stop: Sequence[str] | None = None,
+                run_manager: Any = None,
+                **kwargs: Any,
+            ) -> Any:
                 payload = [
                     {"role": _message_role(message), "content": _message_content(message)}
                     for message in messages
@@ -338,8 +365,9 @@ class InternChatModel:
                     message = AIMessage(content=text)
                 return ChatResult(generations=[ChatGeneration(message=message)])
 
-            def bind_tools(self, tools: Sequence[Any], *, tool_choice: str | None = None,
-                           **kwargs: Any) -> Any:
+            def bind_tools(
+                self, tools: Sequence[Any], *, tool_choice: str | None = None, **kwargs: Any
+            ) -> Any:
                 return self.model_copy(update={"bound_tools": tuple(tools)})
 
         return _InternChatModel(client=args[0], model_id=kwargs.get("model_id", "intern-s2"))
@@ -370,7 +398,9 @@ class DeepAgentsAdapter:
         """Invoke DeepAgents and convert its final message into a product result."""
 
         try:
-            result = self._agent.invoke({"messages": [{"role": "user", "content": request.problem}]})
+            result = self._agent.invoke(
+                {"messages": [{"role": "user", "content": request.problem}]}
+            )
         except Exception as exc:  # noqa: BLE001 - framework details stay behind adapter
             raise AdapterError("deepagents_error", type(exc).__name__) from exc
         text = _extract_agent_text(result)

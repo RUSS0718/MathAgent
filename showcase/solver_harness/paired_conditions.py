@@ -2,7 +2,7 @@
 
 from copy import deepcopy
 
-STRATEGIES = frozenset({"skills", "reexploration", "candidate_registry", "best_effort"})
+STRATEGIES = frozenset({"skills", "reexplore_after_replan", "candidate_registry", "best_effort"})
 ROLES = {"model_port": "reasoner", "verifier_port": "verifier", "meta_port": "meta"}
 
 

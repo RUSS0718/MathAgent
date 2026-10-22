@@ -13,25 +13,48 @@ def generate_initial_plan(harness, run, *, problem, model_port, config):
     if model_port is None:
         return run
     version = run["state"]["plan_version"] + 1
-    run, plan = dispatch(
-        harness,
-        run,
-        model_port.complete,
-        {
-            "role": "planner",
-            "session_key": f"planner:{run['run_id']}:plan{version}",
-            "problem": problem,
-            "plan_version": version,
-            "exploration_findings": run["state"]["exploration_findings"],
-            "instruction": "Return a Plan with version and 1..20 steps with step_id, title, objective and earlier-step depends_on references.",
-        },
-    )
-    try:
-        validate_plan(plan)
-        if plan["version"] != version:
-            raise ValueError("wrong_plan_version")
-    except ValueError:
-        return finish(harness, run, "partial_aborted", "invalid_initial_plan")
+    if config.get("features", {}).get("star_routing") is True:
+        from .plan_generation import generated_plan
+
+        run, plan = generated_plan(
+            harness,
+            run,
+            lambda current, request: dispatch(harness, current, model_port.complete, request),
+            {
+                "role": "planner",
+                "session_key": f"planner:{run['run_id']}:plan{version}",
+                "problem": problem,
+                "plan_version": version,
+                "exploration_findings": run["state"]["exploration_findings"],
+                "preplan_hint": run["state"].get("preplan_hint"),
+                "instruction": "Return a Plan with version and 1..20 steps with step_id, title, objective and earlier-step depends_on references.",
+            },
+            version,
+            config,
+        )
+        if plan is None:
+            return run
+    else:
+        run, plan = dispatch(
+            harness,
+            run,
+            model_port.complete,
+            {
+                "role": "planner",
+                "session_key": f"planner:{run['run_id']}:plan{version}",
+                "problem": problem,
+                "plan_version": version,
+                "exploration_findings": run["state"]["exploration_findings"],
+                "preplan_hint": run["state"].get("preplan_hint"),
+                "instruction": "Return a Plan with version and 1..20 steps with step_id, title, objective and earlier-step depends_on references.",
+            },
+        )
+        try:
+            validate_plan(plan)
+            if plan["version"] != version:
+                raise ValueError("wrong_plan_version")
+        except ValueError:
+            return finish(harness, run, "partial_aborted", "invalid_initial_plan")
     return commit(
         harness,
         run,

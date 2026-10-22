@@ -128,6 +128,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
                 partial_text="".join(partial),
                 usage=getattr(exc, "usage", None),
                 error_type=type(exc).__name__,
+                error_category=getattr(exc, "category", None),
             )
             _save(harness, run, record, status="interrupted")
             raise CallInterrupted(run["run_id"]) from None
@@ -175,18 +176,11 @@ def retry_call(harness, run, problem, decision):
     if state["counters"]["model_calls"] >= harness._config.get("max_model_calls", 2):
         raise ValueError("retry model call budget exhausted")
     role = old["role"]
-    port = (
-        harness._meta_port
-        if role in {"meta", "meta_strategist"}
-        else harness._verifier_port
-        if role in {"step_verifier", "whole_solution_verifier"}
-        else harness._model_port
-    )
-    if port is None:
+    from .roles import role_operation
+
+    operation = role_operation(harness, role)
+    if operation is None:
         raise ValueError("retry role port unavailable")
-    operation = (
-        port.verify if role in {"step_verifier", "whole_solution_verifier"} else port.complete
-    )
     reserved = harness.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],

@@ -254,7 +254,7 @@ class PairedRunner:
                             "final_solution_review",
                             "candidate_registry",
                             "best_effort",
-                            "reexploration",
+                            "reexplore_after_replan",
                         )
                         if config.get("features", {}).get(key) is not True
                     },

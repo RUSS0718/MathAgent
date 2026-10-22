@@ -10,32 +10,26 @@ from typing import Any
 
 from ..redaction import redact
 from ..storage import SQLiteStore
-from .challenge import run_plan
-from .explore import ModelPort, run_exploration
-from .finalize import run_finalization
+from .controller import advance, run_supplied_plan_or_explore
+from .explore import ModelPort
 from .harness_config import (
     SolverHarnessError,
     SolverValidationError,
     _hash_json,
-    _non_negative_config_int,
     _normalize_config,
     _normalize_json_mapping,
-    _positive_config_int,
     _run_id,
 )
 from .initial_state import initial_state
-from .meta import MetaPort, run_meta
+from .meta import MetaPort
 from .plan import validate_plan
-from .planning import generate_initial_plan
-from .replan import run_replan
-from .review import VerifierPort, review_solution
+from .review import VerifierPort
 from .storage import (
     SolverEventConflictError,
     SolverPersistenceError,
     SolverRevisionConflictError,
     SolverStateStore,
 )
-from .traceback import apply_traceback
 
 __all__ = [
     "SolverHarness",
@@ -92,10 +86,13 @@ class SolverHarness:
     def solve(self, problem, metadata=None):
         """Solve or recover; interrupted calls require explicit retry authorization."""
         from .best_effort import run_best_effort
+        from .budget import HardBudgetStop
         from .calls import CallInterrupted
 
         try:
             return run_best_effort(self, self._solve(problem, metadata))
+        except HardBudgetStop as exc:
+            return run_best_effort(self, self.get_run(exc.run_id))
         except CallInterrupted as exc:
             return self.get_run(exc.run_id)
 
@@ -153,9 +150,12 @@ class SolverHarness:
                 and "plan" in metadata
             )
             if self._model_port is None or not resumable:
-                return self._run_meta(existing, metadata, problem)
-            return self._run_meta(
-                self._run_supplied_plan_or_explore(existing, problem, metadata), metadata, problem
+                return advance(self, existing, metadata, problem)
+            return advance(
+                self,
+                run_supplied_plan_or_explore(self, existing, problem, metadata),
+                metadata,
+                problem,
             )
 
         state = initial_state(run_id, problem_hash, self._config_hash)
@@ -177,9 +177,9 @@ class SolverHarness:
         if created is None:
             raise SolverPersistenceError("create_run")
         if self._model_port is None:
-            return self._run_meta(created, metadata, problem)
-        return self._run_meta(
-            self._run_supplied_plan_or_explore(created, problem, metadata), metadata, problem
+            return advance(self, created, metadata, problem)
+        return advance(
+            self, run_supplied_plan_or_explore(self, created, problem, metadata), metadata, problem
         )
 
     def get_run(self, run_id: str, *, problem: str | None = None) -> dict[str, Any]:
@@ -330,6 +330,21 @@ class SolverHarness:
 
     def dispatch(self, run, operation, request):
         """Invoke one model operation with optional audited session continuity."""
+        from .budget import HardBudgetStop, budget_reason, stop
+
+        latest = self.get_run(run["run_id"])
+        # Phase owners reserved this model call already; only future reservations count.
+        check = {
+            **latest["state"],
+            "counters": {
+                **latest["state"]["counters"],
+                "model_calls": max(0, latest["state"]["counters"]["model_calls"] - 1),
+            },
+        }
+        reason = budget_reason(check, self._config)
+        if reason:
+            stop(self, latest, reason)
+            raise HardBudgetStop(run["run_id"])
         from .sessions import dispatch
 
         if self._config.get("features", {}).get("stream_recovery") is True:
@@ -369,102 +384,6 @@ class SolverHarness:
             raise SolverIdentityError("run_id already belongs to a different problem")
         if state.get("config_hash") != self._config_hash:
             raise SolverIdentityError("run_id already belongs to a different config")
-
-    def _run_supplied_plan_or_explore(
-        self,
-        run: dict[str, Any],
-        problem: str,
-        metadata: Mapping[str, Any] | None,
-    ) -> dict[str, Any]:
-        plan = None if metadata is None else metadata.get("plan")
-        if plan is None:
-            return self._run_exploration(run, problem)
-        if self._model_port is None:
-            return run
-        return run_plan(
-            self,
-            run,
-            problem=problem,
-            plan=plan,
-            model_port=self._model_port,
-            verifier_port=self._verifier_port,
-            max_rounds=_positive_config_int(self._config, "max_challenge_rounds", 5),
-            max_model_calls=_non_negative_config_int(self._config, "max_model_calls", 2),
-            max_runtime_seconds=_non_negative_config_int(
-                self._config, "max_total_duration_seconds", 3600
-            ),
-        )
-
-    def _run_exploration(self, run: dict[str, Any], problem: str) -> dict[str, Any]:
-        if self._model_port is None:
-            return run
-        max_model_calls = _non_negative_config_int(self._config, "max_model_calls", 2)
-        max_explore_rounds = min(2, _positive_config_int(self._config, "max_explore_rounds", 2))
-        # STAR's 3600-second default bounds this Showcase run, not official scoring.
-        explored = run_exploration(
-            self,
-            run,
-            problem=problem,
-            model_port=self._model_port,
-            max_model_calls=max_model_calls,
-            max_explore_rounds=max_explore_rounds,
-            max_runtime_seconds=_non_negative_config_int(
-                self._config, "max_total_duration_seconds", 3600
-            ),
-        )
-
-        if explored["state"]["phase"] == "EXPLORE_REVIEW":
-            return review_solution(
-                self,
-                explored,
-                problem=problem,
-                verifier_port=self._verifier_port,
-                max_model_calls=max_model_calls,
-                max_runtime_seconds=_non_negative_config_int(
-                    self._config, "max_total_duration_seconds", 3600
-                ),
-            )
-        return explored
-
-    def _run_meta(self, run, metadata, problem):
-        run = run_meta(
-            self,
-            run,
-            meta_port=self._meta_port,
-            metadata=metadata or {},
-            max_model_calls=_non_negative_config_int(self._config, "max_model_calls", 2),
-            max_runtime_seconds=_non_negative_config_int(
-                self._config, "max_total_duration_seconds", 3600
-            ),
-        )
-        if self._model_port is not None and run["state"]["phase"] == "TRACE_BACK":
-            run = apply_traceback(self, run)
-        run = run_replan(
-            self, run, problem=problem, model_port=self._model_port, config=self._config
-        )
-        if (
-            self._model_port is not None
-            and run["state"]["phase"] == "STEP_EXECUTE"
-            and run["state"].get("replan_count", 0)
-        ):
-            run = self._run_supplied_plan_or_explore(run, problem, {"plan": run["state"]["plan"]})
-        run = generate_initial_plan(
-            self, run, problem=problem, model_port=self._model_port, config=self._config
-        )
-        if (
-            self._model_port is not None
-            and run["state"]["phase"] == "STEP_EXECUTE"
-            and self._config.get("features", {}).get("final_generation")
-        ):
-            run = self._run_supplied_plan_or_explore(run, problem, {"plan": run["state"]["plan"]})
-        return run_finalization(
-            self,
-            run,
-            problem=problem,
-            model_port=self._model_port,
-            verifier_port=self._verifier_port,
-            config=self._config,
-        )
 
     def close(self) -> None:
         """Close the Showcase SQLite connection if this Harness created it."""

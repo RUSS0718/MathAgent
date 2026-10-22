@@ -11,7 +11,7 @@ from ..adapters import AdapterError, InternModelAdapter
 from ..redaction import redact
 from ..tool_schemas import POLYNOMIAL_CHECK_SCHEMA, PYTHON_MATH_SCHEMA, schema_error
 from .intern_schemas import response_schema
-from .prompts import ROLE_DEFINITIONS
+from .roles import definition
 
 
 class InternPortError(RuntimeError):
@@ -64,7 +64,12 @@ class InternModelPort:
         }
         try:
             response = self.adapter.complete(
-                messages, metadata={"run_id": request.get("run_id"), "role": request["role"]}
+                messages,
+                metadata={
+                    "run_id": request.get("run_id"),
+                    "role": request["role"],
+                    "timeout_seconds": request.get("timeout_seconds"),
+                },
             )
             record.update(
                 effective_model=response.model_id,
@@ -109,11 +114,9 @@ class InternModelPort:
             raise InternPortError("problem_identity_mismatch")
         role = request["role"]
         layers = request.get("prompt_layers", [])
-        definition = ROLE_DEFINITIONS.get(
-            role, "Perform only the requested mathematical role; do not alter authoritative state."
-        )
+        role_definition = definition(role)
         instructions = (
-            f"You are the {role}. {definition} Return one JSON object only, no Markdown or commentary. "
+            f"You are the {role}. {role_definition} Return one JSON object only, no Markdown or commentary. "
             "Obey this exact response schema: "
             + json.dumps(schema, ensure_ascii=False)
             + " Use only runtime allowed_tools. A tool_request is a proposed local computation, not evidence. "
