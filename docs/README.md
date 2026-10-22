@@ -37,7 +37,7 @@
 ## v1.1 Solver Harness 规格入口
 
 - [v1.1 实现规格](https://github.com/RUSS0718/MathAgent/issues/32)：S1/S2 seam、验收合同、SC→AC 映射和 v1.1/v1.2 ticket 边界。
-- [v1.1 验收记录](evals/showcase-solver-harness-v1.1-acceptance.md)：当前为 planned；只记录实际命令与结果。
+- [v1.1 验收记录](evals/showcase-solver-harness-v1.1-acceptance.md)：记录 v1.1 离线验收结果、SC 归属与 engineering-preview 能力限制。
 - [ADR-0013](adr/0013-solver-harness-boundary-and-shared-transaction.md)：Showcase 单一产品面、共享 SQLite 事务和版本标识决策。
 - 产品版本为 v1.1；包版本保持 `0.1.0`，前端版本保持 `0.2.0`，Profile 保持 `showcase_mvp`。
 - v1.1 继承 v0.2 的 `engineering-preview` 状态；`v0.2 AC-06` 真实 Intern 工具闭环延期到 v1.2。

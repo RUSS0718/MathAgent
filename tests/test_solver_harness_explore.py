@@ -11,12 +11,13 @@ from showcase.solver_harness import ScriptedModelPort, SolverHarness
 
 
 class SolverHarnessExploreTest(unittest.TestCase):
-    def test_solved_waits_for_whole_solution_review(self) -> None:
+    def test_solved_without_verifier_is_explicitly_unverified(self) -> None:
         port = ScriptedModelPort([{"assessment": "SOLVED", "solution_candidate": "42"}])
         with SolverHarness(model_port=port) as harness:
             result = harness.solve("计算答案", {"run_id": "solved"})
-            self.assertEqual("EXPLORE_REVIEW", result["state"]["phase"])
-            self.assertEqual("running", result["state"]["status"])
+            self.assertEqual("TERMINAL", result["state"]["phase"])
+            self.assertEqual("completed_unverified", result["state"]["status"])
+            self.assertTrue(result["state"]["final_response"])
             self.assertEqual([], result["state"]["accepted_results"])
             self.assertEqual(1, len(port.requests))
 
@@ -32,7 +33,7 @@ class SolverHarnessExploreTest(unittest.TestCase):
                     self.assertEqual(result, harness.get_run("exhausted"))
                 self.assertEqual([], port.requests)
                 self.assertEqual(0, result["state"]["counters"]["model_calls"])
-                self.assertEqual(reason, result["state"]["finalization_reason"])
+                self.assertEqual(reason, result["state"]["budget"]["exhaustion_reason"])
                 self.assertTrue(result["state"]["final_response"])
                 self.assertEqual([], result["state"]["accepted_results"])
                 json.dumps(result, allow_nan=False)

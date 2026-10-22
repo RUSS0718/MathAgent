@@ -99,7 +99,7 @@ def run_exploration(
                 state_updates={
                     "phase": "TERMINAL",
                     "status": "partial_budget_exhausted",
-                    "finalization_reason": reason,
+                    "budget": {**latest["state"].get("budget", {}), "exhaustion_reason": reason},
                     "final_response": "Budget exhausted before completing solution review; no verified answer is available.",
                 },
             )
