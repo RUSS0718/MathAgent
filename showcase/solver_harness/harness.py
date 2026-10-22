@@ -12,6 +12,7 @@ from typing import Any
 
 from ..redaction import redact
 from ..storage import SQLiteStore
+from .explore import ModelPort, run_exploration
 from .storage import (
     SolverEventConflictError,
     SolverPersistenceError,
@@ -51,7 +52,7 @@ class SolverRunNotFoundError(SolverHarnessError, KeyError):
 
 
 class SolverHarness:
-    """Create an initial Solver Run or recover one from Showcase SQLite."""
+    """Initialize, explicitly explore, or recover a Solver Run from Showcase SQLite."""
 
     def __init__(
         self,
@@ -59,11 +60,13 @@ class SolverHarness:
         database_path: str | Path | None = None,
         store: SQLiteStore | None = None,
         config: Mapping[str, Any] | None = None,
+        model_port: ModelPort | None = None,
     ) -> None:
         if store is not None and database_path is not None:
             raise SolverValidationError("provide either store or database_path")
         self._config = _normalize_config(config)
         self._config_hash = _hash_json(self._config)
+        self._model_port = model_port
         self._owns_showcase_store = store is None
         self._showcase_store = (
             store if store is not None else SQLiteStore(database_path or ":memory:")
@@ -78,8 +81,9 @@ class SolverHarness:
         """Initialize or recover a run; optional ``metadata['run_id']`` selects its ID.
 
         If metadata omits ``run_id``, one is generated. The input problem and metadata
-        are not persisted. Only identity hashes and the safe initialization event are
-        stored. Reusing a run ID with different problem or config content is rejected.
+        are not persisted. An injected model port enables bounded exploration;
+        otherwise only initialization runs. Reusing a run ID with different problem
+        or config content is rejected.
         """
 
         if not isinstance(problem, str) or not problem.strip():
@@ -91,7 +95,9 @@ class SolverHarness:
         existing = self._state_store.get_run(run_id)
         if existing is not None:
             self._validate_identity(existing, run_id, problem_hash)
-            return existing
+            if self._model_port is None or existing["state"].get("phase") != "SETUP":
+                return existing
+            return self._run_exploration(existing, problem)
 
         state = _initial_state(run_id, problem_hash, self._config_hash)
         event = {
@@ -111,7 +117,9 @@ class SolverHarness:
         created = self._state_store.get_run(run_id)
         if created is None:
             raise SolverPersistenceError("create_run")
-        return created
+        if self._model_port is None:
+            return created
+        return self._run_exploration(created, problem)
 
     def get_run(self, run_id: str, *, problem: str | None = None) -> dict[str, Any]:
         """Recover a run and optionally verify the expected problem identity."""
@@ -204,6 +212,26 @@ class SolverHarness:
         if state.get("config_hash") != self._config_hash:
             raise SolverIdentityError("run_id already belongs to a different config")
 
+    def _run_exploration(self, run: dict[str, Any], problem: str) -> dict[str, Any]:
+        if self._model_port is None:
+            return run
+        max_model_calls = _non_negative_config_int(self._config, "max_model_calls", 2)
+        max_explore_rounds = min(
+            2, _positive_config_int(self._config, "max_explore_rounds", 2)
+        )
+        # STAR's 3600-second default bounds this Showcase run, not official scoring.
+        return run_exploration(
+            self,
+            run,
+            problem=problem,
+            model_port=self._model_port,
+            max_model_calls=max_model_calls,
+            max_explore_rounds=max_explore_rounds,
+            max_runtime_seconds=_non_negative_config_int(
+                self._config, "max_total_duration_seconds", 3600
+            ),
+        )
+
     def close(self) -> None:
         """Close the Showcase SQLite connection if this Harness created it."""
 
@@ -259,6 +287,20 @@ def _normalize_json_mapping(value: Mapping[str, Any] | None, label: str) -> dict
     if not isinstance(normalized, dict):
         raise SolverValidationError(f"{label} must be a mapping")
     return normalized
+
+
+def _non_negative_config_int(config: Mapping[str, Any], key: str, default: int) -> int:
+    value = config.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise SolverValidationError(f"config.{key} must be a non-negative integer")
+    return value
+
+
+def _positive_config_int(config: Mapping[str, Any], key: str, default: int) -> int:
+    value = config.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise SolverValidationError(f"config.{key} must be a positive integer")
+    return value
 
 
 def _initial_state(run_id: str, problem_hash: str, config_hash: str) -> dict[str, Any]:

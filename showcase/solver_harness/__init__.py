@@ -1,5 +1,6 @@
 """Explicit Showcase Solver Harness API."""
 
+from .explore import ModelPort, ScriptedModelPort
 from .harness import (
     SolverEventConflictError,
     SolverHarness,
@@ -18,4 +19,6 @@ __all__ = [
     "SolverRevisionConflictError",
     "SolverRunNotFoundError",
     "SolverValidationError",
+    "ModelPort",
+    "ScriptedModelPort",
 ]
