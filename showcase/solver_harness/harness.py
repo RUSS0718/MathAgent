@@ -222,7 +222,6 @@ class SolverHarness:
     def prepare_request(self, run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
         """Compose opt-in protocols from the current persisted run projection."""
         from .prompts import compose_request
-
         from .tool_precheck import allowed_tool_ids
 
         latest = self.get_run(run["run_id"])

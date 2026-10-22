@@ -154,11 +154,16 @@ def _execute(harness, run, request, config, port, step_id, claim_index):
             receipt.update(status="output_limit", reason="output_limit_exceeded")
         else:
             receipt.update(output=redact(deepcopy(output)), exit_code=result.get("exit_code"))
-        if receipt["status"] == "success" and receipt["exit_code"] == 0:
+        if (
+            receipt["status"] == "success"
+            and type(receipt["exit_code"]) is int
+            and receipt["exit_code"] == 0
+        ):
             receipt["assertion_matched"] = (
                 request.get("scope") == "finite_computation"
                 and "expected_output" in request
-                and output == request["expected_output"]
+                and json.dumps(output, sort_keys=True, allow_nan=False)
+                == json.dumps(request["expected_output"], sort_keys=True, allow_nan=False)
             )
     except (FutureTimeout, TimeoutError):
         receipt.update(

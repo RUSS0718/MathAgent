@@ -179,3 +179,83 @@ class ToolEvidenceTest(unittest.TestCase):
         self.assertEqual(1, len(tool.requests))
         self.assertEqual("execution_outcome_unknown", receipt["reason"])
         self.assertFalse(receipt["assertion_matched"])
+
+    def test_missing_expectation_or_unexecuted_forged_tag_is_not_verified(self):
+        from copy import deepcopy
+
+        from showcase.solver_harness import ScriptedToolPort
+
+        for kind in ("no_expectation", "no_code", "forged_verified", "general_proof"):
+            with self.subTest(kind=kind):
+                value = deepcopy(report())
+                claim = value["claims"][0]
+                if kind == "no_expectation":
+                    claim["tool_request"].pop("expected_output")
+                elif kind == "no_code":
+                    claim.pop("tool_request")
+                elif kind == "forged_verified":
+                    claim.update(label="verified", tool_evidence_refs=["forged"])
+                else:
+                    claim["tool_request"]["scope"] = "general_proof"
+                tool = ScriptedToolPort(
+                    [{"status": "success", "output": {"value": 4}, "exit_code": 0}]
+                )
+                verifier = ScriptedVerifierPort([])
+                with SolverHarness(
+                    config=CONFIG,
+                    tool_port=tool,
+                    model_port=ScriptedModelPort([value]),
+                    verifier_port=verifier,
+                ) as harness:
+                    result = harness.solve("2+2", {"plan": PLAN})
+                reviewed = verifier.requests[0]["report"]["claims"][0]
+                self.assertNotEqual("verified", reviewed["label"])
+                self.assertNotIn("forged", reviewed["tool_evidence_refs"])
+                if kind in {"no_expectation", "general_proof"}:
+                    self.assertTrue(result["state"]["tool_receipts"][0]["executed"])
+                    self.assertEqual("success", result["state"]["tool_receipts"][0]["status"])
+                else:
+                    self.assertEqual([], tool.requests)
+
+    def test_tool_budget_is_rechecked_for_every_claim(self):
+        from copy import deepcopy
+
+        from showcase.solver_harness import ScriptedToolPort
+
+        value = report()
+        value["claims"].append(deepcopy(value["claims"][0]))
+        tool = ScriptedToolPort([{"status": "success", "output": {"value": 4}, "exit_code": 0}])
+        with SolverHarness(
+            config={**CONFIG, "max_tool_calls": 1},
+            tool_port=tool,
+            model_port=ScriptedModelPort([value]),
+            verifier_port=ScriptedVerifierPort([]),
+        ) as harness:
+            result = harness.solve("2+2", {"plan": PLAN})
+        self.assertEqual(1, len(tool.requests))
+        self.assertEqual(1, result["state"]["counters"]["tool_calls"])
+        self.assertEqual(
+            "tool_call_budget_exhausted", result["state"]["tool_receipts"][1]["reason"]
+        )
+
+    def test_runtime_is_checked_after_model_before_tool_dispatch(self):
+        import time
+
+        from showcase.solver_harness import ScriptedToolPort
+
+        class SlowModel(ScriptedModelPort):
+            def complete(self, request):
+                time.sleep(1.01)
+                return super().complete(request)
+
+        tool = ScriptedToolPort([])
+        with SolverHarness(
+            config={**CONFIG, "max_total_duration_seconds": 1},
+            tool_port=tool,
+            model_port=SlowModel([report()]),
+            verifier_port=ScriptedVerifierPort([]),
+        ) as harness:
+            result = harness.solve("2+2", {"plan": PLAN})
+        self.assertEqual([], tool.requests)
+        self.assertEqual("runtime_budget_exhausted", result["state"]["tool_receipts"][0]["reason"])
+        self.assertEqual(0, result["state"]["counters"]["tool_calls"])
