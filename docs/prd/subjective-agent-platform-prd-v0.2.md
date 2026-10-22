@@ -1,5 +1,7 @@
 # MathAgent Workbench v0.2 PRD Lite
 
+> **状态：** `superseded by v1.1`。本文保留为历史版本，不作为当前开发合同；当前合同见 [`showcase-solver-harness-v1.1-spec.md`](../specs/showcase-solver-harness-v1.1-spec.md)。
+
 文档职责：定义 v0.2 的用户价值、前后端范围、能力升级与可执行验收目标。
 
 适用范围：`showcase_mvp` 产品侧；供需求评审、风险验证和下一步技术设计使用。

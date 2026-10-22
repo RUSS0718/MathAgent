@@ -12,3 +12,11 @@
 - **Evidence Pack**：答案、解释、验证、来源、工具调用和事件摘要的导出包。
 - **Baseline**：官方 88/12/0 评测对应的字节和行为基线，不等同于普遍能力保证。
 - **研究基础设施阶段（S1–S6）**：Intern S2 实验与 Showcase 的有序工程准备阶段；区别于 R1–R5 算法方向，以及 v0.2 Workbench 文档中含义不同的 S1–S4 阶段。
+- **Solver Harness**：`showcase` 内显式启用的数学求解控制面；它组织探索、规划、审查和恢复，但不属于 `official` Profile。
+- **Solver Run**：Solver Harness 的一次隔离执行，拥有独立的 `run_id`、状态版本和事件记录；与产品 Run 共用数据库，但状态存在独立表中。
+- **Plan Attempt**：同一 Solver Run 内一次可被回退或重规划替换的计划尝试；它也是 Reasoner 会话的隔离边界。
+- **Candidate**：可被最终选择的完整答案版本；候选不是已证定理，必须保留来源、证据和失效状态。
+- **Best-Effort Finalization**：预算耗尽后仅根据已持久化候选和证据选择答案的过程；它不新增模型或工具调用。
+- **State Revision**：Solver Run 状态快照的单调版本号，用于拒绝基于过期快照的写入。
+- **STAR AC**：STAR Core 实施规格中的验收编号；引用时写作 `STAR AC-06`，不得与 v0.2 或 Solver Harness 的同号用例混用。
+- **v0.2 AC**：v0.2 Release Evidence 中的验收编号；引用时写作 `v0.2 AC-06`，例如真实 Intern 工具闭环。
