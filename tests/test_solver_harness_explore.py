@@ -23,7 +23,7 @@ class SolverHarnessExploreTest(unittest.TestCase):
     def test_exhausted_budget_returns_explicit_result_without_dispatch(self) -> None:
         for config, reason in [
             ({"max_model_calls": 0}, "model_call_budget_exhausted"),
-            ({"max_runtime_seconds": 0}, "runtime_budget_exhausted"),
+            ({"max_total_duration_seconds": 0}, "runtime_budget_exhausted"),
         ]:
             with self.subTest(config=config):
                 port = ScriptedModelPort([{"assessment": "SOLVED"}])

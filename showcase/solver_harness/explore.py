@@ -67,7 +67,7 @@ def run_exploration(
     model_port: ModelPort,
     max_model_calls: int,
     max_explore_rounds: int,
-    max_runtime_seconds: int | None = None,
+    max_runtime_seconds: int,
 ) -> dict[str, Any]:
     """Run the bounded Explore loop and persist every call and route decision."""
 
@@ -82,7 +82,7 @@ def run_exploration(
             datetime.now(UTC) - datetime.fromisoformat(latest["state"]["created_at"])
         ).total_seconds()
         reason = None
-        if max_runtime_seconds is not None and elapsed >= max_runtime_seconds:
+        if elapsed >= max_runtime_seconds:
             reason = "runtime_budget_exhausted"
         elif model_calls >= state["max_model_calls"]:
             reason = "model_call_budget_exhausted"

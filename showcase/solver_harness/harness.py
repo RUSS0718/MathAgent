@@ -226,9 +226,8 @@ class SolverHarness:
             model_port=self._model_port,
             max_model_calls=max_model_calls,
             max_explore_rounds=max_explore_rounds,
-            max_runtime_seconds=(
-                _non_negative_config_int(self._config, "max_runtime_seconds", 0)
-                if "max_runtime_seconds" in self._config else None
+            max_runtime_seconds=_non_negative_config_int(
+                self._config, "max_total_duration_seconds", 3600
             ),
         )
 
