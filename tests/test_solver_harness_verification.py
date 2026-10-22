@@ -16,19 +16,24 @@ class SolverHarnessVerificationTest(unittest.TestCase):
             None,
             {},
             {"version": True, "steps": []},
-            {"version": 0, "steps": [{"step_id": "s1", "objective": "x"}]},
+            {"version": 0, "steps": [{"step_id": "s1", "title": "步骤一", "objective": "x"}]},
             {"version": 1, "steps": []},
-            {"version": 1, "steps": [{"step_id": "", "objective": "x"}]},
-            {"version": 1, "steps": [{"step_id": "s1", "objective": " "}]},
+            {"version": 1, "steps": [{"step_id": "", "title": "步骤", "objective": "x"}]},
+            {"version": 1, "steps": [{"step_id": "s1", "title": "步骤一", "objective": " "}]},
             {
                 "version": 1,
                 "steps": [
-                    {"step_id": "s1", "objective": "x", "depends_on": ["s2"]},
-                    {"step_id": "s2", "objective": "y"},
+                    {"step_id": "s1", "title": "步骤一", "objective": "x", "depends_on": ["s2"]},
+                    {"step_id": "s2", "title": "步骤二", "objective": "y"},
                 ],
             },
-            {"version": 1, "steps": [{"step_id": "s1", "objective": "x"}] * 2},
-            {"version": 1, "steps": [{"step_id": f"s{i}", "objective": "x"} for i in range(21)]},
+            {"version": 1, "steps": [{"step_id": "s1", "title": "步骤一", "objective": "x"}] * 2},
+            {
+                "version": 1,
+                "steps": [
+                    {"step_id": f"s{i}", "title": "步骤", "objective": "x"} for i in range(21)
+                ],
+            },
         ]
         for plan in invalid:
             with self.subTest(plan=plan):
@@ -55,8 +60,13 @@ class SolverHarnessVerificationTest(unittest.TestCase):
                 plan = {
                     "version": 1,
                     "steps": [
-                        {"step_id": "s1", "objective": "求值"},
-                        {"step_id": "s2", "objective": "代入", "depends_on": ["s1"]},
+                        {"step_id": "s1", "title": "步骤一", "objective": "求值"},
+                        {
+                            "step_id": "s2",
+                            "title": "步骤二",
+                            "objective": "代入",
+                            "depends_on": ["s1"],
+                        },
                     ],
                 }
                 model = ScriptedModelPort([{"argument": "2²=4", "claims": ["2²=4"]}])
@@ -113,7 +123,13 @@ class SolverHarnessVerificationTest(unittest.TestCase):
                     model_port=ScriptedModelPort([{}]), verifier_port=verifier
                 ) as harness:
                     result = harness.solve(
-                        "x", {"plan": {"version": 1, "steps": [{"step_id": "a", "objective": "x"}]}}
+                        "x",
+                        {
+                            "plan": {
+                                "version": 1,
+                                "steps": [{"step_id": "a", "title": "步骤", "objective": "x"}],
+                            }
+                        },
                     )
                 self.assertEqual(expected, result["state"]["phase"])
                 self.assertEqual([], result["state"]["accepted_results"])
@@ -127,7 +143,13 @@ class SolverHarnessVerificationTest(unittest.TestCase):
             ),
         ) as harness:
             result = harness.solve(
-                "x", {"plan": {"version": 1, "steps": [{"step_id": "a", "objective": "x"}]}}
+                "x",
+                {
+                    "plan": {
+                        "version": 1,
+                        "steps": [{"step_id": "a", "title": "步骤", "objective": "x"}],
+                    }
+                },
             )
         self.assertEqual("FINAL_GENERATE", result["state"]["phase"])
         self.assertEqual("running", result["state"]["status"])
@@ -150,7 +172,13 @@ class SolverHarnessVerificationTest(unittest.TestCase):
                     config={"max_model_calls": budget},
                 ) as harness:
                     result = harness.solve(
-                        "x", {"plan": {"version": 1, "steps": [{"step_id": "a", "objective": "x"}]}}
+                        "x",
+                        {
+                            "plan": {
+                                "version": 1,
+                                "steps": [{"step_id": "a", "title": "步骤", "objective": "x"}],
+                            }
+                        },
                     )
                 self.assertEqual(expected, result["state"]["phase"])
                 self.assertEqual([], result["state"]["accepted_results"])
@@ -176,8 +204,26 @@ class SolverHarnessVerificationTest(unittest.TestCase):
                     model_port=ScriptedModelPort([{}]), verifier_port=RawVerifier(reply)
                 ) as harness:
                     result = harness.solve(
-                        "x", {"plan": {"version": 1, "steps": [{"step_id": "a", "objective": "x"}]}}
+                        "x",
+                        {
+                            "plan": {
+                                "version": 1,
+                                "steps": [{"step_id": "a", "title": "步骤", "objective": "x"}],
+                            }
+                        },
                     )
                 self.assertEqual("STEP_VERIFY", result["state"]["phase"])
                 self.assertFalse(result["state"]["steps"]["a"]["verification"]["valid"])
                 self.assertEqual([], result["state"]["accepted_results"])
+
+    def test_missing_or_blank_title_never_dispatches(self):
+        for fields in ({}, {"title": ""}, {"title": "  "}, {"title": None}):
+            with self.subTest(fields=fields):
+                model = ScriptedModelPort([])
+                verifier = ScriptedVerifierPort([])
+                plan = {"version": 1, "steps": [{"step_id": "s1", "objective": "求值", **fields}]}
+                with SolverHarness(model_port=model, verifier_port=verifier) as harness:
+                    with self.assertRaisesRegex(SolverValidationError, "title"):
+                        harness.solve("problem", {"plan": plan})
+                self.assertEqual([], model.requests)
+                self.assertEqual([], verifier.requests)

@@ -21,6 +21,9 @@ def validate_plan(plan: Any) -> None:
         step_id = step.get("step_id")
         if not isinstance(step_id, str) or not step_id.strip() or step_id in seen:
             raise ValueError("plan step IDs must be unique non-empty strings")
+        title = step.get("title")
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("plan step title must be a non-empty string")
         objective = step.get("objective")
         if not isinstance(objective, str) or not objective.strip():
             raise ValueError("plan step objective must be a non-empty string")
