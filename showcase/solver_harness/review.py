@@ -128,6 +128,11 @@ def review_solution(
             "type": "solution_review_assessed",
             "verdict": "ACCEPT" if accepted else "REJECT",
             "next_phase": next_phase,
+            **{
+                key: reply[key]
+                for key in ("reason", "counterexample")
+                if isinstance(reply, Mapping) and isinstance(reply.get(key), str)
+            },
         },
         state_updates=updates,
     )
