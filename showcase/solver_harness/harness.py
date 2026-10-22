@@ -91,10 +91,11 @@ class SolverHarness:
 
     def solve(self, problem, metadata=None):
         """Solve or recover; interrupted calls require explicit retry authorization."""
+        from .best_effort import run_best_effort
         from .calls import CallInterrupted
 
         try:
-            return self._solve(problem, metadata)
+            return run_best_effort(self, self._solve(problem, metadata))
         except CallInterrupted as exc:
             return self.get_run(exc.run_id)
 
@@ -127,6 +128,11 @@ class SolverHarness:
         existing = self._state_store.get_run(run_id)
         if existing is not None:
             self._validate_identity(existing, run_id, problem_hash)
+            if (
+                self._config.get("features", {}).get("best_effort") is True
+                and existing["state"]["status"] == "partial_budget_exhausted"
+            ):
+                return existing
             if self._config.get("features", {}).get("stream_recovery") is True:
                 from .calls import recover_inflight, retry_call
 
@@ -194,8 +200,10 @@ class SolverHarness:
         if self._config.get("features", {}).get("stream_recovery") is True:
             from .calls import recover_inflight
 
-            return recover_inflight(self, result)
-        return result
+            result = recover_inflight(self, result)
+        from .best_effort import run_best_effort
+
+        return run_best_effort(self, result, require_termination=True)
 
     def commit_event(
         self,
@@ -247,7 +255,10 @@ class SolverHarness:
             raise SolverValidationError("state_updates cannot change identity or revision fields")
 
         # Validate the persisted run identity before writing through this Harness.
-        current = self.get_run(normalized_run_id)
+        current = self._state_store.get_run(normalized_run_id)
+        if current is None:
+            raise SolverRunNotFoundError(normalized_run_id)
+        self._validate_identity(current, normalized_run_id, None)
         if (
             self._config.get("features", {}).get("stream_recovery") is True
             and current["state"]["phase"] == "TERMINAL"
