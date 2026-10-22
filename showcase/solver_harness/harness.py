@@ -16,6 +16,7 @@ from .explore import ModelPort, run_exploration
 from .initial_state import initial_state
 from .meta import MetaPort, run_meta
 from .plan import validate_plan
+from .replan import run_replan
 from .review import VerifierPort, review_solution
 from .storage import (
     SolverEventConflictError,
@@ -111,9 +112,9 @@ class SolverHarness:
         if existing is not None:
             self._validate_identity(existing, run_id, problem_hash)
             if self._model_port is None or existing["state"].get("phase") != "SETUP":
-                return self._run_meta(existing, metadata)
+                return self._run_meta(existing, metadata, problem)
             return self._run_meta(
-                self._run_supplied_plan_or_explore(existing, problem, metadata), metadata
+                self._run_supplied_plan_or_explore(existing, problem, metadata), metadata, problem
             )
 
         state = initial_state(run_id, problem_hash, self._config_hash)
@@ -135,9 +136,9 @@ class SolverHarness:
         if created is None:
             raise SolverPersistenceError("create_run")
         if self._model_port is None:
-            return self._run_meta(created, metadata)
+            return self._run_meta(created, metadata, problem)
         return self._run_meta(
-            self._run_supplied_plan_or_explore(created, problem, metadata), metadata
+            self._run_supplied_plan_or_explore(created, problem, metadata), metadata, problem
         )
 
     def get_run(self, run_id: str, *, problem: str | None = None) -> dict[str, Any]:
@@ -285,8 +286,8 @@ class SolverHarness:
             )
         return explored
 
-    def _run_meta(self, run, metadata):
-        return run_meta(
+    def _run_meta(self, run, metadata, problem):
+        run = run_meta(
             self,
             run,
             meta_port=self._meta_port,
@@ -296,6 +297,16 @@ class SolverHarness:
                 self._config, "max_total_duration_seconds", 3600
             ),
         )
+        run = run_replan(
+            self, run, problem=problem, model_port=self._model_port, config=self._config
+        )
+        if (
+            self._model_port is not None
+            and run["state"]["phase"] == "STEP_EXECUTE"
+            and run["state"].get("replan_count", 0)
+        ):
+            run = self._run_supplied_plan_or_explore(run, problem, {"plan": run["state"]["plan"]})
+        return run
 
     def close(self) -> None:
         """Close the Showcase SQLite connection if this Harness created it."""
