@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import html
 import json
 import os
 import uuid
@@ -14,6 +13,8 @@ from typing import Any
 
 from flask import Flask, Response, g, jsonify, request, send_from_directory, stream_with_context
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
+
+from presentation_pages import render_presentation_page
 
 try:
     from dotenv import load_dotenv
@@ -750,12 +751,8 @@ def _stored_verification(
 
 
 def _dashboard_page() -> str:
-    title = html.escape("MathAgent Showcase Workbench")
-    return (
-        "<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'>"
-        f"<title>{title}</title></head><body><main><h1>{title}</h1>"
-        "<p>本机 loopback 工作区。</p></main></body></html>"
-    )
+    """Return the shared local presentation surface."""
+    return render_presentation_page("unbuilt")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,34 @@
+/* Public run state and compact node timeline. */
+.inspector-panel { height: 100dvh; overflow-y: auto; padding: var(--space-5) var(--space-4); border-left: 1px solid var(--border); background: var(--surface); }
+.inspector-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-6); }
+.inspector-header h2 { margin: 0; font-size: var(--text-base); }
+.run-summary { padding-bottom: var(--space-5); border-bottom: 1px solid var(--border); }
+.run-status { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.run-id { font-family: var(--font-mono); color: var(--muted); font-size: var(--text-xs); }
+.run-metrics { display: flex; gap: var(--space-6); margin-top: var(--space-4); font-size: var(--text-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
+.run-metrics b { color: var(--text); font-size: var(--text-base); }
+.inspector-empty { padding: var(--space-12) var(--space-3); }
+.inspector-empty h3 { font-size: var(--text-base); }
+.inspector-check { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--border); }
+.check-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.check-heading h3 { margin: 0; font-size: var(--text-sm); }
+.inspector-check p { margin-top: var(--space-3); color: var(--muted); }
+.inspector-check small { color: var(--muted); }
+.agent-timeline { margin-top: var(--space-6); }
+.timeline-header { display: flex; width: 100%; justify-content: space-between; align-items: center; min-height: var(--control-height); padding: 0; border: 0; background: transparent; color: var(--text); text-align: left; }
+.timeline-header > span:first-child { display: grid; gap: var(--space-1); }
+.timeline-header small, .timeline-node, .timeline-duration, .step-details { color: var(--muted); font-size: var(--text-xs); }
+.timeline-steps { margin: var(--space-3) 0 0; padding: 0; list-style: none; }
+.timeline-step { border-top: 1px solid var(--border); }
+.step-header { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; width: 100%; gap: var(--space-2); align-items: center; min-height: 44px; padding: var(--space-2) 0; border: 0; background: transparent; color: var(--text); text-align: left; }
+.step-header:hover { background: var(--surface-muted); }
+.step-heading { display: grid; }
+.step-status { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.step-completed .step-status { background: var(--success); }
+.step-failed .step-status { background: var(--danger); }
+.timeline-title { overflow-wrap: anywhere; font-weight: 600; font-size: var(--text-sm); }
+.timeline-node { font-family: var(--font-mono); }
+.step-details { padding: 0 0 var(--space-3) var(--space-4); overflow-wrap: anywhere; }
+.timeline-summary { margin: var(--space-2) 0; }
+.step-details ul { display: grid; gap: var(--space-2); margin: var(--space-3) 0 0; padding: 0; list-style: none; }
+.step-details li { display: grid; gap: var(--space-1); }

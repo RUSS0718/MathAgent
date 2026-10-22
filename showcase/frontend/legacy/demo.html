@@ -1,0 +1,7 @@
+<p class="page-description">官方评分骨架的本地展示入口。新增主观功能默认不接入评分链路。</p>
+<form id="problem-form" class="legacy-form">
+  <label for="problem">数学问题</label>
+  <textarea id="problem" required placeholder="输入数学问题" rows="6"></textarea>
+  <div class="action-row"><button id="solve" class="ui-button ui-button--primary" type="submit">求解</button><span id="state" role="status">等待输入</span></div>
+</form>
+<section aria-labelledby="result-heading"><h2 id="result-heading">公开结果</h2><pre id="result" tabindex="0" aria-label="公开结果">等待输入…</pre></section>

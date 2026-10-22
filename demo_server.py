@@ -7,7 +7,6 @@ therefore cannot change the platform scoring path or its default call budget.
 from __future__ import annotations
 
 import argparse
-import html
 import json
 from collections.abc import Callable
 from http import HTTPStatus
@@ -15,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from llm_client import InternChatClient
+from presentation_pages import render_presentation_page
 from user_agent import ReasoningAgent
 
 MAX_BODY_BYTES = 1_000_000
@@ -114,22 +114,7 @@ class DemoHandler(BaseHTTPRequestHandler):
     def _page() -> str:
         """Return the self-contained browser page used for the subjective Demo."""
 
-        title = html.escape("数学推理智能体 Demo")
-        return f"""<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>{title}</title>
-<style>body{{font:16px system-ui;max-width:900px;margin:40px auto;padding:0 20px}}
-textarea{{width:100%;min-height:160px}}button{{margin-top:12px;padding:8px 20px}}
-pre{{white-space:pre-wrap;background:#f4f4f4;padding:16px;border-radius:8px}}</style></head>
-<body><h1>{title}</h1><p>官方评分骨架的本地展示入口。新增主观功能默认不接入评分链路。</p>
-<textarea id="problem" placeholder="输入数学问题"></textarea><br><button id="solve">求解</button>
-<pre id="result">等待输入…</pre><script>
-const button=document.getElementById('solve'); const result=document.getElementById('result');
-button.onclick=async()=>{{button.disabled=true;result.textContent='处理中…';try{{
- const r=await fetch('/solve',{{method:'POST',headers:{{'Content-Type':'application/json'}},
- body:JSON.stringify({{problem:document.getElementById('problem').value}})}});
- result.textContent=JSON.stringify(await r.json(),null,2);
-}}catch(e){{result.textContent='请求失败：'+e;}}finally{{button.disabled=false;}}}};
-</script></body></html>"""
+        return render_presentation_page("demo")
 
 
 def create_server(

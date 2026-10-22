@@ -48,7 +48,8 @@ async function consumeResponse(
     }
     events.push(event)
     await options.onEvent?.(event)
-    return isTerminalEvent(event)
+    // An interrupt is a successful observation boundary; resume opens a new stream.
+    return isTerminalEvent(event) || event.event === 'interrupt'
   }
   try {
     while (true) {

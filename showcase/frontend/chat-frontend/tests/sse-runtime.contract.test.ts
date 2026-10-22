@@ -3,6 +3,19 @@ import test from 'node:test'
 import { decodeSseBlock, SseParser, SseProtocolError } from '../src/api/events.schemas.ts'
 import { readJobEvents } from '../src/runtime/jobs/sse-transport.ts'
 
+test('interrupt ends observation without reporting a dropped stream or retrying', async () => {
+  let calls = 0
+  const events = await readJobEvents('job-wait', 0, {
+    retryDelayMs: 0,
+    fetchImpl: async () => {
+      calls += 1
+      return new Response('id: 1\nevent: interrupt\ndata: {"type":"interrupt","question_id":"q1","message":"补充定义域"}\n\n')
+    },
+  })
+  assert.equal(calls, 1)
+  assert.equal(events.at(-1)?.event, 'interrupt')
+})
+
 test('SSE parser joins UTF-8 data split across chunks and accepts heartbeat', () => {
   const parser = new SseParser()
   const bytes = new TextEncoder().encode(

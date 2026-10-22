@@ -1,0 +1,8 @@
+/* Legacy pages reuse tokens and controls without a JS framework or CDN. */
+.legacy-content { max-width: 860px; }
+.legacy-content h1 { font-size: var(--text-xl); margin-bottom: var(--space-3); }
+.legacy-content h2 { font-size: var(--text-lg); }
+.legacy-form { display: grid; gap: var(--space-3); margin: var(--space-8) 0; }
+.legacy-form label { font-weight: 600; }
+.legacy-form textarea { width: 100%; padding: var(--space-4); border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--surface); color: var(--text); resize: vertical; }
+.legacy-content pre { padding: var(--space-5); white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); font: var(--text-sm)/1.7 var(--font-mono); }

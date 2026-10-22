@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { DecodedSseEvent } from '../api/events.schemas'
+import UiIcon from './ui/UiIcon.vue'
 
 const props = defineProps<{ events: DecodedSseEvent[] }>()
 const expanded = ref(true)
@@ -61,7 +62,7 @@ function status(event: DecodedSseEvent): string {
 }
 
 function toggleStep(node: string): void {
-  expandedSteps.value = { ...expandedSteps.value, [node]: !expandedSteps.value[node] }
+  expandedSteps.value = { ...expandedSteps.value, [node]: expandedSteps.value[node] === false }
 }
 </script>
 
@@ -69,16 +70,14 @@ function toggleStep(node: string): void {
   <section v-if="events.length" class="agent-timeline" aria-live="polite">
     <button class="timeline-header" type="button" :aria-expanded="expanded" @click="expanded = !expanded">
       <span><strong>Agent 执行节点</strong><small>{{ steps.length }} 个节点 · {{ events.length }} 个事件</small></span>
-      <span aria-hidden="true">{{ expanded ? '▾' : '▸' }}</span>
+      <UiIcon :name="expanded ? 'chevronDown' : 'chevronRight'" />
     </button>
     <ol v-if="expanded" class="timeline-steps">
       <li v-for="step in steps" :key="step.nodeName" class="timeline-step" :class="`step-${step.status}`">
         <button class="step-header" type="button" :aria-expanded="expandedSteps[step.nodeName] !== false" @click="toggleStep(step.nodeName)">
           <span class="step-status" aria-hidden="true"></span>
-          <span class="timeline-title">{{ step.title }}</span>
-          <span class="timeline-node">{{ step.nodeName }}</span>
-          <span class="timeline-duration">{{ step.duration !== null ? `${step.duration}s` : step.status }}</span>
-          <span aria-hidden="true">{{ expandedSteps[step.nodeName] !== false ? '▾' : '▸' }}</span>
+          <span class="step-heading"><span class="timeline-title">{{ step.title }}</span><span class="timeline-node">{{ step.nodeName }} · {{ step.duration !== null ? `${step.duration}s · ` : '' }}{{ step.status }}</span></span>
+          <UiIcon :name="expandedSteps[step.nodeName] !== false ? 'chevronDown' : 'chevronRight'" />
         </button>
         <div v-if="expandedSteps[step.nodeName] !== false" class="step-details">
           <p v-if="step.summary" class="timeline-summary">{{ step.summary }}</p>

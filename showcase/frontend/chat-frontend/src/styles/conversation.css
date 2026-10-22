@@ -1,0 +1,48 @@
+/* Conversation has its own scroll region; the composer stays reachable. */
+.conversation-area { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.conversation-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-8) var(--space-6); }
+.message-list { width: min(var(--reading-width), 100%); margin: 0 auto; }
+.welcome-panel { max-width: 640px; margin: 8vh auto var(--space-8); }
+.welcome-panel h2 { margin: 0 0 var(--space-4); font-size: var(--text-2xl); font-weight: 600; letter-spacing: -.02em; }
+.welcome-copy { color: var(--muted); font-size: var(--text-base); max-width: 52ch; margin: 0 0 var(--space-8); }
+.starter-list { display: grid; border-top: 1px solid var(--border); }
+.starter-list button { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); width: 100%; padding: var(--space-4) 0; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); text-align: left; }
+.starter-list button:hover { color: var(--accent-strong); background: var(--accent-wash); }
+.starter-list button span { display: grid; gap: var(--space-1); }
+.starter-list small { color: var(--muted); font-size: var(--text-xs); }
+.message-card { display: flex; gap: var(--space-3); margin: 0 0 var(--space-6); }
+.message-avatar { display: grid; flex: 0 0 28px; height: 28px; place-items: center; color: var(--accent); }
+.message-avatar.user { display: none; }
+.message-body { min-width: 0; flex: 1; }
+.message-label { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--text-xs); font-weight: 600; }
+.message-body p { margin: 0; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-card.user { margin-left: auto; max-width: 90%; padding: var(--space-4); border-radius: var(--radius-lg); background: var(--accent-wash); }
+.composer-shell { flex-shrink: 0; width: min(var(--reading-width), calc(100% - 48px)); margin: 0 auto var(--space-6); padding: var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface); }
+.composer-shell:focus-within { border-color: var(--accent); }
+.composer-shell textarea { display: block; width: 100%; min-height: 76px; max-height: 200px; padding: var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); resize: vertical; }
+.composer-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding-top: var(--space-2); }
+.composer-tools, .composer-actions { display: flex; align-items: center; gap: var(--space-2); }
+.composer-actions { margin-left: auto; }
+.composer-hint, .keyboard-hint { color: var(--muted); font-size: var(--text-xs); }
+.file-chip { display: flex; align-items: center; gap: var(--space-2); padding-left: var(--space-2); background: var(--surface-muted); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+.file-chip .ui-button { margin-left: auto; }
+.report-section { margin: var(--space-6) 0; padding: var(--space-6); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+.conversation-scroll > .report-section { width: min(var(--reading-width), 100%); margin: var(--space-6) auto 0; }
+.report-section > h2 { margin-bottom: var(--space-3); font-size: var(--text-lg); }
+.report-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); color: var(--muted); font-size: var(--text-xs); }
+.report-content { margin-top: var(--space-6); font-size: var(--text-base); line-height: 1.8; overflow-wrap: anywhere; }
+.report-content h1, .report-content h2, .report-content h3 { margin: var(--space-6) 0 var(--space-2); font-size: var(--text-lg); }
+.report-content p { margin: var(--space-3) 0; }
+.report-content ul { padding-left: var(--space-6); }
+.report-content code { padding: 2px var(--space-1); background: var(--surface-muted); border-radius: var(--radius-sm); font: .9em var(--font-mono); }
+.report-content .katex-display { overflow-x: auto; overflow-y: hidden; padding-block: var(--space-2); }
+.report-summary, .report-limitations { margin-top: var(--space-4); color: var(--muted); font-size: var(--text-sm); }
+.report-limitations { padding-left: var(--space-5); margin-bottom: 0; }
+@media (max-width: 760px) {
+  .conversation-scroll { padding: var(--space-6) var(--space-4); }
+  .welcome-panel { margin-top: var(--space-8); }
+  .welcome-panel h2 { font-size: var(--text-xl); }
+  .composer-shell { width: calc(100% - 24px); margin-bottom: var(--space-3); }
+  .composer-hint, .keyboard-hint { display: none; }
+  .report-section { padding: var(--space-4); }
+}

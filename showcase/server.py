@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import html
 import json
 import os
 from collections.abc import Mapping
@@ -11,6 +10,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlsplit
+
+from presentation_pages import render_presentation_page
 
 from .adapters import InternAgentAdapter, InternModelAdapter
 from .evidence import EvidencePackExporter
@@ -237,23 +238,8 @@ def _tool_results(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _page() -> str:
-    title = html.escape("MathAgent Showcase Workbench")
-    return f'''<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>{title}</title>
-<style>body{{font:16px system-ui;max-width:960px;margin:36px auto;padding:0 20px}}textarea{{width:100%;min-height:120px}}button{{margin:10px 8px 10px 0;padding:8px 18px}}pre{{white-space:pre-wrap;background:#f4f4f4;padding:14px;border-radius:8px}}.badge{{display:inline-block;padding:3px 8px;border-radius:12px;background:#e6f4ea}}</style></head>
-<body><h1>{title}</h1><p>showcase_mvp：live / replay / experimental / unavailable 状态会单独标记。</p>
-<textarea id="problem" placeholder="输入数学题目"></textarea><br><button id="run">创建 Run</button>
-<span id="state" class="badge">等待输入</span><pre id="result">Run ID、阶段、事件和 Evidence Pack 将显示在这里。</pre>
-<script>
-const problem=document.getElementById('problem'), state=document.getElementById('state'), result=document.getElementById('result');
-document.getElementById('run').onclick=async()=>{{state.textContent='live';try{{
- const created=await fetch('/api/runs',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{problem:problem.value}})}}).then(r=>r.json());
- const events=await fetch('/api/runs/'+created.run_id+'/events').then(r=>r.json());
- const evidence=await fetch('/api/runs/'+created.run_id+'/evidence').then(r=>r.json());
- state.textContent=(created.execution_mode || 'unavailable')+' / '+created.status+' / '+created.stage;
- result.textContent=JSON.stringify({{run:created,events,evidence}},null,2);
-}}catch(error){{state.textContent='unavailable';result.textContent=String(error)}}}};
-</script></body></html>'''
+    """Return the shared local presentation surface."""
+    return render_presentation_page("showcase")
 
 
 def main() -> None:
