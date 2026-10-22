@@ -30,7 +30,7 @@ def prepare_candidates(run, event, updates):
         return {}, []
     actions = []
     kind = event["type"]
-    if kind == "explore_assessed":
+    if kind in {"explore_assessed", "exploration_polished"}:
         finding = state["exploration_findings"][-1]
         _add(
             registry,
@@ -104,7 +104,9 @@ def prepare_candidates(run, event, updates):
             targets = targets[-1:]
         else:
             review = event
-            targets = targets[-1:]
+            reviewed_text = state["exploration_findings"][-1].get("solution_candidate", "")
+            reviewed_hash = hashlib.sha256(redact(reviewed_text).encode("utf-8")).hexdigest()
+            targets = [record for record in targets if record["answer_hash"] == reviewed_hash][-1:]
         for record in targets:
             _review(registry, actions, record, event, review, source == "STEP_EXECUTE")
     elif kind in {"trace_back_applied", "plan_archived"}:
