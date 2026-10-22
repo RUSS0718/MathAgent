@@ -10,6 +10,7 @@ from .harness import (
     SolverRunNotFoundError,
     SolverValidationError,
 )
+from .review import ScriptedVerifierPort, VerifierPort
 
 __all__ = [
     "SolverHarness",
@@ -21,4 +22,6 @@ __all__ = [
     "SolverValidationError",
     "ModelPort",
     "ScriptedModelPort",
+    "ScriptedVerifierPort",
+    "VerifierPort",
 ]

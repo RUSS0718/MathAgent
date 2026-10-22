@@ -13,6 +13,7 @@ from typing import Any
 from ..redaction import redact
 from ..storage import SQLiteStore
 from .explore import ModelPort, run_exploration
+from .review import VerifierPort, review_solution
 from .storage import (
     SolverEventConflictError,
     SolverPersistenceError,
@@ -61,12 +62,14 @@ class SolverHarness:
         store: SQLiteStore | None = None,
         config: Mapping[str, Any] | None = None,
         model_port: ModelPort | None = None,
+        verifier_port: VerifierPort | None = None,
     ) -> None:
         if store is not None and database_path is not None:
             raise SolverValidationError("provide either store or database_path")
         self._config = _normalize_config(config)
         self._config_hash = _hash_json(self._config)
         self._model_port = model_port
+        self._verifier_port = verifier_port
         self._owns_showcase_store = store is None
         self._showcase_store = (
             store if store is not None else SQLiteStore(database_path or ":memory:")
@@ -220,7 +223,7 @@ class SolverHarness:
             2, _positive_config_int(self._config, "max_explore_rounds", 2)
         )
         # STAR's 3600-second default bounds this Showcase run, not official scoring.
-        return run_exploration(
+        explored = run_exploration(
             self,
             run,
             problem=problem,
@@ -231,6 +234,19 @@ class SolverHarness:
                 self._config, "max_total_duration_seconds", 3600
             ),
         )
+
+        if explored["state"]["phase"] == "EXPLORE_REVIEW":
+            return review_solution(
+                self,
+                explored,
+                problem=problem,
+                verifier_port=self._verifier_port,
+                max_model_calls=max_model_calls,
+                max_runtime_seconds=_non_negative_config_int(
+                    self._config, "max_total_duration_seconds", 3600
+                ),
+            )
+        return explored
 
     def close(self) -> None:
         """Close the Showcase SQLite connection if this Harness created it."""
