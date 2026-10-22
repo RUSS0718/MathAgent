@@ -9,7 +9,7 @@
 | 当前任务 | 阅读顺序 | 读完应能判断 |
 | --- | --- | --- |
 | 了解 v0.1 做到了什么 | [能力基线](evals/v0.1-capability-baseline.md) → [开发完成记录](https://github.com/RUSS0718/MathAgent/issues/1#issuecomment-6209639217) → 下方 v0.1 文档链 | 工程完成、真实模型连接与数学效果各有什么证据 |
-| 规划或评审 v1.1 Solver Harness | [v1.1 实现规格](specs/showcase-solver-harness-v1.1-spec.md) → [STAR Core 实施规格](prd/STAR_CORE/STAR_Core_v1_2/STAR_CORE_SPEC_AGENT_v1_2.md) → [ADR-0013](adr/0013-solver-harness-boundary-and-shared-transaction.md) | v1.1 seam、v1.2 延期项、ticket 依赖和验收边界 |
+| 规划或评审 v1.1 Solver Harness | [v1.1 实现规格](https://github.com/RUSS0718/MathAgent/issues/32) → [STAR Core 实施规格](prd/STAR_CORE/STAR_Core_v1_2/STAR_CORE_SPEC_AGENT_v1_2.md) → [ADR-0013](adr/0013-solver-harness-boundary-and-shared-transaction.md) | v1.1 seam、v1.2 延期项、ticket 依赖和验收边界 |
 | 规划或评审 v0.2 | [v0.2 PRD Lite](prd/subjective-agent-platform-prd-v0.2.md) → [v0.2 实现规格](specs/subjective-agent-platform-v0.2-spec.md) → [现状与前端接口调研](research/v0.2-planning-baseline.md) → [accepted ADR](#架构决策) | 范围、实现决策、测试 seam、验收条件和待验证假设 |
 | 修改官方入口或讨论合并 | [BASELINE.json](../BASELINE.json) → [官方架构](architecture/pre-v0.1-official-agent-architecture.md) → [合并边界](release-boundary.md) | 冻结文件、调用预算、输出合同及重新验收要求 |
 | 运行或演示 | [Demo 说明](demo.md) → [演示脚本](../DEMO_SCRIPT.md) → [验收门禁](ACCEPTANCE.md) | 入口、运行模式、回放和发布检查方式 |
@@ -36,7 +36,7 @@
 
 ## v1.1 Solver Harness 规格入口
 
-- [v1.1 实现规格](specs/showcase-solver-harness-v1.1-spec.md)：S1/S2 seam、验收合同、SC→AC 映射和 v1.1/v1.2 ticket 边界。
+- [v1.1 实现规格](https://github.com/RUSS0718/MathAgent/issues/32)：S1/S2 seam、验收合同、SC→AC 映射和 v1.1/v1.2 ticket 边界。
 - [v1.1 验收记录](evals/showcase-solver-harness-v1.1-acceptance.md)：当前为 planned；只记录实际命令与结果。
 - [ADR-0013](adr/0013-solver-harness-boundary-and-shared-transaction.md)：Showcase 单一产品面、共享 SQLite 事务和版本标识决策。
 - 产品版本为 v1.1；包版本保持 `0.1.0`，前端版本保持 `0.2.0`，Profile 保持 `showcase_mvp`。

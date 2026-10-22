@@ -4,7 +4,7 @@
 
 **计划日期：** 2026-10-22
 
-**对应规格：** [`showcase-solver-harness-v1.1-spec.md`](../specs/showcase-solver-harness-v1.1-spec.md)
+**对应规格：** [GitHub Issue #32](https://github.com/RUSS0718/MathAgent/issues/32)
 
 本文件在实现切片完成前只记录验收骨架。每完成一个 ticket，追加命令、环境、结果和失败项；不得用计划或结构测试冒充已通过结果。
 

@@ -1,6 +1,6 @@
 # MathAgent Workbench v0.2 实现规格
 
-> **状态：** `superseded by v1.1`。本文保留为历史实现合同，不作为当前开发范围；当前合同见 [`showcase-solver-harness-v1.1-spec.md`](showcase-solver-harness-v1.1-spec.md)。
+> **状态：** `superseded by v1.1`。本文保留为历史实现合同，不作为当前开发范围；当前合同见 [GitHub Issue #32](https://github.com/RUSS0718/MathAgent/issues/32)。
 
 **状态：** `proposed`，由 v0.2 PRD Lite 和已确认的需求共识整理而成。本文是开发任务的规格，不是已实现能力声明。
 
