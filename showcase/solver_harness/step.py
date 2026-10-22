@@ -113,7 +113,7 @@ def _normalize_report(reply: Any, step: Mapping[str, Any]) -> dict[str, Any]:
             claim = {"statement": claim}
         if not isinstance(claim, Mapping) or not isinstance(claim.get("statement"), str):
             continue
-        # v1.2 registers no executable tool. Model-supplied refs are never evidence.
+        # Model-supplied refs never establish evidence; prechecks own receipts.
         label = claim.get("label")
         claims.append(
             {
@@ -122,6 +122,8 @@ def _normalize_report(reply: Any, step: Mapping[str, Any]) -> dict[str, Any]:
                 "tool_evidence_refs": [],
             }
         )
+        if label == "easy-verify" and isinstance(claim.get("tool_request"), Mapping):
+            claims[-1]["tool_request"] = dict(claim["tool_request"])
     argument = reply.get("argument", "")
     return {
         "step_id": step["step_id"],

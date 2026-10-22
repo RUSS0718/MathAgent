@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -13,6 +11,16 @@ from ..redaction import redact
 from ..storage import SQLiteStore
 from .challenge import run_plan
 from .explore import ModelPort, run_exploration
+from .harness_config import (
+    SolverHarnessError,
+    SolverValidationError,
+    _hash_json,
+    _non_negative_config_int,
+    _normalize_config,
+    _normalize_json_mapping,
+    _positive_config_int,
+    _run_id,
+)
 from .initial_state import initial_state
 from .meta import MetaPort, run_meta
 from .plan import validate_plan
@@ -35,14 +43,6 @@ __all__ = [
     "SolverRunNotFoundError",
     "SolverValidationError",
 ]
-
-
-class SolverHarnessError(RuntimeError):
-    """Base error for Solver Harness operations."""
-
-
-class SolverValidationError(SolverHarnessError, ValueError):
-    """Raised when a Solver Harness input is invalid."""
 
 
 class SolverIdentityError(SolverHarnessError, ValueError):
@@ -69,11 +69,13 @@ class SolverHarness:
         model_port: ModelPort | None = None,
         verifier_port: VerifierPort | None = None,
         meta_port: MetaPort | None = None,
+        tool_port=None,
     ) -> None:
         if store is not None and database_path is not None:
             raise SolverValidationError("provide either store or database_path")
         self._config = _normalize_config(config)
         self._config_hash = _hash_json(self._config)
+        self._tool_port = tool_port
         self._meta_port = meta_port
         self._model_port = model_port
         self._verifier_port = verifier_port
@@ -115,7 +117,8 @@ class SolverHarness:
             resumable = existing["state"].get("phase") == "SETUP" or (
                 self._config.get("features", {}).get("persistent_sessions") is True
                 and existing["state"].get("phase") == "PLAN"
-                and metadata is not None and "plan" in metadata
+                and metadata is not None
+                and "plan" in metadata
             )
             if self._model_port is None or not resumable:
                 return self._run_meta(existing, metadata, problem)
@@ -228,15 +231,31 @@ class SolverHarness:
 
         from .context_injection import prepare_role_context
         from .prompts import compose_request
+        from .tool_precheck import allowed_tool_ids
 
         latest = self.get_run(run["run_id"])
-        if self._config.get("features", {}).get("skills") is True:
-            return compose_request(latest, request)
-        prepared = deepcopy(dict(request))
-        if self._config.get("features", {}).get("persistent_sessions") is True:
+        prepared = (
+            compose_request(latest, request)
+            if self._config.get("features", {}).get("skills") is True
+            else deepcopy(dict(request))
+        )
+        if (
+            self._config.get("features", {}).get("persistent_sessions") is True
+            and self._config.get("features", {}).get("skills") is not True
+        ):
             prepared["role_context"] = prepare_role_context(latest, prepared)
             prepared["state_revision"] = latest["state_revision"]
+        tools = allowed_tool_ids(latest, request.get("role"), self._config, self._tool_port)
+        if tools:
+            prepared["allowed_tools"] = [*prepared.get("allowed_tools", []), *tools]
+            prepared["tool_policy"] = {"allow": prepared["allowed_tools"]}
         return prepared
+
+    def precheck_report(self, run):
+        """Execute explicitly permitted claim checks before Verifier dispatch."""
+        from .tool_precheck import precheck_report
+
+        return precheck_report(self, run, config=self._config, tool_port=self._tool_port)
 
     def dispatch(self, run, operation, request):
         """Invoke one model operation with optional audited session continuity."""
@@ -267,6 +286,7 @@ class SolverHarness:
     ) -> None:
         state = result["state"]
         from .sessions import validate_registry
+
         validate_registry(state)
         if result.get("run_id") != run_id or state.get("run_id") != run_id:
             raise SolverIdentityError("run_id does not match the persisted Solver Run")
@@ -366,61 +386,3 @@ class SolverHarness:
 
     def __exit__(self, *_args: object) -> None:
         self.close()
-
-
-def _run_id(metadata: Mapping[str, Any] | None) -> str:
-    requested = None if metadata is None else metadata.get("run_id")
-    if requested is None:
-        return f"solver_{uuid.uuid4().hex}"
-    if not isinstance(requested, str) or not requested.strip():
-        raise SolverValidationError("metadata.run_id must be a non-empty string")
-    return requested.strip()
-
-
-def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
-    if config is None:
-        return {}
-    if not isinstance(config, Mapping):
-        raise SolverValidationError("config must be a mapping")
-    try:
-        normalized = json.loads(
-            json.dumps(config, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        )
-    except (TypeError, ValueError) as exc:
-        raise SolverValidationError("config must be JSON serializable") from exc
-    if not isinstance(normalized, dict):
-        raise SolverValidationError("config must be a mapping")
-    return normalized
-
-
-def _hash_json(value: Mapping[str, Any]) -> str:
-    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def _normalize_json_mapping(value: Mapping[str, Any] | None, label: str) -> dict[str, Any]:
-    if not isinstance(value, Mapping):
-        raise SolverValidationError(f"{label} must be a mapping")
-    try:
-        normalized = json.loads(
-            json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        )
-    except (TypeError, ValueError) as exc:
-        raise SolverValidationError(f"{label} must be JSON serializable") from exc
-    if not isinstance(normalized, dict):
-        raise SolverValidationError(f"{label} must be a mapping")
-    return normalized
-
-
-def _non_negative_config_int(config: Mapping[str, Any], key: str, default: int) -> int:
-    value = config.get(key, default)
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise SolverValidationError(f"config.{key} must be a non-negative integer")
-    return value
-
-
-def _positive_config_int(config: Mapping[str, Any], key: str, default: int) -> int:
-    value = config.get(key, default)
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise SolverValidationError(f"config.{key} must be a positive integer")
-    return value
