@@ -90,19 +90,22 @@ def run_challenges(
         )
         try:
             reply = model_port.complete(
-                {
-                    "role": "reasoner",
-                    "run_id": run["run_id"],
-                    "problem": problem,
-                    "call_id": f"{session}:reasoner:{number}",
-                    "session_key": session,
-                    "step": step,
-                    "report": record["report"],
-                    "objection": objection,
-                    "round": number,
-                    "challenge_history": record.get("challenge_history", []),
-                    "tool_policy": {"allow": []},
-                }
+                harness.prepare_request(
+                    run,
+                    {
+                        "role": "reasoner",
+                        "run_id": run["run_id"],
+                        "problem": problem,
+                        "call_id": f"{session}:reasoner:{number}",
+                        "session_key": session,
+                        "step": step,
+                        "report": record["report"],
+                        "objection": objection,
+                        "round": number,
+                        "challenge_history": record.get("challenge_history", []),
+                        "tool_policy": {"allow": []},
+                    },
+                )
             )
         except Exception:
             reply = {"blocked": True}
@@ -239,3 +242,4 @@ def run_plan(
         ):
             return run
     return run
+
