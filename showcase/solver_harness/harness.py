@@ -217,15 +217,27 @@ class SolverHarness:
             raise SolverValidationError("state_updates cannot change identity or revision fields")
 
         # Validate the persisted run identity before writing through this Harness.
-        self.get_run(normalized_run_id)
+        current_run = self.get_run(normalized_run_id)
         request_hash = _hash_json({"event": normalized_event, "state_updates": normalized_updates})
-        return self._state_store.commit_event(
+        from .candidates import enabled, prepare_candidates
+
+        candidate_patch, candidate_events = ({}, [])
+        if enabled(self._config):
+            candidate_patch, candidate_events = prepare_candidates(
+                current_run, normalized_event, normalized_updates
+            )
+        result = self._state_store.commit_event(
             normalized_run_id,
             expected_revision=expected_revision,
             event=normalized_event,
-            state_updates=normalized_updates,
+            state_updates={**normalized_updates, **candidate_patch},
             request_hash=request_hash,
         )
+        for audit in candidate_events:
+            result = self.commit_event(
+                normalized_run_id, expected_revision=result["state_revision"], event=audit
+            )
+        return result
 
     def prepare_request(self, run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
         """Compose opt-in protocols from the current persisted run projection."""
