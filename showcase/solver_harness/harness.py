@@ -13,9 +13,11 @@ from ..redaction import redact
 from ..storage import SQLiteStore
 from .challenge import run_plan
 from .explore import ModelPort, run_exploration
+from .finalize import run_finalization
 from .initial_state import initial_state
 from .meta import MetaPort, run_meta
 from .plan import validate_plan
+from .planning import generate_initial_plan
 from .replan import run_replan
 from .review import VerifierPort, review_solution
 from .storage import (
@@ -333,7 +335,23 @@ class SolverHarness:
             and run["state"].get("replan_count", 0)
         ):
             run = self._run_supplied_plan_or_explore(run, problem, {"plan": run["state"]["plan"]})
-        return run
+        run = generate_initial_plan(
+            self, run, problem=problem, model_port=self._model_port, config=self._config
+        )
+        if (
+            self._model_port is not None
+            and run["state"]["phase"] == "STEP_EXECUTE"
+            and self._config.get("features", {}).get("final_generation")
+        ):
+            run = self._run_supplied_plan_or_explore(run, problem, {"plan": run["state"]["plan"]})
+        return run_finalization(
+            self,
+            run,
+            problem=problem,
+            model_port=self._model_port,
+            verifier_port=self._verifier_port,
+            config=self._config,
+        )
 
     def close(self) -> None:
         """Close the Showcase SQLite connection if this Harness created it."""
