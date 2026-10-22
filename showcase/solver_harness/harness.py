@@ -12,17 +12,16 @@ from typing import Any
 
 from ..redaction import redact
 from ..storage import SQLiteStore
+from .challenge import run_plan
 from .explore import ModelPort, run_exploration
 from .plan import validate_plan
 from .review import VerifierPort, review_solution
-from .step import run_step
 from .storage import (
     SolverEventConflictError,
     SolverPersistenceError,
     SolverRevisionConflictError,
     SolverStateStore,
 )
-from .verification import verify_step
 
 __all__ = [
     "SolverHarness",
@@ -200,9 +199,7 @@ class SolverHarness:
 
         # Validate the persisted run identity before writing through this Harness.
         self.get_run(normalized_run_id)
-        request_hash = _hash_json(
-            {"event": normalized_event, "state_updates": normalized_updates}
-        )
+        request_hash = _hash_json({"event": normalized_event, "state_updates": normalized_updates})
         return self._state_store.commit_event(
             normalized_run_id,
             expected_revision=expected_revision,
@@ -236,20 +233,14 @@ class SolverHarness:
             return self._run_exploration(run, problem)
         if self._model_port is None:
             return run
-        reported = run_step(
+        return run_plan(
             self,
             run,
             problem=problem,
             plan=plan,
             model_port=self._model_port,
-            max_model_calls=_non_negative_config_int(self._config, "max_model_calls", 2),
-            max_runtime_seconds=_non_negative_config_int(
-                self._config, "max_total_duration_seconds", 3600
-            ),
-        )
-
-        return verify_step(
-            self, reported, problem=problem, verifier_port=self._verifier_port,
+            verifier_port=self._verifier_port,
+            max_rounds=_positive_config_int(self._config, "max_challenge_rounds", 5),
             max_model_calls=_non_negative_config_int(self._config, "max_model_calls", 2),
             max_runtime_seconds=_non_negative_config_int(
                 self._config, "max_total_duration_seconds", 3600
@@ -260,9 +251,7 @@ class SolverHarness:
         if self._model_port is None:
             return run
         max_model_calls = _non_negative_config_int(self._config, "max_model_calls", 2)
-        max_explore_rounds = min(
-            2, _positive_config_int(self._config, "max_explore_rounds", 2)
-        )
+        max_explore_rounds = min(2, _positive_config_int(self._config, "max_explore_rounds", 2))
         # STAR's 3600-second default bounds this Showcase run, not official scoring.
         explored = run_exploration(
             self,
