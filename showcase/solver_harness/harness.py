@@ -67,11 +67,13 @@ class SolverHarness:
         model_port: ModelPort | None = None,
         verifier_port: VerifierPort | None = None,
         meta_port: MetaPort | None = None,
+        tool_port=None,
     ) -> None:
         if store is not None and database_path is not None:
             raise SolverValidationError("provide either store or database_path")
         self._config = _normalize_config(config)
         self._config_hash = _hash_json(self._config)
+        self._tool_port = tool_port
         self._meta_port = meta_port
         self._model_port = model_port
         self._verifier_port = verifier_port
@@ -219,10 +221,25 @@ class SolverHarness:
         """Compose opt-in protocols from the current persisted run projection."""
         from .prompts import compose_request
 
-        if self._config.get("features", {}).get("skills") is not True:
-            return dict(request)
+        from .tool_precheck import allowed_tool_ids
+
         latest = self.get_run(run["run_id"])
-        return compose_request(latest, request)
+        prepared = (
+            compose_request(latest, request)
+            if self._config.get("features", {}).get("skills") is True
+            else dict(request)
+        )
+        tools = allowed_tool_ids(latest, request.get("role"), self._config, self._tool_port)
+        if tools:
+            prepared["allowed_tools"] = [*prepared.get("allowed_tools", []), *tools]
+            prepared["tool_policy"] = {"allow": prepared["allowed_tools"]}
+        return prepared
+
+    def precheck_report(self, run):
+        """Execute explicitly permitted claim checks before Verifier dispatch."""
+        from .tool_precheck import precheck_report
+
+        return precheck_report(self, run, config=self._config, tool_port=self._tool_port)
 
     def execute_tool_request(
         self,
