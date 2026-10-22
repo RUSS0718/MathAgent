@@ -1,7 +1,9 @@
 # ADR-0013：Solver Harness v1.1 的 Showcase 边界与共享事务
 
-**状态：** accepted  
-**日期：** 2026-10-22  
+**状态：** accepted
+
+**日期：** 2026-10-22
+
 **范围：** `showcase-solver-harness-v1` 的 v1.1
 
 ## 背景
@@ -46,4 +48,3 @@ v1.1 只覆盖两条可观察的 Explore 分支，能够证明条件路由不是
 - 版本号会暂时出现“产品 v1.1、包 0.1.0、前端 0.2.0、Profile `showcase_mvp`”的差异，必须在规格和发布记录中明确说明。
 - 任何改变官方 `user_agent.py`、`implementations/`、默认预算或 baseline 的变更，都超出本 ADR。
 - v1.2 必须为每个延期需求提供本地 ticket、依赖和验收用例，才能关闭 v1.1。
-

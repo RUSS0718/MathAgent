@@ -1,7 +1,9 @@
 # Solver Harness v1.2 Ticket 索引
 
-**状态：** planned  
-**依赖：** v1.1 的 SH-01..SH-05 全部关闭  
+**状态：** planned
+
+**依赖：** v1.1 的 SH-01..SH-05 全部关闭
+
 **权威范围：** [`showcase-solver-harness-v1.1-spec.md`](showcase-solver-harness-v1.1-spec.md) 与 STAR Core 实施规格
 
 v1.1 关闭前，本文件只冻结延期项的归属、依赖和验收入口；不提前实现，也不创建 GitHub Issue。每个 ticket 在进入 v1.2 时必须补齐文件所有权、失败测试和退出命令。
@@ -76,4 +78,3 @@ v1.1 关闭前，本文件只冻结延期项的归属、依赖和验收入口；
 - 未安装依赖或缺少凭证时保留跳过证据，不标为通过；
 - 每个 ticket 关闭时更新 v1.1 验收记录的延期表；
 - 只有 SH-01..SH-17 全部关闭，且 AC-01..AC-44 有实际结果，才能声明完整 STAR Core 工程合同完成；仍不得声明论文成绩复现。
-

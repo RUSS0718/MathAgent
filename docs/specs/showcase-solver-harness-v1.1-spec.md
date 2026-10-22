@@ -1,10 +1,15 @@
 # Solver Harness v1.1 实现规格
 
-**状态：** accepted for `showcase-solver-harness-v1`  
-**日期：** 2026-10-22  
-**产品版本：** v1.1  
-**基线：** `develop@700f42317df35aab6ae3f7bcda5193a4c88e17d0`  
-**上游合同：** [STAR Core Agent 实施规格](../prd/STAR_CORE/STAR_Core_v1_2/STAR_CORE_SPEC_AGENT_v1_2.md)  
+**状态：** accepted for `showcase-solver-harness-v1`
+
+**日期：** 2026-10-22
+
+**产品版本：** v1.1
+
+**基线：** `develop@700f42317df35aab6ae3f7bcda5193a4c88e17d0`
+
+**上游合同：** [STAR Core Agent 实施规格](../prd/STAR_CORE/STAR_Core_v1_2/STAR_CORE_SPEC_AGENT_v1_2.md)
+
 **决策：** [ADR-0013](../adr/0013-solver-harness-boundary-and-shared-transaction.md)
 
 ## 1. 范围与成功标准
@@ -311,32 +316,42 @@ v1.1 支持：
 
 ### SH-01：冻结 v1.1 基线并建立入口
 
-**依赖：** 无  
-**范围：** 文档状态、基线 hash、官方边界检查、v1.1 验收记录骨架  
+**依赖：** 无
+
+**范围：** 文档状态、基线 hash、官方边界检查、v1.1 验收记录骨架
+
 **验收：** ADR-0013、v1.1 规格和 `docs/README.md` 入口存在；官方冻结文件 hash 与基线一致；没有产品调用。
 
 ### SH-02：状态、事件与 revision 事务
 
-**依赖：** SH-01  
-**范围：** `ProblemState`、`solver_states`、`solver_events`、`commit_transition`、恢复  
+**依赖：** SH-01
+
+**范围：** `ProblemState`、`solver_states`、`solver_events`、`commit_transition`、恢复
+
 **验收：** AC-SH-05、AC-SH-06、AC-SH-08；三个既有回归文件未修改且通过。
 
 ### SH-03：ModelPort 与 Explore 阶段
 
-**依赖：** SH-02  
-**范围：** `ModelPort`、`ScriptedModelPort`、Explore 结果解析、预算门禁  
+**依赖：** SH-02
+
+**范围：** `ModelPort`、`ScriptedModelPort`、Explore 结果解析、预算门禁
+
 **验收：** AC-SH-03、AC-SH-04、AC-SH-07；测试零网络。
 
 ### SH-04：Explore 条件路由
 
-**依赖：** SH-03  
-**范围：** 纯函数转移与 LangGraph 条件边  
+**依赖：** SH-03
+
+**范围：** 纯函数转移与 LangGraph 条件边
+
 **验收：** AC-SH-01、AC-SH-02；两条分支均有独立断言。
 
 ### SH-05：整题审查与 v1.1 收口
 
-**依赖：** SH-02、SH-04  
-**范围：** `VerifierPort`、`ScriptedVerifierPort`、验收记录、全部 SC 归属检查  
+**依赖：** SH-02、SH-04
+
+**范围：** `VerifierPort`、`ScriptedVerifierPort`、验收记录、全部 SC 归属检查
+
 **验收：** AC-SH-01..08 全绿；v1.2 延期项均有 ticket、依赖和用例；发布记录明确 `engineering-preview`。
 
 ## 9. v1.2 延期合同
@@ -361,4 +376,3 @@ uv run python scripts/check.py --offline
 ```
 
 前端命令不属于 v1.1 的实现验收；若改动 `showcase/frontend/`，另行执行 `npm ci --no-audit --no-fund`、`npm audit --audit-level=high` 和 `npm run check`。
-
