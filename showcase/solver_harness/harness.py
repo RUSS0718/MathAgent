@@ -13,6 +13,7 @@ from typing import Any
 from ..redaction import redact
 from ..storage import SQLiteStore
 from .explore import ModelPort, run_exploration
+from .plan import validate_plan
 from .review import VerifierPort, review_solution
 from .step import run_step
 from .storage import (
@@ -21,6 +22,7 @@ from .storage import (
     SolverRevisionConflictError,
     SolverStateStore,
 )
+from .verification import verify_step
 
 __all__ = [
     "SolverHarness",
@@ -95,6 +97,12 @@ class SolverHarness:
             raise SolverValidationError("problem must be a non-empty string")
         if metadata is not None and not isinstance(metadata, Mapping):
             raise SolverValidationError("metadata must be a mapping")
+        if metadata is not None and "plan" in metadata:
+            try:
+                validate_plan(metadata["plan"])
+                _normalize_json_mapping(metadata["plan"], "plan")
+            except ValueError as exc:
+                raise SolverValidationError(str(exc)) from exc
         run_id = _run_id(metadata)
         problem_hash = hashlib.sha256(problem.encode("utf-8")).hexdigest()
         existing = self._state_store.get_run(run_id)
@@ -228,12 +236,20 @@ class SolverHarness:
             return self._run_exploration(run, problem)
         if self._model_port is None:
             return run
-        return run_step(
+        reported = run_step(
             self,
             run,
             problem=problem,
             plan=plan,
             model_port=self._model_port,
+            max_model_calls=_non_negative_config_int(self._config, "max_model_calls", 2),
+            max_runtime_seconds=_non_negative_config_int(
+                self._config, "max_total_duration_seconds", 3600
+            ),
+        )
+
+        return verify_step(
+            self, reported, problem=problem, verifier_port=self._verifier_port,
             max_model_calls=_non_negative_config_int(self._config, "max_model_calls", 2),
             max_runtime_seconds=_non_negative_config_int(
                 self._config, "max_total_duration_seconds", 3600
