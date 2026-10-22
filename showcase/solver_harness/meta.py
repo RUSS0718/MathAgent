@@ -124,6 +124,8 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
     )
     request["call_id"] = f"{session}:{revision}"
     request["state_revision"] = run["state_revision"]
+    request = harness.prepare_request(run, request)
+    request.update(allowed_tools=[], tool_policy={"allow": []})
     try:
         decision = _parse(dict(meta_port.complete(deepcopy(request))), guidance is not None)
         target = decision["trace_back_to"]
