@@ -9,7 +9,10 @@ from showcase.solver_harness import ScriptedModelPort, SolverHarness
 
 class SolverHarnessStepReportTest(unittest.TestCase):
     def test_supplied_plan_persists_conservative_step_report_for_review(self) -> None:
-        plan = {"version": 1, "steps": [{"step_id": "s1", "objective": "计算平方"}]}
+        plan = {
+            "version": 1,
+            "steps": [{"step_id": "s1", "title": "步骤一", "objective": "计算平方"}],
+        }
         port = ScriptedModelPort(
             [
                 {
@@ -53,7 +56,7 @@ class SolverHarnessStepReportTest(unittest.TestCase):
         self.assertEqual("s1", port.requests[0]["step"]["step_id"])
 
     def test_recovering_report_does_not_dispatch_another_step(self) -> None:
-        plan = {"version": 1, "steps": [{"step_id": "s1", "objective": "求值"}]}
+        plan = {"version": 1, "steps": [{"step_id": "s1", "title": "步骤一", "objective": "求值"}]}
         port = ScriptedModelPort(
             [
                 {
@@ -72,7 +75,7 @@ class SolverHarnessStepReportTest(unittest.TestCase):
         self.assertEqual("hard-verify", report["claims"][0]["label"])
 
     def test_supplied_plan_respects_budget_before_dispatch(self) -> None:
-        plan = {"version": 1, "steps": [{"step_id": "s1", "objective": "求值"}]}
+        plan = {"version": 1, "steps": [{"step_id": "s1", "title": "步骤一", "objective": "求值"}]}
         for config in ({"max_model_calls": 0}, {"max_total_duration_seconds": 0}):
             with self.subTest(config=config):
                 port = ScriptedModelPort([])
