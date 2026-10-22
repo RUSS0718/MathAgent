@@ -11,3 +11,9 @@
 发布命令：`uv run python scripts/check_solver_release.py` 检查矩阵、文档链接、官方基线与离线范围；`--matrix-only` 仅检查归属和测试引用；`--require-live` 必须阻塞。工程门禁通过也不授权修改官方入口或合入 main。
 
 本记录不宣称论文完整复现、完整形式化证明、数学正确率提升或真实策略收益。官方基线以根 BASELINE.json 的11个冻结文件为准，默认预算与输出合同不变。
+
+## 前端与官方边界预检
+
+2026-10-23，集成维护者在 integration `03a0d393dcc77f58c0a2ee9391cd32e18fcd562d` 主目录执行：`npm ci --no-audit --no-fund` 通过（66 packages），`npm audit --audit-level=high` 通过（0 vulnerabilities），`npm run check` 通过（依赖、typecheck、13项 unit、build）。前端源码未变，SH23工作树不重复安装。
+
+同一集成版本官方 baseline hash 检查通过；相对 `6d90e51` 的 `user_agent.py`、`implementations/`、`BASELINE.json`、`requirements.txt` 无差异。本工作树的新 gate 另行重新验证11个文件hash和官方导入/JSON合同。BASELINE.json SHA-256：`7c7dba5d0eb17d916228ee7c9ce86fe7375d3ae9d359686e54a71b277215465b`。

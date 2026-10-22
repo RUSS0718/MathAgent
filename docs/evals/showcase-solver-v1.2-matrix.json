@@ -14,7 +14,11 @@
     "live_release": "blocked",
     "model_calls": 8,
     "tool_calls": 0,
-    "evidence": "docs/evals/showcase-solver-intern-live-sh21.md"
+    "evidence": "docs/evals/showcase-solver-intern-live-sh21.md",
+    "probe_count": 2,
+    "provider_tokens": 12790,
+    "release_block_reason": "两个真实探针均未执行工具；SH22未执行真实配对，不能关闭live依赖",
+    "paired_status": "needs_review"
   },
   "star_ac": {
     "AC-01": {
@@ -941,6 +945,16 @@
         "tests.test_solver_release.SolverReleaseTest.test_official_entry_retains_json_output_and_baseline_import_boundary"
       ],
       "limitation": "最终责任归属；前置实现见父规格#32"
+    }
+  },
+  "frontend_check": {
+    "source_commit": "03a0d393dcc77f58c0a2ee9391cd32e18fcd562d",
+    "date": "2026-10-23",
+    "executed_by": "integration-maintainer",
+    "commands": {
+      "npm ci --no-audit --no-fund": "PASS:66packages",
+      "npm audit --audit-level=high": "PASS:0vulnerabilities",
+      "npm run check": "PASS:dependency/typecheck/13unit/build"
     }
   }
 }

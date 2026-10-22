@@ -31,6 +31,17 @@ def test_ids():
 
 
 def check_matrix(payload):
+    source = payload.get("source_commit", "")
+    if (
+        not re.fullmatch(r"[0-9a-f]{40}", source)
+        or subprocess.run(
+            ["git", "merge-base", "--is-ancestor", source, "HEAD"],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        ).returncode
+    ):
+        raise ValueError("release_source_not_ancestor")
     available = test_ids()
     for key, prefix, count in (("star_ac", "AC", 44), ("sc", "SC", 43)):
         expected = {
