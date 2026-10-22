@@ -71,18 +71,21 @@ def run_step(
     )
     try:
         reply = model_port.complete(
-            {
-                "run_id": run["run_id"],
-                "call_id": f"{run['run_id']}:reasoner:{plan['version']}:{step_id}{suffix}",
-                "session_key": session,
-                "failure_records": state["failure_records"],
-                "rescued_results": state.get("rescued_results", []),
-                "role": "reasoner",
-                "problem": problem,
-                "step": dict(step),
-                "state_revision": reserved["state_revision"],
-                "tool_policy": {"allow": []},
-            }
+            harness.prepare_request(
+                reserved,
+                {
+                    "run_id": run["run_id"],
+                    "call_id": f"{run['run_id']}:reasoner:{plan['version']}:{step_id}{suffix}",
+                    "session_key": session,
+                    "failure_records": state["failure_records"],
+                    "rescued_results": state.get("rescued_results", []),
+                    "role": "reasoner",
+                    "problem": problem,
+                    "step": dict(step),
+                    "state_revision": reserved["state_revision"],
+                    "tool_policy": {"allow": []},
+                },
+            )
         )
     except Exception:
         reply = {"blocked": True}
