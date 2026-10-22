@@ -29,7 +29,7 @@ def finish(harness, run, status, reason, candidate=""):
     updates = {
         "phase": "TERMINAL",
         "status": status,
-        "finalization_reason": reason,
+        "result_reason": reason,
         "final_response": candidate or f"No verified final answer is available: {reason}.",
     }
     if "budget_exhausted" in reason:
@@ -46,22 +46,23 @@ def dispatch(harness, run, operation, request):
         {"counters": {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1}},
         role=request["role"],
     )
-    request = harness.prepare_request(
-        run,
-        {
-            "run_id": run["run_id"],
-            "call_id": f"{run['run_id']}:{request['role']}:{run['state_revision']}",
-            "allowed_tools": [],
-            "tool_policy": {"allow": []},
-            **request,
-        },
-    )
-    request.update(allowed_tools=[], tool_policy={"allow": []})
+    request = {
+        "run_id": run["run_id"],
+        "call_id": f"{run['run_id']}:{request['role']}:{run['state_revision']}",
+        "allowed_tools": [],
+        "tool_policy": {"allow": []},
+        **request,
+    }
+    if request["role"] in {"final_generator", "whole_solution_verifier"}:
+        request["finalization_scope"] = True
+
+    def invoke(prepared):
+        prepared = deepcopy(prepared)
+        prepared.update(allowed_tools=[], tool_policy={"allow": []})
+        return operation(prepared)
+
     try:
-        if hasattr(harness, "dispatch"):
-            reply = harness.dispatch(run, operation, request)
-        else:
-            reply = operation(deepcopy(request))
+        reply = harness.dispatch(run, invoke, request)
         return run, redact(deepcopy(dict(reply)))
     except Exception:
         return run, None
@@ -77,6 +78,12 @@ def valid_facts(state):
         if steps.get(step["step_id"], {}).get("verification", {}).get("valid") is True
         and steps[step["step_id"]]["verification"].get("verdict") == "ACCEPT"
     }
+    invalid_ids = {
+        result.get("result_id")
+        for failure in state.get("failure_records", [])
+        for result in failure.get("invalidated_results", [])
+        if result.get("result_id")
+    }
     known = set(accepted_steps)
     pending = deepcopy(state.get("accepted_results", []))
     facts = []
@@ -86,6 +93,9 @@ def valid_facts(state):
             dependencies = fact.get("dependencies")
             if (
                 not fact.get("invalidated")
+                and fact.get("valid", True)
+                and fact.get("status") not in {"INVALIDATED", "invalidated"}
+                and fact.get("result_id") not in invalid_ids
                 and fact.get("evidence_level") in {"llm_reviewed", "tool_verified"}
                 and isinstance(fact.get("statement"), str)
                 and fact["statement"].strip()
@@ -188,7 +198,11 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
                 ],
             },
         )
-        valid = isinstance(review, Mapping) and review.get("verdict") in {"ACCEPT", "REJECT"}
+        valid = (
+            isinstance(review, Mapping)
+            and isinstance(review.get("verdict"), str)
+            and review["verdict"] in {"ACCEPT", "REJECT"}
+        )
         attempt["review"] = (
             review
             if valid

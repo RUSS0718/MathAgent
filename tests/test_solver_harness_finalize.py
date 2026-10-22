@@ -24,7 +24,14 @@ class FinalizeTest(unittest.TestCase):
         verifier = ScriptedVerifierPort(
             [ACCEPT, {"verdict": "REJECT", "reason": "missing boundary"}, {"verdict": "ACCEPT"}]
         )
-        with SolverHarness(model_port=model, verifier_port=verifier, config=CONFIG) as harness:
+        with SolverHarness(
+            model_port=model,
+            verifier_port=verifier,
+            config={
+                **CONFIG,
+                "features": {**CONFIG["features"], "persistent_sessions": True, "skills": True},
+            },
+        ) as harness:
             result = harness.solve("prove", {"run_id": "final", "plan": PLAN})
             self.assertEqual(result, harness.get_run("final"))
         self.assertEqual("completed_llm_reviewed", result["state"]["status"])
@@ -34,6 +41,10 @@ class FinalizeTest(unittest.TestCase):
             verifier.requests[1]["session_key"], verifier.requests[2]["session_key"]
         )
         self.assertEqual("missing boundary", model.requests[2]["previous_review"]["reason"])
+        self.assertEqual([], model.requests[1]["allowed_tools"])
+        projection = model.requests[1]["prompt_layers"][-1]["state"]
+        self.assertEqual(model.requests[1]["accepted_results"], projection["accepted_results"])
+        self.assertNotIn("verified_results_ledger", projection)
 
     def test_explore_plan_step_final_runs_without_supplied_plan(self):
         model = ScriptedModelPort(
@@ -62,7 +73,7 @@ class FinalizeTest(unittest.TestCase):
         with SolverHarness(model_port=model, verifier_port=verifier, config=CONFIG) as harness:
             state = harness.solve("prove", {"plan": PLAN})["state"]
         self.assertEqual("partial_aborted", state["status"])
-        self.assertEqual("final_review_retries_exhausted", state["finalization_reason"])
+        self.assertEqual("final_review_retries_exhausted", state["result_reason"])
         self.assertEqual(3, len(state["final_solution_attempts"]))
         self.assertTrue(
             all(a["review"]["verdict"] == "REJECT" for a in state["final_solution_attempts"])
@@ -101,7 +112,7 @@ class FinalizeTest(unittest.TestCase):
             state = harness.solve("prove", {"plan": PLAN})["state"]
         self.assertEqual("completed_unverified", state["status"])
         self.assertEqual("candidate", state["final_response"])
-        self.assertEqual("final_verifier_failed", state["finalization_reason"])
+        self.assertEqual("final_verifier_failed", state["result_reason"])
 
     def test_absent_final_verifier_and_invalid_fact_filter_at_recovery(self):
         from showcase.storage import SQLiteStore
@@ -146,5 +157,16 @@ class FinalizeTest(unittest.TestCase):
             result = harness.solve("prove", {"run_id": "recover"})
             self.assertEqual(result, harness.get_run("recover"))
         self.assertEqual("completed_unverified", result["state"]["status"])
-        self.assertEqual("final_verifier_unavailable", result["state"]["finalization_reason"])
+        self.assertEqual("final_verifier_unavailable", result["state"]["result_reason"])
         self.assertEqual(["safe"], [f["statement"] for f in model.requests[0]["accepted_results"]])
+
+    def test_malformed_final_review_is_unavailable_not_accepted(self):
+        with SolverHarness(
+            model_port=ScriptedModelPort([{"argument": "valid"}, {"final_response": "candidate"}]),
+            verifier_port=ScriptedVerifierPort([ACCEPT, {"verdict": ["ACCEPT"]}]),
+            config=CONFIG,
+        ) as harness:
+            state = harness.solve("prove", {"plan": PLAN})["state"]
+        self.assertEqual("completed_unverified", state["status"])
+        self.assertEqual("final_verifier_failed", state["result_reason"])
+        self.assertIsNone(state["finalization_reason"])
