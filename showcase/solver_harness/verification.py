@@ -53,6 +53,7 @@ def verify_step(
     """Review one report once, leaving later phases to their owning slices."""
     if verifier_port is None or run["state"]["phase"] != "STEP_VERIFY":
         return run
+    run = harness.precheck_report(run)
     state = run["state"]
     suffix = f"-challenge-{round_number}" if round_number else ""
     attempt = state["attempt_index"]
