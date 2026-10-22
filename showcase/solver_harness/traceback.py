@@ -9,7 +9,16 @@ def apply_traceback(harness, run):
     if state["phase"] not in ("TRACE_BACK", "STEP_VERIFY"):
         return run
     step_id = state["current_step"]
-    verification = state["steps"][step_id].get("verification", {})
+    verification = state["steps"].get(step_id, {}).get("verification", {})
+    meta = state.get("meta_decision", {})
+    from_meta = state["phase"] == "TRACE_BACK" and meta.get("decision") == "TRACE_BACK"
+    if from_meta:
+        verification = {
+            **meta,
+            "verdict": "TRACE_BACK",
+            "valid": True,
+            "reason": meta["reason_summary"],
+        }
     if verification.get("verdict") != "TRACE_BACK":
         return run
     target = verification.get("trace_back_to")
@@ -83,7 +92,7 @@ def apply_traceback(harness, run):
             rescued.append(deepcopy(result))
     failure = {
         "kind": "trace_back",
-        "triggered_by": "verifier",
+        "triggered_by": "meta" if from_meta else "verifier",
         "reason": verification.get("reason") or verification.get("objection", ""),
         "forbidden_directions": verification.get("forbidden_directions", []),
         "plan_version": state["plan_version"],
