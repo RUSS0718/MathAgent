@@ -346,11 +346,11 @@
       "owner": "SH-22",
       "issue": 54,
       "evidence_mode": "scripted",
-      "status": "covered",
+      "status": "needs_review",
       "tests": [
         "tests.test_solver_harness_paired.PairedRunTest.test_common_budget_permission_and_observable_model_mismatch_reject_before_dispatch"
       ],
-      "limitation": "离线工程行为，不代表真实数学能力"
+      "limitation": "已有配置拒绝与零调用覆盖，但准确Profile和扩展/预算跳过原因公开断言待补"
     },
     "AC-34": {
       "owner": "SH-17",
@@ -488,7 +488,7 @@
       "owner": "SH-05",
       "issue": 37,
       "evidence_mode": "scripted",
-      "status": "covered",
+      "status": "needs_review",
       "tests": [
         "tests.test_solver_harness_review.SolverHarnessReviewTest.test_accept_completes_without_plan_and_survives_recovery",
         "tests.test_solver_harness_review.SolverHarnessReviewTest.test_reject_preserves_findings_and_hands_off_to_plan",
@@ -522,7 +522,7 @@
       "owner": "SH-07",
       "issue": 39,
       "evidence_mode": "scripted",
-      "status": "covered",
+      "status": "needs_review",
       "tests": [
         "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_invalid_plan_never_dispatches",
         "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_only_strict_double_gate_accept_advances_and_persists_evidence"
@@ -866,7 +866,11 @@
       "status": "covered",
       "tests": [
         "tests.test_solver_harness_result_replay.ResultReplayTest.test_adapter_never_exposes_internal_decision_or_empty_answer",
-        "tests.test_solver_harness_result_replay.ResultReplayTest.test_empty_snapshot_replay_is_deterministic_without_optional_fields"
+        "tests.test_solver_harness_result_replay.ResultReplayTest.test_empty_snapshot_replay_is_deterministic_without_optional_fields",
+        "tests.test_solver_harness_result_replay.ResultReplayTest.test_persisted_budget_result_exports_only_answer_and_replays_without_calls",
+        "tests.test_solver_harness_streaming.StreamingTest.test_prior_process_inflight_stream_becomes_unknown_without_retry",
+        "tests.test_solver_harness_streaming.StreamingTest.test_partial_output_survives_restart_and_requires_explicit_new_retry_call",
+        "tests.test_solver_harness_paired.PairedRunTest.test_adapter_attempts_unknown_usage_and_declared_identity_are_checked"
       ],
       "limitation": "最终责任归属；前置实现见父规格#32"
     },
