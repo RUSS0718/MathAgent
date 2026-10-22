@@ -10,8 +10,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ..redaction import redact
 from ..storage import SQLiteStore
-from .storage import SolverPersistenceError, SolverStateStore
+from .storage import (
+    SolverEventConflictError,
+    SolverPersistenceError,
+    SolverRevisionConflictError,
+    SolverStateStore,
+)
+
+__all__ = [
+    "SolverHarness",
+    "SolverHarnessError",
+    "SolverEventConflictError",
+    "SolverIdentityError",
+    "SolverRevisionConflictError",
+    "SolverRunNotFoundError",
+    "SolverValidationError",
+]
 
 
 class SolverHarnessError(RuntimeError):
@@ -114,6 +130,66 @@ class SolverHarness:
         self._validate_identity(result, normalized_run_id, problem_hash)
         return result
 
+    def commit_event(
+        self,
+        run_id: str,
+        *,
+        expected_revision: int,
+        event: Mapping[str, Any],
+        state_updates: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Append one event and apply its state patch using revision compare-and-swap.
+
+        The event must include a stable ``event_id`` and ``type``. Replaying the
+        same event and patch is idempotent, even when ``expected_revision`` is now
+        stale. Snapshot identity, revision, and timestamps are maintained here.
+        """
+
+        if not isinstance(run_id, str) or not run_id.strip():
+            raise SolverValidationError("run_id must be a non-empty string")
+        normalized_run_id = run_id.strip()
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+            raise SolverValidationError("expected_revision must be a non-negative integer")
+        if expected_revision < 0:
+            raise SolverValidationError("expected_revision must be a non-negative integer")
+
+        normalized_event = redact(_normalize_json_mapping(event, "event"))
+        event_id = normalized_event.get("event_id")
+        if not isinstance(event_id, str) or not event_id.strip():
+            raise SolverValidationError("event.event_id must be a non-empty string")
+        normalized_event["event_id"] = event_id.strip()
+        event_type = normalized_event.get("type")
+        if not isinstance(event_type, str) or not event_type.strip():
+            raise SolverValidationError("event.type must be a non-empty string")
+        normalized_event["type"] = event_type.strip()
+        if {"run_id", "state_revision", "created_at", "_request_hash"} & normalized_event.keys():
+            raise SolverValidationError("event cannot set storage-managed fields")
+
+        update_input = {} if state_updates is None else state_updates
+        normalized_updates = _normalize_json_mapping(update_input, "state_updates")
+        if {
+            "run_id",
+            "problem_hash",
+            "config_hash",
+            "state_revision",
+            "created_at",
+            "updated_at",
+        } & normalized_updates.keys():
+            raise SolverValidationError("state_updates cannot change identity or revision fields")
+
+        # Validate the persisted run identity before writing through this Harness.
+        self.get_run(normalized_run_id)
+        request_hash = _hash_json(
+            {"event": normalized_event, "state_updates": normalized_updates}
+        )
+        return self._state_store.commit_event(
+            normalized_run_id,
+            expected_revision=expected_revision,
+            event=normalized_event,
+            state_updates=normalized_updates,
+            request_hash=request_hash,
+        )
+
     def _validate_identity(
         self,
         result: Mapping[str, Any],
@@ -169,6 +245,20 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
 def _hash_json(value: Mapping[str, Any]) -> str:
     payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _normalize_json_mapping(value: Mapping[str, Any] | None, label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise SolverValidationError(f"{label} must be a mapping")
+    try:
+        normalized = json.loads(
+            json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        )
+    except (TypeError, ValueError) as exc:
+        raise SolverValidationError(f"{label} must be JSON serializable") from exc
+    if not isinstance(normalized, dict):
+        raise SolverValidationError(f"{label} must be a mapping")
+    return normalized
 
 
 def _initial_state(run_id: str, problem_hash: str, config_hash: str) -> dict[str, Any]:
