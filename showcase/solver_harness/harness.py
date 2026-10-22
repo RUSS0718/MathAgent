@@ -14,6 +14,7 @@ from ..redaction import redact
 from ..storage import SQLiteStore
 from .explore import ModelPort, run_exploration
 from .review import VerifierPort, review_solution
+from .step import run_step
 from .storage import (
     SolverEventConflictError,
     SolverPersistenceError,
@@ -83,8 +84,9 @@ class SolverHarness:
     ) -> dict[str, Any]:
         """Initialize or recover a run; optional ``metadata['run_id']`` selects its ID.
 
-        If metadata omits ``run_id``, one is generated. The input problem and metadata
-        are not persisted. An injected model port enables bounded exploration;
+        If metadata omits ``run_id``, one is generated. The input problem is not persisted. An explicit ``metadata['plan']``
+        runs its first step; the supplied Plan and report are persisted.
+        An injected model port otherwise enables bounded exploration;
         otherwise only initialization runs. Reusing a run ID with different problem
         or config content is rejected.
         """
@@ -100,7 +102,7 @@ class SolverHarness:
             self._validate_identity(existing, run_id, problem_hash)
             if self._model_port is None or existing["state"].get("phase") != "SETUP":
                 return existing
-            return self._run_exploration(existing, problem)
+            return self._run_supplied_plan_or_explore(existing, problem, metadata)
 
         state = _initial_state(run_id, problem_hash, self._config_hash)
         event = {
@@ -122,7 +124,7 @@ class SolverHarness:
             raise SolverPersistenceError("create_run")
         if self._model_port is None:
             return created
-        return self._run_exploration(created, problem)
+        return self._run_supplied_plan_or_explore(created, problem, metadata)
 
     def get_run(self, run_id: str, *, problem: str | None = None) -> dict[str, Any]:
         """Recover a run and optionally verify the expected problem identity."""
@@ -214,6 +216,29 @@ class SolverHarness:
             raise SolverIdentityError("run_id already belongs to a different problem")
         if state.get("config_hash") != self._config_hash:
             raise SolverIdentityError("run_id already belongs to a different config")
+
+    def _run_supplied_plan_or_explore(
+        self,
+        run: dict[str, Any],
+        problem: str,
+        metadata: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        plan = None if metadata is None else metadata.get("plan")
+        if plan is None:
+            return self._run_exploration(run, problem)
+        if self._model_port is None:
+            return run
+        return run_step(
+            self,
+            run,
+            problem=problem,
+            plan=plan,
+            model_port=self._model_port,
+            max_model_calls=_non_negative_config_int(self._config, "max_model_calls", 2),
+            max_runtime_seconds=_non_negative_config_int(
+                self._config, "max_total_duration_seconds", 3600
+            ),
+        )
 
     def _run_exploration(self, run: dict[str, Any], problem: str) -> dict[str, Any]:
         if self._model_port is None:
