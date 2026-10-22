@@ -26,6 +26,9 @@ def run_step(
         plan["steps"][0],
     )
     step_id = step["step_id"]
+    attempt = state["attempt_index"]
+    suffix = f"-attempt-{attempt}" if attempt else ""
+    session = f"reasoner:{run['run_id']}:plan{plan['version']}:attempt{attempt}"
     counters = dict(state["counters"])
     elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
     reason = None
@@ -54,7 +57,7 @@ def run_step(
         run["run_id"],
         expected_revision=run["state_revision"],
         event={
-            "event_id": f"step-dispatched-{step_id}",
+            "event_id": f"step-dispatched-{step_id}{suffix}",
             "type": "step_dispatched",
             "step_id": step_id,
         },
@@ -70,7 +73,10 @@ def run_step(
         reply = model_port.complete(
             {
                 "run_id": run["run_id"],
-                "call_id": f"{run['run_id']}:reasoner:{plan['version']}:{step_id}",
+                "call_id": f"{run['run_id']}:reasoner:{plan['version']}:{step_id}{suffix}",
+                "session_key": session,
+                "failure_records": state["failure_records"],
+                "rescued_results": state.get("rescued_results", []),
                 "role": "reasoner",
                 "problem": problem,
                 "step": dict(step),
@@ -84,7 +90,11 @@ def run_step(
     return harness.commit_event(
         run["run_id"],
         expected_revision=reserved["state_revision"],
-        event={"event_id": f"step-reported-{step_id}", "type": "step_reported", "step_id": step_id},
+        event={
+            "event_id": f"step-reported-{step_id}{suffix}",
+            "type": "step_reported",
+            "step_id": step_id,
+        },
         state_updates={
             "phase": "STEP_VERIFY",
             "steps": {**state["steps"], step_id: {"status": "VERIFYING", "report": report}},
