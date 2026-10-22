@@ -208,6 +208,30 @@ class SolverHarness:
             request_hash=request_hash,
         )
 
+    def prepare_request(self, run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
+        """Compose opt-in protocols from the current persisted run projection."""
+        from .prompts import compose_request
+
+        if self._config.get("features", {}).get("skills") is not True:
+            return dict(request)
+        latest = self.get_run(run["run_id"])
+        return compose_request(latest, request)
+
+    def execute_tool_request(
+        self,
+        run_id: str,
+        *,
+        role: str,
+        tool: str,
+        arguments: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Enforce a same-run read whitelist before accessing state."""
+        from .tool_policy import execute_tool_request
+
+        return execute_tool_request(
+            self, run_id, role=role, tool=tool, arguments=arguments, config=self._config
+        )
+
     def _validate_identity(
         self,
         result: Mapping[str, Any],

@@ -87,14 +87,17 @@ def review_solution(
     )
     try:
         reply = verifier_port.verify(
-            {
-                "run_id": run_id,
-                "call_id": f"{run_id}:whole-solution-review",
-                "role": "whole_solution_verifier",
-                "problem": problem,
-                "solution_candidate": candidate,
-                "state_revision": reserved["state_revision"],
-            }
+            harness.prepare_request(
+                reserved,
+                {
+                    "run_id": run_id,
+                    "call_id": f"{run_id}:whole-solution-review",
+                    "role": "whole_solution_verifier",
+                    "problem": problem,
+                    "solution_candidate": candidate,
+                    "state_revision": reserved["state_revision"],
+                },
+            )
         )
     except Exception:
         return harness.commit_event(
