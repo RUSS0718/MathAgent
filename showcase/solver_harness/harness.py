@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -75,6 +76,7 @@ class SolverHarness:
     ) -> None:
         if store is not None and database_path is not None:
             raise SolverValidationError("provide either store or database_path")
+        self._instance_id = uuid.uuid4().hex
         self._config = _normalize_config(config)
         self._config_hash = _hash_json(self._config)
         self._tool_port = tool_port
@@ -87,7 +89,16 @@ class SolverHarness:
         )
         self._state_store = SolverStateStore(self._showcase_store._connection)
 
-    def solve(
+    def solve(self, problem, metadata=None):
+        """Solve or recover; interrupted calls require explicit retry authorization."""
+        from .calls import CallInterrupted
+
+        try:
+            return self._solve(problem, metadata)
+        except CallInterrupted as exc:
+            return self.get_run(exc.run_id)
+
+    def _solve(
         self,
         problem: str,
         metadata: Mapping[str, Any] | None = None,
@@ -116,6 +127,16 @@ class SolverHarness:
         existing = self._state_store.get_run(run_id)
         if existing is not None:
             self._validate_identity(existing, run_id, problem_hash)
+            if self._config.get("features", {}).get("stream_recovery") is True:
+                from .calls import recover_inflight, retry_call
+
+                existing = recover_inflight(self, existing)
+                if existing["state"]["phase"] == "TERMINAL":
+                    return existing
+                if metadata is not None and "retry_call" in metadata:
+                    return retry_call(self, existing, problem, metadata["retry_call"])
+                if existing["state"].get("status") in {"interrupted", "recovered_pending_validation"}:
+                    return existing
             resumable = existing["state"].get("phase") == "SETUP" or (
                 self._config.get("features", {}).get("persistent_sessions") is True
                 and existing["state"].get("phase") == "PLAN"
@@ -167,6 +188,10 @@ class SolverHarness:
             None if problem is None else hashlib.sha256(problem.encode("utf-8")).hexdigest()
         )
         self._validate_identity(result, normalized_run_id, problem_hash)
+        if self._config.get("features", {}).get("stream_recovery") is True:
+            from .calls import recover_inflight
+
+            return recover_inflight(self, result)
         return result
 
     def commit_event(
@@ -182,6 +207,8 @@ class SolverHarness:
         The event must include a stable ``event_id`` and ``type``. Replaying the
         same event and patch is idempotent, even when ``expected_revision`` is now
         stale. Snapshot identity, revision, and timestamps are maintained here.
+        With stream recovery enabled, terminal runs permit empty audit events and
+        call_audit patches of calls only; business state remains frozen.
         """
 
         if not isinstance(run_id, str) or not run_id.strip():
@@ -217,7 +244,13 @@ class SolverHarness:
             raise SolverValidationError("state_updates cannot change identity or revision fields")
 
         # Validate the persisted run identity before writing through this Harness.
-        self.get_run(normalized_run_id)
+        current = self.get_run(normalized_run_id)
+        if (self._config.get("features", {}).get("stream_recovery") is True
+                and current["state"]["phase"] == "TERMINAL"
+                and not any(item["event_id"] == normalized_event["event_id"] for item in current["events"])
+                and normalized_updates
+                and not (normalized_event["type"] == "call_audit" and set(normalized_updates) <= {"calls"})):
+            raise SolverValidationError("terminal run is frozen; only call audit updates are allowed")
         request_hash = _hash_json({"event": normalized_event, "state_updates": normalized_updates})
         return self._state_store.commit_event(
             normalized_run_id,
@@ -249,7 +282,7 @@ class SolverHarness:
             prepared["state_revision"] = latest["state_revision"]
         tools = allowed_tool_ids(latest, request.get("role"), self._config, self._tool_port)
         if tools:
-            prepared["allowed_tools"] = [*prepared.get("allowed_tools", []), *tools]
+            prepared["allowed_tools"] = list(dict.fromkeys([*prepared.get("allowed_tools", []), *tools]))
             prepared["tool_policy"] = {"allow": prepared["allowed_tools"]}
         return prepared
 
@@ -263,6 +296,10 @@ class SolverHarness:
         """Invoke one model operation with optional audited session continuity."""
         from .sessions import dispatch
 
+        if self._config.get("features", {}).get("stream_recovery") is True:
+            from .calls import dispatch as audit_dispatch
+
+            return audit_dispatch(self, run, operation, request, dispatch)
         return dispatch(self, run, operation, request)
 
     def execute_tool_request(

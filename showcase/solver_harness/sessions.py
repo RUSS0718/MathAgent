@@ -131,6 +131,7 @@ def dispatch(harness, run, operation, request):
     prepared = harness.prepare_request(latest, prepared)
     prepared["state_revision"] = latest["state_revision"]
     response = operation(deepcopy(prepared))
+    latest = harness.get_run(run["run_id"])
     record = append_exchange(record, prepared, response)
     registry = {**latest["state"].get("session_registry", {}), record["session_key"]: record}
     updated = harness.commit_event(
