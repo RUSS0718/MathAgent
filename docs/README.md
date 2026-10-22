@@ -73,6 +73,10 @@ v0.2 PRD 是待评审提案；不覆盖这些 accepted ADR，也不授权修改�
 
 ## 工程环境与 agent 约定
 
+- [UI 复现指导](frontend/ui-reproduction-guide.md)：后续 agent 的执行入口，包含环境、页面矩阵、组件、状态与像素回归步骤。
+- [设计系统](../DESIGN.md)、[产品边界](../PRODUCT.md)：当前统一视觉语言与产品事实。
+- [前端统一验收合同](frontend/ui-unification-contract.md)、[验证记录](frontend/ui-verification.md)：实施范围、实际检查结果和证据限制。
+
 - [初始化蓝图](engineering-bootstrap-plan.md)、[Codespace 调研](research/codespace-bootstrap-landscape.md)
 - [提交与分支规范](engineering/commit-convention.md)
 - [Issue tracker](agents/issue-tracker.md)、[状态标签](agents/triage-labels.md)、[领域文档约定](agents/domain.md)

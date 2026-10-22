@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-22T08:30:00.688786+00:00",
+  "title": "Design System: MathAgent Showcase",
+  "extensions": {
+    "shadows": [
+      {
+        "name": "shadow-overlay",
+        "value": "0 16px 48px rgb(24 35 47 / 16%)",
+        "purpose": "仅用于原生模态抽屉。"
+      }
+    ],
+    "motion": [
+      {
+        "name": "motion-fast",
+        "value": "160ms",
+        "purpose": "按钮颜色与边界过渡。"
+      },
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(.16, 1, .3, 1)",
+        "purpose": "按钮过渡；reduced-motion 时禁用。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "mobile",
+        "value": "760px"
+      },
+      {
+        "name": "inspector-drawer",
+        "value": "1180px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "按钮 primary",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "自有 UiButton 的原生按钮变体。",
+      "html": "<button class=\"ds-button\">提交</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 12px;border:1px solid var(--border-strong);border-radius:var(--radius-md);background:var(--surface);color:var(--text);font:600 .875rem/1.6 var(--font-ui);transition:background-color 160ms cubic-bezier(.16,1,.3,1),border-color 160ms cubic-bezier(.16,1,.3,1)}.ds-button:hover{background:var(--surface-muted);border-color:var(--muted)}.ds-button:active{background:var(--border)}.ds-button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.ds-button:disabled{opacity:.48}.ds-button{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}.ds-button:hover,.ds-button:active{background:var(--accent-strong);border-color:var(--accent-strong)}@media(prefers-reduced-motion:reduce){.ds-button{transition:none}}"
+    },
+    {
+      "name": "按钮 secondary",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "自有 UiButton 的原生按钮变体。",
+      "html": "<button class=\"ds-button\">重新连接</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 12px;border:1px solid var(--border-strong);border-radius:var(--radius-md);background:var(--surface);color:var(--text);font:600 .875rem/1.6 var(--font-ui);transition:background-color 160ms cubic-bezier(.16,1,.3,1),border-color 160ms cubic-bezier(.16,1,.3,1)}.ds-button:hover{background:var(--surface-muted);border-color:var(--muted)}.ds-button:active{background:var(--border)}.ds-button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.ds-button:disabled{opacity:.48}@media(prefers-reduced-motion:reduce){.ds-button{transition:none}}"
+    },
+    {
+      "name": "按钮 ghost",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "自有 UiButton 的原生按钮变体。",
+      "html": "<button class=\"ds-button\">返回列表</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 12px;border:1px solid var(--border-strong);border-radius:var(--radius-md);background:var(--surface);color:var(--text);font:600 .875rem/1.6 var(--font-ui);transition:background-color 160ms cubic-bezier(.16,1,.3,1),border-color 160ms cubic-bezier(.16,1,.3,1)}.ds-button:hover{background:var(--surface-muted);border-color:var(--muted)}.ds-button:active{background:var(--border)}.ds-button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.ds-button:disabled{opacity:.48}.ds-button{background:transparent;border-color:transparent;color:var(--muted)}@media(prefers-reduced-motion:reduce){.ds-button{transition:none}}"
+    },
+    {
+      "name": "按钮 danger",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "自有 UiButton 的原生按钮变体。",
+      "html": "<button class=\"ds-button\">删除</button>",
+      "css": ".ds-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 12px;border:1px solid var(--border-strong);border-radius:var(--radius-md);background:var(--surface);color:var(--text);font:600 .875rem/1.6 var(--font-ui);transition:background-color 160ms cubic-bezier(.16,1,.3,1),border-color 160ms cubic-bezier(.16,1,.3,1)}.ds-button:hover{background:var(--surface-muted);border-color:var(--muted)}.ds-button:active{background:var(--border)}.ds-button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.ds-button:disabled{opacity:.48}.ds-button{color:var(--danger);border-color:var(--danger)}.ds-button:hover{background:var(--danger-wash);border-color:var(--danger)}@media(prefers-reduced-motion:reduce){.ds-button{transition:none}}"
+    },
+    {
+      "name": "数学输入",
+      "kind": "input",
+      "description": "输入容器的边界与原生焦点；示意不包含业务提交逻辑。",
+      "html": "<div class=\"ds-composer\"><textarea class=\"ds-input\" aria-label=\"数学问题\" placeholder=\"输入数学问题\"></textarea></div>",
+      "css": ".ds-composer{padding:12px;border:1px solid var(--border-strong);border-radius:var(--radius-lg);background:var(--surface)}.ds-composer:focus-within{border-color:var(--accent)}.ds-input{width:100%;min-height:76px;padding:8px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--text);font:.875rem/1.6 var(--font-ui);resize:vertical}.ds-input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}"
+    },
+    {
+      "name": "阅读页导航",
+      "kind": "nav",
+      "description": "当前导航使用 aria-current 与浅强调底。",
+      "html": "<nav class=\"ds-nav\" aria-label=\"主导航\"><a href=\"#workspace\">数学工作区</a><a href=\"#campaigns\" aria-current=\"page\">配对实验</a><a href=\"#settings\">设置</a></nav>",
+      "css": ".ds-nav{display:flex;gap:8px;font:.875rem/1.6 var(--font-ui)}.ds-nav a{display:inline-flex;align-items:center;min-height:40px;padding:8px 12px;border-radius:var(--radius-md);color:var(--muted);text-decoration:none}.ds-nav a:hover{background:var(--surface-muted);color:var(--text)}.ds-nav a[aria-current]{background:var(--accent-wash);color:var(--accent-strong);font-weight:600}.ds-nav a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}"
+    },
+    {
+      "name": "状态徽标",
+      "kind": "chip",
+      "refersTo": "status-badge",
+      "description": "文字和原始代码并列，不是可点击按钮。",
+      "html": "<span class=\"ds-badge\"><span class=\"ds-dot\" aria-hidden=\"true\"></span>演示 <span class=\"ds-code\">fake</span></span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;flex-wrap:wrap;gap:6px;padding:4px 8px;border-radius:var(--radius-sm);background:var(--warning-wash);color:var(--warning);font:600 .75rem/1.5 var(--font-ui)}.ds-dot{width:6px;height:6px;border-radius:50%;background:currentColor}.ds-code{font-weight:400}"
+    },
+    {
+      "name": "数学报告",
+      "kind": "card",
+      "refersTo": "report-card",
+      "description": "平面阅读容器；小屏缩小内边距。",
+      "html": "<section class=\"ds-report\"><h2>数学报告</h2><p>这里显示公开答案与验证限制。</p></section>",
+      "css": ".ds-report{padding:24px;border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);color:var(--text);font:1rem/1.8 var(--font-ui)}.ds-report h2{margin:0 0 12px;font-size:1.125rem;line-height:1.4}.ds-report p{margin:12px 0}@media(max-width:760px){.ds-report{padding:16px}}"
+    }
+  ],
+  "narrative": {
+    "overview": "这是既有 accepted 工作区的系统整理，不引入新的品牌隐喻。依据是 `docs/frontend/v0.2-workspace-redesign.md`、`docs/frontend/ui-unification-contract.md` 与当前实现。中性浅色表面和蓝绿色强调色服务数学阅读、输入和运行观察；状态文字必须说明执行模式及验证边界。",
+    "keyCharacteristics": [
+      "对话居中，运行观察与会话导航分列；窄屏使用原生模态抽屉。",
+      "设置、配对实验和运行证据共享阅读页框架。",
+      "自有 Vue 控件源码，单一 SVG 图标库；旧展示入口共享同一 token 文件。"
+    ],
+    "rules": [
+      {
+        "name": "The State Evidence Rule",
+        "body": "状态点必须伴随文字；颜色和 completed/succeeded 都不能作为数学正确性的证明。",
+        "section": "colors"
+      }
+    ],
+    "dos": [
+      "**Do** 从 tokens.css 与 components/ui 复用值和控件，新增页面先采用现有框架。",
+      "**Do** 保留中文状态、模式原值、验证限制、可见焦点与失败重试。",
+      "**Do** 在固定浏览器环境与四档宽度复核截图后更新记录。"
+    ],
+    "donts": [
+      "**Don't** 引入第二套框架、状态、数学渲染或图标库，或 CDN 字体与运行时资源。",
+      "**Don't** 用渐变、大面积装饰和无信息卡片替代数学内容。",
+      "**Don't** 将界面通过、演示数据或有限验证声明为数学能力提升。"
+    ]
+  }
+}
