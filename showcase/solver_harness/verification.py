@@ -55,6 +55,8 @@ def verify_step(
         return run
     state = run["state"]
     suffix = f"-challenge-{round_number}" if round_number else ""
+    attempt = state["attempt_index"]
+    suffix += f"-attempt-{attempt}" if attempt else ""
     step_id = state["current_step"]
     plan = state["plan"]
     index = next(i for i, step in enumerate(plan["steps"]) if step["step_id"] == step_id)
@@ -101,7 +103,8 @@ def verify_step(
                 {
                     "run_id": run["run_id"],
                     "call_id": f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}",
-                    "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}",
+                    "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}"
+                    + (f"-attempt-{attempt}" if attempt else ""),
                     "round": round_number,
                     "challenge_history": state["steps"][step_id].get("challenge_history", []),
                     "role": "step_verifier",
@@ -121,6 +124,12 @@ def verify_step(
         if isinstance(reply, Mapping) and isinstance(reply.get("objection", ""), str)
         else ""
     )
+    if isinstance(reply, Mapping):
+        if isinstance(reply.get("reason"), str):
+            verification["reason"] = reply["reason"]
+        directions = reply.get("forbidden_directions")
+        if isinstance(directions, list) and all(isinstance(item, str) for item in directions):
+            verification["forbidden_directions"] = directions
     accepted = verification["valid"] and verification["verdict"] == "ACCEPT"
     phase = "STEP_VERIFY"
     current_step = step_id

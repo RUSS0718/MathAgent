@@ -102,11 +102,11 @@ class SolverHarnessVerificationTest(unittest.TestCase):
         for verdict, target, expected in [
             ("CHALLENGE", None, "CHALLENGE"),
             ("PROPOSE_REPLAN", None, "META_DECIDE"),
-            ("TRACE_BACK", 1, "TRACE_BACK"),
-            ("TRACE_BACK", 0, "STEP_VERIFY"),
-            ("TRACE_BACK", 2, "STEP_VERIFY"),
-            ("TRACE_BACK", True, "STEP_VERIFY"),
-            ("TRACE_BACK", None, "STEP_VERIFY"),
+            ("TRACE_BACK", 1, "STEP_EXECUTE"),
+            ("TRACE_BACK", 0, "META_DECIDE"),
+            ("TRACE_BACK", 2, "META_DECIDE"),
+            ("TRACE_BACK", True, "META_DECIDE"),
+            ("TRACE_BACK", None, "META_DECIDE"),
         ]:
             with self.subTest(verdict=verdict, target=target):
                 verifier = ScriptedVerifierPort(

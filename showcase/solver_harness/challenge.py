@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from .step import _normalize_report, run_step
+from .traceback import apply_traceback
 from .verification import verify_step
 
 
@@ -22,9 +23,11 @@ def run_challenges(
         state = run["state"]
         if state["phase"] != "CHALLENGE":
             return run
+        attempt = state["attempt_index"]
+        suffix = f"-attempt-{attempt}" if attempt else ""
         step_id = state["current_step"]
         record = state["steps"][step_id]
-        session = f"verify:{run['run_id']}:plan{state['plan_version']}:step{step_id}"
+        session = f"verify:{run['run_id']}:plan{state['plan_version']}:step{step_id}{suffix}"
         elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
         reason = (
             "runtime_budget_exhausted"
@@ -38,7 +41,7 @@ def run_challenges(
                 run["run_id"],
                 expected_revision=run["state_revision"],
                 event={
-                    "event_id": f"challenge-budget-{step_id}-{number}",
+                    "event_id": f"challenge-budget-{step_id}-{number}{suffix}",
                     "type": "budget_exhausted",
                     "reason": reason,
                 },
@@ -55,7 +58,7 @@ def run_challenges(
                 run["run_id"],
                 expected_revision=run["state_revision"],
                 event={
-                    "event_id": f"challenge-invalid-{step_id}-{number}",
+                    "event_id": f"challenge-invalid-{step_id}-{number}{suffix}",
                     "type": "challenge_invalid",
                     "reason": "missing_objection",
                 },
@@ -79,7 +82,7 @@ def run_challenges(
             run["run_id"],
             expected_revision=run["state_revision"],
             event={
-                "event_id": f"challenge-dispatched-{step_id}-{number}",
+                "event_id": f"challenge-dispatched-{step_id}-{number}{suffix}",
                 "type": "challenge_dispatched",
                 "round": number,
             },
@@ -118,7 +121,7 @@ def run_challenges(
             run["run_id"],
             expected_revision=run["state_revision"],
             event={
-                "event_id": f"challenge-replied-{step_id}-{number}",
+                "event_id": f"challenge-replied-{step_id}-{number}{suffix}",
                 "type": "challenge_replied",
                 "round": number,
             },
@@ -151,7 +154,7 @@ def run_challenges(
             run["run_id"],
             expected_revision=run["state_revision"],
             event={
-                "event_id": f"challenge-recorded-{step_id}-{number}",
+                "event_id": f"challenge-recorded-{step_id}-{number}{suffix}",
                 "type": "challenge_recorded",
                 "round": number,
             },
@@ -169,7 +172,7 @@ def run_challenges(
         run["run_id"],
         expected_revision=run["state_revision"],
         event={
-            "event_id": f"challenge-stalemate-{step_id}",
+            "event_id": f"challenge-stalemate-{step_id}{suffix}",
             "type": "challenge_stalemate",
             "trigger": "STALEMATE",
             "action": "META_DECIDE",
@@ -201,7 +204,7 @@ def run_plan(
     max_runtime_seconds,
 ):
     """Execute at most the supplied plan, preserving the final review boundary."""
-    for _ in plan["steps"]:
+    while True:
         run = run_step(
             harness,
             run,
@@ -229,6 +232,7 @@ def run_plan(
             max_model_calls=max_model_calls,
             max_runtime_seconds=max_runtime_seconds,
         )
+        run = apply_traceback(harness, run)
         if (
             run["state"]["phase"] != "STEP_EXECUTE"
             or run["state"]["counters"]["model_calls"] >= max_model_calls
