@@ -95,7 +95,9 @@ def run_replan(harness, run, *, problem, model_port, config):
         "plan_archived",
         {
             "phase": "POST_REPLAN_REEXPLORE"
-            if config.get("reexplore_after_replan", False)
+            if config.get("features", {}).get(
+                "reexplore_after_replan", config.get("reexplore_after_replan", False)
+            )
             else "PLAN",
             "replan_count": state.get("replan_count", 0) + 1,
             "plan_version": version,
@@ -111,7 +113,9 @@ def run_replan(harness, run, *, problem, model_port, config):
     calls = config.get("max_model_calls", 2)
     seconds = config.get("max_total_duration_seconds", 3600)
     findings = []
-    if config.get("reexplore_after_replan", False):
+    if config.get("features", {}).get(
+        "reexplore_after_replan", config.get("reexplore_after_replan", False)
+    ):
         run, findings = _research(harness, run, model_port, config, calls, seconds)
     reason = _budget(run["state"], calls, seconds)
     if reason:
