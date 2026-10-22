@@ -103,7 +103,11 @@ class ToolEvidenceTest(unittest.TestCase):
                     result = harness.solve("2+2", {"plan": PLAN})
                 self.assertEqual([], tool.requests)
                 self.assertEqual(0, result["state"]["counters"]["tool_calls"])
-                self.assertEqual(reason, result["state"]["tool_receipts"][0]["reason"])
+                if extra.get("max_tool_calls") == 0:
+                    self.assertEqual(reason, result["state"]["budget"]["exhaustion_reason"])
+                    self.assertEqual("TERMINAL", result["state"]["phase"])
+                else:
+                    self.assertEqual(reason, result["state"]["tool_receipts"][0]["reason"])
 
     def test_output_cap_and_bounded_retry_preserve_actual_call_count(self):
         from showcase.solver_harness import ScriptedToolPort

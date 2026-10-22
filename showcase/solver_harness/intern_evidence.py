@@ -20,6 +20,7 @@ PROBLEM = (
 )
 CONFIG = {
     "features": {
+        "star_routing": True,
         "stream_recovery": True,
         "skills": True,
         "persistent_sessions": True,

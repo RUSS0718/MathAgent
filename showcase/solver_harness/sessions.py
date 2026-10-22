@@ -10,10 +10,9 @@ class SessionIdentityError(ValueError):
 
 
 def session_identity(state, request):
-    role = request["role"]
-    role = "meta" if role in {"meta", "meta_strategist"} else role
-    if role == "reason_noncoding":
-        role = "reasoner"
+    from .roles import session_role
+
+    role = session_role(request["role"])
     plan = state["plan_version"] if role not in {"meta", "explore"} else None
     attempt = state["attempt_index"] if role not in {"meta", "explore"} else None
     step = state["current_step"] if role == "step_verifier" else None

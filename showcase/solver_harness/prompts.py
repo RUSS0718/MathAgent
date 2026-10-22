@@ -7,16 +7,8 @@ from copy import deepcopy
 from typing import Any
 
 from .context_injection import prepare_role_context
+from .roles import definition as role_definition
 from .skills import PROTOCOLS, select_skills
-
-ROLE_DEFINITIONS = {
-    "explore": "Explore the problem; distinguish observations from proofs and report structured assessment. Do not alter authoritative state.",
-    "reasoner": "Solve only the current objective using accepted results and relevant failures. Return a labeled StepReport; respond to the current objection during Challenge. Do not alter authoritative state.",
-    "reason_noncoding": "Prove the current objective by pure reasoning, without executable tools. Return a labeled StepReport. Do not alter authoritative state.",
-    "step_verifier": "Independently review the current objective and proof. Return exactly one structured verdict and concrete objections. Do not alter authoritative state or access other runs.",
-    "whole_solution_verifier": "Independently review the full candidate against the original problem and proof obligations. Return ACCEPT or REJECT. Do not alter authoritative state or access other runs.",
-    "meta": "Select a strategy from progress, failures and budget. Do not take over the proof, execute code or alter authoritative state.",
-}
 
 
 def compose_request(run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
@@ -25,10 +17,7 @@ def compose_request(run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[
     if role == "reasoner" and run["state"].get("reasoning_mode") == "reason_noncoding":
         role = "reason_noncoding"
         request = {**request, "role": role}
-    definition = ROLE_DEFINITIONS.get(
-        role,
-        ROLE_DEFINITIONS["meta"] if role == "meta_strategist" else ROLE_DEFINITIONS["reasoner"],
-    )
+    definition = role_definition(role)
     ids = select_skills(role, request)
     projection = prepare_role_context(run, request)["state"]
     layers = [

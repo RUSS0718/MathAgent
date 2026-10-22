@@ -45,6 +45,7 @@ SCHEMAS = {
         },
         ["assessment", "worked", "failed", "candidates"],
     ),
+    "explore_polish": obj({"solution_candidate": TEXT}),
     "reasoner": STEP,
     "reason_noncoding": STEP,
     "step_verifier": obj(
@@ -69,6 +70,21 @@ SCHEMAS = {
             "forbidden_directions": TEXTS,
             "reusable_results": TEXTS,
             "trace_back_to": TARGET,
+        }
+    ),
+    "research_delegation": obj(
+        {
+            "tasks": {
+                "type": "array",
+                "maxItems": 8,
+                "items": obj(
+                    {
+                        "prompt": TEXT,
+                        "permitted_tools": {"type": "array", "maxItems": 0},
+                        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 300},
+                    }
+                ),
+            }
         }
     ),
     "meta_guidance": obj(
@@ -101,6 +117,12 @@ SCHEMAS = {
 
 def response_schema(request):
     role = request["role"]
+    if role in {"meta", "meta_strategist"} and request.get("action") == "delegate_research_task":
+        return SCHEMAS["research_delegation"]
+    if role in {"meta", "meta_strategist"} and request.get("action") == "preplan_hint":
+        return obj({"hint": TEXT})
+    if role in {"meta", "meta_strategist"} and request.get("action") == "partial_exploration":
+        return obj({"decision": {"enum": ["RETRY", "PLAN"]}, "reason": TEXT})
     if role in {"meta", "meta_strategist"}:
         return SCHEMAS["meta_guidance" if request.get("guidance_request") else "meta"]
     if role not in SCHEMAS:

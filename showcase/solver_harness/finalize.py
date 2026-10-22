@@ -2,9 +2,9 @@
 
 from collections.abc import Mapping
 from copy import deepcopy
-from datetime import UTC, datetime
 
 from ..redaction import redact
+from .budget import budget_reason
 
 
 def commit(harness, run, kind, updates, **details):
@@ -14,15 +14,6 @@ def commit(harness, run, kind, updates, **details):
         event={"event_id": f"{kind}-{run['state_revision']}", "type": kind, **details},
         state_updates=updates,
     )
-
-
-def budget_reason(state, config):
-    elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
-    if elapsed >= config.get("max_total_duration_seconds", 3600):
-        return "runtime_budget_exhausted"
-    if state["counters"]["model_calls"] >= config.get("max_model_calls", 2):
-        return "model_call_budget_exhausted"
-    return None
 
 
 def finish(harness, run, status, reason, candidate=""):

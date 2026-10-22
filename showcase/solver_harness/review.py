@@ -93,6 +93,7 @@ def review_solution(
                 "run_id": run_id,
                 "call_id": f"{run_id}:whole-solution-review",
                 "role": "whole_solution_verifier",
+                "session_key": f"whole-review:{run_id}:{reserved['state_revision']}",
                 "problem": problem,
                 "solution_candidate": candidate,
                 "state_revision": reserved["state_revision"],

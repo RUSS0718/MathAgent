@@ -54,6 +54,11 @@ def verify_step(
     if verifier_port is None or run["state"]["phase"] != "STEP_VERIFY":
         return run
     run = harness.precheck_report(run)
+    from .budget import budget_reason, stop
+
+    reason = budget_reason(run["state"], harness._config)
+    if reason:
+        return stop(harness, run, reason)
     state = run["state"]
     suffix = f"-challenge-{round_number}" if round_number else ""
     attempt = state["attempt_index"]

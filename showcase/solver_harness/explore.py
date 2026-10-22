@@ -132,6 +132,8 @@ def run_exploration(
             "run_id": state["run_id"],
             "call_id": f"{state['run_id']}:explore:{state['round']}",
             "role": "explore",
+            "session_key": f"explore:{state['run_id']}:{state['round']}",
+            "preplan_hint": current["state"].get("preplan_hint"),
             "round": state["round"],
             "problem": state["problem"],
             "state_revision": current["state_revision"],

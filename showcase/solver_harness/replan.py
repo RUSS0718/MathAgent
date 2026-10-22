@@ -1,7 +1,6 @@
 """Bounded plan replacement and optional noncoding research delegation."""
 
 from copy import deepcopy
-from datetime import UTC, datetime
 
 from ..redaction import redact
 from .plan import validate_plan
@@ -17,12 +16,9 @@ def _commit(harness, run, kind, updates, **details):
 
 
 def _budget(state, calls, seconds):
-    elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
-    if elapsed >= seconds:
-        return "runtime_budget_exhausted"
-    if state["counters"]["model_calls"] >= calls:
-        return "model_call_budget_exhausted"
-    return None
+    from .budget import budget_reason
+
+    return budget_reason(state, {"max_model_calls": calls, "max_total_duration_seconds": seconds})
 
 
 def _stop(harness, run, reason):
@@ -59,9 +55,20 @@ def _call(harness, run, port, request):
     try:
         request = harness.prepare_request(run, request)
         request.update(allowed_tools=[], tool_policy={"allow": []})
-        reply = deepcopy(dict(harness.dispatch(run, port.complete, request)))
-    except Exception:
-        reply = {}
+        operation = port.complete
+        if request["role"] == "researcher":
+            from .research import bounded_research
+
+            def operation(prepared):
+                return bounded_research(port.complete, prepared)
+
+        reply = deepcopy(dict(harness.dispatch(run, operation, request)))
+    except Exception as exc:
+        reply = (
+            {"_research_status": getattr(exc, "research_status", "failed")}
+            if request["role"] == "researcher"
+            else {}
+        )
     return run, reply
 
 
@@ -121,30 +128,56 @@ def run_replan(harness, run, *, problem, model_port, config):
     if reason:
         return _stop(harness, run, reason)
     failures = run["state"]["failure_records"]
-    run, plan = _call(
-        harness,
-        run,
-        model_port,
-        {
-            "role": "planner",
-            "session_key": f"planner:{run['run_id']}:plan{version}",
-            "problem": problem,
-            "plan_version": version,
-            "forbidden_directions": list(
-                dict.fromkeys(d for f in failures for d in f.get("forbidden_directions", []))
-            ),
-            "failure_records": failures,
-            "accepted_results": run["state"]["accepted_results"],
-            "rescued_results": run["state"].get("rescued_results", []),
-            "reexploration_findings": findings,
-        },
-    )
-    try:
-        validate_plan(plan)
-        if plan["version"] != version:
-            raise ValueError("wrong_plan_version")
-    except ValueError:
-        return _stop(harness, run, "invalid_replacement_plan")
+    if config.get("features", {}).get("star_routing") is True:
+        from .plan_generation import generated_plan
+
+        run, plan = generated_plan(
+            harness,
+            run,
+            lambda current, request: _call(harness, current, model_port, request),
+            {
+                "role": "planner",
+                "session_key": f"planner:{run['run_id']}:plan{version}",
+                "problem": problem,
+                "plan_version": version,
+                "forbidden_directions": list(
+                    dict.fromkeys(d for f in failures for d in f.get("forbidden_directions", []))
+                ),
+                "failure_records": failures,
+                "accepted_results": run["state"]["accepted_results"],
+                "rescued_results": run["state"].get("rescued_results", []),
+                "reexploration_findings": findings,
+            },
+            version,
+            config,
+        )
+        if plan is None:
+            return run
+    else:
+        run, plan = _call(
+            harness,
+            run,
+            model_port,
+            {
+                "role": "planner",
+                "session_key": f"planner:{run['run_id']}:plan{version}",
+                "problem": problem,
+                "plan_version": version,
+                "forbidden_directions": list(
+                    dict.fromkeys(d for f in failures for d in f.get("forbidden_directions", []))
+                ),
+                "failure_records": failures,
+                "accepted_results": run["state"]["accepted_results"],
+                "rescued_results": run["state"].get("rescued_results", []),
+                "reexploration_findings": findings,
+            },
+        )
+        try:
+            validate_plan(plan)
+            if plan["version"] != version:
+                raise ValueError("wrong_plan_version")
+        except ValueError:
+            return _stop(harness, run, "invalid_replacement_plan")
     return _commit(
         harness,
         run,
@@ -183,7 +216,7 @@ def _research(harness, run, port, config, calls, seconds):
     tasks = reply.get("tasks", [])
     if not isinstance(tasks, list):
         tasks = []
-    records, findings = [], []
+    findings = []
     for number, task in enumerate(tasks[:limit]):
         if (
             not isinstance(task, dict)
@@ -200,41 +233,88 @@ def _research(harness, run, port, config, calls, seconds):
         ):
             break
         task_id = f"replan{run['state']['plan_version']}:task{number}"
-        run, output = _call(
+        record = {
+            "task_id": task_id,
+            "parent_replan_id": run["state"]["plan_version"],
+            "prompt": redact(task["prompt"]),
+            "permitted_tools": [],
+            "timeout_seconds": timeout,
+            "status": "running",
+            "output_ref": None,
+        }
+        run = _commit(
             harness,
             run,
-            port,
-            {
-                "role": "researcher",
-                "timeout_seconds": timeout,
-                "session_key": f"research:{run['run_id']}:{task_id}",
-                "task": {**task, "permitted_tools": [], "timeout_seconds": timeout},
-            },
+            "research_started",
+            {"reexploration_tasks": [*run["state"]["reexploration_tasks"], record]},
         )
-        finding = {
-            "task_id": task_id,
-            "output": redact(output),
-            "provenance": "unverified_exploration",
-        }
-        findings.append(finding)
-        records.append(
-            {
-                "task_id": task_id,
-                "parent_replan_id": run["state"]["plan_version"],
-                "prompt": redact(task["prompt"]),
-                "permitted_tools": [],
-                "timeout_seconds": timeout,
-                "status": "complete",
-                "output_ref": task_id,
-            }
+        try:
+            run, output = _call(
+                harness,
+                run,
+                port,
+                {
+                    "role": "researcher",
+                    "timeout_seconds": timeout,
+                    "session_key": f"research:{run['run_id']}:{task_id}",
+                    "task": {**task, "permitted_tools": [], "timeout_seconds": timeout},
+                },
+            )
+        except BaseException:
+            import sys
+
+            from .calls import CallInterrupted
+
+            if isinstance(sys.exception(), CallInterrupted):
+                latest = harness.get_run(run["run_id"])
+                call = next(
+                    (
+                        item
+                        for item in reversed(latest["state"].get("calls", {}).values())
+                        if item.get("role") == "researcher"
+                    ),
+                    {},
+                )
+                status = (
+                    "unknown_outcome"
+                    if call.get("error_type") in {"TimeoutError", "FutureTimeoutError"}
+                    else "failed"
+                )
+                _commit(
+                    harness,
+                    latest,
+                    "research_interrupted",
+                    {
+                        "reexploration_tasks": [
+                            *latest["state"]["reexploration_tasks"][:-1],
+                            {**record, "status": status},
+                        ]
+                    },
+                )
+            raise
+        status = output.pop("_research_status", "complete" if output else "failed")
+        record.update(status=status, output_ref=task_id if status == "complete" else None)
+        run = _commit(
+            harness,
+            run,
+            "research_finished",
+            {"reexploration_tasks": [*run["state"]["reexploration_tasks"][:-1], record]},
         )
+        if status == "complete":
+            findings.append(
+                {
+                    "task_id": task_id,
+                    "output": redact(output),
+                    "provenance": "unverified_exploration",
+                }
+            )
     return _commit(
         harness,
         run,
         "reexploration_completed",
         {
             "phase": "PLAN",
-            "reexploration_tasks": [*run["state"]["reexploration_tasks"], *records],
+            "reexploration_tasks": run["state"]["reexploration_tasks"],
             "reexploration_findings": findings,
         },
     ), findings
