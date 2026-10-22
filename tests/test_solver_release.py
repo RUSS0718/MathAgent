@@ -36,3 +36,39 @@ class SolverReleaseTest(unittest.TestCase):
 
         check_baseline()
         check_entry()
+
+    def test_matrix_only_cannot_bypass_required_live_gate(self):
+        result = subprocess.run(
+            [sys.executable, "scripts/check_solver_release.py", "--matrix-only", "--require-live"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(0, result.returncode)
+
+    def test_mapped_executor_rejects_skip_expected_failure_and_missing_execution(self):
+        from scripts.check_solver_release import run_mapped_tests
+
+        class Skipped(unittest.TestCase):
+            @unittest.skip("not available")
+            def test_case(self):
+                pass
+
+        class Expected(unittest.TestCase):
+            @unittest.expectedFailure
+            def test_case(self):
+                self.fail("expected")
+
+        class Passed(unittest.TestCase):
+            def test_case(self):
+                pass
+
+        for case, expected in ((Skipped, False), (Expected, False), (Passed, True)):
+            with self.subTest(case=case.__name__):
+                suite = unittest.TestSuite([case("test_case")])
+                summary = run_mapped_tests([case.__name__], suite=suite)
+                self.assertEqual(expected, summary["passed"])
+                self.assertEqual(1, summary["executed"])
+        summary = run_mapped_tests(["missing"], suite=unittest.TestSuite())
+        self.assertFalse(summary["passed"])
+        self.assertEqual(0, summary["executed"])

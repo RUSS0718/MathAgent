@@ -26,6 +26,7 @@ def generate_initial_plan(harness, run, *, problem, model_port, config):
                 "problem": problem,
                 "plan_version": version,
                 "exploration_findings": run["state"]["exploration_findings"],
+                "preplan_hint": run["state"].get("preplan_hint"),
                 "instruction": "Return a Plan with version and 1..20 steps with step_id, title, objective and earlier-step depends_on references.",
             },
             version,
@@ -44,6 +45,7 @@ def generate_initial_plan(harness, run, *, problem, model_port, config):
                 "problem": problem,
                 "plan_version": version,
                 "exploration_findings": run["state"]["exploration_findings"],
+                "preplan_hint": run["state"].get("preplan_hint"),
                 "instruction": "Return a Plan with version and 1..20 steps with step_id, title, objective and earlier-step depends_on references.",
             },
         )

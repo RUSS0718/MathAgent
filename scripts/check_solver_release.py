@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import io
 import json
 import re
 import subprocess
 import sys
+import unittest
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -93,10 +95,31 @@ def check_doc_links():
     print("solver_document_links=PASS")
 
 
+def run_mapped_tests(selected, *, suite=None):
+    """Require every selected acceptance case to execute without exclusions."""
+    if suite is None:
+        suite = unittest.defaultTestLoader.loadTestsFromNames(selected)
+    output = io.StringIO()
+    result = unittest.TextTestRunner(stream=output, verbosity=1).run(suite)
+    return {
+        "passed": bool(selected)
+        and result.testsRun == len(selected)
+        and result.wasSuccessful()
+        and not result.skipped
+        and not result.expectedFailures,
+        "executed": result.testsRun,
+        "selected": len(selected),
+        "skipped": len(result.skipped),
+        "expected_failures": len(result.expectedFailures),
+        "output": output.getvalue(),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--matrix-only", action="store_true")
-    parser.add_argument("--require-live", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--matrix-only", action="store_true")
+    mode.add_argument("--require-live", action="store_true")
     args = parser.parse_args()
     try:
         payload = json.loads(MATRIX.read_text(encoding="utf-8"))
@@ -131,15 +154,14 @@ def main():
                 for test in record["tests"]
             }
         )
-        result = subprocess.run(
-            [sys.executable, "-m", "unittest", *selected], cwd=ROOT, capture_output=True, text=True
-        )
-        if result.returncode:
-            print(result.stdout)
-            print(result.stderr)
-            print("solver_engineering_release=FAIL mapped_tests")
+        result = run_mapped_tests(selected)
+        if not result["passed"]:
+            print(result["output"])
+            print(
+                f"solver_engineering_release=FAIL mapped_tests executed={result['executed']} selected={result['selected']} skipped={result['skipped']} expected_failures={result['expected_failures']}"
+            )
             return 1
-        print(f"mapped_acceptance_tests=PASS count={len(selected)}")
+        print(f"mapped_acceptance_tests=PASS count={result['executed']}")
         print("solver_engineering_release=PASS live_release=BLOCKED status=engineering-preview")
         return 0
     except (OSError, ValueError, KeyError) as exc:

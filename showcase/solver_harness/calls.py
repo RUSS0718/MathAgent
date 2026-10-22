@@ -128,6 +128,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
                 partial_text="".join(partial),
                 usage=getattr(exc, "usage", None),
                 error_type=type(exc).__name__,
+                error_category=getattr(exc, "category", None),
             )
             _save(harness, run, record, status="interrupted")
             raise CallInterrupted(run["run_id"]) from None
