@@ -4,6 +4,7 @@ import hashlib
 from copy import deepcopy
 
 from ..redaction import redact
+from .confidence import grade_candidate
 
 
 def enabled(config):
@@ -147,6 +148,10 @@ def prepare_candidates(run, event, updates):
                     selection_eligible=False,
                     invalidated_by=[*record["invalidated_by"], event["event_id"]],
                 )
+    for record in registry[len(run["state"].get("candidate_registry") or []):]:
+        record["evidence_grade"] = grade_candidate(record, state, events=[*run["events"], {**event, "run_id": state["run_id"]}])
+        if record["evidence_grade"]["confidence_level"] == "rejected":
+            record["selection_eligible"] = False
     return ({"candidate_registry": registry} if actions else {}), actions
 
 
