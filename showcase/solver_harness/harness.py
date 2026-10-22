@@ -219,6 +219,7 @@ class SolverHarness:
         max_explore_rounds = min(
             2, _positive_config_int(self._config, "max_explore_rounds", 2)
         )
+        # STAR's 3600-second default bounds this Showcase run, not official scoring.
         return run_exploration(
             self,
             run,
