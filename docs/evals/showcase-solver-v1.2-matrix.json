@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "release_status": "engineering-preview",
-  "source_commit": "03a0d393dcc77f58c0a2ee9391cd32e18fcd562d",
+  "source_commit": "ffa46b36c67ac5cc1a3c7b25574a6cb5b1f0db52",
   "labels": [
     "scripted",
     "replay",
@@ -25,11 +25,14 @@
       "owner": "SH-05",
       "issue": 37,
       "evidence_mode": "scripted",
-      "status": "needs_review",
+      "status": "covered",
       "tests": [
-        "tests.test_solver_harness_review.SolverHarnessReviewTest.test_accept_completes_without_plan_and_survives_recovery"
+        "tests.test_solver_harness_review.SolverHarnessReviewTest.test_accept_completes_without_plan_and_survives_recovery",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_solved_polishes_same_explore_session_before_fresh_review",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_retry_decision_and_persistent_polish_session_are_real",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_polish_checks_budget_and_missing_hint_rejected_before_model"
       ],
-      "limitation": "缺少同Explore会话润色"
+      "limitation": "显式star_routing v1.2公开离线用例；不代表真实模型能力"
     },
     "AC-02": {
       "owner": "SH-05",
@@ -45,21 +48,25 @@
       "owner": "SH-05",
       "issue": 37,
       "evidence_mode": "scripted",
-      "status": "needs_review",
+      "status": "covered",
       "tests": [
-        "tests.test_solver_harness_explore.SolverHarnessExploreTest.test_partial_exploration_gets_one_retry_then_routes_to_plan"
+        "tests.test_solver_harness_explore.SolverHarnessExploreTest.test_partial_exploration_gets_one_retry_then_routes_to_plan",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_partial_meta_chooses_plan_instead_of_fixed_retry"
       ],
-      "limitation": "缺少Meta决定重试/规划"
+      "limitation": "显式star_routing v1.2公开离线用例；不代表真实模型能力"
     },
     "AC-04": {
       "owner": "SH-07",
       "issue": 39,
       "evidence_mode": "scripted",
-      "status": "needs_review",
+      "status": "covered",
       "tests": [
-        "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_invalid_plan_never_dispatches"
+        "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_invalid_plan_never_dispatches",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_invalid_initial_plan_repairs_once_then_terminates",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_replacement_plan_repairs_once_and_records_reason",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_streamed_intern_plan_schema_failure_repairs_with_audits_retained"
       ],
-      "limitation": "非法计划拒绝已有覆盖，但有界修复待实现"
+      "limitation": "显式star_routing v1.2公开离线用例；不代表真实模型能力"
     },
     "AC-05": {
       "owner": "SH-07",
@@ -157,9 +164,11 @@
       "evidence_mode": "scripted",
       "status": "covered",
       "tests": [
-        "tests.test_solver_harness_tools.ToolEvidenceTest.test_failed_unknown_and_mismatched_results_never_promote_claim"
+        "tests.test_solver_harness_tools.ToolEvidenceTest.test_failed_unknown_and_mismatched_results_never_promote_claim",
+        "tests.test_solver_harness_review_fixes.ReviewFixTest.test_research_timeout_and_failed_reply_are_not_complete",
+        "tests.test_solver_harness_review_fixes.ReviewFixTest.test_intern_research_timeout_reaches_existing_http_transport"
       ],
-      "limitation": "离线工程行为，不代表真实数学能力"
+      "limitation": "离线公开合同用例；非live能力证据"
     },
     "AC-15": {
       "owner": "SH-03",
@@ -177,9 +186,10 @@
       "evidence_mode": "scripted",
       "status": "covered",
       "tests": [
-        "tests.test_solver_harness_explore.SolverHarnessExploreTest.test_exhausted_budget_returns_explicit_result_without_dispatch"
+        "tests.test_solver_harness_explore.SolverHarnessExploreTest.test_exhausted_budget_returns_explicit_result_without_dispatch",
+        "tests.test_solver_harness_review_fixes.ReviewFixTest.test_tool_hard_budget_stops_verifier_and_enters_terminal_best_effort"
       ],
-      "limitation": "离线工程行为，不代表真实数学能力"
+      "limitation": "离线公开合同用例；非live能力证据"
     },
     "AC-17": {
       "owner": "SH-05",
@@ -278,9 +288,11 @@
       "evidence_mode": "scripted",
       "status": "covered",
       "tests": [
-        "tests.test_solver_harness_replan.ReplanTest.test_research_is_bounded_noncoding_and_only_unverified"
+        "tests.test_solver_harness_replan.ReplanTest.test_research_is_bounded_noncoding_and_only_unverified",
+        "tests.test_solver_harness_review_fixes.ReviewFixTest.test_intern_meta_delegation_uses_tasks_schema",
+        "tests.test_solver_harness_review_fixes.ReviewFixTest.test_paired_reexplore_flag_changes_actual_delegation_branch"
       ],
-      "limitation": "离线工程行为，不代表真实数学能力"
+      "limitation": "离线公开合同用例；非live能力证据"
     },
     "AC-27": {
       "owner": "SH-14",
@@ -346,11 +358,12 @@
       "owner": "SH-22",
       "issue": 54,
       "evidence_mode": "scripted",
-      "status": "needs_review",
+      "status": "covered",
       "tests": [
-        "tests.test_solver_harness_paired.PairedRunTest.test_common_budget_permission_and_observable_model_mismatch_reject_before_dispatch"
+        "tests.test_solver_harness_paired.PairedRunTest.test_common_budget_permission_and_observable_model_mismatch_reject_before_dispatch",
+        "tests.test_solver_harness_review_fixes.ReviewFixTest.test_restricted_pair_records_profile_skips_and_dispatches_no_research_or_tool"
       ],
-      "limitation": "已有配置拒绝与零调用覆盖，但准确Profile和扩展/预算跳过原因公开断言待补"
+      "limitation": "离线公开合同用例；非live能力证据"
     },
     "AC-34": {
       "owner": "SH-17",
@@ -488,12 +501,16 @@
       "owner": "SH-05",
       "issue": 37,
       "evidence_mode": "scripted",
-      "status": "needs_review",
+      "status": "covered",
       "tests": [
         "tests.test_solver_harness_review.SolverHarnessReviewTest.test_accept_completes_without_plan_and_survives_recovery",
         "tests.test_solver_harness_review.SolverHarnessReviewTest.test_reject_preserves_findings_and_hands_off_to_plan",
         "tests.test_solver_harness_explore.SolverHarnessExploreTest.test_partial_exploration_gets_one_retry_then_routes_to_plan",
-        "tests.test_solver_harness_review.SolverHarnessReviewTest.test_extensions_stay_none_without_added_calls"
+        "tests.test_solver_harness_review.SolverHarnessReviewTest.test_extensions_stay_none_without_added_calls",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_solved_polishes_same_explore_session_before_fresh_review",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_retry_decision_and_persistent_polish_session_are_real",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_polish_checks_budget_and_missing_hint_rejected_before_model",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_partial_meta_chooses_plan_instead_of_fixed_retry"
       ],
       "limitation": "最终责任归属；前置实现见父规格#32"
     },
@@ -522,10 +539,13 @@
       "owner": "SH-07",
       "issue": 39,
       "evidence_mode": "scripted",
-      "status": "needs_review",
+      "status": "covered",
       "tests": [
         "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_invalid_plan_never_dispatches",
-        "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_only_strict_double_gate_accept_advances_and_persists_evidence"
+        "tests.test_solver_harness_verification.SolverHarnessVerificationTest.test_only_strict_double_gate_accept_advances_and_persists_evidence",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_invalid_initial_plan_repairs_once_then_terminates",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_replacement_plan_repairs_once_and_records_reason",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_streamed_intern_plan_schema_failure_repairs_with_audits_retained"
       ],
       "limitation": "最终责任归属；前置实现见父规格#32"
     },
@@ -612,11 +632,12 @@
       "owner": "SH-11",
       "issue": 43,
       "evidence_mode": "scripted",
-      "status": "needs_review",
+      "status": "covered",
       "tests": [
         "tests.test_solver_harness_replan.ReplanTest.test_replacement_is_generated_archived_and_persisted",
         "tests.test_solver_harness_meta.MetaTest.test_history_survives_versions_and_new_harness_and_isolates_runs",
-        "tests.test_solver_harness_replan.ReplanTest.test_research_is_bounded_noncoding_and_only_unverified"
+        "tests.test_solver_harness_replan.ReplanTest.test_research_is_bounded_noncoding_and_only_unverified",
+        "tests.test_solver_harness_star_routing.StarRoutingTest.test_star_hint_modes_route_preplan_and_validate_missing_hint"
       ],
       "limitation": "最终责任归属；前置实现见父规格#32"
     },
@@ -932,10 +953,12 @@
       "owner": "SH-23",
       "issue": 55,
       "evidence_mode": "scripted",
-      "status": "needs_review",
+      "status": "covered",
       "tests": [
         "tests.test_solver_release.SolverReleaseTest.test_evidence_matrix_validates_actual_discoverable_test_ids",
-        "tests.test_solver_release.SolverReleaseTest.test_full_live_release_remains_blocked"
+        "tests.test_solver_release.SolverReleaseTest.test_full_live_release_remains_blocked",
+        "tests.test_solver_release.SolverReleaseTest.test_matrix_only_cannot_bypass_required_live_gate",
+        "tests.test_solver_release.SolverReleaseTest.test_mapped_executor_rejects_skip_expected_failure_and_missing_execution"
       ],
       "limitation": "最终责任归属；前置实现见父规格#32"
     },
