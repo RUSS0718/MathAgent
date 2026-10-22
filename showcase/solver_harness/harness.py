@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -206,6 +207,8 @@ class SolverHarness:
         The event must include a stable ``event_id`` and ``type``. Replaying the
         same event and patch is idempotent, even when ``expected_revision`` is now
         stale. Snapshot identity, revision, and timestamps are maintained here.
+        With stream recovery enabled, terminal runs permit empty audit events and
+        call_audit patches of calls only; business state remains frozen.
         """
 
         if not isinstance(run_id, str) or not run_id.strip():
@@ -279,7 +282,7 @@ class SolverHarness:
             prepared["state_revision"] = latest["state_revision"]
         tools = allowed_tool_ids(latest, request.get("role"), self._config, self._tool_port)
         if tools:
-            prepared["allowed_tools"] = [*prepared.get("allowed_tools", []), *tools]
+            prepared["allowed_tools"] = list(dict.fromkeys([*prepared.get("allowed_tools", []), *tools]))
             prepared["tool_policy"] = {"allow": prepared["allowed_tools"]}
         return prepared
 

@@ -75,6 +75,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "session_history",
             "state_revision",
             "session_history_authority",
+            "prompt_fingerprint",
         }
         safe_request = {
             key: deepcopy(value) for key, value in prepared.items() if key not in excluded
