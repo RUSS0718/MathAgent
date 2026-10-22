@@ -46,11 +46,11 @@ def applicable_independent_refs(record, state):
 
 
 def _review_refs(record, state, events, whole):
-    source_type = {
-        "EXPLORE": "explore_assessed",
-        "STEP_EXECUTE": "step_reported",
-        "FINAL_GENERATE": "final_candidate_generated",
-    }.get(record.get("source_phase"))
+    source_types = {
+        "EXPLORE": {"explore_assessed", "exploration_polished"},
+        "STEP_EXECUTE": {"step_reported"},
+        "FINAL_GENERATE": {"final_candidate_generated"},
+    }.get(record.get("source_phase"), set())
     sources = record.get("source_event_refs", [])
     start = next(
         (
@@ -58,7 +58,7 @@ def _review_refs(record, state, events, whole):
             for index, event in enumerate(events)
             if sources
             and event.get("event_id") == sources[0]
-            and event.get("type") == source_type
+            and event.get("type") in source_types
             and event.get("run_id") == record.get("run_id")
         ),
         None,
@@ -67,7 +67,7 @@ def _review_refs(record, state, events, whole):
         return []
     refs = []
     for event in events[start + 1 :]:
-        if event.get("type") == source_type:
+        if event.get("type") in source_types:
             break
         if (
             event.get("event_id") not in record.get("evidence_refs", [])

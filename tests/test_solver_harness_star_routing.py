@@ -2,9 +2,8 @@
 
 import unittest
 
-from tests.test_solver_harness_review_fixes import PLAN
-
 from showcase.solver_harness import ScriptedModelPort, ScriptedVerifierPort, SolverHarness
+from tests.test_solver_harness_review_fixes import PLAN
 
 
 class StarRoutingTest(unittest.TestCase):
@@ -103,9 +102,8 @@ class StarRoutingTest(unittest.TestCase):
                 self.assertEqual(expected, result["state"].get("preplan_hint"))
 
     def test_star_replacement_plan_repairs_once_and_records_reason(self):
-        from tests.test_solver_harness_replan import DECISION, ReplanTest
-
         from showcase.storage import SQLiteStore
+        from tests.test_solver_harness_replan import DECISION, ReplanTest
 
         for repaired in (True, False):
             with self.subTest(repaired=repaired):
@@ -216,3 +214,59 @@ class StarRoutingTest(unittest.TestCase):
                 for c in result["state"]["calls"].values()
             )
         )
+
+    def test_polished_candidate_keeps_draft_history_and_review_binds_exact_text(self):
+        for verdict in ("ACCEPT", "REJECT"):
+            with self.subTest(verdict=verdict):
+                model = ScriptedModelPort(
+                    [
+                        {"assessment": "SOLVED", "solution_candidate": "unreviewed draft"},
+                        {"solution_candidate": "reviewed polished answer"},
+                    ]
+                )
+                verifier = ScriptedVerifierPort([{"verdict": verdict}])
+                with SolverHarness(
+                    config={
+                        "features": {
+                            "star_routing": True,
+                            "candidate_registry": True,
+                            "best_effort": True,
+                        },
+                        "max_model_calls": 3,
+                    },
+                    model_port=model,
+                    verifier_port=verifier,
+                ) as harness:
+                    result = harness.solve("public")
+                    self.assertEqual(result, harness.get_run(result["run_id"]))
+                registry = result["state"]["candidate_registry"]
+                latest = {record["candidate_id"]: record for record in registry}
+                self.assertEqual(2, len(latest))
+                draft = next(
+                    record
+                    for record in latest.values()
+                    if record["answer_text"] == "unreviewed draft"
+                )
+                polished = next(
+                    record
+                    for record in latest.values()
+                    if record["answer_text"] == "reviewed polished answer"
+                )
+                self.assertNotEqual(draft["candidate_id"], polished["candidate_id"])
+                self.assertEqual(1, draft["version"])
+                self.assertEqual("eligible_unreviewed", draft["review_state"])
+                self.assertEqual([], draft["evidence_grade"]["verified_whole_review_refs"])
+                self.assertEqual(
+                    "reviewed polished answer", verifier.requests[0]["solution_candidate"]
+                )
+                if verdict == "ACCEPT":
+                    self.assertEqual("whole_reviewed", polished["review_state"])
+                    self.assertEqual("medium", polished["evidence_grade"]["confidence_level"])
+                    self.assertEqual(
+                        ["review-assessed"],
+                        polished["evidence_grade"]["verified_whole_review_refs"],
+                    )
+                    self.assertEqual("reviewed polished answer", result["state"]["final_response"])
+                else:
+                    selected = result["state"]["best_effort_decision"]["selected_source_record"]
+                    self.assertFalse(selected and selected["review_state"] == "whole_reviewed")
