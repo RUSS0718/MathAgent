@@ -193,7 +193,8 @@
       "evidence_mode": "scripted",
       "status": "covered",
       "tests": [
-        "tests.test_baseline_snapshot.BaselineSnapshotTest.test_runtime_files_match_frozen_baseline"
+        "tests.test_baseline_snapshot.BaselineSnapshotTest.test_runtime_files_match_frozen_baseline",
+        "tests.test_solver_release.SolverReleaseTest.test_official_entry_retains_json_output_and_baseline_import_boundary"
       ],
       "limitation": "离线工程行为，不代表真实数学能力"
     },
@@ -914,7 +915,8 @@
       "evidence_mode": "scripted",
       "status": "covered",
       "tests": [
-        "tests.test_baseline_snapshot.BaselineSnapshotTest.test_runtime_files_match_frozen_baseline"
+        "tests.test_baseline_snapshot.BaselineSnapshotTest.test_runtime_files_match_frozen_baseline",
+        "tests.test_solver_release.SolverReleaseTest.test_official_entry_retains_json_output_and_baseline_import_boundary"
       ],
       "limitation": "最终责任归属；前置实现见父规格#32"
     },
@@ -924,7 +926,8 @@
       "evidence_mode": "scripted",
       "status": "needs_review",
       "tests": [
-        "tests.test_baseline_snapshot.BaselineSnapshotTest.test_runtime_files_match_frozen_baseline"
+        "tests.test_solver_release.SolverReleaseTest.test_evidence_matrix_validates_actual_discoverable_test_ids",
+        "tests.test_solver_release.SolverReleaseTest.test_full_live_release_remains_blocked"
       ],
       "limitation": "最终责任归属；前置实现见父规格#32"
     },
@@ -934,7 +937,8 @@
       "evidence_mode": "scripted",
       "status": "covered",
       "tests": [
-        "tests.test_baseline_snapshot.BaselineSnapshotTest.test_runtime_files_match_frozen_baseline"
+        "tests.test_baseline_snapshot.BaselineSnapshotTest.test_runtime_files_match_frozen_baseline",
+        "tests.test_solver_release.SolverReleaseTest.test_official_entry_retains_json_output_and_baseline_import_boundary"
       ],
       "limitation": "最终责任归属；前置实现见父规格#32"
     }

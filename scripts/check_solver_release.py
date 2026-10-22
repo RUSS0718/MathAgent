@@ -112,8 +112,17 @@ def main():
         if pending:
             print("solver_engineering_release=BLOCKED pending=" + ",".join(pending))
             return 1
-        selected = sorted({test for group in ("star_ac", "sc") for record in payload[group].values() for test in record["tests"]})
-        result = subprocess.run([sys.executable, "-m", "unittest", *selected], cwd=ROOT, capture_output=True, text=True)
+        selected = sorted(
+            {
+                test
+                for group in ("star_ac", "sc")
+                for record in payload[group].values()
+                for test in record["tests"]
+            }
+        )
+        result = subprocess.run(
+            [sys.executable, "-m", "unittest", *selected], cwd=ROOT, capture_output=True, text=True
+        )
         if result.returncode:
             print(result.stdout)
             print(result.stderr)
