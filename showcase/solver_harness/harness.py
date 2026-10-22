@@ -6,7 +6,6 @@ import hashlib
 import json
 import uuid
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +13,8 @@ from ..redaction import redact
 from ..storage import SQLiteStore
 from .challenge import run_plan
 from .explore import ModelPort, run_exploration
+from .initial_state import initial_state
+from .meta import MetaPort, run_meta
 from .plan import validate_plan
 from .review import VerifierPort, review_solution
 from .storage import (
@@ -65,11 +66,13 @@ class SolverHarness:
         config: Mapping[str, Any] | None = None,
         model_port: ModelPort | None = None,
         verifier_port: VerifierPort | None = None,
+        meta_port: MetaPort | None = None,
     ) -> None:
         if store is not None and database_path is not None:
             raise SolverValidationError("provide either store or database_path")
         self._config = _normalize_config(config)
         self._config_hash = _hash_json(self._config)
+        self._meta_port = meta_port
         self._model_port = model_port
         self._verifier_port = verifier_port
         self._owns_showcase_store = store is None
@@ -108,10 +111,12 @@ class SolverHarness:
         if existing is not None:
             self._validate_identity(existing, run_id, problem_hash)
             if self._model_port is None or existing["state"].get("phase") != "SETUP":
-                return existing
-            return self._run_supplied_plan_or_explore(existing, problem, metadata)
+                return self._run_meta(existing, metadata)
+            return self._run_meta(
+                self._run_supplied_plan_or_explore(existing, problem, metadata), metadata
+            )
 
-        state = _initial_state(run_id, problem_hash, self._config_hash)
+        state = initial_state(run_id, problem_hash, self._config_hash)
         event = {
             "event_id": "initialized",
             "run_id": run_id,
@@ -130,8 +135,10 @@ class SolverHarness:
         if created is None:
             raise SolverPersistenceError("create_run")
         if self._model_port is None:
-            return created
-        return self._run_supplied_plan_or_explore(created, problem, metadata)
+            return self._run_meta(created, metadata)
+        return self._run_meta(
+            self._run_supplied_plan_or_explore(created, problem, metadata), metadata
+        )
 
     def get_run(self, run_id: str, *, problem: str | None = None) -> dict[str, Any]:
         """Recover a run and optionally verify the expected problem identity."""
@@ -302,6 +309,18 @@ class SolverHarness:
             )
         return explored
 
+    def _run_meta(self, run, metadata):
+        return run_meta(
+            self,
+            run,
+            meta_port=self._meta_port,
+            metadata=metadata or {},
+            max_model_calls=_non_negative_config_int(self._config, "max_model_calls", 2),
+            max_runtime_seconds=_non_negative_config_int(
+                self._config, "max_total_duration_seconds", 3600
+            ),
+        )
+
     def close(self) -> None:
         """Close the Showcase SQLite connection if this Harness created it."""
 
@@ -371,41 +390,3 @@ def _positive_config_int(config: Mapping[str, Any], key: str, default: int) -> i
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise SolverValidationError(f"config.{key} must be a positive integer")
     return value
-
-
-def _initial_state(run_id: str, problem_hash: str, config_hash: str) -> dict[str, Any]:
-    now = datetime.now(UTC).isoformat()
-    return {
-        "schema_version": "1.1",
-        "run_id": run_id,
-        "problem_hash": problem_hash,
-        "config_hash": config_hash,
-        "phase": "SETUP",
-        "status": "running",
-        "plan_version": 0,
-        "attempt_index": 0,
-        "current_step": None,
-        "steps": {},
-        "exploration_findings": [],
-        "accepted_results": [],
-        "failure_records": [],
-        "verified_results_ledger": [],
-        "confirmed_failures_ledger": [],
-        "meta_interventions": [],
-        "reexploration_tasks": [],
-        "session_registry": {},
-        "run_salt": uuid.uuid4().hex,
-        "state_revision": 0,
-        "tool_policy": {"allow": []},
-        "partial_transcript_refs": [],
-        "session_refs": {},
-        "counters": {"model_calls": 0, "tool_calls": 0},
-        "budget": {},
-        "usage": {},
-        "artifact_refs": {},
-        "created_at": now,
-        "updated_at": now,
-        "candidate_registry": None,
-        "best_effort_decision": None,
-        "finalization_reason": None,
-    }
