@@ -163,3 +163,57 @@ class SessionsTest(unittest.TestCase):
             self.assertNotEqual(model.requests[0]["session_key"], model.requests[2]["session_key"])
             self.assertEqual([], model.requests[2]["session_history"])
             self.assertIn(model.requests[0]["session_key"], second["state"]["session_registry"])
+
+    def test_replan_dispatch_uses_rescued_ledger_and_archives_invalid_facts(self):
+        config = {"max_model_calls": 3, "features": {"persistent_sessions": True}}
+        safe = {
+            "result_id": "safe",
+            "source": "independent",
+            "dependencies": [],
+            "evidence_level": "tool_verified",
+        }
+        bad = {"result_id": "bad", "source": "s1", "dependencies": []}
+        decision = {
+            "decision": "APPROVE_REPLAN",
+            "reason_summary": "route failed",
+            "plan_summary": "new",
+            "forbidden_directions": ["forbidden"],
+            "reusable_results": ["safe"],
+            "trace_back_to": None,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "run.db"
+            with SolverHarness(config=config, database_path=database) as harness:
+                run = harness.solve("prove", {"run_id": "replan"})
+                harness.commit_event(
+                    "replan",
+                    expected_revision=run["state_revision"],
+                    event={"event_id": "seed", "type": "seed"},
+                    state_updates={
+                        "phase": "META_DECIDE",
+                        "plan": PLAN,
+                        "plan_version": 1,
+                        "current_step": "s1",
+                        "accepted_results": [safe, bad],
+                        "verified_results_ledger": [safe, bad],
+                    },
+                )
+            model = ScriptedModelPort([{**PLAN, "version": 2}, {"argument": "new"}])
+            with SolverHarness(
+                config=config,
+                database_path=database,
+                model_port=model,
+                meta_port=ScriptedModelPort([decision]),
+            ) as harness:
+                result = harness.solve("prove", {"run_id": "replan"})
+                self.assertEqual(result, harness.get_run("replan"))
+            self.assertEqual(
+                ["safe"],
+                [
+                    item["result_id"]
+                    for item in model.requests[0]["role_context"]["state"][
+                        "verified_results_ledger"
+                    ]
+                ],
+            )
+            self.assertTrue(model.requests[1]["role_context"]["state"]["confirmed_failures_ledger"])

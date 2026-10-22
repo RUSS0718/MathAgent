@@ -16,6 +16,12 @@ def prepare_role_context(run, request):
         "confirmed_failures_ledger",
     )
     context = {key: deepcopy(state[key]) for key in keys if key in state}
+    invalid_ids = {
+        result["result_id"]
+        for failure in state.get("failure_records", [])
+        for result in failure.get("invalidated_results", [])
+        if isinstance(result, dict) and "result_id" in result
+    }
     if role in {"meta", "meta_strategist"}:
         keys = ("steps", "failure_records", "meta_interventions", "replan_count")
     else:
@@ -37,6 +43,7 @@ def prepare_role_context(run, request):
                     item.get("valid", True)
                     and item.get("status") not in {"INVALIDATED", "invalidated"}
                     and not item.get("invalidated", False)
+                    and item.get("result_id") not in invalid_ids
                 )
             ]
         context[key] = value
