@@ -42,9 +42,19 @@ class BestEffortTest(unittest.TestCase):
                     event={"event_id": "seed-candidates", "type": "seed_candidates"},
                     state_updates={
                         "candidate_registry": [
-                            candidate("unreviewed", "weak"),
-                            candidate("reviewed", "strong"),
+                            candidate("a-unreviewed", "weak"),
                         ]
+                    },
+                )
+                run = seed.commit_event(
+                    "select",
+                    expected_revision=run["state_revision"],
+                    event={"event_id": "explore-source", "type": "explore_assessed"},
+                    state_updates={
+                        "phase": "EXPLORE_REVIEW",
+                        "exploration_findings": [
+                            {"assessment": "SOLVED", "solution_candidate": "strong"}
+                        ],
                     },
                 )
                 run = seed.commit_event(
@@ -74,7 +84,8 @@ class BestEffortTest(unittest.TestCase):
                 self.assertEqual("strong", result["state"]["final_response"])
                 self.assertEqual(result, harness.solve("prove", {"run_id": "select"}))
         self.assertEqual(
-            "reviewed", result["state"]["best_effort_decision"]["selected_candidate_id"]
+            "select:candidate:explore-source",
+            result["state"]["best_effort_decision"]["selected_candidate_id"],
         )
         self.assertEqual("partial_budget_exhausted", result["state"]["status"])
         self.assertEqual([], model.requests)
@@ -158,3 +169,26 @@ class BestEffortTest(unittest.TestCase):
             state = harness.solve("prove")["state"]
         self.assertIsNone(state["best_effort_decision"])
         self.assertIsNone(state["finalization_reason"])
+
+    def test_persisted_hard_stop_does_not_dispatch_meta_even_with_model_allowance(self):
+        from showcase.storage import SQLiteStore
+
+        store = SQLiteStore(":memory:")
+        config = {"max_model_calls": 5, "features": {"best_effort": True}}
+        with SolverHarness(store=store, config=config) as seed:
+            run = seed.solve("prove", {"run_id": "stop"})
+            seed.commit_event(
+                "stop",
+                expected_revision=run["state_revision"],
+                event={"event_id": "tool-budget", "type": "budget_exhausted"},
+                state_updates={
+                    "phase": "META_DECIDE",
+                    "status": "partial_budget_exhausted",
+                    "budget": {"exhaustion_reason": "tool_call_budget_exhausted"},
+                },
+            )
+        meta = ScriptedModelPort([])
+        with SolverHarness(store=store, config=config, meta_port=meta) as harness:
+            result = harness.solve("prove", {"run_id": "stop", "meta_trigger": "plan-blocked"})
+        self.assertEqual([], meta.requests)
+        self.assertEqual("tool_call_budget_exhausted", result["state"]["finalization_reason"])

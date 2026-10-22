@@ -128,6 +128,11 @@ class SolverHarness:
         existing = self._state_store.get_run(run_id)
         if existing is not None:
             self._validate_identity(existing, run_id, problem_hash)
+            if (
+                self._config.get("features", {}).get("best_effort") is True
+                and existing["state"]["status"] == "partial_budget_exhausted"
+            ):
+                return existing
             if self._config.get("features", {}).get("stream_recovery") is True:
                 from .calls import recover_inflight, retry_call
 

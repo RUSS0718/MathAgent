@@ -28,7 +28,15 @@ def _rank(record, state):
         return 3
     if _independent(record, state):
         return 2
-    return 1 if record["review_state"] == "locally_reviewed" else 0
+    from .confidence import grade_candidate
+
+    grade = grade_candidate(record, state, events=state.get("_events", []))
+    return (
+        1
+        if record["review_state"] == "locally_reviewed"
+        and "local_review_accepted" in grade["reason_codes"]
+        else 0
+    )
 
 
 def _valid_dependencies(state, records):
@@ -105,6 +113,7 @@ def select_best_effort(snapshot):
         "selected_candidate_id": None,
         "confidence_level": None,
         "reason_codes": ["no_eligible_candidate"],
+        "reason_evidence": {"no_eligible_candidate": ["missing:eligible_complete_answer"]},
         "evidence_refs": [],
         "unresolved_issues": [],
         "excluded_candidate_ids": sorted(exclusions),
@@ -134,6 +143,8 @@ def select_best_effort(snapshot):
         status="candidate_selected",
         selected_candidate_id=chosen["candidate_id"],
         selected_source_record=chosen,
+        evidence_grade=grade,
+        reason_evidence={"evidence_ranked": [chosen["candidate_id"]], **grade["reason_evidence"]},
         confidence_level=grade["confidence_level"],
         reason_codes=["evidence_ranked", *grade["reason_codes"]],
         evidence_refs=grade["evidence_refs"],
@@ -143,6 +154,10 @@ def select_best_effort(snapshot):
         decision["reason_codes"] = list(
             dict.fromkeys([*decision["reason_codes"], "candidate_conflict"])
         )
+        decision["reason_evidence"]["candidate_conflict"] = [
+            chosen["candidate_id"],
+            *chosen["conflicting_candidate_ids"],
+        ]
         decision["unresolved_issues"].append("semantic_equivalence_unverified")
     return decision
 
