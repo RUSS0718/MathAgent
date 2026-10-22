@@ -16,6 +16,16 @@ def prepare_role_context(run, request):
         "confirmed_failures_ledger",
     )
     context = {key: deepcopy(state[key]) for key in keys if key in state}
+    if request.get("finalization_scope") is True:
+        # Final synthesis and review receive the already dependency-checked facts only.
+        context.pop("confirmed_failures_ledger", None)
+        context["accepted_results"] = deepcopy(request.get("accepted_results", []))
+        return {
+            "run_id": run["run_id"],
+            "state_revision": run["state_revision"],
+            "role": role,
+            "state": context,
+        }
     invalid_ids = {
         result["result_id"]
         for failure in state.get("failure_records", [])
