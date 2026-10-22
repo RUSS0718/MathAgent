@@ -48,11 +48,13 @@ def verify_step(
     verifier_port: VerifierPort | None,
     max_model_calls: int,
     max_runtime_seconds: int,
+    round_number: int = 0,
 ) -> dict[str, Any]:
     """Review one report once, leaving later phases to their owning slices."""
     if verifier_port is None or run["state"]["phase"] != "STEP_VERIFY":
         return run
     state = run["state"]
+    suffix = f"-challenge-{round_number}" if round_number else ""
     step_id = state["current_step"]
     plan = state["plan"]
     index = next(i for i, step in enumerate(plan["steps"]) if step["step_id"] == step_id)
@@ -69,7 +71,7 @@ def verify_step(
             run["run_id"],
             expected_revision=run["state_revision"],
             event={
-                "event_id": f"step-review-budget-{step_id}",
+                "event_id": f"step-review-budget-{step_id}{suffix}",
                 "type": "budget_exhausted",
                 "reason": reason,
             },
@@ -85,7 +87,7 @@ def verify_step(
         run["run_id"],
         expected_revision=run["state_revision"],
         event={
-            "event_id": f"step-review-dispatched-{step_id}",
+            "event_id": f"step-review-dispatched-{step_id}{suffix}",
             "type": "step_review_dispatched",
             "step_id": step_id,
         },
@@ -96,7 +98,10 @@ def verify_step(
         reply = verifier_port.verify(
             {
                 "run_id": run["run_id"],
-                "call_id": f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}",
+                "call_id": f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}",
+                "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}",
+                "round": round_number,
+                "challenge_history": state["steps"][step_id].get("challenge_history", []),
                 "role": "step_verifier",
                 "problem": problem,
                 "step": step,
@@ -108,6 +113,11 @@ def verify_step(
     except Exception:
         reply = None
     verification = normalize_verdict(reply, index + 1)
+    verification["objection"] = (
+        reply.get("objection", "")
+        if isinstance(reply, Mapping) and isinstance(reply.get("objection", ""), str)
+        else ""
+    )
     accepted = verification["valid"] and verification["verdict"] == "ACCEPT"
     phase = "STEP_VERIFY"
     current_step = step_id
@@ -140,7 +150,7 @@ def verify_step(
         run["run_id"],
         expected_revision=reserved["state_revision"],
         event={
-            "event_id": f"step-reviewed-{step_id}",
+            "event_id": f"step-reviewed-{step_id}{suffix}",
             "type": "step_reviewed",
             "step_id": step_id,
             **verification,

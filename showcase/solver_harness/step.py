@@ -21,7 +21,10 @@ def run_step(
 ) -> dict[str, Any]:
     """Execute the first supplied step once, leaving the report pending review."""
     state = run["state"]
-    step = plan["steps"][0]
+    step = next(
+        (item for item in plan["steps"] if item["step_id"] == state["current_step"]),
+        plan["steps"][0],
+    )
     step_id = step["step_id"]
     counters = dict(state["counters"])
     elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
