@@ -44,7 +44,7 @@ def _call(harness, run, port, request):
     state = run["state"]
     request = {
         "run_id": run["run_id"],
-        "call_id": f"replan:{run['state_revision']}",
+        "call_id": f"replan:{run['run_id']}:plan{state['plan_version']}:attempt{state['attempt_index']}:{run['state_revision']}",
         "allowed_tools": [],
         "tool_policy": {"allow": []},
         **request,
@@ -57,6 +57,8 @@ def _call(harness, run, port, request):
         role=request["role"],
     )
     try:
+        request = harness.prepare_request(run, request)
+        request.update(allowed_tools=[], tool_policy={"allow": []})
         reply = deepcopy(dict(port.complete(deepcopy(request))))
     except Exception:
         reply = {}
@@ -74,12 +76,15 @@ def run_replan(harness, run, *, problem, model_port, config):
     if state.get("replan_count", 0) >= limit:
         return _stop(harness, run, "replan_limit_reached")
     decision = state["meta_decision"]
+    rescued, excluded = _reusable(state)
     failure = {
         "kind": "replan",
         "plan_version": state["plan_version"],
         "attempt_index": state["attempt_index"],
         "archived_plan": deepcopy(state.get("plan")),
         "archived_steps": deepcopy(state["steps"]),
+        "invalidated_results": excluded,
+        "rescued_results": rescued,
         "reason": decision["reason_summary"],
         "forbidden_directions": decision["forbidden_directions"],
     }
@@ -97,6 +102,8 @@ def run_replan(harness, run, *, problem, model_port, config):
             "attempt_index": state["attempt_index"] + 1,
             "failure_records": [*state["failure_records"], failure],
             "confirmed_failures_ledger": [*state["confirmed_failures_ledger"], failure],
+            "accepted_results": rescued,
+            "rescued_results": rescued,
             "steps": {},
             "current_step": None,
         },
@@ -195,6 +202,7 @@ def _research(harness, run, port, config, calls, seconds):
             port,
             {
                 "role": "researcher",
+                "timeout_seconds": timeout,
                 "session_key": f"research:{run['run_id']}:{task_id}",
                 "task": {**task, "permitted_tools": [], "timeout_seconds": timeout},
             },
@@ -226,3 +234,28 @@ def _research(harness, run, port, config, calls, seconds):
             "reexploration_findings": findings,
         },
     ), findings
+
+
+def _reusable(state):
+    pending = deepcopy(state["accepted_results"])
+    rescued = []
+    valid_ids = set()
+    old_steps = {step["step_id"] for step in state.get("plan", {}).get("steps", [])}
+    while pending:
+        found = []
+        for result in pending:
+            dependencies = result.get("dependencies")
+            if (
+                result.get("source") not in old_steps
+                and result.get("evidence_level") in {"llm_reviewed", "tool_verified"}
+                and isinstance(dependencies, list)
+                and all(dependency in valid_ids for dependency in dependencies)
+            ):
+                rescued.append(result)
+                if result.get("result_id"):
+                    valid_ids.add(result["result_id"])
+                found.append(result)
+        if not found:
+            break
+        pending = [result for result in pending if result not in found]
+    return rescued, [{**result, "invalidated": True} for result in pending]

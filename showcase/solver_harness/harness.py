@@ -24,6 +24,7 @@ from .storage import (
     SolverRevisionConflictError,
     SolverStateStore,
 )
+from .traceback import apply_traceback
 
 __all__ = [
     "SolverHarness",
@@ -321,6 +322,8 @@ class SolverHarness:
                 self._config, "max_total_duration_seconds", 3600
             ),
         )
+        if self._model_port is not None and run["state"]["phase"] == "TRACE_BACK":
+            run = apply_traceback(self, run)
         run = run_replan(
             self, run, problem=problem, model_port=self._model_port, config=self._config
         )
