@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { DecodedSseEvent } from '../api/events.schemas'
+import {
+  timelineEventLabel,
+  timelineNodeLabel,
+  timelineNodeName,
+  timelineStatus,
+  timelineStatusLabel,
+  timelineSummary,
+  timelineTitle,
+} from '../runtime/jobs/star-event-presentation'
 import UiIcon from './ui/UiIcon.vue'
 
 const props = defineProps<{ events: DecodedSseEvent[] }>()
@@ -19,47 +28,25 @@ interface TimelineStep {
 const steps = computed<TimelineStep[]>(() => {
   const grouped = new Map<string, TimelineStep>()
   for (const event of props.events) {
-    const key = nodeName(event)
+    const key = timelineNodeName(event)
     const current = grouped.get(key) ?? {
       nodeName: key,
-      title: title(event),
+      title: timelineTitle(event),
       status: 'running',
       summary: '',
       events: [],
       duration: null,
     }
     current.events.push(event)
-    current.title = title(event)
-    current.status = status(event)
-    current.summary = summary(event) || current.summary
+    current.title = timelineTitle(event)
+    current.status = timelineStatus(event)
+    current.summary = timelineSummary(event) || current.summary
     const duration = event.data.duration
     if (typeof duration === 'number') current.duration = duration
     grouped.set(key, current)
   }
   return [...grouped.values()]
 })
-
-function nodeName(event: DecodedSseEvent): string {
-  return typeof event.data.node_name === 'string' ? event.data.node_name : 'system'
-}
-
-function title(event: DecodedSseEvent): string {
-  return typeof event.data.title === 'string' ? event.data.title : event.event
-}
-
-function summary(event: DecodedSseEvent): string {
-  if (typeof event.data.summary === 'string') return event.data.summary
-  if (typeof event.data.message === 'string') return event.data.message
-  const data = event.data.data
-  if (data && typeof data === 'object' && 'summary' in data) return String(data.summary)
-  return ''
-}
-
-function status(event: DecodedSseEvent): string {
-  if (typeof event.data.status === 'string') return event.data.status
-  if (event.event === 'node_start') return 'running'
-  return event.event
-}
 
 function toggleStep(node: string): void {
   expandedSteps.value = { ...expandedSteps.value, [node]: expandedSteps.value[node] === false }
@@ -76,16 +63,16 @@ function toggleStep(node: string): void {
       <li v-for="step in steps" :key="step.nodeName" class="timeline-step" :class="`step-${step.status}`">
         <button class="step-header" type="button" :aria-expanded="expandedSteps[step.nodeName] !== false" @click="toggleStep(step.nodeName)">
           <span class="step-status" aria-hidden="true"></span>
-          <span class="step-heading"><span class="timeline-title">{{ step.title }}</span><span class="timeline-node">{{ step.nodeName }} · {{ step.duration !== null ? `${step.duration}s · ` : '' }}{{ step.status }}</span></span>
+          <span class="step-heading"><span class="timeline-title">{{ step.title }}</span><span class="timeline-node">{{ timelineNodeLabel(step.nodeName) }} · {{ step.duration !== null ? `${step.duration}s · ` : '' }}{{ timelineStatusLabel(step.status) }}</span></span>
           <UiIcon :name="expandedSteps[step.nodeName] !== false ? 'chevronDown' : 'chevronRight'" />
         </button>
         <div v-if="expandedSteps[step.nodeName] !== false" class="step-details">
-          <p v-if="step.summary" class="timeline-summary">{{ step.summary }}</p>
+          <p v-if="step.summary && !step.nodeName.startsWith('star:')" class="timeline-summary">{{ step.summary }}</p>
           <ul>
             <li v-for="event in step.events" :key="`${event.id}-${event.event}`">
-              <span>{{ event.event }}</span>
+              <strong>{{ timelineEventLabel(event) }}</strong>
               <span v-if="event.event === 'tool_call_start' && Array.isArray(event.data.argument_keys)">参数键：{{ event.data.argument_keys.join('、') }}</span>
-              <span v-else-if="summary(event)">{{ summary(event) }}</span>
+              <span v-else-if="timelineSummary(event)">{{ timelineSummary(event) }}</span>
             </li>
           </ul>
         </div>

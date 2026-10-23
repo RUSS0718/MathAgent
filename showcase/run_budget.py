@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import sqlite3
@@ -17,6 +18,16 @@ from uuid import uuid4
 from llm_response import provider_usage, public_attempt
 
 from .run_control import assert_dispatch_allowed, check_control, controlled_action
+
+
+def public_solver_call_id(run_id, solver_call_id):
+    """Pseudonymize step-scoped call IDs before placing them in public evidence."""
+    if not isinstance(solver_call_id, str) or not solver_call_id:
+        return None
+    if ":reasoner:" not in solver_call_id and ":step-verifier:" not in solver_call_id:
+        return solver_call_id
+    digest = hashlib.sha256(f"{run_id}:{solver_call_id}".encode()).hexdigest()[:32]
+    return f"solver_call_{digest}"
 
 
 @dataclass(frozen=True)
@@ -142,7 +153,7 @@ class RunBudgetLedger:
                     "tool_call_id": tool_call_id,
                     "input_estimate": input_estimate,
                     "output_cap": output_cap,
-                    "public_attempt": ({**public_attempt(attempt_event, run_id=run_id, role=role), "started_at_utc": attempt_event.get("started_at_utc"), "dispatch_status": "reserved_dispatch_unconfirmed", "solver_call_id": solver_call_id} if attempt_event is not None else None),
+                    "public_attempt": ({**public_attempt(attempt_event, run_id=run_id, role=role), "started_at_utc": attempt_event.get("started_at_utc"), "dispatch_status": "reserved_dispatch_unconfirmed", "solver_call_id": public_solver_call_id(run_id, solver_call_id)} if attempt_event is not None else None),
                     "status": "reserved",
                     "usage": provider_usage(None),
                 }
@@ -154,7 +165,7 @@ class RunBudgetLedger:
             for action in state["actions"]:
                 if action["id"] == action_id:
                     if action["kind"] == "http":
-                        action["public_attempt"] = {**public_attempt(event, run_id=run_id, role=action["role"]), "started_at_utc": event.get("started_at_utc"), "dispatch_status": "transport_observed", "solver_call_id": action.get("solver_call_id")}
+                        action["public_attempt"] = {**public_attempt(event, run_id=run_id, role=action["role"]), "started_at_utc": event.get("started_at_utc"), "dispatch_status": "transport_observed", "solver_call_id": public_solver_call_id(run_id, action.get("solver_call_id"))}
                     action.update(
                         status=event.get("status", "unknown"),
                         usage=provider_usage(event),

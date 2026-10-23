@@ -7,10 +7,11 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from llm_response import public_attempt, safe_identifier
+from llm_response import public_attempt
 
 from .final_evidence import bind_verification
 from .redaction import redact
+from .run_budget import public_solver_call_id
 from .verification import VerificationResult
 
 
@@ -195,5 +196,7 @@ def _attempts(snapshot):
     result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
     records = snapshot.get("request_attempts", result.get("request_attempts", []))
     return [{**public_attempt(item, run_id=item.get("run_id"), role=item.get("role")),
-             "solver_call_id": safe_identifier(item.get("solver_call_id"))}
+             "solver_call_id": public_solver_call_id(
+                 item.get("run_id") or snapshot.get("run_id"), item.get("solver_call_id")
+             )}
             for item in records if isinstance(item, Mapping)]

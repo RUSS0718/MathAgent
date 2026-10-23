@@ -359,6 +359,7 @@ def create_app(
                 verification_mode=payload.get("verification_mode", "auto"),
                 solver_mode=payload.get("solver_mode", "legacy"),
                 solver_options=payload.get("solver_options"),
+                solver_hint=payload.get("solver_hint"),
             )
         except WorkspaceError as exc:
             return _workspace_error(exc)
@@ -719,6 +720,7 @@ def _json_error(error: str, status: int) -> tuple[Response, int]:
         "star_review_required": "STAR 必须执行整题审查，不能关闭验证。",
         "solver_mode_invalid": "求解模式无效或尚未实现。",
         "solver_options_unsupported": "当前 STAR 使用固定受限预设，不接受自定义开关。",
+        "solver_hint_invalid": "STAR 提示须为 1 至 2000 字的非空文本。",
         "invalid_last_event_id": "事件游标无效。",
     }
     response = jsonify({

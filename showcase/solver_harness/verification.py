@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from typing import Any
 
+from .calls import CallInterrupted
 from .explore import _HarnessOperations
 from .review import VerifierPort
 
@@ -99,13 +100,14 @@ def verify_step(
         state_updates={"counters": counters},
     )
     report = state["steps"][step_id]["report"]
+    call_id = f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
     try:
         reply = harness.dispatch(
             reserved,
             verifier_port.verify,
             {
                 "run_id": run["run_id"],
-                "call_id": f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}",
+                "call_id": call_id,
                 "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}"
                 + (f"-attempt-{attempt}" if attempt else ""),
                 "round": round_number,
@@ -116,6 +118,39 @@ def verify_step(
                 "report": report,
                 "current_step_index": index + 1,
                 "state_revision": reserved["state_revision"],
+            },
+        )
+    except CallInterrupted:
+        latest = harness.get_run(run["run_id"])
+        call = latest["state"].get("calls", {}).get(call_id, {})
+        if call.get("error_category") not in {
+            "invalid_role_schema", "invalid_json", "empty_response", "truncated_response"
+        }:
+            return latest
+        failed_review = normalize_verdict(None, index + 1)
+        failed_review.update(objection="", reason="invalid_verifier_response")
+        return harness.commit_event(
+            run["run_id"],
+            expected_revision=latest["state_revision"],
+            event={
+                "event_id": f"step-review-invalid-{step_id}{suffix}",
+                "type": "step_reviewed",
+                "step_id": step_id,
+                **failed_review,
+                "summary": "Verifier response was invalid; the step was not accepted",
+            },
+            state_updates={
+                "phase": "STEP_VERIFY",
+                "status": "partial_aborted",
+                "current_step": step_id,
+                "steps": {
+                    **latest["state"]["steps"],
+                    step_id: {
+                        **latest["state"]["steps"][step_id],
+                        "status": "VERIFYING",
+                        "verification": failed_review,
+                    },
+                },
             },
         )
     except Exception:
@@ -160,6 +195,21 @@ def verify_step(
             "TRACE_BACK": "TRACE_BACK",
             "PROPOSE_REPLAN": "META_DECIDE",
         }[verification["verdict"]]
+    state_updates = {
+        "phase": phase,
+        "current_step": current_step,
+        "steps": {
+            **state["steps"],
+            step_id: {
+                **state["steps"][step_id],
+                "status": "ACCEPTED" if accepted else "VERIFYING",
+                "verification": verification,
+            },
+        },
+        "accepted_results": [*state["accepted_results"], *evidence],
+    }
+    if not verification["valid"]:
+        state_updates["status"] = "partial_aborted"
     return harness.commit_event(
         run["run_id"],
         expected_revision=reserved["state_revision"],
@@ -169,17 +219,5 @@ def verify_step(
             "step_id": step_id,
             **verification,
         },
-        state_updates={
-            "phase": phase,
-            "current_step": current_step,
-            "steps": {
-                **state["steps"],
-                step_id: {
-                    **state["steps"][step_id],
-                    "status": "ACCEPTED" if accepted else "VERIFYING",
-                    "verification": verification,
-                },
-            },
-            "accepted_results": [*state["accepted_results"], *evidence],
-        },
+        state_updates=state_updates,
     )

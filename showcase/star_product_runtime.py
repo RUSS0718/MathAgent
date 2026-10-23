@@ -41,4 +41,5 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
         budget=budget,
         features=features,
         registry=registry,
+        hint_mode=config.get("SHOWCASE_STAR_HINT_MODE", "none"),
         evidence_kind=config.get("SHOWCASE_STAR_EVIDENCE_KIND", "live"))
