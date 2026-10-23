@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from llm_response import public_attempt
+from llm_response import public_attempt, safe_identifier
 
 from .final_evidence import bind_verification
 from .redaction import redact
@@ -194,4 +194,6 @@ __all__ = ["EvidencePackExporter", "replay_evidence"]
 def _attempts(snapshot):
     result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
     records = snapshot.get("request_attempts", result.get("request_attempts", []))
-    return [public_attempt(item, run_id=item.get("run_id"), role=item.get("role")) for item in records if isinstance(item, Mapping)]
+    return [{**public_attempt(item, run_id=item.get("run_id"), role=item.get("role")),
+             "solver_call_id": safe_identifier(item.get("solver_call_id"))}
+            for item in records if isinstance(item, Mapping)]

@@ -67,6 +67,7 @@ class InternModelPort:
                 messages,
                 metadata={
                     "run_id": request.get("run_id"),
+                    "call_id": request.get("call_id"),
                     "role": request["role"],
                     "timeout_seconds": request.get("timeout_seconds"),
                 },

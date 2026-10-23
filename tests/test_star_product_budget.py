@@ -32,6 +32,11 @@ class StarBudgetTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(1, budget["unresolved_attempts"])
         self.assertGreater(budget["reserved_tokens"], 0)
         self.assertEqual(30, budget["provider_known"]["total_tokens"])
+        attempts = self.report(job_id)["request_attempts"]
+        self.assertTrue(all(attempt["solver_call_id"] for attempt in attempts))
+        self.assertEqual(attempts[0]["solver_call_id"], attempts[1]["solver_call_id"])
+        self.assertEqual(attempts[0]["logical_call_id"], attempts[1]["logical_call_id"])
+        self.assertEqual(3, len({attempt["solver_call_id"] for attempt in attempts}))
 
 
 if __name__ == "__main__":
