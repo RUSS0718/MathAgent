@@ -43,8 +43,8 @@ def prepare_candidates(run, event, updates):
             [],
             [],
         )
-    elif kind == "step_reported":
-        step_id = event["step_id"]
+    elif kind in {"step_reported", "challenge_replied"}:
+        step_id = event.get("step_id", state["current_step"])
         report = state["steps"][step_id]["report"]
         _add(
             registry,
@@ -97,8 +97,13 @@ def prepare_candidates(run, event, updates):
             and record["attempt_index"] == state["attempt_index"]
         ]
         if kind == "step_reviewed":
-            targets = [record for record in targets if event["step_id"] in record["step_refs"]]
-            review = state["steps"][event["step_id"]]["verification"]
+            reviewed = state["steps"][event["step_id"]]
+            reviewed_hash = hashlib.sha256(redact(
+                reviewed["report"].get("solution_candidate", "")).encode("utf-8")).hexdigest()
+            targets = [record for record in targets
+                       if event["step_id"] in record["step_refs"]
+                       and record["answer_hash"] == reviewed_hash][-1:]
+            review = reviewed["verification"]
         elif kind == "final_candidate_reviewed":
             review = state["final_solution_attempts"][-1]["review"]
             targets = targets[-1:]

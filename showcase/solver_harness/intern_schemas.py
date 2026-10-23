@@ -32,7 +32,9 @@ CLAIM = obj(
     ["statement", "label"],
 )
 STEP = obj(
-    {"argument": TEXT, "claims": {"type": "array", "items": CLAIM}, "blocked": {"type": "boolean"}}
+    {"argument": TEXT, "claims": {"type": "array", "items": CLAIM}, "blocked": {"type": "boolean"},
+     "solution_candidate": TEXT, "answer_completeness": {"enum": ["complete", "partial"]}},
+    ["argument", "claims", "blocked"],
 )
 SCHEMAS = {
     "explore": obj(

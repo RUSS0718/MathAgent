@@ -99,7 +99,9 @@ class InternModelPort:
                 error_category=exc.category,
                 request_attempts=list(getattr(exc, "request_attempts", ())),
             )
-            raise InternPortError(exc.category) from exc
+            error = InternPortError(exc.category)
+            error.request_attempts = record["request_attempts"]
+            raise error from exc
         except InternPortError as exc:
             record["error_category"] = exc.category
             raise
