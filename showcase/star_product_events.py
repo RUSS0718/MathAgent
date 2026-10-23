@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import re
+from collections.abc import Mapping
 
 from .redaction import redact
 from .solver_harness.skills import PROTOCOLS
@@ -92,6 +93,21 @@ def decision_fields(event, state, invocations=()):
         (item for item in reversed(invocations) if item.get("role") in accepted_roles), None
     ) if role else None
     if isinstance(invocation, dict):
+        stream = invocation.get("stream")
+        # Streaming evidence publishes only fragment/byte counts and status.
+        if (
+            isinstance(stream, Mapping)
+            and type(stream.get("fragments")) is int
+            and stream["fragments"] >= 0
+            and type(stream.get("bytes")) is int
+            and stream["bytes"] >= 0
+            and isinstance(stream.get("status"), str)
+        ):
+            fields["stream_metrics"] = {
+                "fragments": stream["fragments"],
+                "bytes": stream["bytes"],
+                "status": stream["status"],
+            }
         skills = invocation.get("active_skill_ids")
         if isinstance(skills, list) and all(isinstance(item, str) for item in skills):
             fields["active_skill_ids"] = skills

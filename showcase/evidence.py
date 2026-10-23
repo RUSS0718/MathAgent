@@ -131,7 +131,7 @@ def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
         "tool_call_id", "protocol", "tool_name", "solver_event_id", "solver_revision",
         "solver_event_type", "role", "failure_type", "action_type", "use_pure_reasoning",
         "specific_task_consumed", "triggered_by", "active_skill_ids", "skill_protocol_version",
-        "skill_protocols", "prompt_fingerprint",
+        "skill_protocols", "prompt_fingerprint", "stream_metrics",
     ):
         if event.get(key) is not None:
             summary[key] = event[key]
@@ -157,6 +157,8 @@ def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         "result_summary": result.get("result_summary", ""),
         "error_category": result.get("error_category"),
     }
+    if isinstance(result.get("receipt"), Mapping):
+        summary["receipt"] = redact(dict(result["receipt"]))
     value = result.get("value")
     if result.get("name") == "polynomial_check" and isinstance(value, Mapping):
         candidates = value.get('candidates', [])

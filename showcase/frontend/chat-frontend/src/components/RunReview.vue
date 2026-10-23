@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api/client'
 import { downloadJson } from '../runtime/reports/download'
 import type { JobReport } from '../api/reports.schemas'
 import { useJobsStore } from '../stores/jobs.store'
 import { JobController } from '../runtime/jobs/job-controller'
 import { createIdempotencyKey } from '../runtime/jobs/idempotency'
+import StarRunReview from './StarRunReview.vue'
+import ToolArtifactLinks from './ToolArtifactLinks.vue'
 import AgentTimeline from './AgentTimeline.vue'
 import ReportSection from './ReportSection.vue'
 import PageFrame from './ui/PageFrame.vue'
@@ -23,8 +25,19 @@ const connected = ref(false)
 const cancelKey = createIdempotencyKey()
 const busy = ref(false)
 const loading = ref(true)
+let reportTimer: ReturnType<typeof setTimeout> | undefined
+let disposed = false
+watch(() => job.value?.events.length, () => {
+  if (reportTimer || disposed) return
+  reportTimer = setTimeout(() => {
+    reportTimer = undefined
+    void api.jobReport(props.jobId).then(value => {
+      if (!disposed && (value.solver?.solver?.state_revision ?? 0) >= (report.value?.solver?.solver?.state_revision ?? 0)) report.value = value
+    }).catch(() => { /* Explicit refresh retains the visible retry path. */ })
+  }, 200)
+})
 const fields = ['attempt_id', 'logical_call_id', 'attempt_index', 'started_at_utc', 'dispatch_status', 'action', 'requested_model', 'returned_model', 'status', 'http_status', 'finish_reason', 'duration_seconds', 'error_category', 'stop_category', 'metering_status', 'usage_source', 'usage']
-const toolFields = ['name', 'tool_call_id', 'protocol', 'transport_mode', 'status', 'error_category', 'continuation_status', 'continuation_tool_call_id', 'continuation_response_received', 'candidate_status', 'coverage_status', 'result_summary', 'limitations']
+const toolFields = ['name', 'tool_call_id', 'protocol', 'transport_mode', 'status', 'error_category', 'continuation_status', 'continuation_tool_call_id', 'continuation_response_received', 'candidate_status', 'coverage_status', 'result_summary', 'limitations', 'receipt']
 const budgetLabels: Record<string, string> = { http_attempts: 'HTTP 请求数', unknown_attempts: '未知请求数', reserved_tokens: '未决预留 Token', charged_tokens: '累计计入 Token', deadline_at: '原截止时间' }
 function display(value: unknown): string { return value === null || value === undefined ? 'unknown（未知）' : typeof value === 'object' ? JSON.stringify(value) : String(value) }
 async function refresh(): Promise<void> { loading.value = true; try { jobs.observe(await api.getJob(props.jobId)); report.value = await api.jobReport(props.jobId); notice.value = '' } catch (error) { notice.value = error instanceof Error ? error.message : '报告 unavailable（不可用）' } finally { loading.value = false } }
@@ -36,13 +49,14 @@ async function resume(callId?: string): Promise<void> {
   try {
     if (callId) await api.retryUnknownCall(props.jobId, callId, crypto.randomUUID(), createIdempotencyKey())
     else await api.resumeJob(props.jobId, '', createIdempotencyKey())
+    jobs.confirmResume(props.jobId)
     await reconnect()
   } catch (error) {
     notice.value = error instanceof Error ? error.message : '续算失败'
   } finally { busy.value = false }
 }
 onMounted(() => { void reconnect() })
-onUnmounted(() => controller.stopAll())
+onUnmounted(() => { disposed = true; clearTimeout(reportTimer); controller.stopAll() })
 </script>
 <template>
   <PageFrame title="子 Run 审阅" description="查看公开答案、最终验证范围与脱敏执行记录。" active="run">
@@ -65,12 +79,13 @@ onUnmounted(() => controller.stopAll())
       </div>
       <UiButton v-if="recovery.status === 'safe'" :busy="busy" :disabled="busy" @click="resume()">继续同一任务</UiButton>
     </section>
-    <div v-else-if="loading" class="loading-state" role="status" aria-busy="true">正在读取运行报告…<div v-for="n in 3" :key="n" class="skeleton"></div></div>
-    <section v-else class="empty-state"><h2>报告当前不可用</h2><p>请刷新重试，尚不能判断运行成功。</p></section>
+    <div v-if="loading && !report" class="loading-state" role="status" aria-busy="true">正在读取运行报告…<div v-for="n in 3" :key="n" class="skeleton"></div></div>
+    <section v-else-if="!report" class="empty-state"><h2>报告当前不可用</h2><p>请刷新重试，尚不能判断运行成功。</p></section>
     <template v-if="report">
+      <StarRunReview :report="report" :job-id="jobId" />
       <section class="evidence-section"><h2>最终验证范围</h2><p>候选检查通过不等于完整解集证明。</p><dl class="data-list"><template v-for="field in ['status', 'scope', 'checker', 'checker_version', 'acceptance', 'binding', 'artifact', 'candidate_status', 'coverage_status', 'limitations', 'findings']" :key="field"><dt>{{ field }}</dt><dd>{{ display(report.report.checks[field]) }}</dd></template></dl></section>
       <section class="evidence-section"><h2>脱敏 Request Attempts</h2><p>reserved_dispatch_unconfirmed：本地预留已提交，远端是否接收或计费尚未确认；transport_observed 表示本地传输返回了观测。</p><p v-if="!report.report.request_attempts.length">无已记录 HTTP attempt；详见预算与计量。</p><details v-for="(attempt, index) in report.report.request_attempts" :key="index"><summary>Attempt {{ index + 1 }} · {{ display(attempt.status) }}</summary><dl class="data-list"><template v-for="field in fields" :key="field"><dt>{{ field }}</dt><dd>{{ display(attempt[field]) }}</dd></template></dl></details></section>
-      <section class="evidence-section"><h2>工具闭环</h2><p v-if="!report.report.tool_summaries.length">无已记录工具结果。</p><article v-for="(tool, index) in report.report.tool_summaries" :key="index"><p v-if="tool.domain_status === 'out_of_domain'" class="notice notice--warning" role="status"><strong>域外：候选不满足定义域，最终结论仍为 unknown。</strong></p><dl class="data-list"><template v-for="field in toolFields" :key="field"><dt>{{ field }}</dt><dd>{{ display(tool[field]) }}</dd></template></dl></article></section>
+      <section class="evidence-section"><h2>工具闭环</h2><p v-if="!report.report.tool_summaries.length">无已记录工具结果。</p><article v-for="(tool, index) in report.report.tool_summaries" :key="index"><p v-if="tool.domain_status === 'out_of_domain'" class="notice notice--warning" role="status"><strong>域外：候选不满足定义域，最终结论仍为 unknown。</strong></p><dl class="data-list"><template v-for="field in toolFields" :key="field"><dt>{{ field }}</dt><dd>{{ display(tool[field]) }}</dd></template></dl><ToolArtifactLinks :job-id="jobId" :receipt="tool.receipt" /></article></section>
     </template>
     <AgentTimeline v-if="job" :events="job.events" />
   </PageFrame>

@@ -38,6 +38,8 @@ def recovery_projection(run):
 
 def authorize_resume(connection, row, decision):
     """Validate before Job CAS; no network or math writes occur here."""
+    import hashlib
+
     from .workspace import WorkspaceError
 
     identity = json.loads(row["result_json"] or "{}")
@@ -48,13 +50,23 @@ def authorize_resume(connection, row, decision):
     }:
         return False
     stored = connection.execute(
-        "SELECT state_json FROM solver_states WHERE run_id=?", (row["job_id"],)
+        "SELECT state_json, state_revision FROM solver_states WHERE run_id=?", (row["job_id"],)
     ).fetchone()
     if stored is None:
         raise WorkspaceError("star_recovery_unavailable", status=409)
     state = json.loads(stored[0])
     if state["phase"] == "TERMINAL":
         raise WorkspaceError("star_recovery_terminal", status=409)
+    # A checkpoint revision must be a real persisted transition; never guess a
+    # continuation from a snapshot whose revision has no committed event.
+    if state.get("state_revision") != stored["state_revision"] or connection.execute(
+        "SELECT 1 FROM solver_events WHERE run_id=? AND state_revision=? LIMIT 1",
+        (row["job_id"], stored["state_revision"]),
+    ).fetchone() is None:
+        raise WorkspaceError("star_recovery_revision_unavailable", status=409)
+    # The resumed task must be the problem this Solver Run was initialized with.
+    if hashlib.sha256(str(row["problem"]).encode("utf-8")).hexdigest() != state["problem_hash"]:
+        raise WorkspaceError("star_recovery_task_mismatch", status=409)
     budget = connection.execute(
         "SELECT ledger_json FROM run_budgets WHERE run_id=?", (row["job_id"],)
     ).fetchone()

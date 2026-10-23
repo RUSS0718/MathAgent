@@ -12,6 +12,13 @@ const starEventTitles: Record<string, string> = {
   meta_dispatched: 'Meta 升级',
   meta_decided: 'Meta 裁定',
   meta_invalid: 'Meta 裁定无效',
+  trace_back_applied: '回退与依赖失效',
+  plan_archived: '归档旧计划',
+  plan_replaced: '执行新计划',
+  final_candidate_generated: '生成整题候选',
+  final_candidate_reviewed: '最终整题裁决',
+  meta_guidance_applied: '执行局部指导',
+  best_effort_selected: '选择已有候选',
 }
 
 export function solverEventType(event: DecodedSseEvent): string | null {
@@ -67,6 +74,8 @@ export function timelineEventLabel(event: DecodedSseEvent): string {
 }
 
 function starSummary(event: DecodedSseEvent, solverEvent: string): string {
+  if (solverEvent === 'trace_back_applied') return `回退至步骤 ${event.data.trace_back_to ?? '未知'} · 失效 ${event.data.invalidated_result_count ?? '未知'} 项 · 救援 ${event.data.rescued_result_count ?? '未知'} 项`
+  if (solverEvent === 'plan_archived' || solverEvent === 'plan_replaced') return `活动计划 v${event.data.plan_version ?? '未知'} · 尝试 ${event.data.attempt_index ?? '未知'}`
   const phaseLabels: Record<string, string> = {
     EXPLORE: '继续探索',
     EXPLORE_REVIEW: '整题审查',

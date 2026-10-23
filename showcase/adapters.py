@@ -9,10 +9,15 @@ from __future__ import annotations
 
 import json
 import os
+import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from functools import wraps
 from typing import Any, Protocol
+
+import requests
 
 from .graph import AgentDecision
 from .request_attempts import record_attempts
@@ -209,6 +214,142 @@ class InternModelAdapter:
             category = getattr(exc, "category", None) or "configuration"
             raise AdapterError(str(category), type(exc).__name__) from exc
         return self._client
+
+
+class InternStreamAdapter(InternModelAdapter):
+    """Explicitly injected SSE-streaming variant; the default adapter stays non-streaming.
+
+    ``stream_complete`` yields ``text_delta`` fragments as they arrive on the wire
+    so the existing call audit persists each delta before the next provider
+    fragment is requested. Outbound metering reserves through the same persisted
+    run budget ledger as the non-streaming client path.
+    """
+
+    def stream_complete(self, messages, *, metadata=None):
+        """Yield provider fragments, then exactly one complete result envelope."""
+        client = self._get_client()
+        if any(not isinstance(getattr(client, name, None), str) for name in ("api_base", "authorization")):
+            raise AdapterError("stream_transport_unavailable")
+        normalized = [_normalize_message(message) for message in messages]
+        model_id = getattr(client, "model", None) or self.model_id
+        body = json.dumps({
+            "model": model_id, "messages": normalized, "stream": True,
+            "temperature": self.temperature, "max_tokens": self.max_tokens,
+        }, ensure_ascii=False).encode("utf-8")
+        headers = {"Content-Type": "application/json", "Authorization": client.authorization}
+        role = (metadata or {}).get("role")
+        attempt = {
+            "logical_call_id": uuid.uuid4().hex,
+            "attempt_id": uuid.uuid4().hex,
+            "attempt_index": 1,
+            "request_model_id": model_id,
+            "role": role,
+            "solver_call_id": (metadata or {}).get("call_id"),
+            "started_at_utc": datetime.now(UTC).isoformat(),
+            "max_tokens": self.max_tokens,
+            "message_count": len(normalized),
+            "status": "pending",
+        }
+        budget = current_budget()
+        call_budget = budget.model_call(role, solver_call_id=attempt["solver_call_id"]) if budget else None
+        configured = getattr(client, "timeout", self.client_timeout)
+        requested = (metadata or {}).get("timeout_seconds")
+        effective_timeout = configured or requested or 30
+        if requested is not None:
+            effective_timeout = min(configured or requested, requested)
+        attempts: list[dict[str, Any]] = []
+        response = None
+        started = time.monotonic()
+        try:
+            if call_budget is not None:
+                effective_timeout = call_budget.before_attempt(attempt, len(body))
+            response = requests.post(
+                client.api_base, headers=headers, data=body,
+                timeout=effective_timeout, stream=True,
+            )
+            response.raise_for_status()
+            attempt.update(status="success", http_status=getattr(response, "status_code", None))
+            parts: list[str] = []
+            usage: dict[str, Any] = {}
+            finish_reason = None
+            for line in response.iter_lines(decode_unicode=True):
+                if not isinstance(line, str):
+                    continue
+                payload = line.strip()
+                if not payload.startswith("data:"):
+                    continue
+                chunk_text = payload[len("data:"):].strip()
+                if chunk_text == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(chunk_text)
+                except ValueError as exc:
+                    raise AdapterError("invalid_response", "invalid_sse_chunk") from exc
+                choice = chunk.get("choices")[0] if isinstance(chunk.get("choices"), list) and chunk["choices"] else {}
+                delta = choice.get("delta") if isinstance(choice, Mapping) else None
+                piece = delta.get("content") if isinstance(delta, Mapping) else None
+                if isinstance(piece, str) and piece:
+                    parts.append(piece)
+                    yield {"type": "text_delta", "text": piece}
+                if isinstance(choice.get("finish_reason"), str):
+                    finish_reason = choice["finish_reason"]
+                if isinstance(chunk.get("model"), str):
+                    model_id = chunk["model"]
+                if isinstance(chunk.get("usage"), Mapping):
+                    usage = dict(chunk["usage"])
+            attempt.update(
+                finish_reason=finish_reason,
+                response_model_id=model_id,
+                **{key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")},
+            )
+            attempt["duration_seconds"] = round(time.monotonic() - started, 3)
+            attempts.append(dict(attempt))
+            yield {
+                "type": "result",
+                "text": "".join(parts),
+                "usage": usage,
+                "finish_reason": finish_reason,
+                "model": model_id,
+                "attempts": record_attempts(attempts, metadata),
+            }
+        except AdapterError as exc:
+            attempt.update(status="error", error_category=exc.category, error_type=type(exc).__name__)
+            attempt["duration_seconds"] = round(time.monotonic() - started, 3)
+            attempts.append(dict(attempt))
+            exc.request_attempts = record_attempts(attempts, metadata)
+            raise
+        except Exception as exc:  # noqa: BLE001 - provider details stay out of events
+            category = _request_failure_category(exc)
+            attempt.update(status="error", error_category=category, error_type=type(exc).__name__)
+            attempt["duration_seconds"] = round(time.monotonic() - started, 3)
+            attempts.append(dict(attempt))
+            error = AdapterError(category, type(exc).__name__)
+            error.request_attempts = record_attempts(attempts, metadata)
+            raise error from exc
+        finally:
+            attempt["duration_seconds"] = round(time.monotonic() - started, 3)
+            if not attempts:
+                attempts.append(dict(attempt))
+            if call_budget is not None:
+                call_budget.after_attempt(attempt)
+            if response is not None:
+                response.close()
+
+
+def _request_failure_category(exc: BaseException) -> str:
+    if isinstance(exc, requests.Timeout):
+        return "timeout"
+    if isinstance(exc, requests.exceptions.ProxyError):
+        return "proxy"
+    if isinstance(exc, requests.exceptions.SSLError):
+        return "tls"
+    if isinstance(exc, requests.ConnectionError):
+        return "connectivity"
+    if isinstance(exc, requests.HTTPError):
+        return "http_status"
+    if isinstance(exc, requests.RequestException):
+        return "request"
+    return "adapter_error"
 
 
 class InternAgentAdapter:
@@ -477,6 +618,7 @@ __all__ = [
     "InternAgentAdapter",
     "InternChatModel",
     "InternModelAdapter",
+    "InternStreamAdapter",
     "ModelResponse",
     "ModelContinuationTransport",
     "ToolRequest",
