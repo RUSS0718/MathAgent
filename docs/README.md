@@ -6,6 +6,8 @@
 
 ## 先读哪些文档
 
+当前完整 STAR 产品集成由 [spec #56](https://github.com/RUSS0718/MathAgent/issues/56) 承载，承接 #23 基础设施与 #32 求解机制。状态职责和恢复合同见 [ADR-0014](adr/0014-star-product-state-and-recovery.md)，范围形成过程见 [访谈记录](experiments/star-completion-interview.md)。新 spec 尚未完成；历史工单关闭不表示 Workbench 已贯通完整 STAR。
+
 | 当前任务 | 阅读顺序 | 读完应能判断 |
 | --- | --- | --- |
 | 了解 v0.1 做到了什么 | [能力基线](evals/v0.1-capability-baseline.md) → [开发完成记录](https://github.com/RUSS0718/MathAgent/issues/1#issuecomment-6209639217) → 下方 v0.1 文档链 | 工程完成、真实模型连接与数学效果各有什么证据 |

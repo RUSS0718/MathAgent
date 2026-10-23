@@ -13,6 +13,7 @@
 - **Baseline**：官方 88/12/0 评测对应的字节和行为基线，不等同于普遍能力保证。
 - **研究基础设施阶段（S1–S6）**：Intern S2 实验与 Showcase 的有序工程准备阶段；区别于 R1–R5 算法方向，以及 v0.2 Workbench 文档中含义不同的 S1–S4 阶段。
 - **Solver Harness**：`showcase` 内显式启用的数学求解控制面；它组织探索、规划、审查和恢复，但不属于 `official` Profile。
+- **完整 STAR 参考模式（STAR Reference）**：按完整 STAR Core 行为合同组织数学任务的求解模式，各机制按适用条件参与执行并保留可审查结果；项目的 Best-Effort 扩展独立验收。该名称不代表复现论文成绩或证明数学正确性。
 - **Solver Run**：Solver Harness 的一次隔离执行，拥有独立的 `run_id`、状态版本和事件记录；与产品 Run 共用数据库，但状态存在独立表中。
 - **Plan Attempt**：同一 Solver Run 内一次可被回退或重规划替换的计划尝试；它也是 Reasoner 会话的隔离边界。
 - **Candidate**：可被最终选择的完整答案版本；候选不是已证定理，必须保留来源、证据和失效状态。
