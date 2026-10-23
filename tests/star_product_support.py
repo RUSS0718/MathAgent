@@ -28,6 +28,7 @@ class StarJobFixture:
     def open_star(self, replies, *, retry=1, **config):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
+        self.data_dir = folder.name
         self.enterContext(patch.dict(os.environ, {"INTERN_API_KEY": "scripted-only"}))
         self.outbound = []
         self.replies = list(replies)

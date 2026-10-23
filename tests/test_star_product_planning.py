@@ -31,7 +31,7 @@ class StarPlanningTest(StarJobFixture, unittest.TestCase):
                           "final_generator", "whole_solution_verifier"],
                          [r["role"] for r in self.outbound])
         gate = next(e for e in events if e.get("solver_event_type") == "step_reviewed")
-        self.assertEqual("sum", gate["step_id"])
+        self.assertEqual("步骤 1", gate["step_id"])
         self.assertEqual({"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT", "valid": True},
                          {key: gate[key] for key in ("goal_gate", "logic_gate", "verdict", "valid")})
         self.assertEqual(job_id, gate["solver"]["run_id"])

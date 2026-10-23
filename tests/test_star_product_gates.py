@@ -26,14 +26,35 @@ class StarGateTest(StarJobFixture, unittest.TestCase):
     def test_contradictory_accept_does_not_execute_next_step(self):
         for goal, logic in (("NO", "PASS"), ("PARTIAL", "PASS"), ("YES", "FAIL"), ("YES", "UNCERTAIN")):
             with self.subTest(goal=goal, logic=logic):
-                _, job, events = self.start([
+                job_id, job, events = self.start([
                     NEED_PLAN, TWO_STEPS, STEP, {**VERDICT, "goal_gate": goal, "logic_gate": logic},
                 ])
                 self.assertEqual("failed", job["status"])
                 self.assertEqual(4, len(self.outbound))
+                self.assertEqual("partial_aborted", job["result"]["solver"]["status"])
+                self.assertEqual("STEP_VERIFY", job["result"]["solver"]["phase"])
+                run = self.client.get(f"/api/runs/{job_id}").get_json()
+                self.assertEqual("partial_aborted", run["result"]["solver"]["status"])
                 gate = next(e for e in events if e.get("solver_event_type") == "step_reviewed")
                 self.assertFalse(gate["valid"])
+                self.assertEqual("步骤 1", gate["step_id"])
                 self.assertEqual("STEP_VERIFY", gate["solver"]["phase"])
+
+    def test_malformed_verifier_reply_is_persisted_as_needs_review(self):
+        job_id, job, events = self.start([
+            NEED_PLAN, TWO_STEPS, STEP, {"unexpected": "shape"},
+        ])
+        self.assertEqual("failed", job["status"])
+        self.assertEqual(4, len(self.outbound))
+        self.assertEqual("partial_aborted", job["result"]["solver"]["status"])
+        self.assertEqual("STEP_VERIFY", job["result"]["solver"]["phase"])
+        run = self.client.get(f"/api/runs/{job_id}").get_json()
+        self.assertEqual("partial_aborted", run["result"]["solver"]["status"])
+        self.assertEqual(["explore", "planner", "reasoner", "step_verifier"],
+                         [request["role"] for request in self.outbound])
+        gate = next(e for e in events if e.get("solver_event_type") == "step_reviewed")
+        self.assertFalse(gate["valid"])
+        self.assertEqual("STEP_VERIFY", gate["solver"]["phase"])
 
     def test_valid_gates_accept_once_and_pass_only_accepted_dependencies(self):
         job_id, job, events = self.start([
@@ -47,7 +68,7 @@ class StarGateTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(["sum"], [fact["source"] for fact in facts])
         self.assertEqual("llm_reviewed", facts[0]["evidence_level"])
         accepted = [e for e in events if e.get("solver_event_type") == "step_reviewed" and e.get("valid")]
-        self.assertEqual(["sum", "conclude"], [e["step_id"] for e in accepted])
+        self.assertEqual(["步骤 1", "步骤 2"], [e["step_id"] for e in accepted])
         self.assertEqual(len(events), len({e.get("solver_event_id", e.get("type")) for e in events}))
         before = len(self.outbound)
         self.client.get(f"/api/runs/{job_id}/evidence")
