@@ -111,6 +111,19 @@ class ToolRegistry:
             parameters_schema=PYTHON_MATH_SCHEMA,
         )
 
+    def register_container_python(self, executor) -> ToolSpec:
+        """Explicit isolated Python registration; never changes legacy host mode."""
+        from .container_tool import ContainerPythonTool
+        from .python_executor import DockerPythonExecutor
+
+        if not isinstance(executor, DockerPythonExecutor):
+            raise TypeError("container_executor_required")
+        self.container_python_executor = executor
+        return self.register("python_math", ContainerPythonTool(executor).invoke,
+            capabilities=("calculation", "isolated_mathematical_python"),
+            timeout_seconds=executor.timeout_seconds, experimental=True,
+            parameters_schema=PYTHON_MATH_SCHEMA)
+
     def register_polynomial_check(self, *, timeout_seconds: float = 3.0) -> ToolSpec:
         """Register the bounded exact polynomial candidate checker."""
 
@@ -196,10 +209,15 @@ class ToolRegistry:
         self._call_count += 1
         executor = ThreadPoolExecutor(max_workers=1)
         try:
-            future = executor.submit(copy_context().run, handler, dict(arguments))
+            if getattr(getattr(handler, "__self__", None), "owns_execution_limits", False):
+                value = handler(dict(arguments))
+                future = None
+            else:
+                future = executor.submit(copy_context().run, handler, dict(arguments))
             budget = current_budget()
             timeout = min(spec.timeout_seconds, budget.remaining_seconds()) if budget else spec.timeout_seconds
-            value = future.result(timeout=timeout)
+            if future is not None:
+                value = future.result(timeout=timeout)
         except FutureTimeoutError:
             future.cancel()
             executor.shutdown(wait=False, cancel_futures=True)

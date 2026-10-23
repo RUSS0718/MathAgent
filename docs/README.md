@@ -12,6 +12,8 @@
 
 SP-03 的[共享账本与控制合同](engineering/star-product-sp03-contract.md)及[公共故障验证记录](evals/star-product-sp03.md)记录模型、重试、工具和研究的同一S3准入，取消/截止的数学事务栅栏及迟到用量；不替代后续恢复、生成Python隔离和MetaGuidance切换验收。
 
+SP-09 的[受控 Python 合同](engineering/star-product-sp09-contract.md)与[公共 Job 和 Docker 验收记录](evals/star-product-sp09.md)记录默认关闭的固定镜像 ID Registry 接线、S3 单次工具动作、外部 stdout/stderr 总量限制和授权产物下载。纯推理的 MetaGuidance 触发仍由 SP-07 验收；完整 reference 继续拒绝启动。
+
 | 当前任务 | 阅读顺序 | 读完应能判断 |
 | --- | --- | --- |
 | 了解 v0.1 做到了什么 | [能力基线](evals/v0.1-capability-baseline.md) → [开发完成记录](https://github.com/RUSS0718/MathAgent/issues/1#issuecomment-6209639217) → 下方 v0.1 文档链 | 工程完成、真实模型连接与数学效果各有什么证据 |

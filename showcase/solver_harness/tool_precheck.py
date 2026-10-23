@@ -17,13 +17,17 @@ SAFE_TOOLS = frozenset({"polynomial_check", "python_math"})
 
 
 def precheck_report(harness, run, *, config, tool_port):
-    if config.get("features", {}).get("local_code_tool") is not True:
-        return run
     state = run["state"]
     step_id = state.get("current_step")
     record = state.get("steps", {}).get(step_id, {})
     report = deepcopy(record.get("report", {}))
     if not report or report.get("prechecked"):
+        return run
+    has_request = any(
+        claim.get("label") == "easy-verify" and isinstance(claim.get("tool_request"), Mapping)
+        for claim in report.get("claims", [])
+    )
+    if config.get("features", {}).get("local_code_tool") is not True and not has_request:
         return run
     receipts = list(state.get("tool_receipts", []))
     for index, claim in enumerate(report.get("claims", [])):
@@ -69,6 +73,7 @@ def _execute(harness, run, request, config, port, step_id, claim_index):
     receipt_id = f"tool:{run['run_id']}:{run['state_revision']}:{claim_index}"
     receipt = {
         "receipt_id": receipt_id,
+        "tool": request.get("tool") if isinstance(request, Mapping) else None,
         "step_id": step_id,
         "claim_index": claim_index,
         "executed": False,
@@ -124,9 +129,10 @@ def _execute(harness, run, request, config, port, step_id, claim_index):
     }
     started = time.monotonic()
     pool = ThreadPoolExecutor(max_workers=1)
-    future = pool.submit(copy_context().run, port.execute, invocation)
+    managed = getattr(port, "owns_execution_limits", False) and request["tool"] == "python_math"
+    future = None if managed else pool.submit(copy_context().run, port.execute, invocation)
     try:
-        result = future.result(timeout=timeout)
+        result = port.execute(invocation) if managed else future.result(timeout=timeout)
         if not isinstance(result, Mapping):
             raise ValueError("malformed_tool_result")
         status = result.get("status")
@@ -137,15 +143,19 @@ def _execute(harness, run, request, config, port, step_id, claim_index):
             if status
             in {
                 "success",
+                "output_limit",
+                "canceled",
+                "unavailable",
                 "timeout",
                 "tool_error",
                 "network_error",
                 "parse_error",
                 "unknown_outcome",
+                "rejected",
             }
             else "tool_error"
         )
-        if time.monotonic() - started >= timeout or _remaining(state, config) <= 0:
+        if not managed and (time.monotonic() - started >= timeout or _remaining(state, config) <= 0):
             receipt.update(
                 status="timeout",
                 timeout=True,
@@ -156,6 +166,9 @@ def _execute(harness, run, request, config, port, step_id, claim_index):
             receipt.update(status="output_limit", reason="output_limit_exceeded")
         else:
             receipt.update(output=redact(deepcopy(output)), exit_code=result.get("exit_code"))
+        if managed:
+            receipt.update({key: result.get(key) for key in ("code_ref", "input_ref", "stdout_ref", "stderr_ref", "receipt_ref", "image", "environment", "sandbox_policy_version", "cleanup_verified", "retained_output_bytes", "observed_output_bytes", "executed", "signal", "oom_killed", "timeout", "unknown_outcome", "termination_reason")})
+            receipt["unknown_outcome"] = result.get("unknown_outcome") is True or result.get("status") == "unknown_outcome"
         if (
             receipt["status"] == "success"
             and type(receipt["exit_code"]) is int
@@ -179,8 +192,9 @@ def _execute(harness, run, request, config, port, step_id, claim_index):
         receipt["status"] = "tool_error"
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
-    receipt["timeout"] = receipt["status"] == "timeout"
-    receipt["unknown_outcome"] |= receipt["status"] in {"unknown_outcome", "timeout"}
+    receipt["timeout"] = receipt.get("timeout") is True or receipt["status"] == "timeout"
+    receipt["unknown_outcome"] |= receipt["status"] == "unknown_outcome" or (
+        not managed and receipt["status"] == "timeout")
     run = harness.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],
@@ -209,8 +223,10 @@ def _denial(state, run_id, request, config, port):
     except (TypeError, ValueError):
         return "invalid_arguments"
     tool = request.get("tool")
+    if state.get("reasoning_mode") == "reason_noncoding":
+        return "pure_reasoning_denied"
     if (
-        state.get("reasoning_mode") == "reason_noncoding"
+        config.get("features", {}).get("local_code_tool") is not True
         or port is None
         or not isinstance(tool, str)
         or tool not in SAFE_TOOLS

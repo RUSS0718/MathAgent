@@ -84,15 +84,10 @@ def create_app(
     if app.config["SHOWCASE_MODE"] not in {"fake", "live"}:
         raise ValueError("showcase_mode_invalid")
     from .star_product_modes import capabilities as star_capabilities
-    from .star_product_pipeline import StarProductPipeline
+    from .star_product_runtime import create_star_product_pipeline
 
-    star_pipeline = (StarProductPipeline(resolved_database,
-        adapter=app.config.get("SHOWCASE_STAR_ADAPTER"),
-        budget=app.config.get("SHOWCASE_STAR_BUDGET"),
-        features=app.config.get("SHOWCASE_STAR_FEATURES"),
-        registry=app.config.get("SHOWCASE_STAR_REGISTRY"),
-        evidence_kind=app.config.get("SHOWCASE_STAR_EVIDENCE_KIND", "live"))
-        if app.config.get("SHOWCASE_STAR_ENABLED") is True else None)
+    star_pipeline = create_star_product_pipeline(
+        resolved_database, storage_root=storage_root, config=app.config)
     loopback_store = LoopbackStore(resolved_database)
     live_pipeline = app.config.get("SHOWCASE_LIVE_PIPELINE")
     if service is None:
@@ -369,6 +364,26 @@ def create_app(
             return _workspace_error(exc)
         status = 200 if existing else 202
         return jsonify({"success": True, "job_id": job["job_id"], "status": job["status"], "existing": existing}), status
+
+    @app.get("/api/agent/jobs/<job_id>/artifacts/<digest>")
+    def tool_artifact(job_id, digest):
+        from .tool_artifacts import ToolArtifactError
+
+        session = _require_auth(g.auth_session)
+        try:
+            workspace_service.get_job(job_id, session.user_id)
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+        executor = getattr(getattr(star_pipeline, "registry", None), "container_python_executor", None)
+        if executor is None:
+            return _json_error("artifact_unavailable", 404)
+        try:
+            content = executor.artifacts.read(job_id, digest)
+        except ToolArtifactError as exc:
+            return _json_error(str(exc), 404 if str(exc) == "artifact_not_found" else 409)
+        return Response(content, content_type="application/octet-stream", headers={
+            "Content-Disposition": "attachment; filename=" + digest,
+            "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
 
     @app.get("/api/agent/jobs/active")
     def active_jobs() -> Response | tuple[Response, int]:

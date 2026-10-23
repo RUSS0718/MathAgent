@@ -74,7 +74,7 @@ class StarProductPipeline:
                         "llm_whole_review_accepted" if reviewed else "whole_review_not_accepted",
                         "not_a_formal_or_complete_proof"]},
                     "request_attempts": [attempt for call in port.invocations for attempt in call["request_attempts"]],
-                    "tool_results": [],
+                    "tool_results": public_tools(math),
                     "error": None if reviewed and verification_mode != "required" else {"category": "verification_needs_review" if reviewed else "star_needs_review"},
                 }
                 check_control()
@@ -103,3 +103,12 @@ def projection(run):
     return {"run_id": run["run_id"], "state_revision": run["state_revision"],
             "phase": state["phase"], "status": state["status"],
             "config_hash": state["config_hash"], "checkpoint_thread_id": run["run_id"]}
+
+
+def public_tools(state):
+    receipts = state.get("tool_receipts", [])
+    return [{"name": item.get("tool") or ("python_math" if item.get("source") == "docker_isolated" else "polynomial_check"),
+             "status": item["status"], "tool_call_id": item["receipt_id"],
+             "result_summary": "Finite computation only; not a completeness proof",
+             "receipt": {key: value for key, value in item.items() if key not in {"input", "output"}}}
+            for item in receipts]
