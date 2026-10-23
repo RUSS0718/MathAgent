@@ -47,3 +47,18 @@
 - 集成分支标准/规格审查及固定上游一致性独立复核
 
 所有票的实际验收与发布门禁通过后才关闭对应工作；历史工单、helper 测试和 Demo 可运行均不能替代能力证据。
+
+## 改动前回归基点
+
+2026-10-23，在开发基点代码上执行以下检查。检查期间仅新增本执行合同，没有修改产品代码。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| `uv run python scripts/check.py --offline` | PASS；343 tests，204.441 秒；服务 help 与仓库合同通过 |
+| `uv run python scripts/check_showcase_release.py` | `showcase_release=PASS` |
+| `npm ci --no-audit --no-fund` | 成功，安装 66 个包 |
+| `npm audit --audit-level=high` | 0 vulnerabilities |
+| `npm run check` | 依赖合同、类型检查、13 个测试和构建通过 |
+| `git diff 606d874 -- user_agent.py implementations BASELINE.json requirements.txt` | 空差异 |
+
+以上结果是回归基点，不是 SP-01 风险门禁或 #56 产品完成证据。
