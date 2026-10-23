@@ -71,7 +71,7 @@ class StarProductJobsTest(unittest.TestCase):
         result = job["result"]
         self.assertEqual("star_limited", result["solver_mode"])
         self.assertEqual("scripted", result["evidence_kind"])
-        self.assertIn("isolated_python_output_guard", result["missing_capabilities"])
+        self.assertIn("feature:skills", result["missing_capabilities"])
         self.assertEqual(3, result["budget"]["logical_calls"])
         self.assertEqual(3, result["budget"]["http_attempts"])
         self.assertEqual(run_id, result["solver"]["run_id"])

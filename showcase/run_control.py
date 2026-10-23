@@ -5,6 +5,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
 
+from .star_product_modes import BEST_EFFORT_MODES
+
 _current = ContextVar("showcase_run_control", default=None)
 
 
@@ -26,7 +28,7 @@ class RunControl:
                 "run_canceled" if row and row["status"] == "canceled" else "run_stopped"
             )
         if time.time() >= self.budget.snapshot()["deadline_at"]:
-            if self.store.job_identity(self.run_id).get("solver_mode") == "star_limited_best_effort":
+            if self.store.job_identity(self.run_id).get("solver_mode") in BEST_EFFORT_MODES:
                 if allow_expired_selection:
                     return
                 raise RunStopped("run_deadline_exhausted")

@@ -4,6 +4,7 @@ import json
 import time
 
 from ..run_control import RunStopped
+from ..star_product_modes import BEST_EFFORT_MODES
 
 
 def controlled_patch(connection, run_id, event, updates):
@@ -37,7 +38,7 @@ def _expired_selection(connection, run_id, event, updates):
         "SELECT json_extract(result_json,'$.solver_mode') FROM workspace_jobs WHERE job_id=?",
         (run_id,),
     ).fetchone()[0]
-    if mode != "star_limited_best_effort" or event["type"] not in {
+    if mode not in BEST_EFFORT_MODES or event["type"] not in {
         "best_effort_selected", "best_effort_empty"
     }:
         return False

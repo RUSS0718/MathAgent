@@ -12,9 +12,9 @@ from .solver_harness.intern_port import InternModelPort
 from .solver_harness.result import export_result
 from .solver_harness.tool_ports import RegistryToolPort
 from .star_product_candidates import candidate_projection
-from .star_product_config import limited_config
+from .star_product_config import core_gaps, full_config, limited_config
 from .star_product_events import decision_fields, public_solver_event_id
-from .star_product_modes import mode_identity
+from .star_product_modes import BEST_EFFORT_MODES, FULL_MODES, STAR_MODES, mode_identity
 from .star_product_recovery import recovery_projection, resume_solver
 
 PUBLIC_TOOL_NAMES = frozenset({"polynomial_check", "python_math"})
@@ -24,7 +24,8 @@ class StarProductPipeline:
     execution_mode = "star_limited"
 
     def __init__(self, database_path, *, adapter=None, evidence_kind="live", budget=None,
-                 features=None, registry=None, hint_mode="none"):
+                 features=None, registry=None, hint_mode="none", full_enabled=False,
+                 full_features=None, full_budget=None):
         if evidence_kind not in {"live", "scripted", "fault_injection"}:
             raise ValueError("star_evidence_kind_invalid")
         if adapter is not None and not isinstance(adapter, InternModelAdapter):
@@ -41,19 +42,57 @@ class StarProductPipeline:
         self.config["hint_mode"] = hint_mode
         self.registry = registry
         self.checkpointer = None
+        self.full_enabled = full_enabled is True
+        self.full_budget = full_budget or RunBudgetLimits(
+            max_model_calls=48, max_http_attempts=48, max_tool_calls=8)
+        if not isinstance(self.full_budget, RunBudgetLimits):
+            raise ValueError("star_budget_invalid")
+        self.full_config = full_config(self.full_budget, full_features)
+        self.full_config["hint_mode"] = hint_mode
+        self.readiness = {"available": False, "reason": "full_mode_not_enabled"}
+        if self.full_enabled:
+            self.full_gaps(probe=True)
+
+    def full_gaps(self, *, probe=False):
+        if not self.full_enabled:
+            return ["full_mode_not_enabled"]
+        gaps = core_gaps(self.full_config)
+        if gaps:
+            return gaps
+        try:
+            self.adapter._get_client()
+        except Exception:
+            return ["model_configuration_unavailable"]
+        if self.adapter.model_id != "intern-s2":
+            return ["intern_s2_required"]
+        readiness = self.readiness
+        if probe:
+            from .star_product_readiness import isolated_readiness
+
+            readiness = isolated_readiness(self.registry)
+            self.readiness = readiness
+        if not readiness["available"]:
+            gaps.append(readiness["reason"])
+        return gaps
+
+    def budget_for_mode(self, mode):
+        return self.full_budget if mode in FULL_MODES else self.budget
 
     def run(self, run_id, problem, *, verification_mode="auto", emit=None, solver_hint=None,
             retry_call=None, solver_mode="star_limited"):
-        if solver_mode not in {"star_limited", "star_limited_best_effort"}:
+        if solver_mode not in STAR_MODES:
             raise ValueError("star_mode_invalid")
+        if solver_mode in FULL_MODES and self.full_gaps():
+            raise ValueError("star_prerequisites_unverified")
         check_control()
         if current_budget() is None or self.checkpointer is None:
             raise RuntimeError("star_requires_product_control")
         sink = emit or (lambda _event: None)
         port = InternModelPort(self.adapter, original_problem=problem)
-        config = {**self.config, **({"hint_mode": "user_hint"} if solver_hint is not None else {}),
-                  "features": {**self.config["features"], "candidate_registry": True,
-                               "best_effort": solver_mode == "star_limited_best_effort"}}
+        base = self.full_config if solver_mode in FULL_MODES else self.config
+        config = {**base, **({"hint_mode": "user_hint"} if solver_hint is not None else {}),
+                  "features": {**base["features"], "candidate_registry": True,
+                               "best_effort": solver_mode in BEST_EFFORT_MODES}}
 
         def observe(run, event):
             if event:
@@ -85,13 +124,13 @@ class StarProductPipeline:
                 except (CallInterrupted, HardBudgetStop):
                     run = harness.get_run(run_id)
                 except RunStopped as exc:
-                    if solver_mode != "star_limited_best_effort" or exc.category != "run_deadline_exhausted":
+                    if solver_mode not in BEST_EFFORT_MODES or exc.category != "run_deadline_exhausted":
                         raise
                     run = harness.get_run(run_id)
                 try:
                     run = advance_product(harness, run, problem)
                 except RunStopped as exc:
-                    if solver_mode != "star_limited_best_effort" or exc.category != "run_deadline_exhausted":
+                    if solver_mode not in BEST_EFFORT_MODES or exc.category != "run_deadline_exhausted":
                         raise
                     run = harness.get_run(run_id)
                 from .solver_harness.best_effort import run_best_effort
@@ -114,14 +153,16 @@ class StarProductPipeline:
                             )
                         attempts.append(public_attempt)
                 result = {
-                    **mode_identity(solver_mode), "run_id": run_id,
+                    **mode_identity(solver_mode, config), "run_id": run_id,
                     "execution_mode": solver_mode, "evidence_kind": self.evidence_kind,
                     "solver": projection(run, answer=answer),
                     "status": "COMPLETED" if reviewed and verification_mode != "required" else "NEEDS_REVIEW",
                     "stage": math["phase"].lower(),
                     "final_response": answer,
-                    "summary": ("受限 STAR Best-Effort：预算终止后仅选择已有候选；未完成审查仍需复核"
+                    "summary": ("STAR Best-Effort：预算终止后仅选择已有候选；未完成审查仍需复核"
                                 if math.get("best_effort_decision") is not None else
+                                "STAR 完整预设：使用完整核心；运行完成不代表能力或发布验收通过"
+                                if solver_mode in FULL_MODES else
                                 "受限 STAR：探索、润色和新整题审查；不代表完整参考能力"),
                     "verification": verification,
                     "request_attempts": attempts,
@@ -141,7 +182,7 @@ class StarProductPipeline:
         result = graph.invoke(result, graph_config, durability="sync")
         sink({"type": "final_result" if result["status"] == "COMPLETED" else "needs_review",
               "job_id": run_id, "node_name": "terminal", "step_id": "terminal",
-              "title": "受限 STAR 已完成" if result["status"] == "COMPLETED" else "受限 STAR 需要复核",
+              "title": "STAR 已完成" if result["status"] == "COMPLETED" else "STAR 需要复核",
               "message": "star_needs_review", "data": {"type": "text", "summary": result["summary"]}})
         return result
 

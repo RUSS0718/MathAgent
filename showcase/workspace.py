@@ -27,6 +27,7 @@ from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, freeze_bu
 from .run_checkpoints import RunCheckpointSaver
 from .run_control import RunControl, RunStopped, bind_control
 from .star_product_hints import migrate_hints, validate_hint
+from .star_product_modes import STAR_MODES
 
 ACTIVE_JOB_STATUSES = ("queued", "running", "waiting_input")
 TERMINAL_JOB_STATUSES = ("succeeded", "failed", "canceled")
@@ -792,9 +793,9 @@ class WorkspaceService:
     ) -> tuple[dict[str, Any], bool]:
         from .star_product_modes import validate_mode
 
-        identity = validate_mode(solver_mode, enabled=self.star_pipeline is not None, verification_mode=verification_mode, options=solver_options)
+        identity = validate_mode(solver_mode, enabled=self.star_pipeline is not None, verification_mode=verification_mode, options=solver_options, pipeline=self.star_pipeline)
         validate_hint(solver_hint, solver_mode)
-        selected = self.star_pipeline if solver_mode in {"star_limited", "star_limited_best_effort"} else self.pipeline
+        selected = self.star_pipeline if solver_mode in STAR_MODES else self.pipeline
         if web_search_enabled:
             raise WorkspaceError("capability_unavailable", status=503)
         if input_user_file_id is not None and (not isinstance(input_user_file_id, str) or not input_user_file_id):
@@ -813,7 +814,7 @@ class WorkspaceService:
             problem=problem,
             idempotency_key=idempotency_key,
             request_digest=digest,
-            execution_mode=solver_mode if solver_mode in {"star_limited", "star_limited_best_effort"} else getattr(selected, "execution_mode", self.execution_mode),
+            execution_mode=solver_mode if solver_mode in STAR_MODES else getattr(selected, "execution_mode", self.execution_mode),
             solver_identity={**identity, "evidence_kind": getattr(selected, "evidence_kind", self.execution_mode)},
             solver_hint=solver_hint,
             verification_mode=verification_mode,
@@ -859,7 +860,7 @@ class WorkspaceService:
     def _execute(self, job_id: str) -> None:
         try:
             identity = self.store.job_identity(job_id)
-            pipeline = self.star_pipeline if identity.get("solver_mode") in {"star_limited", "star_limited_best_effort"} else self.pipeline
+            pipeline = self.star_pipeline if identity.get("solver_mode") in STAR_MODES else self.pipeline
             execution_mode = identity.get("execution_mode", self.execution_mode)
             if not self.store.start_job(job_id, execution_mode=execution_mode):
                 return
@@ -869,11 +870,12 @@ class WorkspaceService:
             if self.execution_mode == "fake" and self.budget_ledger.snapshot(job_id) is not None:
                 budget = self.budget_ledger.ensure(job_id, RunBudgetLimits())
                 RunControl(self.store, job_id, budget).check()
-            if self.execution_mode == "live" or execution_mode in {"star_limited", "star_limited_best_effort"}:
+            if self.execution_mode == "live" or execution_mode in STAR_MODES:
                 if pipeline is None:
                     self.store.fail_job(job_id, "unavailable", execution_mode="live")
                     return
-                limits = getattr(pipeline, "budget", RunBudgetLimits())
+                limits = (pipeline.budget_for_mode(identity.get("solver_mode"))
+                          if execution_mode in STAR_MODES else getattr(pipeline, "budget", RunBudgetLimits()))
                 with bind_budget(self.budget_ledger.ensure(job_id, limits)) as budget, bind_control(RunControl(self.store, job_id, budget, self.checkpointer)) as control:
                     control.check()
                     state = pipeline.run(
@@ -883,7 +885,7 @@ class WorkspaceService:
                         emit=lambda event: self.store.append_event(job_id, event),
                         **({"solver_hint": self.store.solver_hint(job_id),
                             "retry_call": identity.get("retry_call"),
-                            "solver_mode": identity.get("solver_mode")} if execution_mode in {"star_limited", "star_limited_best_effort"} else {}),
+                            "solver_mode": identity.get("solver_mode")} if execution_mode in STAR_MODES else {}),
                     )
                 self.store.finish_live_job(job_id, state)
                 if self.checkpointer is not None and state.get("status") != "WAITING_INPUT":
@@ -916,7 +918,7 @@ class WorkspaceService:
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
         payload = self.store.get_job(job_id, user_id)
-        star = (payload.get("result") or {}).get("solver_mode") in {"star_limited", "star_limited_best_effort"}
+        star = (payload.get("result") or {}).get("solver_mode") in STAR_MODES
         if star:
             from .star_product_projection import current_solver
 
