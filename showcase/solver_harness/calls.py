@@ -160,6 +160,15 @@ def dispatch(harness, run, operation, request, session_dispatch):
         try:
             response = _consume(operation(deepcopy(prepared)), partial, checkpoint)
         except Exception as exc:
+            if getattr(exc, "category", None) == "run_budget_exhausted":
+                from .budget import HardBudgetStop, stop
+
+                attempts = getattr(exc, "request_attempts", [])
+                record.update(status="unknown_outcome" if attempts else "budget_rejected",
+                              error_category="run_budget_exhausted")
+                _save(harness, run, record)
+                stop(harness, run, "shared_admission_budget_exhausted")
+                raise HardBudgetStop(run["run_id"]) from None
             partial.append(str(getattr(exc, "partial_text", "")))
             record.update(
                 status="tool_error" if getattr(exc, "tool_error", False) else "unknown_outcome",

@@ -19,23 +19,27 @@ class RunControl:
         self.store, self.run_id, self.budget = store, run_id, budget
         self.checkpointer = checkpointer
 
-    def check(self):
+    def check(self, *, allow_expired_selection=False):
         row = self.store.control_status(self.run_id)
         if row is None or row["status"] not in {"running", "queued"}:
             raise RunStopped(
                 "run_canceled" if row and row["status"] == "canceled" else "run_stopped"
             )
         if time.time() >= self.budget.snapshot()["deadline_at"]:
+            if self.store.job_identity(self.run_id).get("solver_mode") == "star_limited_best_effort":
+                if allow_expired_selection:
+                    return
+                raise RunStopped("run_deadline_exhausted")
             self.store.fail_job(self.run_id, "run_deadline_exhausted", execution_mode="live")
             if self.checkpointer is not None:
                 self.checkpointer.stop(self.run_id, "FAILED", "run_deadline_exhausted")
             raise RunStopped("run_deadline_exhausted")
 
 
-def check_control():
+def check_control(*, allow_expired_selection=False):
     control = _current.get()
     if control is not None:
-        control.check()
+        control.check(allow_expired_selection=allow_expired_selection)
     else:
         from .run_budget import current_budget
 

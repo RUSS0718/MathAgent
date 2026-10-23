@@ -578,6 +578,27 @@ def create_app(
         pack = app.extensions["showcase_evidence_exporter"].export(snapshot, events=events, tool_results=tool_results)
         return jsonify(replay_evidence(pack))
 
+    @app.get("/api/agent/jobs/<job_id>/candidate-replay")
+    def replay_job_candidates(job_id: str) -> Response | tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        try:
+            job = workspace_service.get_job(job_id, session.user_id)
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+        if (job.get("result") or {}).get("solver_mode") not in {
+            "star_limited", "star_limited_best_effort"
+        }:
+            return _json_error("star_replay_unavailable", 409)
+        from .star_product_candidates import replay_candidates
+        from .star_product_projection import persisted_solver
+
+        with workspace_service.store._lock:
+            persisted = persisted_solver(workspace_service.store._connection, job_id)
+        if persisted is None:
+            return _json_error("star_replay_unavailable", 409)
+        run, _ = persisted
+        return jsonify(replay_candidates(run))
+
     @app.get("/api/agent/jobs/<job_id>/report")
     def get_job_report(job_id: str) -> Response | tuple[Response, int]:
         session = _require_auth(g.auth_session)

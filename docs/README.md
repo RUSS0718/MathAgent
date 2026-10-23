@@ -26,6 +26,8 @@ SP-09 的[受控 Python 合同](engineering/star-product-sp09-contract.md)与[�
 
 SP-10 的[整题审查与交付绑定合同](engineering/star-product-sp10-contract.md)和[公共验收记录](evals/star-product-sp10.md)覆盖实际整题 Verifier、文本身份/版本/来源、改写降级、伪造引用拒绝、并发追加及回退/重规划后的合法救援绑定。证据为 scripted/fault-injection；LLM 审查不等于完整数学证明，真实验收仍由 SP-13 负责。
 
+SP-11 的[候选与零调用选择合同](engineering/star-product-sp11-contract.md)及[公共验收记录](evals/star-product-sp11.md)记录受限 BestEffort 显式入口、候选全版本、依赖/反证排除、硬预算纯选择、S4 选择绑定与持久快照 replay。证据为 fault-injection/replay；完整模式和前端全生命周期仍受 SP-12/13 门禁约束。
+
 | 当前任务 | 阅读顺序 | 读完应能判断 |
 | --- | --- | --- |
 | 了解 v0.1 做到了什么 | [能力基线](evals/v0.1-capability-baseline.md) → [开发完成记录](https://github.com/RUSS0718/MathAgent/issues/1#issuecomment-6209639217) → 下方 v0.1 文档链 | 工程完成、真实模型连接与数学效果各有什么证据 |

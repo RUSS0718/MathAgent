@@ -206,10 +206,14 @@ def run_best_effort(harness, run, *, require_termination=False):
     }
     # This narrow internal transition accepts no caller-provided patch and preserves
     # the generic terminal freeze in commit_event. CAS protects concurrent recovery.
-    return harness._state_store.commit_event(
+    result = harness._state_store.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],
         event=event,
         state_updates=updates,
         request_hash=_hash_json({"event": event, "state_updates": updates}),
     )
+
+    if harness._event_observer is not None:
+        harness._event_observer(result, result["events"][-1])
+    return result

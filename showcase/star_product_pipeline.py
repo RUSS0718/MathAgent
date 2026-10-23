@@ -4,13 +4,14 @@ from langgraph.graph import END, START, StateGraph
 
 from .adapters import InternModelAdapter
 from .run_budget import RunBudgetLimits, current_budget, public_solver_call_id
-from .run_control import check_control
+from .run_control import RunStopped, check_control
 from .solver_harness import SolverHarness
 from .solver_harness.controller import advance_product
 from .solver_harness.final_binding import delivery_verification
 from .solver_harness.intern_port import InternModelPort
 from .solver_harness.result import export_result
 from .solver_harness.tool_ports import RegistryToolPort
+from .star_product_candidates import candidate_projection
 from .star_product_config import limited_config
 from .star_product_events import decision_fields, public_solver_event_id
 from .star_product_modes import mode_identity
@@ -42,13 +43,17 @@ class StarProductPipeline:
         self.checkpointer = None
 
     def run(self, run_id, problem, *, verification_mode="auto", emit=None, solver_hint=None,
-            retry_call=None):
+            retry_call=None, solver_mode="star_limited"):
+        if solver_mode not in {"star_limited", "star_limited_best_effort"}:
+            raise ValueError("star_mode_invalid")
         check_control()
         if current_budget() is None or self.checkpointer is None:
             raise RuntimeError("star_requires_product_control")
         sink = emit or (lambda _event: None)
         port = InternModelPort(self.adapter, original_problem=problem)
-        config = {**self.config, **({"hint_mode": "user_hint"} if solver_hint is not None else {})}
+        config = {**self.config, **({"hint_mode": "user_hint"} if solver_hint is not None else {}),
+                  "features": {**self.config["features"], "candidate_registry": True,
+                               "best_effort": solver_mode == "star_limited_best_effort"}}
 
         def observe(run, event):
             if event:
@@ -79,10 +84,25 @@ class StarProductPipeline:
                            harness.solve(problem, {"run_id": run_id, "user_hint": solver_hint}))
                 except (CallInterrupted, HardBudgetStop):
                     run = harness.get_run(run_id)
-                run = advance_product(harness, run, problem)
+                except RunStopped as exc:
+                    if solver_mode != "star_limited_best_effort" or exc.category != "run_deadline_exhausted":
+                        raise
+                    run = harness.get_run(run_id)
+                try:
+                    run = advance_product(harness, run, problem)
+                except RunStopped as exc:
+                    if solver_mode != "star_limited_best_effort" or exc.category != "run_deadline_exhausted":
+                        raise
+                    run = harness.get_run(run_id)
+                from .solver_harness.best_effort import run_best_effort
+
+                run = run_best_effort(harness, run)
                 math = run["state"]
                 answer = export_result(run)["final_response"]
                 bound, verification = delivery_verification(run, answer)
+                from .star_product_candidates import selection_verification
+
+                verification = selection_verification(run, answer, verification)
                 reviewed = math["status"] == "completed_llm_reviewed" and bound
                 attempts = []
                 for call in port.invocations:
@@ -94,19 +114,21 @@ class StarProductPipeline:
                             )
                         attempts.append(public_attempt)
                 result = {
-                    **mode_identity(self.execution_mode), "run_id": run_id,
-                    "execution_mode": self.execution_mode, "evidence_kind": self.evidence_kind,
+                    **mode_identity(solver_mode), "run_id": run_id,
+                    "execution_mode": solver_mode, "evidence_kind": self.evidence_kind,
                     "solver": projection(run, answer=answer),
                     "status": "COMPLETED" if reviewed and verification_mode != "required" else "NEEDS_REVIEW",
                     "stage": math["phase"].lower(),
                     "final_response": answer,
-                    "summary": "受限 STAR：探索、润色和新整题审查；不代表完整参考能力",
+                    "summary": ("受限 STAR Best-Effort：预算终止后仅选择已有候选；未完成审查仍需复核"
+                                if math.get("best_effort_decision") is not None else
+                                "受限 STAR：探索、润色和新整题审查；不代表完整参考能力"),
                     "verification": verification,
                     "request_attempts": attempts,
                     "tool_results": public_tools(math),
                     "error": None if reviewed and verification_mode != "required" else {"category": "verification_needs_review" if reviewed else "star_needs_review"},
                 }
-                check_control()
+                check_control(allow_expired_selection=math.get("best_effort_decision") is not None)
                 return result
 
         builder = StateGraph(dict)
@@ -134,7 +156,8 @@ def projection(run, *, answer=None):
     return {"run_id": run["run_id"], "state_revision": run["state_revision"],
             "phase": state["phase"], "status": status,
             "config_hash": state["config_hash"], "checkpoint_thread_id": run["run_id"],
-            "recovery": recovery_projection(run)}
+            "recovery": recovery_projection(run),
+            **candidate_projection(run)}
 
 
 def public_tools(state):

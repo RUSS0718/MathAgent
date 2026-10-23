@@ -40,7 +40,7 @@ def authorize_resume(connection, row, decision):
     from .workspace import WorkspaceError
 
     identity = json.loads(row["result_json"] or "{}")
-    if identity.get("solver_mode") != "star_limited":
+    if identity.get("solver_mode") not in {"star_limited", "star_limited_best_effort"}:
         return False
     if row["status"] != "failed" or row["error_code"] not in {
         "needs_review", "star_needs_review", "job_execution_failed"

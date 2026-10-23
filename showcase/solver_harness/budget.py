@@ -14,6 +14,10 @@ def budget_reason(state, config):
             return "runtime_budget_exhausted"
         if budget["logical_calls"] >= budget["limits"]["max_model_calls"]:
             return "model_call_budget_exhausted"
+        if budget["http_attempts"] >= budget["limits"]["max_http_attempts"]:
+            return "http_attempt_budget_exhausted"
+        if budget["charged_tokens"] + budget["reserved_tokens"] >= budget["limits"]["max_tokens"]:
+            return "token_budget_exhausted"
         if _tools_authorized(state, config) and budget["tool_calls"] >= budget["limits"]["max_tool_calls"]:
             return "tool_call_budget_exhausted"
         return None
