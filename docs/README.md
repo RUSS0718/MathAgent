@@ -8,6 +8,8 @@
 
 当前完整 STAR 产品集成由 [spec #56](https://github.com/RUSS0718/MathAgent/issues/56) 及 SP-01..SP-13（#57..#69）承载，承接 #23 基础设施与 #32 求解机制；当前从 [SP-01 #57](https://github.com/RUSS0718/MathAgent/issues/57) 的来源审计和风险验证开始。状态职责和恢复合同见 [ADR-0014](adr/0014-star-product-state-and-recovery.md)，范围形成过程见 [访谈记录](experiments/star-completion-interview.md)。新 spec 尚未完成；历史工单关闭不表示 Workbench 已贯通完整 STAR。
 
+本次执行记录见 [产品集成执行合同](engineering/star-product-execution.md)。SP-01 已形成 [固定来源与全量验收映射](experiments/star-product-source-audit.md) 和 [风险报告](experiments/star-product-risk-sp01.md)：公共旧流程恢复有实测证据，但 STAR 接受步骤恢复尚未验证，Docker 原型输出限制存在已复现旁路。完整模式门槛仍未通过；后续先实现明确受限的 SP-02 纵切。
+
 | 当前任务 | 阅读顺序 | 读完应能判断 |
 | --- | --- | --- |
 | 了解 v0.1 做到了什么 | [能力基线](evals/v0.1-capability-baseline.md) → [开发完成记录](https://github.com/RUSS0718/MathAgent/issues/1#issuecomment-6209639217) → 下方 v0.1 文档链 | 工程完成、真实模型连接与数学效果各有什么证据 |
