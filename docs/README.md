@@ -42,8 +42,8 @@
 
 - [v1.1 实现规格](https://github.com/RUSS0718/MathAgent/issues/32)：S1/S2 seam、验收合同、SC→AC 映射和 v1.1/v1.2 ticket 边界。
 - [v1.1 验收记录](evals/showcase-solver-harness-v1.1-acceptance.md)：记录 v1.1 离线验收结果、SC 归属与 engineering-preview 能力限制。
-- [SH21 Intern 真实调用记录](evals/showcase-solver-intern-live-sh21.md)：两次真实样本均未形成工具闭环，AC-06 仍为 unavailable；包含确切预算、失败原因与本地证据哈希。
-- [SH22 配对报告工程合同](evals/showcase-solver-paired-report-sh22.md)：独立 Run、同条件校验、失败保留与离线恢复；真实配对证据仍为 needs_review。
+- [SH21 Intern 真实调用记录](evals/showcase-solver-intern-live-sh21.md)：记录两次未执行工具的旧样本和一次有回执续接、但未完成整题审查的新探针；六次跨三题的历史门槛仍 unavailable。
+- [SH22 配对报告工程合同](evals/showcase-solver-paired-report-sh22.md)：独立 Run、同条件校验、失败保留与离线恢复；一组真实 Skills 配对已完成，能力结论仍需更多样本。
 - [ADR-0013](adr/0013-solver-harness-boundary-and-shared-transaction.md)：Showcase 单一产品面、共享 SQLite 事务和版本标识决策。
 - 产品版本为 v1.1；包版本保持 `0.1.0`，前端版本保持 `0.2.0`，Profile 保持 `showcase_mvp`。
 - v1.1 继承 v0.2 的 `engineering-preview` 状态；`v0.2 AC-06` 真实 Intern 工具闭环延期到 v1.2。

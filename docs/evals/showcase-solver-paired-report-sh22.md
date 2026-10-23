@@ -2,7 +2,7 @@
 
 **关联：** [#54](https://github.com/RUSS0718/MathAgent/issues/54)、父规格 [#32](https://github.com/RUSS0718/MathAgent/issues/32)。
 
-**状态：** 离线报告工程可验收；真实配对运行、真实费用与 live gate 均为 `needs_review`。[SH21 两次实测](showcase-solver-intern-live-sh21.md)没有形成真实工具闭环，因此本合同不把依赖视为通过。本任务没有新增真实调用。
+**状态：** 离线报告工程验收通过。2026-10-23 获准执行一组真实 Skills 配对：两臂均完成并保留真实用量与工具回执；真实费用未知，`live_gate` 保持 `needs_review`。单组运行不构成能力提升或完整 live 发布证据。
 
 ## 公共入口与条件
 
@@ -12,7 +12,7 @@
 
 可观察的客户端模型 ID 优先于 adapter 声明；若与声明不符，则拒绝运行。模型 revision 可观察时同样验证。服务通常不提供固定 revision，报告保留 `declared_only`，不声称提供了不存在的版本证据。脚本 port 没有可观察模型标识时，报告明确为 `identity_status=unknown`，只支持工程结论。
 
-脚本运行依靠已有 Harness 预算。包含真实 adapter 的注入运行另外绑定已有 `RunBudgetLedger`，在发送逻辑调用和每次 HTTP attempt 前预留预算；不新增第二套发送循环。脚本 CLI 不提供 live 开关。本任务没有进行真实配对实验。
+脚本运行依靠已有 Harness 预算。包含真实 adapter 的注入运行另外绑定已有 `RunBudgetLedger`，在发送逻辑调用和每次 HTTP attempt 前预留预算；本次真实运行还将每臂预算绑定到 Registry 工具线程，保留工具计数。离线脚本 CLI 仍不提供 live 开关；真实调用使用显式 `provider_live` 端口和相同预算条件。
 
 ## 保留和恢复
 
@@ -40,3 +40,18 @@ uv run ruff check showcase/solver_harness/paired.py showcase/solver_harness/pair
 ```
 
 测试覆盖两 Run 隔离、条件不一致预先拒绝、失败保留、进程中断恢复、未知 usage 和费用、真实 adapter 的模拟 HTTP attempt 审计，以及同一配对身份不可重新绑定。模拟 HTTP 测试不是实际服务证据。
+
+## 一组真实配对记录
+
+本次只比较 `skills=false` 与 `skills=true`，其余题目、Intern-S2 模型、工具权限、Profile、传输限制和预算相同。配对条件观测到的模型 ID 为 `intern-s2`，返回 ID 为 `Intern-S2`；服务未提供 revision，因此 revision 仅声明，未冒称为服务观测值。
+
+| 臂 | Skills | HTTP / 逻辑调用 | 本地工具 | Provider tokens | Run 结果 | 未知调用 | 费用 |
+| --- | --- | ---: | ---: | ---: | --- | --- | --- |
+| control | off | 4 | 1 | 5927 | `completed_llm_reviewed` | 0 | `null` |
+| variant | on | 4 | 1 | 5761 | `completed_llm_reviewed` | 0 | `null` |
+
+两臂的真实 `polynomial_check` 均返回成功，step Verifier 的调用记录均包含对应 receipt ID，整题结果均通过 LLM review。两份 receipt 的 `assertion_matched=false`：模型未提供与本地结果完全匹配的 `expected_output`，所以工具结果没有被升级为 `verified`。工具仅检查候选代回；答案完整性仍由其代数论证和 LLM review 表示，不等于形式化证明。
+
+本组配对 ID 为 `solver-pair-live-skills-v1`，报告保存在被忽略的 `artifacts/sh23-release/solver-pair-live-skills-v1/report.json`，SHA-256 为 `cae1c8f26f1f177bd4fd37abde97b77b204be65e460d2482fbc12e3d29c094be`；`summary.json` SHA-256 为 `c923fff394b4848f9f902cb90ad6b3f3f7e41303fdfb468ea920d4c41f4b6b1c`。本组实际使用 8 次 HTTP、2 次工具调用和 11688 provider tokens，花费未知。配对报告状态为 `completed`，live gate 仍为 `needs_review`。
+
+新授权轮次合计使用 12 次 HTTP、3 次本地工具执行和 17478 provider tokens；每次请求只有一次物理 attempt，未知调用为 0，货币费用未知。SH21 的 probe 与本组配对共包含三次 Run，均为同一道公开题。旧 `v0.2 AC-06` 要求三道计算题各运行两次，目前总计五次 Run 且只有一道题，因此仍为 `unavailable`。本组不用于推断策略收益或数学正确率提升。
