@@ -77,6 +77,9 @@ def run():
         ("stdout", "import os;\nwhile True: os.write(1,b'x'*1024)"),
         ("stderr", "import os;\nwhile True: os.write(2,b'x'*1024)"),
         ("tree_timeout", "import subprocess,time; subprocess.Popen(['sleep','30']); time.sleep(30)"),
+        ("parent_stdout_bypass", "import os; paths=['/proc/1/fd/'+x for x in os.listdir('/proc/1/fd')]; "
+         "target=next(p for p in paths if p.endswith('/10') and os.readlink(p).startswith('pipe:')); "
+         "fd=os.open(target,os.O_WRONLY); os.write(fd,b'B'*16384)"),
     ]
     results = [probe(identity, name, code) for name, code in cases]
     # Bypass counterexample: writing the same path without --read-only succeeds.
@@ -93,13 +96,15 @@ def run():
         "stdout_bounded_during_execution": "8192 /tmp/stdout" in results[7]["stdout"] and not results[7]["timeout"],
         "stderr_bounded_during_execution": "8192 /tmp/stderr" in results[8]["stdout"] and not results[8]["timeout"],
         "timeout_kills_tree": results[9]["timeout"] and results[9]["process_tree_gone"],
+        "arbitrary_stdout_bounded": results[10]["stdout"].count("B") <= 8192,
         "bypass_detected": control["exit_code"] == 0 and results[1]["exit_code"] != 0,
         "all_process_trees_gone": all(r["process_tree_gone"] for r in results),
     }
     report = {
         "mode": "fault-injection", "model_calls": 0, "image_id": identity,
         "repo_digests": image.get("RepoDigests"), "engine": docker("version", "--format", "{{json .Server}}").stdout.strip(),
-        "budget": {"containers": 11, "per_container_seconds": 8, "memory_bytes": 67108864,
+        "production_output_gate": "blocked: regular-file limits can be bypassed through parent stdout fd",
+        "budget": {"containers": 12, "per_container_seconds": 8, "memory_bytes": 67108864,
                    "output_bytes_per_stream": 8192, "external_api_calls": 0},
         "assertions": assertions, "results": results, "bypass_control": control,
     }

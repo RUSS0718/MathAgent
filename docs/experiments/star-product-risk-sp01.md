@@ -2,13 +2,13 @@
 
 日期：2026-10-23。实现基点：`606d874fcee11bc161d68aa001cd706de63afbe2`，工单：[SP-01 #57](https://github.com/RUSS0718/MathAgent/issues/57)。
 
-结论：固定来源审计和可执行风险材料已交付；Docker 隔离原型通过本次反例；旧产品安全 checkpoint 和未知请求策略通过真实进程中断实验。**STAR 已接受步骤、动作、账本与 checkpoint 的联合恢复门槛仍为 blocked/unverified。**公共 Job 在基点没有 STAR 步骤，不能把旧 planner 恢复当成第二步接受后续算第三步。
+结论：固定来源审计和可执行风险材料已交付；Docker网络/文件/资源/超时通过对应反例，但任意代码输出上限存在实际旁路，风险门槛blocked；旧产品安全checkpoint和未知请求策略通过真实进程中断实验。**STAR已接受步骤、动作、账本与checkpoint的联合恢复门槛仍为blocked/unverified。**公共Job在基点没有STAR步骤，不能把旧planner恢复当成第二步接受后续算第三步。
 
 ## 证据边界与预算
 
 两份脚本都是可执行验收，不新增求解循环，也不接入官方入口。恢复脚本使用真实产品 worker/LangGraph/SQLite 与公开 Job、Run、report、SSE、Evidence 接缝；仅 HTTP 提供方替换为可控回复。`SHOWCASE_MODE=live` 表示经过现有生产 pipeline，**证据来源仍是 scripted，不是真实 Intern**。
 
-执行前上限为：恢复两场景各一次中断和一次重启，4 次 scripted HTTP、0 工具、120 秒；Docker 11 个隔离容器，每个运行 8 秒、64 MiB、16 PIDs，stdout/stderr 各 8192 字节。真实 API 调用为 0，费用为 0；不读取宿主凭证。Docker 拉取公开 Python 镜像不是模型调用。
+执行前上限为：恢复两场景各一次中断和一次重启，4次scripted HTTP、0工具、120秒；首批Docker11个容器，最终对抗批次12个，每个运行8秒、64MiB、16PIDs。普通stdout/stderr文件各8192字节；对抗探针仅一次16384字节写入以有界验证旁路。真实API调用为0，费用为0；不读取宿主凭证。Docker拉取公开Python镜像不是模型调用。
 
 ## 固定来源核对
 
@@ -43,7 +43,7 @@ uv run python scripts/star_docker_spike.py --output artifacts/star-sp01/docker.j
 
 每个受限容器启用 network=none、read-only root、cap-drop ALL、no-new-privileges、非root UID65534、memory/memory-swap=64m、CPU0.5、pids16、CPU soft1/hard2秒、文件大小硬上限8192、独立1MiB noexec/nosuid/nodev tmpfs，无宿主或其他题目 bind mount，Docker log-driver=none。
 
-stdout/stderr 在子进程开始前重定向到普通文件，Linux RLIMIT_FSIZE 在写入时拒绝超额；不是读取无限 stdout 后再截断。代码未获得 Docker socket。脚本最后仅读取这两个有界文件。容器退出或超时后检查 Docker State 与 top，再删除本批容器。
+stdout/stderr在子进程开始前重定向到普通文件，Linux RLIMIT_FSIZE在写入普通文件时拒绝超额；但这不限制所有输出通道。实际对抗探针发现shell在`/proc/1/fd/10`保留原Docker stdout管道，同UID代码能重开它绕过普通文件上限。`/proc/1/fd/1`当时恰为重定向文件，该特定尝试未绕过。代码未获得Docker socket。容器退出或超时后检查Docker State与top，再删除本批容器。
 
 | 实际反例 | 观察 |
 | --- | --- |
@@ -55,9 +55,12 @@ stdout/stderr 在子进程开始前重定向到普通文件，Linux RLIMIT_FSIZE
 | 无限CPU循环 | 2.828秒，exit152，CPU time limit exceeded；未等到外层8秒deadline |
 | 无限stdout / 无限stderr | 各在8192字节停止并异常退出；0.860/0.906秒 |
 | 父进程与sleep子进程持续运行 | 8秒deadline后 docker kill，exit137、State.Running=false、docker top拒绝，无残留容器进程树 |
+| 重开父shell保存的stdout管道 | 单次写入16384个B，超过8192上限；实际任意代码输出门槛失败 |
 | 实际移除read-only的对照 | 同一root写入代码成功退出，而受限运行失败；原只读断言能识别该旁路 |
 
-11 个容器、12 个断言通过。该原型尚不是产品 Registry 工具，不提供数学库镜像、内容寻址产物或工具Evidence合同；不得据此声称 SP-09/SP-AC-15/16/17 已完成。Docker 配置并不证明不存在内核逃逸漏洞；本票记录的是列出的实际边界观察。
+首批11个容器、12个固定脚本断言通过，不足以证明任意代码输出上限。最终对抗批次12个容器，12项通过、`arbitrary_stdout_bounded`失败，命令退出1；不把已发现旁路包装成通过。SP-09必须实现容器外有界drain/kill监督器，不能让同UID可访问的shell保留未受控输出管道。该原型尚不是产品Registry工具，不提供数学库镜像、内容寻址产物或工具Evidence合同；不得据此声称SP-09/SP-AC-15/16/17已完成。Docker配置也不证明不存在内核逃逸漏洞。
+
+最终反例命令为 `uv run python scripts/star_docker_spike.py --image sha256:b7a9e5f6a93d6d4a31f129bbd4bdee69efccb6ded0fb230d78aafaf37af98377 --output artifacts/star-sp01/docker-adversarial-final.json`。该命令**预期当前失败**，修复不能删除或放宽失败断言。额外诊断曾读取容器内父进程FD列表，并运行一次未成功绕过fd1的12容器批次；这些不是新能力通过记录。
 
 ## 冻结的恢复窗口与后续退出条件
 
@@ -76,7 +79,7 @@ stdout/stderr 在子进程开始前重定向到普通文件，Linux RLIMIT_FSIZE
 
 联合门槛的退出用例必须从公共 Job 运行三步计划，在第二步接受后、checkpoint更新前杀进程；恢复后实际第三步被派发，前两步与接受事件各一次、账本累计和deadline不变；在响应缓存与数学接受之间另杀一次，证明缓存复用不新增调用。在接缝具备前状态为blocked/unverified，不由本次旧planner实验替代。
 
-针对性旁路验收须包括：把过期checkpoint当权威应重跑步骤并被实际派发计数发现；在读缓存前扣预算应被累计计费断言发现；未知请求自动重发应被提供方计数发现；取消后数学commit应被接受状态反例发现。最终恢复责任为 SP-08，首次可运行桥接为 SP-02，独立复核为 SP-13。
+针对性旁路验收须包括：把过期checkpoint当权威应重跑步骤并被实际派发计数发现；在读缓存前扣预算应被累计计费断言发现；未知请求自动重发应被提供方计数发现；取消后数学commit应被接受状态反例发现。最终恢复责任为SP-08，首次可运行桥接为SP-02，独立复核为SP-13。输出旁路阻塞完整模式和SP-09隔离发布验收，不阻塞保持fail-closed的SP-02/03开发。
 
 ## 实际证据位置与结果
 
@@ -85,8 +88,9 @@ stdout/stderr 在子进程开始前重定向到普通文件，Linux RLIMIT_FSIZE
 | 文件 | SHA-256 |
 | --- | --- |
 | `docker.json` | `d5085f4984c5789ab7e0f2628d6f72dfbc9416a7b1a39fe9cb12e6aa270cc612` |
+| `docker-adversarial-final.json` | `b944425a7a756d4702d5c1b916157ce9f8857b9c48bdec4c5076431ad809aa5c` |
 | `recovery-1/summary.json` | `90f0d49a9e0622bd5887ace59ebc096162d5c5de546b441d56379bef8b6eb936` |
 
 `recovery-1/<scenario>/` 保留before/after公共观测、独立dispatch计数、进程日志和SQLite。复核脚本可重跑生成新批次；含时间/UUID的raw哈希自然会变化。上述哈希只绑定此次观察，不要求未来复现实验产生相同字节。
 
-聚焦验证：`uv run python -m unittest tests.test_run_control tests.test_run_control_accounting tests.test_baseline_snapshot`：12项通过（7.400秒）；两份spike成功；`uv run ruff check scripts/star_docker_spike.py scripts/star_recovery_spike.py`通过；SC表43行、AC表44行且所有本地路径存在；`git diff --check`通过。没有新增官方调用、修改冻结文件、伪称真实模型运行或数学正确率提升。全量基线由集成维护者在同一基点运行，343项通过；本票聚焦公共控制/基线回归已通过。风险基点退出为完成：已定位风险、执行可用反例、冻结后续合同；完整STAR恢复发布门槛仍blocked/unverified，不循环要求SP-08先于SP-02实施。
+聚焦验证：`uv run python -m unittest tests.test_run_control tests.test_run_control_accounting tests.test_baseline_snapshot`：12项通过（7.400秒）；恢复spike通过，Docker任意代码输出反例实际失败并保留；`uv run ruff check scripts/star_docker_spike.py scripts/star_recovery_spike.py`通过；SC表43行、AC表44行且所有本地路径存在；`git diff --check`通过。隔离实验共38个容器（首批11、fd1尝试12、最终12、FD诊断3），另有1个镜像版本检查容器，均已清理。没有新增官方调用、修改冻结文件、伪称真实模型运行或数学正确率提升。全量基线由集成维护者在同一基点运行，343项通过；本票聚焦公共控制/基线回归已通过。风险基点退出为完成：已定位风险、执行可用反例、冻结后续合同；完整STAR恢复发布门槛及任意代码输出隔离门槛仍blocked，不循环要求SP-08先于SP-02实施。
