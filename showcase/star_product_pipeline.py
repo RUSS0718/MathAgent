@@ -90,9 +90,15 @@ class StarProductPipeline:
         sink = emit or (lambda _event: None)
         port = InternModelPort(self.adapter, original_problem=problem)
         base = self.full_config if solver_mode in FULL_MODES else self.config
+        features = dict(base["features"])
+        # SP-13 合同：reference 核心恰为 9 项；candidate_registry/best_effort 仅由
+        # Best-Effort 附加；受限模式保留 SP-11 已验收的候选历史行为。
+        if solver_mode != "star_reference":
+            features["candidate_registry"] = True
+        if solver_mode in BEST_EFFORT_MODES:
+            features["best_effort"] = True
         config = {**base, **({"hint_mode": "user_hint"} if solver_hint is not None else {}),
-                  "features": {**base["features"], "candidate_registry": True,
-                               "best_effort": solver_mode in BEST_EFFORT_MODES}}
+                  "features": features}
 
         def observe(run, event):
             if event:

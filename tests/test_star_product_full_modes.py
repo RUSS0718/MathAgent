@@ -85,6 +85,44 @@ class StarFullModeTest(StarJobFixture, unittest.TestCase):
         self.assertTrue(receipt["cleanup_verified"])
         self.assertEqual(IMAGE, receipt["environment"]["image_id"])
 
+    def test_reference_preset_is_exactly_nine_core_features_and_registry_inactive(self):
+        from showcase.solver_harness.harness_config import _hash_json
+        from showcase.star_product_config import full_config
+
+        self.open_full([NEED_PLAN, PLAN, STEP, VERDICT,
+                        {"final_response": "x^2-1=(x-1)(x+1)."}, ACCEPT])
+        job_id = self.submit().get_json()["job_id"]
+        result = self.terminal(job_id)["result"]
+        self.assertEqual("star_reference", result["execution_mode"])
+        expected = {**full_config(RunBudgetLimits(
+            max_model_calls=48, max_http_attempts=48, max_tool_calls=8)), "hint_mode": "none"}
+        self.assertEqual(set(CORE), set(expected["features"]))
+        self.assertNotIn("candidate_registry", expected["features"])
+        self.assertNotIn("best_effort", expected["features"])
+        self.assertEqual(_hash_json(expected), result["solver"]["config_hash"])
+        self.assertEqual([], result["solver"]["candidate_history"])
+        self.assertIsNone(result["solver"]["best_effort"])
+
+    def test_capabilities_expose_verifiable_preflight_budget_ledger(self):
+        from showcase.tool_artifacts import ToolArtifactStore
+
+        self.open_full([])
+        self.assertEqual(202, self.submit().status_code)
+        record = next(item for item in self.client.get("/api/capabilities").get_json()["solver_modes"]
+                      if item["solver_mode"] == "star_reference")
+        preflight = record.get("last_preflight")
+        self.assertIsNotNone(preflight, record)
+        budget_ref = preflight.get("budget_ref")
+        self.assertIsNotNone(budget_ref, preflight)
+        self.assertEqual("isolation-probe", budget_ref["call_id"])
+        ledger = json.loads(ToolArtifactStore(
+            Path(self.data_dir) / "tool_artifacts").read(preflight["run_id"], budget_ref["sha256"]))
+        self.assertTrue(ledger["run_id"].startswith("star-preflight-"))
+        self.assertEqual(1, ledger["summary"]["limits"]["max_tool_calls"])
+        self.assertGreaterEqual(ledger["summary"]["tool_calls"], 1)
+        self.assertEqual("tool", ledger["actions"][0]["kind"])
+        self.assertEqual("success", ledger["actions"][0]["status"])
+
     def test_full_best_effort_selects_after_one_call_and_replays_without_dispatch(self):
         self.open_full([SOLVED], SHOWCASE_STAR_FULL_BUDGET=RunBudgetLimits(
             max_model_calls=1, max_http_attempts=1, max_tool_calls=1))
@@ -230,4 +268,36 @@ class StarFullUnavailableTest(StarJobFixture, unittest.TestCase):
             record = next(m for m in modes if m["solver_mode"] == mode)
             self.assertFalse(record["enabled"])
             self.assertIn("full_mode_not_enabled", record["missing_capabilities"])
+
+    def test_capabilities_without_star_pipeline_do_not_enumerate_limited_feature_gaps(self):
+        import tempfile
+
+        from showcase.flask_app import create_app
+
+        with tempfile.TemporaryDirectory() as folder:
+            app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": folder})
+            client = app.test_client()
+            try:
+                modes = client.get("/api/capabilities").get_json()["solver_modes"]
+                for mode in ("star_limited", "star_limited_best_effort"):
+                    record = next(m for m in modes if m["solver_mode"] == mode)
+                    self.assertFalse(record["enabled"])
+                    self.assertEqual(["star_not_enabled"], record["missing_capabilities"], record)
+                    self.assertFalse(any(gap.startswith("feature:")
+                                         or gap == "isolated_python_registry"
+                                         for gap in record["missing_capabilities"]))
+            finally:
+                for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
+                    app.extensions[name].close()
+
+
+class StarContractAnchorTest(unittest.TestCase):
+    def test_contract_python_image_id_is_pinned_in_code(self):
+        from showcase.star_product_runtime import CONTRACT_PYTHON_IMAGE_ID
+
+        self.assertEqual(
+            "sha256:fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d",
+            CONTRACT_PYTHON_IMAGE_ID,
+        )
+
 

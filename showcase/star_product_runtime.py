@@ -7,6 +7,11 @@ from .run_budget import RunBudgetLimits
 from .star_product_pipeline import StarProductPipeline
 from .tools import ToolRegistry
 
+# SP-13 合同固定的数学镜像指纹（初始来自 SP-09）。此常量把合同值锚定在代码内，
+# 供不依赖 Docker 的断言测试核对；运行时接线仍是显式 opt-in——操作者必须经
+# SHOWCASE_STAR_PYTHON_IMAGE_ID 提供精确镜像 ID，本常量不会自动启用容器执行。
+CONTRACT_PYTHON_IMAGE_ID = "sha256:fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d"
+
 
 def create_star_product_pipeline(database_path, *, storage_root, config):
     """Keep container execution disabled unless the operator supplies an exact image ID."""

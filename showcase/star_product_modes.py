@@ -13,7 +13,9 @@ def mode_identity(mode="legacy", config=None):
         "solver_mode": mode,
         "preset_version": ("sp13-v1" if mode in FULL_MODES else
                            "sp11-v1" if mode == "star_limited_best_effort" else "sp02-v1"),
-        "missing_capabilities": core_gaps(config or {}) if mode in LIMITED_MODES else [],
+        # 无 preset 配置＝模式默认关闭，不逐项枚举特性缺口；有配置时按实际配置列。
+        "missing_capabilities": ((["star_not_enabled"] if config is None else core_gaps(config))
+                                 if mode in LIMITED_MODES else []),
     }
 
 
@@ -41,8 +43,8 @@ def validate_mode(mode, *, enabled, verification_mode="auto", options=None, pipe
 def capabilities(enabled, pipeline=None):
     gaps = pipeline.full_gaps() if pipeline is not None else ["full_mode_not_enabled"]
     readiness = getattr(pipeline, "readiness", None) or {}
-    preflight = {key: readiness[key] for key in ("run_id", "image_id", "receipt_ref")
-                 if readiness.get(key) is not None} or None
+    preflight = {key: readiness[key] for key in (
+        "run_id", "image_id", "receipt_ref", "budget_ref") if readiness.get(key) is not None} or None
     records = []
     for mode in ("legacy", "star_limited", "star_limited_best_effort", "star_reference", "star_best_effort"):
         record = {**mode_identity(mode, getattr(pipeline, "config", None)),
