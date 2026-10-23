@@ -127,7 +127,12 @@ def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
         "summary": event.get("summary", ""),
         "error_category": event.get("error_category"),
     }
-    for key in ("tool_call_id", "protocol", "tool_name", "solver_event_id", "solver_revision", "solver_event_type"):
+    for key in (
+        "tool_call_id", "protocol", "tool_name", "solver_event_id", "solver_revision",
+        "solver_event_type", "role", "failure_type", "action_type", "use_pure_reasoning",
+        "specific_task_consumed", "triggered_by", "active_skill_ids", "skill_protocol_version",
+        "skill_protocols", "prompt_fingerprint",
+    ):
         if event.get(key) is not None:
             summary[key] = event[key]
     return summary

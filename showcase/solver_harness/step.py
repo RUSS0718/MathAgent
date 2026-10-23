@@ -83,6 +83,10 @@ def run_step(
             "state_revision": reserved["state_revision"],
             "tool_policy": {"allow": []},
         }
+        guidance_task = state.get("pending_guidance_task")
+        guidance = state.get("meta_guidance_decision")
+        if isinstance(guidance_task, str) and guidance_task.strip():
+            request["specific_task"] = guidance_task
         if challenge_history:
             request["challenge_history"] = challenge_history
             request["objection"] = previous.get("verification", {}).get("objection", "")
@@ -94,7 +98,27 @@ def run_step(
     except Exception:
         reply = {"blocked": True}
     report = _normalize_report(reply, step)
-    return harness.commit_event(
+    updates = {
+        "phase": "STEP_VERIFY",
+        "steps": {
+            **state["steps"],
+            step_id: {**previous, "status": "VERIFYING", "report": report},
+        },
+    }
+    action_type = guidance.get("action_type") if isinstance(guidance, Mapping) else None
+    failure_type = next(
+        (
+            item.get("failure_type")
+            for item in reversed(state.get("meta_interventions", []))
+            if item.get("kind") == "guidance"
+            and item.get("plan_version") == state["plan_version"]
+            and item.get("step_id") == step_id
+        ),
+        None,
+    )
+    if request.get("specific_task"):
+        updates["pending_guidance_task"] = None
+    run = harness.commit_event(
         run["run_id"],
         expected_revision=reserved["state_revision"],
         event={
@@ -102,14 +126,22 @@ def run_step(
             "type": "step_reported",
             "step_id": step_id,
         },
-        state_updates={
-            "phase": "STEP_VERIFY",
-            "steps": {
-                **state["steps"],
-                step_id: {**previous, "status": "VERIFYING", "report": report},
-            },
-        },
+        state_updates=updates,
     )
+    if request.get("specific_task"):
+        run = harness.commit_event(
+            run["run_id"],
+            expected_revision=run["state_revision"],
+            event={
+                "event_id": f"meta-guidance-applied-{run['state_revision']}",
+                "type": "meta_guidance_applied",
+                "step_id": step_id,
+                "failure_type": failure_type,
+                "action_type": action_type,
+                "specific_task_consumed": True,
+            },
+        )
+    return run
 
 
 def _normalize_report(reply: Any, step: Mapping[str, Any]) -> dict[str, Any]:

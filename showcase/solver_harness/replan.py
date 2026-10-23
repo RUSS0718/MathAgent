@@ -39,6 +39,9 @@ def _stop(harness, run, reason):
 
 def _call(harness, run, port, request):
     state = run["state"]
+    guidance_task = state.get("pending_guidance_task")
+    if request.get("role") == "planner" and isinstance(guidance_task, str):
+        request["specific_task"] = guidance_task
     request = {
         "run_id": run["run_id"],
         "call_id": f"replan:{run['run_id']}:plan{state['plan_version']}:attempt{state['attempt_index']}:{run['state_revision']}",
@@ -83,8 +86,18 @@ def run_replan(harness, run, *, problem, model_port, config):
         raise ValueError("config.max_replans must be a non-negative integer")
     if state.get("replan_count", 0) >= limit:
         return _stop(harness, run, "replan_limit_reached")
-    decision = state["meta_decision"]
-    rescued, excluded = _reusable(state)
+    guidance = state.get("meta_guidance_decision")
+    guided_replan = isinstance(guidance, dict) and guidance.get("action_type") == "replan"
+    decision = (
+        {
+            "reason_summary": guidance["rationale"],
+            "forbidden_directions": [],
+            "reusable_results": [],
+        }
+        if guided_replan
+        else state["meta_decision"]
+    )
+    rescued, excluded = _reusable(state, decision)
     failure = {
         "kind": "replan",
         "plan_version": state["plan_version"],
@@ -128,7 +141,10 @@ def run_replan(harness, run, *, problem, model_port, config):
     if config.get("features", {}).get(
         "reexplore_after_replan", config.get("reexplore_after_replan", False)
     ):
-        run, findings = _research(harness, run, model_port, config, calls, seconds)
+        run, findings = _research(
+            harness, run, model_port, config, calls, seconds,
+            decision.get("forbidden_directions", []),
+        )
     reason = _budget(run["state"], calls, seconds)
     if reason:
         return _stop(harness, run, reason)
@@ -191,12 +207,19 @@ def run_replan(harness, run, *, problem, model_port, config):
             "phase": "STEP_EXECUTE",
             "plan": redact(plan),
             "current_step": plan["steps"][0]["step_id"],
+            **({"pending_guidance_task": None} if guided_replan else {}),
         },
         plan_version=version,
+        **({
+            "action_type": "replan",
+            "failure_type": guidance.get("failure_type"),
+            "specific_task_consumed": True,
+            "role": "planner",
+        } if guided_replan else {}),
     )
 
 
-def _research(harness, run, port, config, calls, seconds):
+def _research(harness, run, port, config, calls, seconds, forbidden_directions):
     limit = config.get("max_reexploration_tasks", 2)
     if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 8:
         raise ValueError("config.max_reexploration_tasks must be 0..8")
@@ -216,7 +239,7 @@ def _research(harness, run, port, config, calls, seconds):
             "action": "delegate_research_task",
             "session_key": f"meta:{run['run_id']}",
             "max_tasks": limit,
-            "forbidden_directions": run["state"]["meta_decision"]["forbidden_directions"],
+            "forbidden_directions": forbidden_directions,
         },
     )
     tasks = reply.get("tasks", [])
@@ -326,12 +349,12 @@ def _research(harness, run, port, config, calls, seconds):
     ), findings
 
 
-def _reusable(state):
+def _reusable(state, decision=None):
     pending = deepcopy(state["accepted_results"])
     rescued = []
     valid_ids = set()
     old_steps = {step["step_id"] for step in state.get("plan", {}).get("steps", [])}
-    selected = state.get("meta_decision", {}).get("reusable_results", [])
+    selected = (decision or {}).get("reusable_results", [])
     invalidated = [result for failure in state.get("failure_records", [])
                    for result in failure.get("invalidated_results", [])]
     invalid_refs = {value for result in invalidated

@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 
-def prepare_role_context(run, request):
+def prepare_role_context(run, request, *, include_exploration=False):
     state = run["state"]
     role = request["role"]
     keys = (
@@ -42,8 +42,13 @@ def prepare_role_context(run, request):
             "failure_records",
             "rescued_results",
         )
+        if include_exploration:
+            keys = (*keys, "exploration_findings")
     for key in keys:
         value = deepcopy(state.get(key, []))
+        if key == "exploration_findings":
+            value = [{**item, "provenance": "unverified_exploration"}
+                     for item in value if isinstance(item, dict)]
         if key in {"accepted_results", "verified_results_ledger", "rescued_results"}:
             value = [
                 item

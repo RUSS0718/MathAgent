@@ -65,17 +65,29 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
     state = run["state"]
     guidance = metadata.get("meta_guidance")
     trigger = metadata.get("meta_trigger")
-    upgrade = next(
-        (
-            item
-            for item in reversed(state.get("meta_interventions", []))
-            if item.get("meta_trigger", item.get("trigger")) == "challenge_round_limit"
-            and item.get("plan_version") == state["plan_version"]
-            and item.get("attempt_index") == state["attempt_index"]
-            and item.get("step_id") == state["current_step"]
-        ),
-        None,
+    challenge_meta_decisions = {"CONTINUE", "TRACE_BACK", "APPROVE_REPLAN", "ABORT"}
+    upgrade_decided = any(
+        item.get("meta_trigger", item.get("trigger")) == "challenge_round_limit"
+        and item.get("plan_version") == state["plan_version"]
+        and item.get("attempt_index") == state["attempt_index"]
+        and item.get("step_id") == state["current_step"]
+        and item.get("decision") in challenge_meta_decisions
+        for item in state.get("meta_interventions", [])
     )
+    upgrade = None
+    if not upgrade_decided:
+        upgrade = next(
+            (
+                item
+                for item in reversed(state.get("meta_interventions", []))
+                if item.get("meta_trigger", item.get("trigger")) == "challenge_round_limit"
+                and item.get("plan_version") == state["plan_version"]
+                and item.get("attempt_index") == state["attempt_index"]
+                and item.get("step_id") == state["current_step"]
+                and item.get("decision") not in challenge_meta_decisions
+            ),
+            None,
+        )
     if trigger is None and upgrade is not None:
         trigger = upgrade.get("meta_trigger", "challenge_round_limit")
     if guidance is None and trigger is None and state["phase"] != "META_DECIDE":
@@ -123,6 +135,8 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         "failures": redact(deepcopy(state["failure_records"])),
         "budget": {"max_model_calls": max_model_calls, **state["counters"]},
     }
+    if isinstance(metadata.get("tool_failure"), str):
+        request["tool_failure"] = metadata["tool_failure"]
     revision = run["state_revision"]
     run = harness.commit_event(
         run["run_id"],
@@ -186,18 +200,21 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         "APPROVE_REPLAN": "REPLAN",
         "ABORT": "TERMINAL",
         "trace_back": "TRACE_BACK",
-        "replan": "META_DECIDE",
+        "replan": "REPLAN",
         "explore_more": "EXPLORE",
         "retry_different_method": "STEP_EXECUTE",
     }[action]
     updates = {
         "phase": phase,
         "meta_history": history,
-        "meta_decision": decision,
         "session_refs": {**state["session_refs"], "meta": session},
         "meta_interventions": [
             *state["meta_interventions"],
             {
+                **({"kind": "guidance", "failure_type": guidance["failure_type"],
+                    "step_id": state["current_step"], "plan_version": state["plan_version"],
+                    "attempt_index": state["attempt_index"]}
+                   if guidance is not None else {}),
                 "session_key": session,
                 **({
                     "trigger": trigger,
@@ -211,6 +228,13 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
             },
         ],
     }
+    if guidance is None:
+        updates["meta_decision"] = decision
+    else:
+        updates["meta_guidance_decision"] = decision
+        updates["pending_guidance_task"] = decision["specific_task"]
+        if decision["action_type"] in {"retry_different_method", "explore_more"}:
+            updates["attempt_index"] = state["attempt_index"] + 1
     if action == "ABORT":
         updates.update(
             status="partial_aborted", final_response="Run aborted: " + decision["reason_summary"]
@@ -219,14 +243,20 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         updates.update(tool_policy={"allow": []}, reasoning_mode="reason_noncoding")
     if target is not None:
         updates["trace_back_to"] = target
+    guidance_event = guidance is not None
     return harness.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],
         event={
-            "event_id": f"meta-decided-{revision}",
-            "type": "meta_decided",
-            "decision": decision,
+            "event_id": f"meta-guidance-decided-{revision}" if guidance_event else f"meta-decided-{revision}",
+            "type": "meta_guidance_decided" if guidance_event else "meta_decided",
+            **({
+                "failure_type": guidance["failure_type"],
+                "action_type": decision["action_type"],
+                "use_pure_reasoning": decision["use_pure_reasoning"],
+            } if guidance_event else {"decision": decision}),
             **({"trigger": trigger, "upgrade_reason": "round_limit_reached", "role": "meta"} if upgrade is not None else {}),
+            **({"role": "meta"} if guidance_event else {}),
         },
         state_updates=updates,
     )

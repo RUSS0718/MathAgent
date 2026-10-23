@@ -76,8 +76,11 @@ class MetaTest(unittest.TestCase):
                 self.assertEqual("STEP_EXECUTE", result["state"]["phase"])
                 self.assertEqual({"allow": []}, result["state"]["tool_policy"])
                 self.assertEqual(
-                    "derive a symbolic bound", result["state"]["meta_decision"]["specific_task"]
+                    "derive a symbolic bound",
+                    result["state"]["meta_guidance_decision"]["specific_task"],
                 )
+                self.assertNotIn("meta_decision", result["state"])
+                self.assertEqual("derive a symbolic bound", result["state"]["pending_guidance_task"])
                 self.assertNotIn("state", port.requests[0])
 
     def test_invalid_response_is_audited_and_does_not_route(self):

@@ -95,23 +95,26 @@ def run_challenges(
             },
             state_updates={"counters": counters},
         )
+        request = {
+            "role": "reasoner",
+            "run_id": run["run_id"],
+            "problem": problem,
+            "call_id": f"{session}:reasoner:{number}",
+            "session_key": session,
+            "step": step,
+            "report": record["report"],
+            "objection": objection,
+            "round": number,
+            "challenge_history": record.get("challenge_history", []),
+            "tool_policy": {"allow": []},
+        }
+        if harness._config.get("features", {}).get("skills") is True:
+            request["suspected_false_claim"] = True
         try:
             reply = harness.dispatch(
                 run,
                 model_port.complete,
-                {
-                    "role": "reasoner",
-                    "run_id": run["run_id"],
-                    "problem": problem,
-                    "call_id": f"{session}:reasoner:{number}",
-                    "session_key": session,
-                    "step": step,
-                    "report": record["report"],
-                    "objection": objection,
-                    "round": number,
-                    "challenge_history": record.get("challenge_history", []),
-                    "tool_policy": {"allow": []},
-                },
+                request,
             )
         except Exception:
             reply = {"blocked": True}
@@ -281,9 +284,49 @@ def run_plan(
         )
         run = apply_traceback(harness, run)
         if (
+            run["state"]["phase"] == "EXPLORE"
+            and run["state"].get("meta_guidance_decision", {}).get("action_type") == "explore_more"
+        ):
+            run = _explore_after_guidance(
+                harness, run, problem, model_port, max_model_calls, max_runtime_seconds
+            )
+        if (
             run["state"]["phase"] != "STEP_EXECUTE"
             or budget_reason(run["state"], {"max_model_calls": max_model_calls,
                                              "max_total_duration_seconds": max_runtime_seconds})
         ):
             return run
     return run
+
+
+def _explore_after_guidance(harness, run, problem, model_port, max_model_calls, max_runtime_seconds):
+    """Add one unverified Explore finding, then resume the current accepted-plan boundary."""
+    from .explore import run_exploration
+
+    round_number = len(run["state"].get("exploration_findings", [])) + 1
+    run = run_exploration(
+        harness,
+        run,
+        problem=problem,
+        model_port=model_port,
+        max_model_calls=max_model_calls,
+        max_explore_rounds=round_number,
+        max_runtime_seconds=max_runtime_seconds,
+    )
+    if run["state"]["phase"] == "TERMINAL":
+        return run
+    state = run["state"]
+    guidance = state["meta_guidance_decision"]
+    return harness.commit_event(
+        run["run_id"],
+        expected_revision=run["state_revision"],
+        event={
+            "event_id": f"meta-guidance-applied-{run['state_revision']}",
+            "type": "meta_guidance_applied",
+            "failure_type": guidance.get("failure_type"),
+            "action_type": "explore_more",
+            "specific_task_consumed": True,
+            "role": "explore",
+        },
+        state_updates={"phase": "STEP_EXECUTE", "pending_guidance_task": None},
+    )
