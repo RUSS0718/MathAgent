@@ -20,7 +20,11 @@ SP-06 的[回退与重规划合同](engineering/star-product-sp06-contract.md)�
 
 SP-07 的[记忆、Skill 与局部指导合同](engineering/star-product-sp07-contract.md)及[公共产品验收记录](evals/star-product-sp07.md)覆盖七类协议的实际注入、受限工具故障指导、纯推理权限栅栏、三种局部恢复动作、多任务研究采纳与跨 Run 隔离。未知远端请求保持待复核；证据为 scripted/fault-injection，不代表 live 效果。
 
+SP-08 的[安全恢复合同](engineering/star-product-sp08-contract.md)与[公共验收记录](evals/star-product-sp08.md)覆盖真实进程退出后的同一 Job 续算、已接受步骤与响应/工具回执复用、显式新身份重试、旧未知预留和原 deadline，以及并发/取消/只读反例。证据为 fault-injection；完整模式和 live 门槛仍由后续责任票验收。
+
 SP-09 的[受控 Python 合同](engineering/star-product-sp09-contract.md)与[公共 Job 和 Docker 验收记录](evals/star-product-sp09.md)记录默认关闭的固定镜像 ID Registry 接线、S3 单次工具动作、外部 stdout/stderr 总量限制和授权产物下载。纯推理与受控工具故障的 MetaGuidance 见 SP-07 验收；完整 reference 继续拒绝启动。
+
+SP-10 的[整题审查与交付绑定合同](engineering/star-product-sp10-contract.md)和[公共验收记录](evals/star-product-sp10.md)覆盖实际整题 Verifier、文本身份/版本/来源、改写降级、伪造引用拒绝、并发追加及回退/重规划后的合法救援绑定。证据为 scripted/fault-injection；LLM 审查不等于完整数学证明，真实验收仍由 SP-13 负责。
 
 | 当前任务 | 阅读顺序 | 读完应能判断 |
 | --- | --- | --- |

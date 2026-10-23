@@ -24,8 +24,15 @@ def recovery_projection(run):
         if item["status"] in {"dispatched", "streaming", "unknown_outcome"}
         and item["call_id"] not in replaced
     ]
-    return {"status": "needs_review" if unknown else "safe",
-            "unknown_calls": unknown, "retries": retries}
+    events = run.get("events", [])
+    receipts = {event["event_id"] for event in events if event["type"] == "tool_receipt"}
+    unknown_tools = [
+        {"call_id": event["event_id"].removesuffix(":dispatch"), "status": "unknown_outcome"}
+        for event in events if event["type"] == "tool_dispatched"
+        and event["event_id"].removesuffix(":dispatch") not in receipts
+    ]
+    return {"status": "needs_review" if unknown or unknown_tools else "safe",
+            "unknown_calls": unknown, "unknown_tools": unknown_tools, "retries": retries}
 
 
 def authorize_resume(connection, row, decision):
@@ -52,6 +59,14 @@ def authorize_resume(connection, row, decision):
     ).fetchone()
     if budget is None or time.time() >= json.loads(budget[0])["deadline_at"]:
         raise WorkspaceError("run_deadline_exhausted", status=409)
+    receipts = {event[0] for event in connection.execute(
+        "SELECT event_id FROM solver_events WHERE run_id=? "
+        "AND json_extract(event_json,'$.type')='tool_receipt'", (row["job_id"],)
+    )}
+    orphan_tools = [action for action in json.loads(budget[0])["actions"]
+                    if action["kind"] == "tool" and action.get("tool_call_id") not in receipts]
+    if orphan_tools:
+        raise WorkspaceError("star_tool_recovery_needs_review", status=409)
     run = {"run_id": row["job_id"], "state": state}
     unknown = recovery_projection(run)["unknown_calls"]
     if unknown:

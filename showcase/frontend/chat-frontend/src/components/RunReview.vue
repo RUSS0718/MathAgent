@@ -25,6 +25,7 @@ const busy = ref(false)
 const loading = ref(true)
 const fields = ['attempt_id', 'logical_call_id', 'attempt_index', 'started_at_utc', 'dispatch_status', 'action', 'requested_model', 'returned_model', 'status', 'http_status', 'finish_reason', 'duration_seconds', 'error_category', 'stop_category', 'metering_status', 'usage_source', 'usage']
 const toolFields = ['name', 'tool_call_id', 'protocol', 'transport_mode', 'status', 'error_category', 'continuation_status', 'continuation_tool_call_id', 'continuation_response_received', 'candidate_status', 'coverage_status', 'result_summary', 'limitations']
+const budgetLabels: Record<string, string> = { http_attempts: 'HTTP 请求数', unknown_attempts: '未知请求数', reserved_tokens: '未决预留 Token', charged_tokens: '累计计入 Token', deadline_at: '原截止时间' }
 function display(value: unknown): string { return value === null || value === undefined ? 'unknown（未知）' : typeof value === 'object' ? JSON.stringify(value) : String(value) }
 async function refresh(): Promise<void> { loading.value = true; try { jobs.observe(await api.getJob(props.jobId)); report.value = await api.jobReport(props.jobId); notice.value = '' } catch (error) { notice.value = error instanceof Error ? error.message : '报告 unavailable（不可用）' } finally { loading.value = false } }
 async function reconnect(): Promise<void> { await refresh(); connected.value = true; await controller.subscribe(props.jobId); connected.value = false; await refresh() }
@@ -54,8 +55,9 @@ onUnmounted(() => controller.stopAll())
     <ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
     <section v-if="recovery && job?.status === 'failed' && report?.solver?.solver?.phase !== 'TERMINAL'" class="evidence-section" aria-label="安全续算">
       <h2>{{ recovery.status === 'needs_review' ? '未知请求需要人工决定' : '从安全边界继续' }}</h2>
-      <dl v-if="report?.report.budget" class="data-list"><template v-for="field in ['http_attempts', 'unknown_attempts', 'reserved_tokens', 'charged_tokens', 'deadline_at']" :key="field"><dt>{{ field }}</dt><dd>{{ display(report.report.budget[field]) }}</dd></template></dl>
+      <dl v-if="report?.report.budget" class="data-list"><template v-for="field in Object.keys(budgetLabels)" :key="field"><dt>{{ budgetLabels[field] }}</dt><dd>{{ field === 'deadline_at' && typeof report.report.budget[field] === 'number' ? new Date(Number(report.report.budget[field]) * 1000).toLocaleString() : display(report.report.budget[field]) }}</dd></template></dl>
       <p v-if="recovery.status === 'needs_review'">以下请求结果与消耗未知。选择重试会产生新的调用身份，保留旧请求预留，继续使用原预算和截止时间。</p>
+      <p v-if="recovery.unknown_tools?.length" role="alert">存在尚未保存结果的工具动作，必须人工复核，当前不能自动重放工具。</p>
       <p v-else>沿用同一任务、已接受步骤和累计预算继续运行。</p>
       <div v-for="call in recovery.unknown_calls" :key="call.call_id" class="action-row">
         <span>{{ call.role }} · {{ call.call_id }}</span>

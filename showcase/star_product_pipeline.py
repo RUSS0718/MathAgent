@@ -7,6 +7,7 @@ from .run_budget import RunBudgetLimits, current_budget, public_solver_call_id
 from .run_control import check_control
 from .solver_harness import SolverHarness
 from .solver_harness.controller import advance_product
+from .solver_harness.final_binding import delivery_verification
 from .solver_harness.intern_port import InternModelPort
 from .solver_harness.result import export_result
 from .solver_harness.tool_ports import RegistryToolPort
@@ -80,7 +81,9 @@ class StarProductPipeline:
                     run = harness.get_run(run_id)
                 run = advance_product(harness, run, problem)
                 math = run["state"]
-                reviewed = math["status"] == "completed_llm_reviewed"
+                answer = export_result(run)["final_response"]
+                bound, verification = delivery_verification(run, answer)
+                reviewed = math["status"] == "completed_llm_reviewed" and bound
                 attempts = []
                 for call in port.invocations:
                     for attempt in call["request_attempts"]:
@@ -93,14 +96,12 @@ class StarProductPipeline:
                 result = {
                     **mode_identity(self.execution_mode), "run_id": run_id,
                     "execution_mode": self.execution_mode, "evidence_kind": self.evidence_kind,
-                    "solver": projection(run),
+                    "solver": projection(run, answer=answer),
                     "status": "COMPLETED" if reviewed and verification_mode != "required" else "NEEDS_REVIEW",
                     "stage": math["phase"].lower(),
-                    "final_response": export_result(run)["final_response"],
+                    "final_response": answer,
                     "summary": "受限 STAR：探索、润色和新整题审查；不代表完整参考能力",
-                    "verification": {"status": "unknown", "findings": [
-                        "llm_whole_review_accepted" if reviewed else "whole_review_not_accepted",
-                        "not_a_formal_or_complete_proof"]},
+                    "verification": verification,
                     "request_attempts": attempts,
                     "tool_results": public_tools(math),
                     "error": None if reviewed and verification_mode != "required" else {"category": "verification_needs_review" if reviewed else "star_needs_review"},
@@ -123,10 +124,15 @@ class StarProductPipeline:
         return result
 
 
-def projection(run):
+def projection(run, *, answer=None):
     state = run["state"]
+    status = state["status"]
+    if answer is not None and status == "completed_llm_reviewed":
+        bound, _ = delivery_verification(run, answer)
+        if not bound:
+            status = "completed_unverified"
     return {"run_id": run["run_id"], "state_revision": run["state_revision"],
-            "phase": state["phase"], "status": state["status"],
+            "phase": state["phase"], "status": status,
             "config_hash": state["config_hash"], "checkpoint_thread_id": run["run_id"],
             "recovery": recovery_projection(run)}
 

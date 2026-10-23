@@ -53,6 +53,12 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
     def test_process_exit_inflight_requires_explicit_new_identity(self):
         self.assert_process_window("unknown")
 
+    def test_process_exit_after_tool_receipt_does_not_repeat_tool(self):
+        self.assert_process_window("tool")
+
+    def test_process_exit_inside_tool_refuses_unsafe_replay(self):
+        self.assert_process_window("tool_unknown")
+
     def assert_process_window(self, window):
         import json
         import os
@@ -71,7 +77,7 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
             self.assertEqual(71, process.returncode, process.stderr.decode(errors="replace"))
             job_id = (folder / "job_id").read_text()
             before = [json.loads(line) for line in (folder / "requests.jsonl").read_text().splitlines()]
-            self.assertEqual(6, len(before))
+            self.assertEqual(5 if window in {"tool", "tool_unknown"} else 6, len(before))
             with patch.dict(os.environ, {"INTERN_API_KEY": "scripted-only"}), patch(
                     "llm_client.requests.post", side_effect=lambda *a, **kw: provider(folder, kw)):
                 app = create_app(config(folder))
@@ -80,6 +86,16 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
                     self.client = app.test_client()
                     self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
                     original = self.job(job_id)["result"]["budget"]
+                    if window == "tool_unknown":
+                        recovery = self.job(job_id)["result"]["solver"]["recovery"]
+                        self.assertEqual("needs_review", recovery["status"])
+                        self.assertEqual(1, len(recovery["unknown_tools"]))
+                        response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={}, headers=self.headers())
+                        self.assertEqual(409, response.status_code)
+                        self.assertEqual("star_tool_recovery_needs_review", response.get_json()["error"])
+                        self.assertEqual(1, self.job(job_id)["result"]["budget"]["tool_calls"])
+                        self.assertEqual(5, len((folder / "requests.jsonl").read_text().splitlines()))
+                        return
                     decision = {}
                     if window == "unknown":
                         unknown = self.job(job_id)["result"]["solver"]["recovery"]["unknown_calls"]
@@ -94,7 +110,12 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
                     self.assertEqual("succeeded", final["status"], final)
                     after = [json.loads(line) for line in (folder / "requests.jsonl").read_text().splitlines()]
                     self.assertEqual(11 if window == "unknown" else 10, len(after))
-                    self.assertEqual("s2" if window == "unknown" else "s3", after[6]["step"]["step_id"])
+                    if window == "tool":
+                        self.assertEqual("s2", after[5]["step"]["step_id"])
+                        self.assertEqual("step_verifier", after[5]["role"])
+                        self.assertEqual(1, final["result"]["budget"]["tool_calls"])
+                    else:
+                        self.assertEqual("s2" if window == "unknown" else "s3", after[6]["step"]["step_id"])
                     self.assertEqual(original["deadline_at"], final["result"]["budget"]["deadline_at"])
                     self.assertEqual(11 if window == "unknown" else 10, final["result"]["budget"]["logical_calls"])
                     if window == "unknown":
@@ -189,8 +210,9 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
         job_id = self.create_job()
         unknown = self.terminal(job_id)["result"]["solver"]["recovery"]["unknown_calls"]
         self.assertEqual(1, len(unknown))
+        new_id = str(uuid.uuid4())
         response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={"retry_call": {
-            "call_id": unknown[0]["call_id"], "new_call_id": str(uuid.uuid4())}}, headers=self.headers())
+            "call_id": unknown[0]["call_id"], "new_call_id": new_id}}, headers=self.headers())
         self.assertEqual(202, response.status_code, response.get_json())
         job = self.terminal(job_id)
         self.assertEqual("succeeded", job["status"], job)
@@ -201,6 +223,8 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(job["result"]["solver"], evidence["solver"]["solver"])
         self.assertEqual(job["result"]["budget"], report["report"]["budget"])
         self.assertEqual(job["result"]["budget"], evidence["budget"])
+        if unknown[0]["role"] == "whole_solution_verifier":
+            self.assertEqual(new_id, job["result"]["verification"]["source"]["call_id"])
 
     def test_unknown_final_review_reuses_persisted_candidate(self):
         from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT

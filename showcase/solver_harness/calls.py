@@ -28,6 +28,17 @@ def pending_call(run):
     return record
 
 
+def latest_retry_id(calls, call_id):
+    """Resolve an immutable retry lineage without changing the original call."""
+    for _ in range(len(calls)):
+        successor = next((item for item in calls.values()
+                          if item.get("retry_of") == call_id), None)
+        if successor is None:
+            break
+        call_id = successor["call_id"]
+    return call_id
+
+
 def _save(harness, run, record, *, status=None):
     latest = harness.get_run(run["run_id"])
     updates = {"calls": {**latest["state"].get("calls", {}), record["call_id"]: redact(record)}}
@@ -81,14 +92,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
             request = {**deepcopy(pending["request"]), "problem": request.get("problem")}
     retry = run["state"].get("authorized_retry")
     calls = run["state"].get("calls", {})
-    current_id = request.get("call_id")
-    # Follow immutable retry lineage; every unknown attempt remains in the audit.
-    for _ in range(len(calls)):
-        successor = next((item for item in calls.values()
-                          if item.get("retry_of") == current_id), None)
-        if successor is None:
-            break
-        current_id = successor["call_id"]
+    current_id = latest_retry_id(calls, request.get("call_id"))
     if current_id != request.get("call_id"):
         record = calls[current_id]
         request = {**request, "call_id": current_id, "retry_of": record["retry_of"]}

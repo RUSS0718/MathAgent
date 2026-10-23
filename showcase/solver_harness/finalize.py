@@ -5,6 +5,7 @@ from copy import deepcopy
 
 from ..redaction import redact
 from .budget import budget_reason
+from .final_binding import review_record
 
 
 def commit(harness, run, kind, updates, **details):
@@ -92,7 +93,8 @@ def valid_facts(state):
                 and fact["statement"].strip()
                 and isinstance(dependencies, list)
                 and all(d in known for d in dependencies)
-                and (fact.get("source") in accepted_steps or fact.get("result_id"))
+                and (fact.get("source") in accepted_steps or fact.get("result_id")
+                     or fact in state.get("rescued_results", []))
             ):
                 facts.append(fact)
                 if fact.get("result_id"):
@@ -184,6 +186,7 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
             verifier_port.verify,
             {
                 "role": "whole_solution_verifier",
+                "call_id": f"whole-review:{session}",
                 "session_key": f"whole_verify:{session}",
                 "problem": problem,
                 "solution_candidate": candidate,
@@ -210,7 +213,11 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
             harness,
             run,
             "final_candidate_reviewed",
-            {"final_solution_attempts": attempts},
+            {"final_solution_attempts": attempts,
+             "whole_solution_reviews": [*run["state"].get("whole_solution_reviews", []),
+                 review_record(run, candidate, attempt["review"]["verdict"],
+                     call_id=f"whole-review:{session}",
+                     origin="final_generator", facts=facts)]},
             review=attempt["review"],
         )
         if not valid:

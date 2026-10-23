@@ -3,6 +3,7 @@ import { z } from 'zod'
 export const recoverySchema = z.object({
   status: z.enum(['safe', 'needs_review']),
   unknown_calls: z.array(z.object({ call_id: z.string(), role: z.string(), status: z.string() })),
+  unknown_tools: z.array(z.object({ call_id: z.string(), status: z.string() })).optional(),
   retries: z.array(z.object({ call_id: z.string(), retry_of: z.string(), status: z.string() })),
 })
 
