@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from llm_client import InternChatClient
-from showcase.adapters import InternModelAdapter
+from showcase.adapters import InternModelAdapter, InternStreamAdapter
 from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
 from showcase.tools import ToolRegistry
@@ -29,11 +29,15 @@ def config(folder, *, crash_tools=False):
             os._exit(71)
         return 2
     registry.register("polynomial_check", tool)
+    window = (folder / "window").read_text() if (folder / "window").exists() else ""
     # Trace-back windows re-execute every archived step on resume and need more calls.
-    calls = 16 if (folder / "window").exists() and (folder / "window").read_text() in TRACE_WINDOWS else 12
+    calls = 16 if window in TRACE_WINDOWS else 12
+    adapter = (InternStreamAdapter(InternChatClient(retry=1), max_tokens=256)
+               if window in STREAM_WINDOWS
+               else InternModelAdapter(InternChatClient(retry=1), max_tokens=256))
     return {"TESTING": True, "SHOWCASE_DATA_DIR": str(folder),
             "SHOWCASE_JOB_DELAY_SECONDS": 0, "SHOWCASE_STAR_ENABLED": True,
-            "SHOWCASE_STAR_ADAPTER": InternModelAdapter(InternChatClient(retry=1), max_tokens=256),
+            "SHOWCASE_STAR_ADAPTER": adapter,
             "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection",
             "SHOWCASE_STAR_BUDGET": RunBudgetLimits(max_model_calls=calls, max_http_attempts=calls),
             "SHOWCASE_STAR_REGISTRY": registry,
@@ -42,12 +46,10 @@ def config(folder, *, crash_tools=False):
 
 
 TRACE_WINDOWS = {"trace_before", "trace_after"}
+STREAM_WINDOWS = {"stream_exit"}
 
 
-def provider(folder, request):
-    context = json.loads(json.loads(request["data"])["messages"][-1]["content"])
-    with (folder / "requests.jsonl").open("a", encoding="utf-8") as output:
-        output.write(json.dumps(context) + "\n")
+def reply_value(window, context, folder):
     role = context["role"]
     if role == "explore":
         value = {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
@@ -55,14 +57,14 @@ def provider(folder, request):
         value = PLAN
     elif role == "reasoner":
         value = {"argument": "Addition", "claims": [], "blocked": False}
-        if ((folder / "window").read_text() in {"tool", "tool_unknown"}
+        if (window in {"tool", "tool_unknown"}
                 and context["step"]["step_id"] == "s2"):
             value["claims"] = [{"statement": "1+1=2", "label": "easy-verify",
                                "tool_request": {"tool": "polynomial_check", "arguments": {},
                                                 "expected_output": 2, "scope": "finite_computation"}}]
     elif (
         role == "step_verifier"
-        and (folder / "window").read_text() in TRACE_WINDOWS
+        and window in TRACE_WINDOWS
         and context["step"]["step_id"] == "s2"
         and sum(
             1
@@ -81,6 +83,14 @@ def provider(folder, request):
         value = {"final_response": "2"}
     else:
         value = {"verdict": "ACCEPT", "reason": "Addition"}
+    return value
+
+
+def provider(folder, request):
+    context = json.loads(json.loads(request["data"])["messages"][-1]["content"])
+    with (folder / "requests.jsonl").open("a", encoding="utf-8") as output:
+        output.write(json.dumps(context) + "\n")
+    value = reply_value((folder / "window").read_text(), context, folder)
 
     class Reply:
         status_code = 200
@@ -90,6 +100,39 @@ def provider(folder, request):
             return {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(value)}}],
                     "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}}
     return Reply()
+
+
+def stream_transport(folder, window):
+    """SSE wire fake for the injected streaming adapter; ``stream_exit`` dies mid-stream."""
+    def post(_url, **kwargs):
+        context = json.loads(json.loads(kwargs["data"])["messages"][-1]["content"])
+        with (folder / "requests.jsonl").open("a", encoding="utf-8") as output:
+            output.write(json.dumps(context) + "\n")
+        value = reply_value(window, context, folder)
+
+        class StreamReply:
+            status_code = 200
+            def raise_for_status(self):
+                pass
+            def close(self):
+                pass
+            def iter_lines(self, decode_unicode=True):
+                text = json.dumps(value)
+                size = max(1, len(text) // 3)
+                pieces = [text[index:index + size] for index in range(0, len(text), size)]
+                for index, piece in enumerate(pieces):
+                    if window == "stream_exit" and index == 1:
+                        # Fragment one was persisted by the audit; die before fragment two.
+                        while not (folder / "job_id").exists():
+                            time.sleep(.01)
+                        os._exit(71)
+                    yield "data: " + json.dumps({"choices": [{"delta": {"content": piece}}]})
+                yield "data: " + json.dumps({"choices": [{"delta": {}, "finish_reason": "stop"}],
+                                             "usage": {"prompt_tokens": 7, "completion_tokens": 3,
+                                                       "total_tokens": 10}, "model": "intern-s2"})
+                yield "data: [DONE]"
+        return StreamReply()
+    return post
 
 
 def main():
@@ -106,7 +149,8 @@ def main():
                   "tool": "tool_receipt",
                   "exchange": "session_recorded",
                   "trace_before": "step_reviewed",
-                  "trace_after": "trace_back_applied"}[window]
+                  "trace_after": "trace_back_applied",
+                  "stream_exit": "never"}[window]
         target_role = "reasoner" if window == "tool" else "step_verifier"
         if (event.get("solver_event_type") == target and last.get("role") == target_role
                 and last.get("step", {}).get("step_id") == "s2"):
@@ -121,8 +165,15 @@ def main():
                 and context.get("step", {}).get("step_id") == "s2"):
             os._exit(71)
         return response
-    with patch("llm_client.requests.post", side_effect=transport), \
-            patch.object(WorkspaceStore, "append_event", crash):
+    patches = [patch("llm_client.requests.post", side_effect=transport),
+               patch.object(WorkspaceStore, "append_event", crash)]
+    if window in STREAM_WINDOWS:
+        patches.append(patch("showcase.adapters.requests.post",
+                             side_effect=stream_transport(folder, window)))
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        for item in patches:
+            stack.enter_context(item)
         app = create_app(config(folder, crash_tools=window == "tool_unknown"))
         client = app.test_client()
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
