@@ -26,11 +26,11 @@ BASE = {
 }
 
 
-def ports():
+def ports(source="scripted"):
     return {
         "model_port": ScriptedModelPort([{"assessment": "SOLVED", "solution_candidate": "4"}]),
         "verifier_port": ScriptedVerifierPort([{"verdict": "ACCEPT"}]),
-        "source": "scripted",
+        "source": source,
     }
 
 
@@ -62,7 +62,34 @@ class PairedRunTest(unittest.TestCase):
         self.assertIsNone(arms["control"]["cost"])
         self.assertEqual("monotonic_wall_clock", arms["control"]["duration_source"])
         self.assertEqual("needs_review", report["live_gate"])
+        self.assertEqual(
+            "SH21_live_tool_loop_unavailable; paired_live_not_run",
+            report["live_gate_reason"],
+        )
         self.assertNotIn("prompt_layers", str(report))
+
+    def test_provider_live_pair_is_reported_as_run_but_still_needs_review(self):
+        from showcase.solver_harness.paired import PairedRunner
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            PairedRunner(database_path=Path(directory) / "pair.db") as runner,
+        ):
+            report = runner.run_pair(
+                "2+2",
+                control_config=BASE,
+                variant_config={**BASE, "features": {"skills": True}},
+                conditions=CONDITIONS,
+                control_ports=ports("provider_live"),
+                variant_ports=ports("provider_live"),
+            )
+
+        self.assertEqual("provider_live", report["manifest"]["execution_source"])
+        self.assertEqual("needs_review", report["live_gate"])
+        self.assertEqual(
+            "provider_live_pair_ran; paired_live_evidence_needs_review",
+            report["live_gate_reason"],
+        )
 
     def test_common_budget_permission_and_observable_model_mismatch_reject_before_dispatch(self):
         from copy import deepcopy

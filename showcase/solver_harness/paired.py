@@ -102,7 +102,11 @@ class PairedRunner:
             "created_at": datetime.now(UTC).isoformat(),
             "status": "running",
             "live_gate": "needs_review",
-            "live_gate_reason": "SH21_live_tool_loop_unavailable; paired_live_not_run",
+            "live_gate_reason": (
+                "provider_live_pair_ran; paired_live_evidence_needs_review"
+                if manifest["execution_source"] == "provider_live"
+                else "SH21_live_tool_loop_unavailable; paired_live_not_run"
+            ),
             "manifest": redact(manifest),
             "condition_validation": validation,
             "comparison_scope": "engineering_only; no mathematical improvement conclusion",
