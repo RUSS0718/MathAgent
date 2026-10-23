@@ -3,6 +3,7 @@
 import json
 import unittest
 
+from showcase.final_evidence import artifact_identity
 from showcase.run_budget import RunBudgetLimits
 from tests.star_product_support import ACCEPT, StarJobFixture
 from tests.test_star_product_challenge import META_ABORT
@@ -63,6 +64,17 @@ class StarTracebackTest(StarJobFixture, unittest.TestCase):
         self.assertTrue(any(e.get("solver_event_type") == "trace_back_applied" for e in evidence["timeline"]))
         self.assertEqual("fault_injection", evidence["solver"]["evidence_kind"])
         self.assertEqual(job_id, self.report(job_id)["solver"]["solver"]["run_id"])
+        binding = self.report(job_id)["checks"]["history"][-1]
+        self.assertEqual(1, binding["source"]["plan_version"])
+        self.assertEqual(1, binding["source"]["attempt_index"])
+        self.assertEqual({artifact_identity(text)["sha256"] for text in
+            ("safe reviewed fact", "new route", "new dependent", "new completion")},
+            {fact["statement_artifact"]["sha256"] for fact in binding["fact_sources"]})
+        final_request = next(r for r in self.outbound if r["role"] == "whole_solution_verifier")
+        statements = [fact["statement"] for fact in final_request["accepted_results"]]
+        self.assertIn("safe reviewed fact", statements)
+        self.assertNotIn("old wrong fact", statements)
+        self.assertNotIn("old dependent fact", statements)
         for hidden in ("private rejected proof", "old wrong fact", "candidate is not a fact"):
             self.assertNotIn(hidden, json.dumps(events))
 
@@ -96,6 +108,18 @@ class StarTracebackTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(2, archived.get("plan_version"))
         self.assertTrue(any(e.get("solver_event_type") == "plan_replaced" for e in events))
         self.assertEqual(job_id, self.report(job_id)["solver"]["solver"]["run_id"])
+        binding = self.report(job_id)["checks"]["history"][-1]
+        self.assertEqual(2, binding["source"]["plan_version"])
+        self.assertEqual(2, binding["source"]["attempt_index"])
+        self.assertEqual({artifact_identity(text)["sha256"] for text in
+            ("safe reviewed fact", "fresh proof")},
+            {fact["statement_artifact"]["sha256"] for fact in binding["fact_sources"]})
+        rescued = next(f for f in binding["fact_sources"] if f["rescued"])
+        self.assertTrue(rescued["rescued"])
+        self.assertEqual(artifact_identity("safe reviewed fact"), rescued["statement_artifact"])
+        final_request = next(r for r in self.outbound if r["role"] == "whole_solution_verifier")
+        self.assertEqual(["safe reviewed fact", "fresh proof"],
+                         [fact["statement"] for fact in final_request["accepted_results"]])
         self.assertNotIn("private failed argument", json.dumps(events))
 
     def test_illegal_verifier_targets_never_guess_or_restart_a_step(self):

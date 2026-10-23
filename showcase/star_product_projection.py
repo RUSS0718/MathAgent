@@ -11,7 +11,10 @@ def current_solver(connection, run_id):
     from .star_product_pipeline import projection
 
     state = json.loads(row[0])
-    return projection({"run_id": run_id, "state_revision": state["state_revision"], "state": state})
+    saved = connection.execute("SELECT snapshot_json FROM runs WHERE run_id=?", (run_id,)).fetchone()
+    answer = json.loads(saved[0]).get("final_response") if saved else None
+    return projection({"run_id": run_id, "state_revision": state["state_revision"], "state": state},
+                      answer=answer)
 
 
 def project_solver_event(connection, job_id, event):
