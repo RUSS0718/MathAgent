@@ -13,6 +13,8 @@ from .solver_harness.tool_ports import RegistryToolPort
 from .star_product_config import limited_config
 from .star_product_modes import mode_identity
 
+PUBLIC_TOOL_NAMES = frozenset({"polynomial_check", "python_math"})
+
 
 class StarProductPipeline:
     execution_mode = "star_limited"
@@ -107,8 +109,30 @@ def projection(run):
 
 def public_tools(state):
     receipts = state.get("tool_receipts", [])
-    return [{"name": item.get("tool") or ("python_math" if item.get("source") == "docker_isolated" else "polynomial_check"),
-             "status": item["status"], "tool_call_id": item["receipt_id"],
-             "result_summary": "Finite computation only; not a completeness proof",
-             "receipt": {key: value for key, value in item.items() if key not in {"input", "output"}}}
-            for item in receipts]
+    plan = state.get("plan") or {}
+    ordinals = {
+        step["step_id"]: f"步骤 {index}"
+        for index, step in enumerate(plan.get("steps", []), 1)
+        if isinstance(step, dict) and isinstance(step.get("step_id"), str)
+    }
+    tools = []
+    for item in receipts:
+        receipt = {key: value for key, value in item.items() if key not in {"input", "output"}}
+        if "tool" in item:
+            tool_name = item.get("tool")
+            public_name = tool_name if isinstance(tool_name, str) and tool_name in PUBLIC_TOOL_NAMES else "unsupported"
+        else:
+            public_name = "python_math" if item.get("source") == "docker_isolated" else "polynomial_check"
+        if "tool" in receipt:
+            receipt["tool"] = public_name
+        step_id = receipt.get("step_id")
+        ordinal = ordinals.get(step_id)
+        if ordinal is None:
+            receipt.pop("step_id", None)
+        else:
+            receipt["step_id"] = ordinal
+        tools.append({"name": public_name,
+            "status": item["status"], "tool_call_id": item["receipt_id"],
+            "result_summary": "Finite computation only; not a completeness proof",
+            "receipt": receipt})
+    return tools
