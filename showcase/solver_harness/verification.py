@@ -162,6 +162,36 @@ def verify_step(
     except Exception:
         reply = None
     verification = normalize_verdict(reply, index + 1)
+    if isinstance(reply, Mapping) and "answer_claim" in reply:
+        from . import counterexample
+
+        declared = counterexample.target(report, reply["answer_claim"])
+        if declared is None:
+            verification.update(valid=False, reason="invalid_answer_claim_target")
+        elif not declared["both_directions_proved"]:
+            reserved = counterexample.run_check(
+                harness, reserved, problem=problem, declared=declared, verifier_call_id=call_id,
+            )
+            if reserved["state"]["phase"] == "TERMINAL":
+                return reserved
+            result = counterexample.consumed_result(
+                reserved["state"], step_id=step_id, verifier_call_id=call_id, declared=declared,
+            )
+            if result is None:
+                verification.update(valid=False, reason="counterexample_check_not_completed")
+            else:
+                found = result["verdict"] == "FOUND_COUNTEREXAMPLE"
+                verification.update(
+                    verdict="CHALLENGE", goal_gate="PARTIAL",
+                    logic_gate="FAIL" if found else "UNCERTAIN",
+                    counterexample_verdict=result["verdict"],
+                )
+                reply = {**reply, "objection": (
+                    f"Counterexample: {result['counterexample']}; {result['violated_conclusion']}"
+                    if found else "No counterexample found within the reported scope; "
+                                  "the missing proof direction remains a Conjecture."
+                )}
+    state = reserved["state"]
     verification["objection"] = (
         reply.get("objection", "")
         if isinstance(reply, Mapping) and isinstance(reply.get("objection", ""), str)
