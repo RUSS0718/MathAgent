@@ -2,6 +2,7 @@
 
 import json
 import unittest
+import uuid
 from unittest.mock import patch
 
 import requests
@@ -175,6 +176,34 @@ class StarCounterexampleTest(StarJobFixture, unittest.TestCase):
         self.client.get(f"/api/agent/jobs/{job_id}")
         self.client.get(f"/api/agent/jobs/{job_id}/report")
         self.assertEqual(5, len(self.outbound))
+
+    def test_unknown_research_retries_only_with_explicit_new_identity_and_reuses_verifier(self):
+        job_id, first, _ = self.start(requests.Timeout(), limit=10)
+        old = first["result"]["solver"]["recovery"]["unknown_calls"][0]["call_id"]
+        deadline = first["result"]["budget"]["deadline_at"]
+        rejected = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={},
+                                    headers=self.headers())
+        self.assertEqual(409, rejected.status_code)
+        repaired = {"argument": "Every real x has a smaller real value x-1.",
+            "claims": [{"statement": "There is no minimum.", "label": "hard-verify"}],
+            "blocked": False}
+        self.replies.extend([
+            NOT_FOUND, repaired,
+            {**ACCEPT, "answer_claim": {**TRIGGER, "both_directions_proved": True}},
+            {"final_response": "There is no minimum."}, {"verdict": "ACCEPT"},
+        ])
+        response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={
+            "retry_call": {"call_id": old, "new_call_id": str(uuid.uuid4())},
+        }, headers=self.headers())
+        self.assertEqual(202, response.status_code, response.get_json())
+        final = self.terminal(job_id)
+        self.assertEqual("succeeded", final["status"], final)
+        self.assertEqual(2, sum(item["role"] == "researcher" for item in self.outbound))
+        self.assertEqual(2, sum(item["role"] == "step_verifier" for item in self.outbound))
+        self.assertEqual(deadline, final["result"]["budget"]["deadline_at"])
+        self.assertEqual(10, final["result"]["budget"]["http_attempts"])
+        retries = final["result"]["solver"]["recovery"]["retries"]
+        self.assertEqual(old, retries[0]["retry_of"])
 
 
 if __name__ == "__main__":

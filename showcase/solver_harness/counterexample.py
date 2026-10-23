@@ -7,6 +7,22 @@ from .budget import budget_reason, stop
 from .calls import CallInterrupted
 
 
+def pending_review(run):
+    """Resume a declared falsification action without dispatching its Verifier again."""
+    from .calls import pending_call
+
+    call = pending_call(run)
+    if call is None or call.get("request", {}).get("action") != "counterexample_check":
+        return None
+    step = run["state"].get("steps", {}).get(run["state"].get("current_step"), {})
+    for record in step.get("counterexample_checks", {}).values():
+        if record.get("call_id") == call.get("call_id") or call.get("retry_of") == record.get("call_id"):
+            verifier = run["state"].get("calls", {}).get(record["verifier_call_id"], {})
+            if verifier.get("status") == "completed":
+                return record["verifier_call_id"], deepcopy(verifier["response"])
+    return None
+
+
 def target(report, declaration):
     """Bind a structured declaration to an actual claim; do not infer mathematics."""
     if not isinstance(declaration, Mapping):
@@ -39,17 +55,18 @@ def run_check(harness, run, *, problem, declared, verifier_call_id):
         "verifier_call_id": verifier_call_id, "call_id": call_id,
         "target": deepcopy(declared), "status": "requested", "result": None,
     }
-    checks = {**state["steps"][step_id].get("counterexample_checks", {}), verifier_call_id: record}
-    run = harness.commit_event(
-        run["run_id"], expected_revision=run["state_revision"],
-        event={"event_id": f"counterexample-requested-{run['state_revision']}",
-               "type": "counterexample_requested", "step_id": step_id, "role": "researcher"},
-        state_updates={
-            "counters": {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1},
-            "steps": {**state["steps"], step_id: {**state["steps"][step_id],
-                                                "counterexample_checks": checks}},
-        },
-    )
+    if pending_review(run) is None:
+        checks = {**state["steps"][step_id].get("counterexample_checks", {}), verifier_call_id: record}
+        run = harness.commit_event(
+            run["run_id"], expected_revision=run["state_revision"],
+            event={"event_id": f"counterexample-requested-{run['state_revision']}",
+                   "type": "counterexample_requested", "step_id": step_id, "role": "researcher"},
+            state_updates={
+                "counters": {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1},
+                "steps": {**state["steps"], step_id: {**state["steps"][step_id],
+                                                    "counterexample_checks": checks}},
+            },
+        )
     request = {
         "run_id": run["run_id"], "call_id": call_id, "role": "researcher",
         "action": "counterexample_check", "session_key": call_id,
@@ -78,6 +95,9 @@ def run_check(harness, run, *, problem, declared, verifier_call_id):
     except Exception:
         run = harness.get_run(run["run_id"])
     valid = valid_result(result)
+    from .calls import latest_retry_id
+
+    record["call_id"] = latest_retry_id(run["state"].get("calls", {}), call_id)
     record.update(status="completed" if valid else "invalid", result=deepcopy(result) if valid else None)
     if valid:
         record["evidence_category"] = (

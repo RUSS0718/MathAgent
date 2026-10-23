@@ -36,3 +36,9 @@
 研究对象与来源 Verifier call、研究 call、当前 claim 及调用审计响应一致才算完成。FOUND 给出反例后交回双方质询，不是机器形式化验证；NOT_FOUND 不补足证明，持久研究记录保留 Conjecture 类别。未知调用沿用现有中断和人工恢复规则，不自动重发。
 
 没有真实模型调用、Docker 执行或能力收益结论。未改官方冻结入口/预算，没有修改恢复或最终文本绑定模块，也没有解锁 `star_reference` / `star_best_effort`。
+
+## SP-08 合入后的交互修正
+
+同步 SP-08 集成 `32b8fd5` 后，独立研究未知调用的人工重试用例首先失败：旧步骤入口试图重新进入 Verifier，而待恢复动作属于 researcher。修复仅位于本切片的 verification/counterexample 模块：识别持久反证请求，复用已经完成的 Verifier 响应，沿用 SP-08 的新身份重试链，再将研究完成结果绑定到新调用。没有修改 SP-08 引擎。
+
+公共用例验证不显式选择时409；显式选择新身份后完成，仍只有原审查和修正报告审查两次 Verifier，两个 researcher 请求分别是原 unknown 与新重试，累计10次HTTP，原 deadline 和旧 unknown 保留。单项修复后通过，2.314秒。最终相关回归另记。

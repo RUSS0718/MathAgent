@@ -95,7 +95,10 @@ def verify_step(
             },
         )
     counters["model_calls"] += 1
-    reserved = harness.commit_event(
+    from .counterexample import pending_review
+
+    pending = pending_review(run) if getattr(harness, "_product_recovery", False) else None
+    reserved = run if pending else harness.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],
         event={
@@ -108,24 +111,27 @@ def verify_step(
     report = state["steps"][step_id]["report"]
     call_id = f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
     try:
-        reply = harness.dispatch(
-            reserved,
-            verifier_port.verify,
-            {
-                "run_id": run["run_id"],
-                "call_id": call_id,
-                "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}"
-                + (f"-attempt-{attempt}" if attempt else ""),
-                "round": round_number,
-                "challenge_history": challenge_history,
-                "role": "step_verifier",
-                "problem": problem,
-                "step": step,
-                "report": report,
-                "current_step_index": index + 1,
-                "state_revision": reserved["state_revision"],
-            },
-        )
+        if pending:
+            call_id, reply = pending
+        else:
+            reply = harness.dispatch(
+                reserved,
+                verifier_port.verify,
+                {
+                    "run_id": run["run_id"],
+                    "call_id": call_id,
+                    "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}"
+                    + (f"-attempt-{attempt}" if attempt else ""),
+                    "round": round_number,
+                    "challenge_history": challenge_history,
+                    "role": "step_verifier",
+                    "problem": problem,
+                    "step": step,
+                    "report": report,
+                    "current_step_index": index + 1,
+                    "state_revision": reserved["state_revision"],
+                },
+            )
     except CallInterrupted:
         latest = harness.get_run(run["run_id"])
         call = latest["state"].get("calls", {}).get(call_id, {})
