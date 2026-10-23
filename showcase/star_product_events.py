@@ -19,7 +19,9 @@ def public_solver_event_id(run, event):
 def decision_fields(event, state, invocations=()):
     fields = {key: event[key] for key in (
         "assessment", "round", "next_phase", "goal_gate", "logic_gate",
-        "verdict", "valid", "trace_back_to",
+        "verdict", "valid", "trace_back_to", "from_step_index", "attempt_index",
+        "archived_plan_version", "archived_step_count", "invalidated_result_count",
+        "rescued_result_count",
     ) if key in event}
     roles = {
         "challenge_dispatched": "reasoner",

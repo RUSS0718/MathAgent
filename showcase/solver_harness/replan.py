@@ -117,6 +117,10 @@ def run_replan(harness, run, *, problem, model_port, config):
             "steps": {},
             "current_step": None,
         },
+        archived_plan_version=state["plan_version"],
+        archived_step_count=len(state["steps"]),
+        invalidated_result_count=len(excluded),
+        rescued_result_count=len(rescued),
     )
     calls = config.get("max_model_calls", 2)
     seconds = config.get("max_total_duration_seconds", 3600)
@@ -188,6 +192,7 @@ def run_replan(harness, run, *, problem, model_port, config):
             "plan": redact(plan),
             "current_step": plan["steps"][0]["step_id"],
         },
+        plan_version=version,
     )
 
 
@@ -326,19 +331,38 @@ def _reusable(state):
     rescued = []
     valid_ids = set()
     old_steps = {step["step_id"] for step in state.get("plan", {}).get("steps", [])}
+    selected = state.get("meta_decision", {}).get("reusable_results", [])
+    invalidated = [result for failure in state.get("failure_records", [])
+                   for result in failure.get("invalidated_results", [])]
+    invalid_refs = {value for result in invalidated
+                    for value in (result.get("result_id"), result.get("source")) if value}
     while pending:
         found = []
         for result in pending:
             dependencies = result.get("dependencies")
             if (
-                result.get("source") not in old_steps
+                (result.get("source") not in old_steps
+                 or result.get("result_id") in selected
+                 or result.get("statement") in selected)
+                and result.get("valid", True)
+                and not result.get("invalidated", False)
+                and result.get("status") not in {"INVALIDATED", "invalidated"}
+                and not any(
+                    (result.get("result_id") and result.get("result_id") == item.get("result_id"))
+                    or (result.get("statement") == item.get("statement")
+                        and result.get("source") == item.get("source"))
+                    for item in invalidated
+                )
                 and result.get("evidence_level") in {"llm_reviewed", "tool_verified"}
                 and isinstance(dependencies, list)
+                and not invalid_refs.intersection(dependencies)
                 and all(dependency in valid_ids for dependency in dependencies)
             ):
                 rescued.append(result)
                 if result.get("result_id"):
                     valid_ids.add(result["result_id"])
+                if result.get("source"):
+                    valid_ids.add(result["source"])
                 found.append(result)
         if not found:
             break
