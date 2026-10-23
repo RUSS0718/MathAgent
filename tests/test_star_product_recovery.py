@@ -352,3 +352,131 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
             "call_id": old_id, "new_call_id": str(uuid.uuid4())}}, headers=self.headers())
         self.assertEqual(409, response.status_code)
         self.assertEqual(1, len(self.outbound))
+
+
+class StarArchiveTransactionWindowTest(StarJobFixture, unittest.TestCase):
+    """AC-15: real os._exit on both sides of the Trace-Back archive transaction."""
+
+    def test_process_exit_before_archive_commit_reuses_verdict_and_applies_once(self):
+        self.assert_trace_window("trace_before")
+
+    def test_process_exit_after_archive_commit_keeps_failure_history_without_repeat(self):
+        self.assert_trace_window("trace_after")
+
+    def assert_trace_window(self, window):
+        import json
+        import os
+        import subprocess
+        import sys
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from showcase.flask_app import create_app
+        from tests.star_recovery_worker import config, provider
+
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            process = subprocess.run([sys.executable, "-m", "tests.star_recovery_worker", directory, window],
+                                     capture_output=True, timeout=60)
+            self.assertEqual(71, process.returncode, process.stderr.decode(errors="replace"))
+            job_id = (folder / "job_id").read_text()
+            before = [json.loads(line) for line in (folder / "requests.jsonl").read_text().splitlines()]
+            self.assertEqual(6, len(before))
+            self.assertEqual("step_verifier", before[5]["role"])
+            self.assertEqual("s2", before[5]["step"]["step_id"])
+            with patch.dict(os.environ, {"INTERN_API_KEY": "scripted-only"}), patch(
+                    "llm_client.requests.post", side_effect=lambda *a, **kw: provider(folder, kw)):
+                app = create_app(config(folder))
+                try:
+                    self.app = app
+                    self.client = app.test_client()
+                    self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
+                    original = self.job(job_id)["result"]["budget"]
+                    self.assertEqual("safe", self.job(job_id)["result"]["solver"]["recovery"]["status"])
+                    response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={}, headers=self.headers())
+                    self.assertEqual(202, response.status_code, response.get_json())
+                    final = self.terminal(job_id)
+                    self.assertEqual("succeeded", final["status"], final)
+                    after = [json.loads(line) for line in (folder / "requests.jsonl").read_text().splitlines()]
+                    self.assertEqual(14, len(after))
+                    # The original s2 verifier TRACE_BACK reply is never re-dispatched.
+                    original_s2_reviews = [request for request in after if request["role"] == "step_verifier"
+                                           and request["step"]["step_id"] == "s2"
+                                           and "-attempt-1" not in request["call_id"]]
+                    self.assertEqual(1, len(original_s2_reviews))
+                    self.assertEqual("reasoner", after[6]["role"])
+                    self.assertEqual("s1", after[6]["step"]["step_id"])
+                    # Failure history survived the archive and is visible to the retry attempt.
+                    failure = after[6]["failure_records"][-1]
+                    self.assertEqual({"s1", "s2"}, set(failure["archived_steps"]))
+                    self.assertEqual(1, len(failure["invalidated_results"]))
+                    self.assertEqual([], failure["rescued_results"])
+                    # Only attempt-1 acceptances reach the final review; none are repeated.
+                    verifier = next(request for request in after if request["role"] == "whole_solution_verifier")
+                    self.assertEqual(3, len(verifier["accepted_results"]))
+                    stream = self.client.get(f"/api/agent/jobs/{job_id}/events").get_data(as_text=True)
+                    events = [json.loads(line[6:]) for line in stream.splitlines() if line.startswith("data: ")]
+                    applied = [event for event in events
+                               if event.get("solver_event_type") == "trace_back_applied"]
+                    self.assertEqual(1, len(applied))
+                    reviewed = [event for event in events
+                                if event.get("solver_event_type") == "step_reviewed"]
+                    self.assertEqual(5, len(reviewed))
+                    budget = final["result"]["budget"]
+                    self.assertEqual(original["deadline_at"], budget["deadline_at"])
+                    self.assertEqual(14, budget["http_attempts"])
+                    self.assertEqual(14, budget["logical_calls"])
+                    self.assertEqual(0, budget["unknown_attempts"])
+                    evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
+                    self.assertEqual(1, len([event for event in evidence["timeline"]
+                                             if event.get("solver_event_type") == "trace_back_applied"]))
+                    self.assertEqual(final["result"]["budget"], evidence["budget"])
+                finally:
+                    for name in ("showcase_workspace_service", "showcase_run_service", "loopback_store"):
+                        app.extensions[name].close()
+
+    def mutate_database(self, statements):
+        import sqlite3
+        from pathlib import Path
+
+        connection = sqlite3.connect(str(Path(self.data_dir) / "showcase.sqlite3"))
+        connection.execute("PRAGMA busy_timeout = 5000")
+        try:
+            for statement in statements:
+                connection.execute(statement)
+            connection.commit()
+        finally:
+            connection.close()
+
+    def failed_unknown_job(self):
+        self.open_star([requests.Timeout("unknown"), SOLVED, POLISH, ACCEPT],
+                       SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=6, max_http_attempts=6))
+        job_id = self.create_job()
+        job = self.terminal(job_id)
+        self.assertEqual("failed", job["status"])
+        return job_id, job["result"]["solver"]["recovery"]["unknown_calls"][0]["call_id"]
+
+    def test_resume_rejects_checkpoint_revision_without_persisted_event(self):
+        job_id, old_id = self.failed_unknown_job()
+        self.mutate_database([
+            "UPDATE solver_states SET state_revision=999, "
+            "state_json=json_set(state_json,'$.state_revision',999)",
+        ])
+        response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={"retry_call": {
+            "call_id": old_id, "new_call_id": str(uuid.uuid4())}}, headers=self.headers())
+        self.assertEqual(409, response.status_code, response.get_json())
+        self.assertEqual("star_recovery_revision_unavailable", response.get_json()["error"])
+        self.assertEqual("failed", self.job(job_id)["status"])
+        self.assertEqual(1, len(self.outbound))
+
+    def test_resume_rejects_mismatched_task_problem(self):
+        job_id, old_id = self.failed_unknown_job()
+        self.mutate_database(["UPDATE workspace_jobs SET problem='2+2' WHERE job_id="
+                              f"'{job_id}'"])
+        response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={"retry_call": {
+            "call_id": old_id, "new_call_id": str(uuid.uuid4())}}, headers=self.headers())
+        self.assertEqual(409, response.status_code, response.get_json())
+        self.assertEqual("star_recovery_task_mismatch", response.get_json()["error"])
+        self.assertEqual("failed", self.job(job_id)["status"])
+        self.assertEqual(1, len(self.outbound))
