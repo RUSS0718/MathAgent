@@ -14,7 +14,7 @@ from .star_product_modes import mode_identity
 class StarProductPipeline:
     execution_mode = "star_limited"
 
-    def __init__(self, database_path, *, adapter=None, evidence_kind="live"):
+    def __init__(self, database_path, *, adapter=None, evidence_kind="live", budget=None):
         if evidence_kind not in {"live", "scripted", "fault_injection"}:
             raise ValueError("star_evidence_kind_invalid")
         if adapter is not None and not isinstance(adapter, InternModelAdapter):
@@ -22,7 +22,9 @@ class StarProductPipeline:
         self.database_path = database_path
         self.adapter = adapter or InternModelAdapter(client_timeout=180, client_retry=1)
         self.evidence_kind = evidence_kind
-        self.budget = RunBudgetLimits(max_model_calls=3, max_http_attempts=3, max_tool_calls=0)
+        if budget is not None and not isinstance(budget, RunBudgetLimits):
+            raise ValueError("star_budget_invalid")
+        self.budget = budget or RunBudgetLimits(max_model_calls=3, max_http_attempts=3, max_tool_calls=0)
         self.checkpointer = None
 
     def run(self, run_id, problem, *, verification_mode="auto", emit=None):
