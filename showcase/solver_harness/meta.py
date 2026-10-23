@@ -65,6 +65,19 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
     state = run["state"]
     guidance = metadata.get("meta_guidance")
     trigger = metadata.get("meta_trigger")
+    upgrade = next(
+        (
+            item
+            for item in reversed(state.get("meta_interventions", []))
+            if item.get("meta_trigger", item.get("trigger")) == "challenge_round_limit"
+            and item.get("plan_version") == state["plan_version"]
+            and item.get("attempt_index") == state["attempt_index"]
+            and item.get("step_id") == state["current_step"]
+        ),
+        None,
+    )
+    if trigger is None and upgrade is not None:
+        trigger = upgrade.get("meta_trigger", "challenge_round_limit")
     if guidance is None and trigger is None and state["phase"] != "META_DECIDE":
         return run
     if guidance is not None:
@@ -114,7 +127,12 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
     run = harness.commit_event(
         run["run_id"],
         expected_revision=revision,
-        event={"event_id": f"meta-dispatched-{revision}", "type": "meta_dispatched"},
+        event={
+            "event_id": f"meta-dispatched-{revision}",
+            "type": "meta_dispatched",
+            "role": "meta",
+            **({"upgrade_reason": "round_limit_reached"} if upgrade is not None else {}),
+        },
         state_updates={
             "counters": {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1}
         },
@@ -135,6 +153,14 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
             if target > current_index:
                 raise ValueError("invalid_trace_back_target")
     except Exception:
+        updates = {}
+        if upgrade is not None:
+            updates = {
+                "phase": "TERMINAL",
+                "status": "partial_aborted",
+                "result_reason": "invalid_challenge_meta_decision",
+                "final_response": "Meta returned an invalid challenge decision; no further action was taken.",
+            }
         return harness.commit_event(
             run["run_id"],
             expected_revision=run["state_revision"],
@@ -142,7 +168,10 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
                 "event_id": f"meta-invalid-{revision}",
                 "type": "meta_invalid",
                 "reason": "invalid_or_failed_response",
+                "role": "meta",
+                **({"upgrade_reason": "round_limit_reached"} if upgrade is not None else {}),
             },
+            state_updates=updates,
         )
     history.extend(
         [
@@ -166,7 +195,21 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         "meta_history": history,
         "meta_decision": decision,
         "session_refs": {**state["session_refs"], "meta": session},
-        "meta_interventions": [*state["meta_interventions"], {"session_key": session, **decision}],
+        "meta_interventions": [
+            *state["meta_interventions"],
+            {
+                "session_key": session,
+                **({
+                    "trigger": trigger,
+                    "meta_trigger": trigger,
+                    "upgrade_reason": "round_limit_reached",
+                    "step_id": state["current_step"],
+                    "plan_version": state["plan_version"],
+                    "attempt_index": state["attempt_index"],
+                } if upgrade is not None else {}),
+                **decision,
+            },
+        ],
     }
     if action == "ABORT":
         updates.update(
@@ -183,6 +226,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
             "event_id": f"meta-decided-{revision}",
             "type": "meta_decided",
             "decision": decision,
+            **({"trigger": trigger, "upgrade_reason": "round_limit_reached", "role": "meta"} if upgrade is not None else {}),
         },
         state_updates=updates,
     )

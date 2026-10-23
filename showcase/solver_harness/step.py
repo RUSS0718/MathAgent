@@ -26,7 +26,11 @@ def run_step(
     )
     step_id = step["step_id"]
     attempt = state["attempt_index"]
+    previous = state["steps"].get(step_id, {})
+    challenge_history = previous.get("challenge_history", [])
     suffix = f"-attempt-{attempt}" if attempt else ""
+    if challenge_history:
+        suffix += f"-challenge-continuation-{len(challenge_history)}"
     session = f"reasoner:{run['run_id']}:plan{plan['version']}:attempt{attempt}"
     counters = dict(state["counters"])
     from .budget import budget_reason
@@ -67,21 +71,25 @@ def run_step(
         },
     )
     try:
+        request = {
+            "run_id": run["run_id"],
+            "call_id": f"{run['run_id']}:reasoner:{plan['version']}:{step_id}{suffix}",
+            "session_key": session,
+            "failure_records": state["failure_records"],
+            "rescued_results": state.get("rescued_results", []),
+            "role": "reasoner",
+            "problem": problem,
+            "step": dict(step),
+            "state_revision": reserved["state_revision"],
+            "tool_policy": {"allow": []},
+        }
+        if challenge_history:
+            request["challenge_history"] = challenge_history
+            request["objection"] = previous.get("verification", {}).get("objection", "")
         reply = harness.dispatch(
             reserved,
             model_port.complete,
-            {
-                "run_id": run["run_id"],
-                "call_id": f"{run['run_id']}:reasoner:{plan['version']}:{step_id}{suffix}",
-                "session_key": session,
-                "failure_records": state["failure_records"],
-                "rescued_results": state.get("rescued_results", []),
-                "role": "reasoner",
-                "problem": problem,
-                "step": dict(step),
-                "state_revision": reserved["state_revision"],
-                "tool_policy": {"allow": []},
-            },
+            request,
         )
     except Exception:
         reply = {"blocked": True}
@@ -96,7 +104,10 @@ def run_step(
         },
         state_updates={
             "phase": "STEP_VERIFY",
-            "steps": {**state["steps"], step_id: {"status": "VERIFYING", "report": report}},
+            "steps": {
+                **state["steps"],
+                step_id: {**previous, "status": "VERIFYING", "report": report},
+            },
         },
     )
 

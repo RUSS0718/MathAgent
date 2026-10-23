@@ -28,4 +28,5 @@ def limited_config(budget, features=None, registry=None):
         "features": enabled, "allowed_tools": tools,
         "max_model_calls": budget.max_model_calls, "max_tool_calls": budget.max_tool_calls,
         "max_total_duration_seconds": max(1, int(budget.max_runtime_seconds)), "max_explore_rounds": 2,
+        "max_challenge_rounds": 3,
     }

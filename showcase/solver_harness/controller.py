@@ -38,7 +38,7 @@ def run_supplied_plan_or_explore(
         plan=plan,
         model_port=harness._model_port,
         verifier_port=harness._verifier_port,
-        max_rounds=_positive_config_int(harness._config, "max_challenge_rounds", 5),
+        max_rounds=min(5, _positive_config_int(harness._config, "max_challenge_rounds", 5)),
         max_model_calls=_non_negative_config_int(harness._config, "max_model_calls", 2),
         max_runtime_seconds=_non_negative_config_int(
             harness._config, "max_total_duration_seconds", 3600
