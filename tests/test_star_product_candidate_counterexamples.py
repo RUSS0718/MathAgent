@@ -90,3 +90,57 @@ class StarRealContradictionReplayTest(StarJobFixture, unittest.TestCase):
                 for name in ('loopback_store', 'showcase_run_service', 'showcase_workspace_service'):
                     reopened.extensions[name].close()
 
+
+
+class StarUncalibratedProbabilityTest(StarJobFixture, unittest.TestCase):
+    """AC-40: an uncalibrated 0.95 never becomes a displayed calibrated probability."""
+
+    def test_step_reply_with_probability_field_is_rejected_by_strict_schema(self):
+        from tests.test_star_product_planning import FEATURES, STEP
+        from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
+
+        confident = {**STEP, 'confidence': 0.95}
+        self.open_star([NEED_PLAN, PLAN, confident, VERDICT, {'final_response': '2'},
+                        {'verdict': 'ACCEPT', 'reason': 'ok'}],
+                       SHOWCASE_STAR_FEATURES=FEATURES,
+                       SHOWCASE_STAR_BUDGET=RunBudgetLimits(
+                           max_model_calls=16, max_http_attempts=16))
+        job_id = self.create_job()
+        job = self.terminal(job_id)
+        self.assertEqual('failed', job['status'], job)
+        recovery = job['result']['solver']['recovery']
+        self.assertEqual('needs_review', recovery['status'])
+        self.assertEqual(1, len(recovery['unknown_calls']))
+        self.assertEqual('reasoner', recovery['unknown_calls'][0]['role'])
+        public = json.dumps([job, self.report(job_id),
+                             self.client.get(f'/api/runs/{job_id}/evidence').get_json(),
+                             self.client.get(f'/api/agent/jobs/{job_id}/candidate-replay')
+                             .get_json()])
+        self.assertNotIn('0.95', public)
+        self.assertNotIn('"confidence"', public)
+        self.assertNotIn('calibrated', public)
+        self.assertEqual([], job['result']['solver']['candidate_history'])
+
+    def test_verifier_reply_with_probability_field_is_rejected_not_normalized(self):
+        from tests.test_star_product_planning import FEATURES, STEP
+        from tests.test_star_product_tools import NEED_PLAN, PLAN
+
+        confident = {'goal_gate': 'YES', 'logic_gate': 'PASS', 'verdict': 'ACCEPT',
+                     'objection': '', 'confidence': 0.95}
+        self.open_star([NEED_PLAN, PLAN, STEP, confident],
+                       SHOWCASE_STAR_FEATURES=FEATURES,
+                       SHOWCASE_STAR_BUDGET=RunBudgetLimits(
+                           max_model_calls=16, max_http_attempts=16))
+        job_id = self.create_job()
+        job = self.terminal(job_id)
+        self.assertEqual('failed', job['status'], job)
+        stream = self.client.get(f'/api/agent/jobs/{job_id}/events').get_data(as_text=True)
+        reviewed = [json.loads(line[6:]) for line in stream.splitlines()
+                    if line.startswith('data: ')
+                    and json.loads(line[6:]).get('solver_event_type') == 'step_reviewed']
+        self.assertTrue(reviewed)
+        self.assertNotIn('ACCEPT', [event.get('verdict') for event in reviewed])
+        public = stream + json.dumps([job, self.report(job_id),
+                                      self.client.get(f'/api/runs/{job_id}/evidence').get_json()])
+        self.assertNotIn('0.95', public)
+        self.assertNotIn('"confidence"', public)
