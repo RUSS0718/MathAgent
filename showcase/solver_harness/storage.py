@@ -9,6 +9,9 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+from ..run_control import RunStopped
+from .product_control import controlled_patch
+
 _SOLVER_STORAGE_LOCK = threading.RLock()
 
 
@@ -165,6 +168,7 @@ class SolverStateStore:
                 state = json.loads(row["state_json"])
                 if not isinstance(state, dict):
                     raise SolverPersistenceError("commit_event")
+                state_updates = controlled_patch(connection, run_id, event, state_updates)
                 next_revision = current_revision + 1
                 now = datetime.now(UTC).isoformat()
                 state.update(state_updates)
@@ -225,7 +229,7 @@ class SolverStateStore:
                     raise SolverPersistenceError("commit_event")
                 connection.commit()
                 return result
-            except (SolverRevisionConflictError, SolverEventConflictError):
+            except (SolverRevisionConflictError, SolverEventConflictError, RunStopped):
                 connection.rollback()
                 raise
             except SolverPersistenceError:

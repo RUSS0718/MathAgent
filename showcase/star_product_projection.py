@@ -3,6 +3,17 @@
 import json
 
 
+def current_solver(connection, run_id):
+    """Read only public math progress, including after Job projection is sealed."""
+    row = connection.execute("SELECT state_json FROM solver_states WHERE run_id=?", (run_id,)).fetchone()
+    if row is None:
+        return None
+    from .star_product_pipeline import projection
+
+    state = json.loads(row[0])
+    return projection({"run_id": run_id, "state_revision": state["state_revision"], "state": state})
+
+
 def project_solver_event(connection, job_id, event):
     if event.get("type") != "solver_progress":
         return True
