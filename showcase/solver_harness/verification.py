@@ -95,7 +95,10 @@ def verify_step(
             },
         )
     counters["model_calls"] += 1
-    reserved = harness.commit_event(
+    from .counterexample import pending_review
+
+    pending = pending_review(run) if getattr(harness, "_product_recovery", False) else None
+    reserved = run if pending else harness.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],
         event={
@@ -108,24 +111,27 @@ def verify_step(
     report = state["steps"][step_id]["report"]
     call_id = f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
     try:
-        reply = harness.dispatch(
-            reserved,
-            verifier_port.verify,
-            {
-                "run_id": run["run_id"],
-                "call_id": call_id,
-                "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}"
-                + (f"-attempt-{attempt}" if attempt else ""),
-                "round": round_number,
-                "challenge_history": challenge_history,
-                "role": "step_verifier",
-                "problem": problem,
-                "step": step,
-                "report": report,
-                "current_step_index": index + 1,
-                "state_revision": reserved["state_revision"],
-            },
-        )
+        if pending:
+            call_id, reply = pending
+        else:
+            reply = harness.dispatch(
+                reserved,
+                verifier_port.verify,
+                {
+                    "run_id": run["run_id"],
+                    "call_id": call_id,
+                    "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}"
+                    + (f"-attempt-{attempt}" if attempt else ""),
+                    "round": round_number,
+                    "challenge_history": challenge_history,
+                    "role": "step_verifier",
+                    "problem": problem,
+                    "step": step,
+                    "report": report,
+                    "current_step_index": index + 1,
+                    "state_revision": reserved["state_revision"],
+                },
+            )
     except CallInterrupted:
         latest = harness.get_run(run["run_id"])
         call = latest["state"].get("calls", {}).get(call_id, {})
@@ -162,6 +168,36 @@ def verify_step(
     except Exception:
         reply = None
     verification = normalize_verdict(reply, index + 1)
+    if isinstance(reply, Mapping) and "answer_claim" in reply:
+        from . import counterexample
+
+        declared = counterexample.target(report, reply["answer_claim"])
+        if declared is None:
+            verification.update(valid=False, reason="invalid_answer_claim_target")
+        elif not declared["both_directions_proved"]:
+            reserved = counterexample.run_check(
+                harness, reserved, problem=problem, declared=declared, verifier_call_id=call_id,
+            )
+            if reserved["state"]["phase"] == "TERMINAL":
+                return reserved
+            result = counterexample.consumed_result(
+                reserved["state"], step_id=step_id, verifier_call_id=call_id, declared=declared,
+            )
+            if result is None:
+                verification.update(valid=False, reason="counterexample_check_not_completed")
+            else:
+                found = result["verdict"] == "FOUND_COUNTEREXAMPLE"
+                verification.update(
+                    verdict="CHALLENGE", goal_gate="PARTIAL",
+                    logic_gate="FAIL" if found else "UNCERTAIN",
+                    counterexample_verdict=result["verdict"],
+                )
+                reply = {**reply, "objection": (
+                    f"Counterexample: {result['counterexample']}; {result['violated_conclusion']}"
+                    if found else "No counterexample found within the reported scope; "
+                                  "the missing proof direction remains a Conjecture."
+                )}
+    state = reserved["state"]
     verification["objection"] = (
         reply.get("objection", "")
         if isinstance(reply, Mapping) and isinstance(reply.get("objection", ""), str)
