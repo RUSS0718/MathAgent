@@ -11,6 +11,7 @@ from .solver_harness.intern_port import InternModelPort
 from .solver_harness.result import export_result
 from .solver_harness.tool_ports import RegistryToolPort
 from .star_product_config import limited_config
+from .star_product_events import decision_fields
 from .star_product_modes import mode_identity
 
 
@@ -50,7 +51,7 @@ class StarProductPipeline:
                       "node_name": "star", "step_id": event["event_id"],
                       "title": "STAR " + event["type"],
                       "summary": event.get("summary", event["type"]),
-                      "solver": projection(run)})
+                      "solver": projection(run), **decision_fields(event, run["state"])})
 
         def solve():
             with SolverHarness(database_path=self.database_path, config=config,
