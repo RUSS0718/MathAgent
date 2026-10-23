@@ -13,7 +13,7 @@ FULL_MODE_GAPS = (
 def mode_identity(mode="legacy"):
     return {
         "solver_mode": mode,
-        "preset_version": "sp02-v1",
+        "preset_version": "sp11-v1" if mode == "star_limited_best_effort" else "sp02-v1",
         "missing_capabilities": list(FULL_MODE_GAPS) if mode != "legacy" else [],
     }
 

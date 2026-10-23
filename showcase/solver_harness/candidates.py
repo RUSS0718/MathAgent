@@ -213,6 +213,8 @@ def _review(registry, actions, record, event, review, local):
     elif verdict in {"REJECT", "CHALLENGE", "TRACE_BACK", "PROPOSE_REPLAN"}:
         # A missing proof obligation is an objection, not decisive disproof.
         counterexample = review.get("counterexample")
+        if review.get("counterexample_verdict") == "FOUND_COUNTEREXAMPLE":
+            counterexample = review.get("objection") or "independent_counterexample_found"
         refuted = isinstance(counterexample, str) and bool(counterexample.strip())
         objection = (
             counterexample

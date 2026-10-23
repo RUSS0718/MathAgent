@@ -120,7 +120,9 @@ class StarProductPipeline:
                     "status": "COMPLETED" if reviewed and verification_mode != "required" else "NEEDS_REVIEW",
                     "stage": math["phase"].lower(),
                     "final_response": answer,
-                    "summary": "受限 STAR：探索、润色和新整题审查；不代表完整参考能力",
+                    "summary": ("受限 STAR Best-Effort：预算终止后仅选择已有候选；未完成审查仍需复核"
+                                if math.get("best_effort_decision") is not None else
+                                "受限 STAR：探索、润色和新整题审查；不代表完整参考能力"),
                     "verification": verification,
                     "request_attempts": attempts,
                     "tool_results": public_tools(math),

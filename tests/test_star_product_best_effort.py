@@ -175,3 +175,149 @@ class StarBestEffortTest(StarJobFixture, unittest.TestCase):
         self.assertEqual('no_eligible_candidate', job['result']['solver']['best_effort']['status'])
         self.assertEqual([], self.outbound)
         self.assertEqual('safe', job['result']['solver']['recovery']['status'])
+
+    def test_independent_counterexample_refutes_candidate_before_budget_selection(self):
+        from tests.test_star_product_counterexample import (
+            ACCEPT,
+            FEATURES,
+            FOUND,
+            NEED_PLAN,
+            PLAN,
+            STEP,
+        )
+
+        self.open_star([NEED_PLAN, PLAN, {**STEP, 'solution_candidate': '0 is the minimum',
+            'answer_completeness': 'complete'}, ACCEPT, FOUND],
+            SHOWCASE_STAR_FEATURES=FEATURES,
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=5, max_http_attempts=5))
+        _, job = self.start_best_effort()
+        history = job['result']['solver']['candidate_history']
+        self.assertEqual('refuted', history[-1]['review_state'])
+        self.assertFalse(history[-1]['selection_eligible'])
+        self.assertEqual('no_eligible_candidate', job['result']['solver']['best_effort']['status'])
+        self.assertNotEqual('0 is the minimum', job['result']['final_response'])
+        self.assertEqual(5, len(self.outbound))
+
+    def test_reopened_job_and_replay_are_immutable_and_do_not_dispatch(self):
+        import json
+
+        from showcase.flask_app import create_app
+
+        self.open_star([SOLVED], SHOWCASE_STAR_BUDGET=RunBudgetLimits(
+            max_model_calls=1, max_http_attempts=1, max_tool_calls=0))
+        job_id, job = self.start_best_effort()
+        original = self.client.get(f'/api/agent/jobs/{job_id}/candidate-replay').get_json()
+        app = create_app({'TESTING': True, 'SHOWCASE_DATA_DIR': self.data_dir})
+        for name in ('loopback_store', 'showcase_run_service', 'showcase_workspace_service'):
+            self.addCleanup(app.extensions[name].close)
+        with app.test_client() as client:
+            client.get('/api/check_auth')
+            self.assertEqual(original, client.get(
+                f'/api/agent/jobs/{job_id}/candidate-replay').get_json())
+            reopened = client.get(f'/api/agent/jobs/{job_id}').get_json()
+            self.assertEqual(job['result']['solver'], reopened['result']['solver'])
+            evidence = client.get(f'/api/runs/{job_id}/evidence').get_json()
+            public = json.dumps(evidence)
+            for forbidden in ('prompt_layers', 'session_history', 'role_context',
+                              'selected_source_record', 'request_hash', 'owner_instance',
+                              'problem_hash', 'probability'):
+                self.assertNotIn(forbidden, public)
+            record = reopened['result']['solver']['candidate_history'][0]
+            self.assertEqual({'version', 'answer_text', 'answer_hash', 'source_phase',
+                'plan_version', 'attempt_index', 'answer_completeness', 'review_state',
+                'selection_eligible', 'candidate_id', 'step_refs', 'dependency_refs',
+                'source_event_refs', 'evidence_refs', 'invalidated_by', 'evidence_grade'}, set(record))
+        self.assertEqual(1, len(self.outbound))
+        self.assertEqual(404, self.client.get(
+            '/api/agent/jobs/unknown/candidate-replay').status_code)
+
+    def test_rewritten_best_effort_delivery_cannot_inherit_selected_artifact(self):
+        from unittest.mock import patch
+
+        self.open_star([SOLVED], SHOWCASE_STAR_BUDGET=RunBudgetLimits(
+            max_model_calls=1, max_http_attempts=1, max_tool_calls=0))
+        with patch('showcase.star_product_pipeline.export_result',
+                   return_value={'final_response': 'unreviewed rewrite'}):
+            job_id, job = self.start_best_effort()
+        check = self.report(job_id)['checks']
+        self.assertEqual('artifact_changed', check['binding'])
+        self.assertNotEqual(check['artifact'], check['selection']['artifact'])
+        self.assertEqual('needs_review', check['acceptance'])
+        self.assertEqual('failed', job['status'])
+        self.assertEqual(1, len(self.outbound))
+
+    def test_selector_bypass_is_detected_by_the_public_refutation_contract(self):
+        from unittest.mock import patch
+
+        from showcase.solver_harness.best_effort import select_best_effort
+        from tests.test_star_product_counterexample import (
+            ACCEPT,
+            FEATURES,
+            FOUND,
+            NEED_PLAN,
+            PLAN,
+            STEP,
+        )
+
+        def bypass(snapshot):
+            decision = select_best_effort(snapshot)
+            record = snapshot['candidate_registry'][0]
+            return {**decision, 'status': 'candidate_selected',
+                    'selected_candidate_id': record['candidate_id'], 'selected_source_record': record}
+
+        self.open_star([NEED_PLAN, PLAN, {**STEP, 'solution_candidate': 'refuted minimum',
+            'answer_completeness': 'complete'}, ACCEPT, FOUND],
+            SHOWCASE_STAR_FEATURES=FEATURES,
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=5, max_http_attempts=5))
+        with patch('showcase.solver_harness.best_effort.select_best_effort', side_effect=bypass):
+            _, job = self.start_best_effort()
+        with self.assertRaises(AssertionError):
+            self.assertEqual('no_eligible_candidate', job['result']['solver']['best_effort']['status'])
+        self.assertEqual('refuted minimum', job['result']['final_response'])
+        self.assertEqual(5, len(self.outbound))
+
+    def test_cancel_beats_expired_pure_selection_and_cannot_publish_late_candidate(self):
+        import time
+
+        holder = {}
+
+        def cancel_then_late(_request):
+            self.cancel(holder['job_id'])
+            time.sleep(1.1)
+            return {'solution_candidate': 'late canceled answer'}
+
+        self.open_star([SOLVED, cancel_then_late], SHOWCASE_STAR_BUDGET=RunBudgetLimits(
+            max_model_calls=8, max_http_attempts=8, max_runtime_seconds=1))
+        response = self.client.post('/api/agent/jobs', json={
+            'message': '1+1', 'session_id': self.session,
+            'solver_mode': 'star_limited_best_effort'}, headers=self.headers())
+        holder['job_id'] = response.get_json()['job_id']
+        job = self.terminal(holder['job_id'])
+        self.assertEqual('canceled', job['status'])
+        self.wait_for(lambda: len(self.outbound) == 2)
+        solver = self.job(holder['job_id'])['result']['solver']
+        self.assertIsNone(solver['best_effort'])
+        self.assertEqual(['2'], [v['answer_text'] for v in solver['candidate_history']])
+
+    def test_tool_hard_limit_stops_other_claim_and_verifier_before_selection(self):
+        from copy import deepcopy
+
+        from showcase.tools import ToolRegistry
+        from tests.test_star_product_tools import FEATURES, NEED_PLAN, PLAN, STEP
+
+        actual = []
+        registry = ToolRegistry()
+        registry.register('polynomial_check', lambda args: actual.append(args) or 2)
+        step = deepcopy(STEP)
+        step['claims'].append(deepcopy(step['claims'][0]))
+        self.open_star([NEED_PLAN, PLAN, step], SHOWCASE_STAR_FEATURES=FEATURES,
+            SHOWCASE_STAR_REGISTRY=registry,
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8,
+                                                max_tool_calls=1))
+        _, job = self.start_best_effort()
+        self.assertEqual([{}], actual)
+        self.assertEqual(3, len(self.outbound))
+        self.assertEqual(1, job['result']['budget']['tool_calls'])
+        self.assertEqual('tool_call_budget_exhausted',
+            job['result']['solver']['best_effort']['termination_reason'])
+        self.assertEqual('no_eligible_candidate', job['result']['solver']['best_effort']['status'])

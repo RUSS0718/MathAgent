@@ -813,7 +813,7 @@ class WorkspaceService:
             problem=problem,
             idempotency_key=idempotency_key,
             request_digest=digest,
-            execution_mode=solver_mode if selected is self.star_pipeline else getattr(selected, "execution_mode", self.execution_mode),
+            execution_mode=solver_mode if solver_mode in {"star_limited", "star_limited_best_effort"} else getattr(selected, "execution_mode", self.execution_mode),
             solver_identity={**identity, "evidence_kind": getattr(selected, "evidence_kind", self.execution_mode)},
             solver_hint=solver_hint,
             verification_mode=verification_mode,
