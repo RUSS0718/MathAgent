@@ -157,6 +157,8 @@ def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         "result_summary": result.get("result_summary", ""),
         "error_category": result.get("error_category"),
     }
+    if isinstance(result.get("receipt"), Mapping):
+        summary["receipt"] = redact(dict(result["receipt"]))
     value = result.get("value")
     if result.get("name") == "polynomial_check" and isinstance(value, Mapping):
         candidates = value.get('candidates', [])

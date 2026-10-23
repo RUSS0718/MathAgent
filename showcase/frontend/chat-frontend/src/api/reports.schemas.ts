@@ -11,8 +11,8 @@ export const reportSchema = z.object({
   version: z.string(),
   evidence_id: z.string(),
   status: z.string(),
-  mode: z.enum(['live', 'fake', 'replay', 'experimental', 'unavailable', 'planned', 'star_limited']),
-  solver: z.object({ solver_mode: z.string().nullable(), evidence_kind: z.string().nullable(), missing_capabilities: z.array(z.string()).nullable(), solver: z.object({ run_id: z.string(), state_revision: z.number(), phase: z.string(), status: z.string(), recovery: recoverySchema.optional() }).passthrough().nullable() }).optional(),
+  mode: z.enum(['live', 'fake', 'replay', 'experimental', 'unavailable', 'planned', 'star_limited', 'star_limited_best_effort', 'star_reference', 'star_best_effort']),
+  solver: z.object({ solver_mode: z.string().nullable(), evidence_kind: z.string().nullable(), missing_capabilities: z.array(z.string()).nullable(), solver: z.object({ run_id: z.string(), state_revision: z.number(), phase: z.string(), status: z.string(), recovery: recoverySchema.optional(), progress: z.record(z.string(), z.unknown()).optional(), candidate_history: z.array(z.record(z.string(), z.unknown())).optional(), best_effort: z.record(z.string(), z.unknown()).nullable().optional() }).passthrough().nullable() }).optional(),
   report: z.object({
     budget: z.record(z.string(), z.unknown()).nullable().optional(),
     answer: z.string(),

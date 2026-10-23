@@ -58,5 +58,6 @@ export const api = {
   getJob: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}`, {}, jobResponseSchema),
   jobReport: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/report`, {}, reportSchema),
   evidence: (jobId: string) => requestJson('/api/runs/' + encodeURIComponent(jobId) + '/evidence', {}, z.object({ evidence_id: z.string(), mode: z.string(), run: z.record(z.string(), z.unknown()) }).passthrough()),
+  candidateReplay: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/candidate-replay`, {}, z.object({ evidence_kind: z.literal('replay'), run_id: z.string(), state_revision: z.number(), audit: z.record(z.string(), z.unknown()), decision: z.unknown() })),
   capabilities: () => requestJson('/api/capabilities', {}, capabilitiesResponseSchema),
 }

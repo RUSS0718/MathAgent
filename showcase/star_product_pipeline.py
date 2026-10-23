@@ -147,6 +147,8 @@ class StarProductPipeline:
 
 
 def projection(run, *, answer=None):
+    from .star_product_summary import progress_summary
+
     state = run["state"]
     status = state["status"]
     if answer is not None and status == "completed_llm_reviewed":
@@ -157,6 +159,7 @@ def projection(run, *, answer=None):
             "phase": state["phase"], "status": status,
             "config_hash": state["config_hash"], "checkpoint_thread_id": run["run_id"],
             "recovery": recovery_projection(run),
+            "progress": progress_summary(state),
             **candidate_projection(run)}
 
 
