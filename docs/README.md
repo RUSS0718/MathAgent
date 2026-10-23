@@ -10,6 +10,8 @@
 
 本次执行记录见 [产品集成执行合同](engineering/star-product-execution.md)。SP-01 已形成 [固定来源与全量验收映射](experiments/star-product-source-audit.md) 和 [风险报告](experiments/star-product-risk-sp01.md)：公共旧流程恢复有实测证据，但 STAR 接受步骤恢复尚未验证，Docker 原型输出限制存在已复现旁路。完整模式门槛仍未通过；SP-02 明确受限纵切的实现边界见 [合同](engineering/star-product-sp02-contract.md) 与 [实际验收记录](evals/star-product-sp02.md)；完整模式仍拒绝启动。
 
+SP-03 的[共享账本与控制合同](engineering/star-product-sp03-contract.md)及[公共故障验证记录](evals/star-product-sp03.md)记录模型、重试、工具和研究的同一S3准入，取消/截止的数学事务栅栏及迟到用量；不替代后续恢复、生成Python隔离和MetaGuidance切换验收。
+
 | 当前任务 | 阅读顺序 | 读完应能判断 |
 | --- | --- | --- |
 | 了解 v0.1 做到了什么 | [能力基线](evals/v0.1-capability-baseline.md) → [开发完成记录](https://github.com/RUSS0718/MathAgent/issues/1#issuecomment-6209639217) → 下方 v0.1 文档链 | 工程完成、真实模型连接与数学效果各有什么证据 |
