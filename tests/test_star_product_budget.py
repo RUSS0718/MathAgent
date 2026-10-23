@@ -9,6 +9,16 @@ from tests.star_product_support import ACCEPT, POLISH, SOLVED, StarJobFixture
 
 
 class StarBudgetTest(StarJobFixture, unittest.TestCase):
+    def test_token_reservation_rejects_before_real_http(self):
+        self.open_star([], SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_tokens=1))
+        job_id = self.create_job()
+        self.assertEqual("failed", self.terminal(job_id)["status"])
+        budget = self.report(job_id)["budget"]
+        self.assertEqual([], self.outbound)
+        self.assertEqual(0, budget["http_attempts"])
+        self.assertEqual(0, budget["reserved_tokens"])
+        self.assertEqual(1, budget["logical_calls"])
+
     def test_retry_is_one_logical_call_and_preserves_unknown_attempt(self):
         self.open_star([requests.Timeout(), SOLVED, POLISH, ACCEPT], retry=2,
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=3, max_http_attempts=4))

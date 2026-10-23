@@ -875,7 +875,11 @@ class WorkspaceService:
                 self.store.fail_job(job_id, "needs_review")
             else:
                 self.store.complete_job(job_id, "Fake Agent completed a deterministic showcase run.", "fake adapter")
-        except RunStopped:
+        except RunStopped as exc:
+            if exc.category == "run_deadline_exhausted":
+                self.store.fail_job(job_id, exc.category)
+                if self.checkpointer is not None:
+                    self.checkpointer.stop(job_id, "FAILED", exc.category)
             return
         except Exception:
             self.store.fail_job(job_id, "job_execution_failed", execution_mode=self.execution_mode)
