@@ -62,11 +62,12 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
     def assert_process_window(self, window):
         import json
         import os
-        from pathlib import Path
         import subprocess
         import sys
         import tempfile
+        from pathlib import Path
         from unittest.mock import patch
+
         from showcase.flask_app import create_app
         from tests.star_recovery_worker import config, provider
 
@@ -199,8 +200,8 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
         self.assert_unknown_role([SOLVED, POLISH, requests.Timeout("unknown review"), ACCEPT], 4)
 
     def test_unknown_step_review_does_not_repeat_reasoner(self):
+        from tests.test_star_product_planning import FEATURES, STEP
         from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
-        from tests.test_star_product_planning import STEP, FEATURES
         self.assert_unknown_role([NEED_PLAN, PLAN, STEP, requests.Timeout("unknown step review"),
                                   VERDICT, {"final_response": "2"}, ACCEPT], 7, FEATURES)
 
@@ -227,14 +228,14 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
             self.assertEqual(new_id, job["result"]["verification"]["source"]["call_id"])
 
     def test_unknown_final_review_reuses_persisted_candidate(self):
+        from tests.test_star_product_planning import FEATURES, STEP
         from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
-        from tests.test_star_product_planning import STEP, FEATURES
         self.assert_unknown_role([NEED_PLAN, PLAN, STEP, VERDICT, {"final_response": "2"},
                                   requests.Timeout("unknown final review"), ACCEPT], 7, FEATURES)
 
     def test_rejecting_retried_third_candidate_cannot_reset_final_retry_limit(self):
+        from tests.test_star_product_planning import FEATURES, STEP
         from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
-        from tests.test_star_product_planning import STEP, FEATURES
 
         reject = {"verdict": "REJECT", "reason": "Candidate does not resolve the problem"}
         self.open_star([
@@ -273,8 +274,8 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(final["result"]["budget"], evidence["budget"])
 
     def test_retried_third_candidate_can_still_be_accepted_at_generation_limit(self):
+        from tests.test_star_product_planning import FEATURES, STEP
         from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
-        from tests.test_star_product_planning import STEP, FEATURES
 
         reject = {"verdict": "REJECT", "reason": "Candidate is incomplete"}
         self.assert_unknown_role([
@@ -290,20 +291,20 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
                                 if request["role"] == "whole_solution_verifier"]))
 
     def test_unknown_planner_retries_original_action(self):
+        from tests.test_star_product_planning import FEATURES, STEP
         from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
-        from tests.test_star_product_planning import STEP, FEATURES
         self.assert_unknown_role([NEED_PLAN, requests.Timeout("unknown planner"), PLAN,
                                   STEP, VERDICT, {"final_response": "2"}, ACCEPT], 7, FEATURES)
 
     def test_unknown_step_reasoner_retries_without_repeating_plan(self):
+        from tests.test_star_product_planning import FEATURES, STEP
         from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
-        from tests.test_star_product_planning import STEP, FEATURES
         self.assert_unknown_role([NEED_PLAN, PLAN, requests.Timeout("unknown reasoner"),
                                   STEP, VERDICT, {"final_response": "2"}, ACCEPT], 7, FEATURES)
 
     def test_unknown_final_generator_retries_original_action(self):
+        from tests.test_star_product_planning import FEATURES, STEP
         from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
-        from tests.test_star_product_planning import STEP, FEATURES
         self.assert_unknown_role([NEED_PLAN, PLAN, STEP, VERDICT, requests.Timeout("unknown final"),
                                   {"final_response": "2"}, ACCEPT], 7, FEATURES)
 
