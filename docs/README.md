@@ -14,7 +14,9 @@ SP-03 的[共享账本与控制合同](engineering/star-product-sp03-contract.md
 
 SP-04 的[产品集成验收合同](engineering/star-product-sp04-contract.md)和[产品路径验收记录](evals/star-product-sp04.md)覆盖Explore路由、合法Plan与双Gate的Job路径，并记录hint来源和隐私边界。验收使用fault-injection回复，不代表live模型效果；Python工具与执行产物另见SP-09验收。
 
-SP-05 的[连续Challenge合同](engineering/star-product-sp05-contract.md)和[产品验收记录](evals/star-product-sp05.md)覆盖三轮双方历史、最新状态、单次接受、有界Meta及非法裁决拒绝，并记录界面异议/角色/用量。证据为fault-injection；Trace-Back、恢复、最终文本绑定和live仍由后续责任票验收。
+SP-05 的[连续Challenge合同](engineering/star-product-sp05-contract.md)和[产品验收记录](evals/star-product-sp05.md)覆盖三轮双方历史、最新状态、单次接受、有界Meta及非法裁决拒绝，并记录界面异议/角色/用量。证据为fault-injection；恢复、最终文本绑定和live仍由后续责任票验收。
+
+SP-06 的[回退与重规划合同](engineering/star-product-sp06-contract.md)及[产品验收记录](evals/star-product-sp06.md)覆盖同一 Job 的区间归档、依赖失效、合法救援、非法目标拒绝，以及 Meta 裁定的新计划实际执行；包含能识别失效事实复活的旁路探针。证据为 fault-injection，完整 reference 与 live 验收仍未完成。
 
 SP-09 的[受控 Python 合同](engineering/star-product-sp09-contract.md)与[公共 Job 和 Docker 验收记录](evals/star-product-sp09.md)记录默认关闭的固定镜像 ID Registry 接线、S3 单次工具动作、外部 stdout/stderr 总量限制和授权产物下载。纯推理的 MetaGuidance 触发仍由 SP-07 验收；完整 reference 继续拒绝启动。
 
