@@ -4,6 +4,8 @@ import json
 import unittest
 from unittest.mock import patch
 
+import requests
+
 from showcase.run_budget import RunBudgetLimits
 from showcase.tools import ToolRegistry
 from tests.star_product_support import StarJobFixture
@@ -160,6 +162,19 @@ class StarCounterexampleTest(StarJobFixture, unittest.TestCase):
         revisions = [item for item in events if item.get("solver_event_type") == "step_reviewed"]
         self.assertEqual(["CHALLENGE", "ACCEPT"], [item["verdict"] for item in revisions])
         self.assertEqual(9, self.report(job_id)["budget"]["logical_calls"])
+
+    def test_unknown_research_preserves_consumption_and_does_not_retry_on_reads(self):
+        job_id, job, events = self.start(requests.Timeout())
+        self.assertEqual("failed", job["status"])
+        self.assertEqual(5, len(self.outbound))
+        budget = self.report(job_id)["budget"]
+        self.assertEqual(5, budget["logical_calls"])
+        self.assertEqual(1, budget["unresolved_attempts"])
+        self.assertFalse(any(e.get("verdict") == "ACCEPT" for e in events))
+        self.assertFalse(any(e.get("solver_event_type") == "counterexample_completed" for e in events))
+        self.client.get(f"/api/agent/jobs/{job_id}")
+        self.client.get(f"/api/agent/jobs/{job_id}/report")
+        self.assertEqual(5, len(self.outbound))
 
 
 if __name__ == "__main__":
