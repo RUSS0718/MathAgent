@@ -21,6 +21,9 @@ PLAN = {"version": 1, "steps": [
     {"step_id": "s3", "title": "Third", "objective": "conclusion", "depends_on": ["s2"]},
 ]}
 
+TRACE_WINDOWS = {"trace_before", "trace_after"}
+STREAM_WINDOWS = {"stream_exit"}
+
 
 def config(folder, *, crash_tools=False):
     registry = ToolRegistry()
@@ -43,10 +46,6 @@ def config(folder, *, crash_tools=False):
             "SHOWCASE_STAR_REGISTRY": registry,
             "SHOWCASE_STAR_FEATURES": {"final_generation": True, "final_solution_review": True,
                                        "local_code_tool": True}}
-
-
-TRACE_WINDOWS = {"trace_before", "trace_after"}
-STREAM_WINDOWS = {"stream_exit"}
 
 
 def reply_value(window, context, folder):

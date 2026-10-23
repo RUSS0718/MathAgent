@@ -1,5 +1,6 @@
 """Public recovery decisions evaluated inside the existing Job transaction."""
 
+import hashlib
 import json
 import time
 import uuid
@@ -38,8 +39,6 @@ def recovery_projection(run):
 
 def authorize_resume(connection, row, decision):
     """Validate before Job CAS; no network or math writes occur here."""
-    import hashlib
-
     from .workspace import WorkspaceError
 
     identity = json.loads(row["result_json"] or "{}")

@@ -57,3 +57,38 @@
 - 本记录只证明完整预设运行路径的公共准入、真实隔离预检、预算映射与受控执行；模型回复仍为 scripted/故障注入，不是 live 数学效果，也不是 SP-AC-24 真实 Intern 批次。
 - 未执行全量 offline/release、前端与依赖门禁（属 #69 最终门禁，非本切片）；未调用真实 Intern 云端；未 push、未关闭 issue（`Refs: #69`，由父流程在最终门禁+真实批次后关闭）。
 - 受限与 legacy 行为回归由上表第二、三栏套件覆盖；受限默认预算维持原值未变。
+
+## 五、终审修复轮（2026-10-24，分支 `fix/star-final-review`，基点 `ef92490`）
+
+两轴最终审查（Spec 轴 4 项必改 + Standards 轴 6 项判断题）由本轮统一修复；行为修复 `f107d78` 与纯重构 `c15cd51`、证据补记分开提交。官方冻结文件与未跟踪文件零改动。
+
+### Spec 轴（行为变化，全部先 RED 后 GREEN）
+
+| 发现 | RED 测试（`tests/test_star_product_full_modes.py`） | 修复 |
+| --- | --- | --- |
+| reference 配置强制 `candidate_registry: True` 违反"reference 核心=恰 9 项" | `test_reference_preset_is_exactly_nine_core_features_and_registry_inactive`：RED 时公共 `solver.config_hash` 不等于 9 核心预期配置的哈希（生效 features 含 candidate_registry/best_effort） | `StarProductPipeline.run` 仅对非 reference 模式附加 `candidate_registry`、仅 Best-Effort 模式附加 `best_effort`；reference 运行注册表不激活（公共 `candidate_history=[]`、`best_effort=None`）。`star_limited`/`star_limited_best_effort` 保持 SP-11 已验收行为不变；reference 恢复/S4 路径核对后不依赖注册表（`run_best_effort` 特性关闭时为 no-op） |
+| 无 STAR pipeline 时受限模式 `core_gaps({})` 列出全部 9+1 缺口 | `test_capabilities_without_star_pipeline_do_not_enumerate_limited_feature_gaps`：RED 时 `star_limited.missing_capabilities` 为 10 项特性缺口 | `mode_identity` 无 preset 配置（pipeline 为 None）时受限模式表达 `["star_not_enabled"]`（与 validate_mode 同名拒绝原因一致），不逐项枚举；有 pipeline 时仍按实际配置列（既有用例覆盖 `feature:skills` 等） |
+| 预检内存 `RunBudgetLedger` finally close，S3 计量不可事后审计 | `test_capabilities_expose_verifiable_preflight_budget_ledger`：RED 时 `last_preflight` 无 `budget_ref` | 探针把账本序列化（`{run_id, summary, actions}`，含 limits `max_tool_calls=1` 与实际 tool 用量）以内容寻址 JSON（kind=`preflight_budget`，call_id=`isolation-probe`）随 receipt 落盘于同一 `tool_artifacts/<run_id>/<sha256>`；capabilities 的 `last_preflight` 增加 `budget_ref`，经 `ToolArtifactStore.read` 按 sha256 校验取回；探针异常路径补脱敏日志（仅异常类型名，无凭证/prompt） |
+| 合同镜像指纹未在代码内锚定 | `test_contract_python_image_id_is_pinned_in_code`：RED 时 `CONTRACT_PYTHON_IMAGE_ID` 不存在（ImportError） | `showcase/star_product_runtime.py` 增加代码内固定常量 `CONTRACT_PYTHON_IMAGE_ID = sha256:fc913659…73a2d`，不依赖 Docker 的断言测试直接核对。**边界（如实记录）**：该常量仅锚定合同值，不作为运行时默认接线——镜像仍必须由操作者经 `SHOWCASE_STAR_PYTHON_IMAGE_ID` 显式提供（若把指纹设为隐式默认，会让未配置镜像的服务器自动构造容器执行并改变受限默认预算，破坏 SP-09/SP-13 显式 opt-in 与 fail-closed 语义，并迫使离线门禁起 Docker）。Docker 用例保留 `skipUnless(MATHAGENT_TEST_PYTHON_IMAGE)` 门控 |
+
+### Standards 轴（行为保持的重构，`c15cd51`）
+
+- a（收敛）：`star_product_modes` 的 validate 5 元素字面量与 capabilities 模式元组统一由 `MODE_ORDER`/`STAR_MODES` 单一来源派生（展示顺序固定，不随 frozenset 迭代漂移）；`evidence._mode` 白名单改由 `STAR_MODES` 派生。前端 zod enum（`reports.schemas.ts`）**保持现状**：前后端无共享代码生成来源，改写 TS schema 只会引入新的漂移面；当前两端枚举一致且后端已稳定。
+- b：`run_service.py` 中重复 3 次的 `(snapshot.get("result") or {}).get("solver_mode") in STAR_MODES` 收敛为局部变量 `result`。
+- c（部分采纳）：`intern_port.py` 非流式与流式路径重复的 invocation record 字典与请求 metadata 组装提取为纯数据 helper `_invocation_record`/`_request_metadata`；计量与流式协议路径未动。`adapters.py` 的流式 attempt envelope 为单处使用且与计量交织，**不强行提取**（提取只增加间接层并触及高风险流式路径）。
+- d：pipeline 新增显式小方法 `dependency_gaps()`/`readiness_state()`/`preset_config()`，`full_gaps` 不再调用 `adapter._get_client()`（adapter 暴露 `ensure_configured()`），`star_product_modes` 不再 `getattr(pipeline, ...)`；返回值与 fail-closed 语义逐分支保持。
+- e：`star_product_recovery.py` 的 `import hashlib` 移至模块顶部；`star_product_readiness.py` 裸 except 的脱敏日志已随 Spec#3 修复提交（仓库此前无 logger 先例，采用标准库 `logging.getLogger(__name__)`，仅记异常类型名，沿用 `AdapterError` 类别+类型名的脱敏惯例）。
+- f：`tests/star_recovery_worker.py` 的 `TRACE_WINDOWS`/`STREAM_WINDOWS` 常量移至 `config()` 之前（纯移动）。
+- g（构造期真实 Docker 探针）：合同覆盖，未改动。
+
+### 终审修复轮聚焦重跑（真实执行，Docker 用例无 skip）
+
+| 命令 | 结果 |
+| --- | --- |
+| `MATHAGENT_TEST_PYTHON_IMAGE=sha256:fc91…73a2d uv run python -m unittest tests.test_star_product_full_modes tests.test_star_product_jobs tests.test_star_product_recovery tests.test_star_product_streaming_recovery tests.test_star_product_summary tests.test_star_product_best_effort` | PASS，65 项，121.7 秒（full_modes 15 项含 4 条新增 RED→GREEN 用例） |
+| `uv run python -m unittest tests.test_star_product_gates tests.test_star_product_runtime tests.test_star_product_control tests.test_star_product_budget tests.test_star_product_candidate_counterexamples tests.test_adapters tests.test_solver_harness_streaming` | PASS，31 项 |
+| `uv run python -m unittest tests.test_graph_service tests.test_flask_showcase tests.test_worker_death_attempt tests.test_star_product_guidance tests.test_campaign_live_contract` | PASS，33 项 |
+| `uv run python -m unittest discover -s tests -p "test_evidence_history.py"` / `-p "test_sync_evidence.py"` | 各 PASS，2 项 |
+| `uv run ruff check showcase tests` | 本轮触碰文件全部通过；仅存 2 个 I001 于 `tests/test_solver_harness_review_fixes.py`（集成 tip `ef92490` 上即预存，本分支未改动该文件） |
+
+本轮仍未执行全量门禁与真实 Intern 批次（属 #69）；未 push、未关闭 issue。

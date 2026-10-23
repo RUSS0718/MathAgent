@@ -22,6 +22,44 @@ class InternPortError(RuntimeError):
         super().__init__(category)
 
 
+def _request_metadata(request):
+    """Pure adapter metadata mapping for one invocation; no metering inside."""
+    return {
+        "run_id": request.get("run_id"),
+        "call_id": request.get("call_id"),
+        "role": request["role"],
+        "timeout_seconds": request.get("timeout_seconds"),
+    }
+
+
+def _invocation_record(request, model_id, *, stream=False):
+    """Assemble the initial audited invocation record; fields only, no dispatch."""
+    record = {
+        "run_id": request.get("run_id"),
+        "call_id": request.get("call_id"),
+        "consumed_receipt_ids": [
+            item["receipt_id"]
+            for item in request.get("report", {}).get("tool_receipts", [])
+            if item.get("receipt_id")
+        ],
+        "role": request["role"],
+        "state_revision": request.get("state_revision"),
+        "active_skill_ids": request.get("active_skill_ids", []),
+        "prompt_fingerprint": request.get("prompt_fingerprint"),
+        "requested_model": model_id,
+        "returned_model": None,
+        "finish_reason": None,
+        "request_attempts": [],
+        "usage": provider_usage(None),
+        "status": "error",
+        "error_category": None,
+        "response": None,
+    }
+    if stream:
+        record["stream"] = {"fragments": 0, "bytes": 0, "status": "streaming"}
+    return record
+
+
 class InternModelPort:
     """Reasoner/Verifier/Meta bridge, with no implicit live adapter creation."""
 
@@ -43,37 +81,9 @@ class InternModelPort:
         if callable(getattr(self.adapter, "stream_complete", None)):
             return self._complete_stream(request, schema, messages)
         started = time.monotonic()
-        record = {
-            "run_id": request.get("run_id"),
-            "call_id": request.get("call_id"),
-            "consumed_receipt_ids": [
-                item["receipt_id"]
-                for item in request.get("report", {}).get("tool_receipts", [])
-                if item.get("receipt_id")
-            ],
-            "role": request["role"],
-            "state_revision": request.get("state_revision"),
-            "active_skill_ids": request.get("active_skill_ids", []),
-            "prompt_fingerprint": request.get("prompt_fingerprint"),
-            "requested_model": self.adapter.model_id,
-            "returned_model": None,
-            "finish_reason": None,
-            "request_attempts": [],
-            "usage": provider_usage(None),
-            "status": "error",
-            "error_category": None,
-            "response": None,
-        }
+        record = _invocation_record(request, self.adapter.model_id)
         try:
-            response = self.adapter.complete(
-                messages,
-                metadata={
-                    "run_id": request.get("run_id"),
-                    "call_id": request.get("call_id"),
-                    "role": request["role"],
-                    "timeout_seconds": request.get("timeout_seconds"),
-                },
-            )
+            response = self.adapter.complete(messages, metadata=_request_metadata(request))
             record.update(
                 effective_model=response.model_id,
                 returned_model=response.returned_model,
@@ -119,41 +129,12 @@ class InternModelPort:
         the strict provider schema is normalized into a final result chunk.
         """
         started = time.monotonic()
-        record = {
-            "run_id": request.get("run_id"),
-            "call_id": request.get("call_id"),
-            "consumed_receipt_ids": [
-                item["receipt_id"]
-                for item in request.get("report", {}).get("tool_receipts", [])
-                if item.get("receipt_id")
-            ],
-            "role": request["role"],
-            "state_revision": request.get("state_revision"),
-            "active_skill_ids": request.get("active_skill_ids", []),
-            "prompt_fingerprint": request.get("prompt_fingerprint"),
-            "requested_model": self.adapter.model_id,
-            "returned_model": None,
-            "finish_reason": None,
-            "request_attempts": [],
-            "usage": provider_usage(None),
-            "status": "error",
-            "error_category": None,
-            "response": None,
-            "stream": {"fragments": 0, "bytes": 0, "status": "streaming"},
-        }
+        record = _invocation_record(request, self.adapter.model_id, stream=True)
         metrics = record["stream"]
-
-        def metadata():
-            return {
-                "run_id": request.get("run_id"),
-                "call_id": request.get("call_id"),
-                "role": request["role"],
-                "timeout_seconds": request.get("timeout_seconds"),
-            }
 
         try:
             envelope = None
-            for chunk in self.adapter.stream_complete(messages, metadata=metadata()):
+            for chunk in self.adapter.stream_complete(messages, metadata=_request_metadata(request)):
                 if chunk.get("type") == "text_delta" and isinstance(chunk.get("text"), str):
                     metrics["fragments"] += 1
                     metrics["bytes"] += len(chunk["text"].encode("utf-8"))
