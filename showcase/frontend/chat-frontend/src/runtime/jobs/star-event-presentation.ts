@@ -6,6 +6,12 @@ const starEventTitles: Record<string, string> = {
   partial_exploration_routed: 'Meta 探索决策',
   initial_plan_generated: '计划生成',
   step_reviewed: 'Step Gate',
+  challenge_replied: 'Reasoner 回应异议',
+  challenge_stalemate: 'Challenge 限次升级',
+  challenge_escalation_stopped: 'Challenge 停止',
+  meta_dispatched: 'Meta 升级',
+  meta_decided: 'Meta 裁定',
+  meta_invalid: 'Meta 裁定无效',
 }
 
 export function solverEventType(event: DecodedSseEvent): string | null {
@@ -36,7 +42,11 @@ export function timelineSummary(event: DecodedSseEvent): string {
 }
 
 export function timelineStatus(event: DecodedSseEvent): string {
-  if (solverEventType(event)) return event.data.valid === false ? 'failed' : 'recorded'
+  const solverEvent = solverEventType(event)
+  if (solverEvent) {
+    return event.data.valid === false || solverEvent === 'meta_invalid'
+      || solverEvent === 'challenge_escalation_stopped' ? 'failed' : 'recorded'
+  }
   if (typeof event.data.status === 'string') return event.data.status
   if (event.event === 'node_start') return 'running'
   return event.event
@@ -121,9 +131,76 @@ function starSummary(event: DecodedSseEvent, solverEvent: string): string {
       return '步骤裁决信息不完整'
     }
     const stepId = ordinalStepLabel(event.data.step_id)
-    return `${stepId ? `${stepId} · ` : ''}目标 ${goal} · 逻辑 ${gate} · ${verdict} · ${event.data.valid ? '允许推进' : '未允许推进'}`
+    const decision = `${stepId ? `${stepId} · ` : ''}目标 ${goal} · 逻辑 ${gate} · ${verdict} · ${event.data.valid ? '允许推进' : '未允许推进'}`
+    if (verdict !== 'CHALLENGE') return decision
+    const objection = typeof event.data.objection_summary === 'string'
+      ? ` · 异议：${event.data.objection_summary}`
+      : ''
+    return `${decision}${roleSummary(event)}${usageSummary(event)}${objection}`
+  }
+  if (solverEvent === 'challenge_replied') {
+    const round = validRound(event.data.round)
+    const number = round ? `第 ${round} 轮 · ` : ''
+    return `${number}${roleLabel(event.data.role)} · 已回应异议${usageSummary(event)}`
+  }
+  if (solverEvent === 'challenge_stalemate') {
+    return `达到质询轮数上限 · ${upgradeReasonLabel(event.data.upgrade_reason)} · 已升级 Meta`
+  }
+  if (solverEvent === 'meta_dispatched') {
+    return `${roleLabel(event.data.role)} 已收到质询升级 · ${upgradeReasonLabel(event.data.upgrade_reason)}`
+  }
+  if (solverEvent === 'challenge_escalation_stopped') {
+    return `Meta 继续后再次遇到异议，已停止 · ${upgradeReasonLabel(event.data.upgrade_reason)}`
+  }
+  if (solverEvent === 'meta_decided') {
+    const decision = typeof event.data.decision === 'string' ? event.data.decision : '未知'
+    return `${roleLabel(event.data.role)} 裁定 ${decision} · ${upgradeReasonLabel(event.data.upgrade_reason)}${usageSummary(event)}`
+  }
+  if (solverEvent === 'meta_invalid') {
+    return `${roleLabel(event.data.role)} 裁定无效 · ${upgradeReasonLabel(event.data.upgrade_reason)}`
   }
   return 'STAR 状态已记录'
+}
+
+function roleSummary(event: DecodedSseEvent): string {
+  return event.data.role ? ` · ${roleLabel(event.data.role)}` : ''
+}
+
+function roleLabel(value: unknown): string {
+  const labels: Record<string, string> = {
+    reasoner: 'Reasoner',
+    step_verifier: 'Verifier',
+    meta: 'Meta',
+    controller: '控制器',
+  }
+  return typeof value === 'string' ? labels[value] ?? '角色未知' : ''
+}
+
+function usageSummary(event: DecodedSseEvent): string {
+  const usage = event.data.usage
+  if (!usage || typeof usage !== 'object') return ''
+  const value = usage as Record<string, unknown>
+  const fields: Array<[string, string]> = [
+    ['prompt_tokens', '输入'],
+    ['completion_tokens', '输出'],
+    ['total_tokens', '合计'],
+  ]
+  const reported = fields.flatMap(([key, label]) =>
+    Number.isSafeInteger(value[key]) && Number(value[key]) >= 0
+      ? [`${label} ${value[key]}`]
+      : [],
+  )
+  return ` · 用量：${reported.length ? `${reported.join(' · ')} tokens` : '未知'}`
+}
+
+function validRound(value: unknown): number | null {
+  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null
+}
+
+function upgradeReasonLabel(value: unknown): string {
+  if (value === 'round_limit_reached') return '升级原因：轮数上限'
+  if (value === 'meta_escalation_limit_reached') return '升级原因：Meta 升级次数上限'
+  return '升级原因未知'
 }
 
 function ordinalStepLabel(value: unknown): string | null {

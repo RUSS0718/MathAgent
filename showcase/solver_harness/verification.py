@@ -64,6 +64,9 @@ def verify_step(
     attempt = state["attempt_index"]
     suffix += f"-attempt-{attempt}" if attempt else ""
     step_id = state["current_step"]
+    challenge_history = state["steps"].get(step_id, {}).get("challenge_history", [])
+    if round_number == 0 and challenge_history:
+        suffix += f"-challenge-continuation-{len(challenge_history)}"
     plan = state["plan"]
     index = next(i for i, step in enumerate(plan["steps"]) if step["step_id"] == step_id)
     step = plan["steps"][index]
@@ -111,7 +114,7 @@ def verify_step(
                 "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}"
                 + (f"-attempt-{attempt}" if attempt else ""),
                 "round": round_number,
-                "challenge_history": state["steps"][step_id].get("challenge_history", []),
+                "challenge_history": challenge_history,
                 "role": "step_verifier",
                 "problem": problem,
                 "step": step,

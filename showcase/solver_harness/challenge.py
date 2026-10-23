@@ -18,7 +18,20 @@ def run_challenges(
     max_runtime_seconds,
 ):
     """Reply and recheck in verify:{run_id}:plan{version}:step{step_id}."""
-    for number in range(1, max_rounds + 1):
+    initial_state = run["state"]
+    step_id = initial_state["current_step"]
+    initial_history = initial_state["steps"].get(step_id, {}).get("challenge_history", [])
+    completed_rounds = max(
+        (
+            item["round"]
+            for item in initial_history
+            if isinstance(item, dict)
+            and type(item.get("round")) is int
+            and item["round"] > 0
+        ),
+        default=0,
+    )
+    for number in range(completed_rounds + 1, max_rounds + 1):
         state = run["state"]
         if state["phase"] != "CHALLENGE":
             return run
@@ -78,6 +91,7 @@ def run_challenges(
                 "event_id": f"challenge-dispatched-{step_id}-{number}{suffix}",
                 "type": "challenge_dispatched",
                 "round": number,
+                "role": "reasoner",
             },
             state_updates={"counters": counters},
         )
@@ -119,6 +133,7 @@ def run_challenges(
                 "event_id": f"challenge-replied-{step_id}-{number}{suffix}",
                 "type": "challenge_replied",
                 "round": number,
+                "role": "reasoner",
             },
             state_updates={
                 "phase": "STEP_VERIFY",
@@ -163,14 +178,43 @@ def run_challenges(
     if run["state"]["phase"] != "CHALLENGE":
         return run
     state = run["state"]
+    plan_version = state["plan_version"]
+    attempt = state["attempt_index"]
+    escalated = any(
+        item.get("meta_trigger", item.get("trigger")) == "challenge_round_limit"
+        and item.get("step_id") == step_id
+        and item.get("plan_version") == plan_version
+        and item.get("attempt_index") == attempt
+        and item.get("decision") in {"CONTINUE", "TRACE_BACK", "APPROVE_REPLAN", "ABORT"}
+        for item in state.get("meta_interventions", [])
+    )
+    if escalated:
+        return harness.commit_event(
+            run["run_id"],
+            expected_revision=run["state_revision"],
+            event={
+                "event_id": f"challenge-escalation-stopped-{step_id}-{plan_version}-{attempt}-{state['state_revision']}",
+                "type": "challenge_escalation_stopped",
+                "upgrade_reason": "meta_escalation_limit_reached",
+                "role": "controller",
+            },
+            state_updates={
+                "phase": "TERMINAL",
+                "status": "partial_aborted",
+                "result_reason": "challenge_meta_limit_reached",
+                "final_response": "Challenge limit reached after the bounded Meta continuation; no verified answer is available.",
+            },
+        )
     return harness.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],
         event={
-            "event_id": f"challenge-stalemate-{step_id}{suffix}",
+            "event_id": f"challenge-stalemate-{step_id}-{plan_version}-{attempt}-{state['state_revision']}",
             "type": "challenge_stalemate",
             "trigger": "STALEMATE",
             "action": "META_DECIDE",
+            "upgrade_reason": "round_limit_reached",
+            "role": "controller",
         },
         state_updates={
             "phase": "META_DECIDE",
@@ -180,7 +224,15 @@ def run_challenges(
             },
             "meta_interventions": [
                 *state["meta_interventions"],
-                {"trigger": "STALEMATE", "action": "META_DECIDE", "step_id": step_id},
+                {
+                    "trigger": "STALEMATE",
+                    "meta_trigger": "challenge_round_limit",
+                    "action": "META_DECIDE",
+                    "upgrade_reason": "round_limit_reached",
+                    "plan_version": plan_version,
+                    "attempt_index": attempt,
+                    "step_id": step_id,
+                },
             ],
         },
     )

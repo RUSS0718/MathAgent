@@ -57,7 +57,8 @@ class StarProductPipeline:
                       "node_name": "star", "step_id": public_event_id,
                       "title": "STAR " + event["type"],
                       "summary": event["type"],
-                      "solver": projection(run), **decision_fields(event, run["state"])})
+                      "solver": projection(run),
+                      **decision_fields(event, run["state"], port.invocations)})
 
         def solve():
             with SolverHarness(database_path=self.database_path, config=config,
