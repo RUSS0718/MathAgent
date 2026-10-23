@@ -29,14 +29,19 @@ def config(folder, *, crash_tools=False):
             os._exit(71)
         return 2
     registry.register("polynomial_check", tool)
+    # Trace-back windows re-execute every archived step on resume and need more calls.
+    calls = 16 if (folder / "window").exists() and (folder / "window").read_text() in TRACE_WINDOWS else 12
     return {"TESTING": True, "SHOWCASE_DATA_DIR": str(folder),
             "SHOWCASE_JOB_DELAY_SECONDS": 0, "SHOWCASE_STAR_ENABLED": True,
             "SHOWCASE_STAR_ADAPTER": InternModelAdapter(InternChatClient(retry=1), max_tokens=256),
             "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection",
-            "SHOWCASE_STAR_BUDGET": RunBudgetLimits(max_model_calls=12, max_http_attempts=12),
+            "SHOWCASE_STAR_BUDGET": RunBudgetLimits(max_model_calls=calls, max_http_attempts=calls),
             "SHOWCASE_STAR_REGISTRY": registry,
             "SHOWCASE_STAR_FEATURES": {"final_generation": True, "final_solution_review": True,
                                        "local_code_tool": True}}
+
+
+TRACE_WINDOWS = {"trace_before", "trace_after"}
 
 
 def provider(folder, request):
@@ -55,6 +60,21 @@ def provider(folder, request):
             value["claims"] = [{"statement": "1+1=2", "label": "easy-verify",
                                "tool_request": {"tool": "polynomial_check", "arguments": {},
                                                 "expected_output": 2, "scope": "finite_computation"}}]
+    elif (
+        role == "step_verifier"
+        and (folder / "window").read_text() in TRACE_WINDOWS
+        and context["step"]["step_id"] == "s2"
+        and sum(
+            1
+            for line in (folder / "requests.jsonl").read_text(encoding="utf-8").splitlines()
+            if (item := json.loads(line)).get("role") == "step_verifier"
+            and item.get("step", {}).get("step_id") == "s2"
+        )
+        == 1
+    ):
+        # Only the first s2 review demands the archive; the re-executed attempt accepts.
+        value = {"goal_gate": "NO", "logic_gate": "FAIL", "verdict": "TRACE_BACK",
+                 "trace_back_to": 1, "objection": "First route is unsupported"}
     elif role == "step_verifier":
         value = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT", "objection": ""}
     elif role == "final_generator":
@@ -84,7 +104,9 @@ def main():
                   "unknown": "never",
                   "tool_unknown": "never",
                   "tool": "tool_receipt",
-                  "exchange": "session_recorded"}[window]
+                  "exchange": "session_recorded",
+                  "trace_before": "step_reviewed",
+                  "trace_after": "trace_back_applied"}[window]
         target_role = "reasoner" if window == "tool" else "step_verifier"
         if (event.get("solver_event_type") == target and last.get("role") == target_role
                 and last.get("step", {}).get("step_id") == "s2"):
