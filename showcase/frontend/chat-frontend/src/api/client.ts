@@ -50,7 +50,7 @@ export const api = {
   listFiles: () => requestJson('/api/files', {}, filesResponseSchema),
   uploadFile: (file: File) => { const body = new FormData(); body.append('file', file); return requestJson('/api/upload_file', { method: 'POST', body }, uploadResponseSchema) },
   deleteFile: (fileId: string) => requestJson('/api/delete_file', json({ file_id: fileId }), z.object({ success: z.boolean(), file_id: z.string() })),
-  createJob: (message: string, sessionId: string, key: string, fileId?: string) => requestJson('/api/agent/jobs', { ...json({ message, session_id: sessionId, web_search_enabled: false, input_user_file_id: fileId }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
+  createJob: (message: string, sessionId: string, key: string, fileId?: string, solverMode = 'legacy') => requestJson('/api/agent/jobs', { ...json({ message, session_id: sessionId, web_search_enabled: false, input_user_file_id: fileId, solver_mode: solverMode }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   resumeJob: (jobId: string, answer: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/resume`, { ...json({ answer }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   cancelJob: (jobId: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/cancel`, { ...json({}), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   activeJobs: (sessionId?: string) => requestJson(`/api/agent/jobs/active${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`, {}, activeJobsResponseSchema),
