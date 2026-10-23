@@ -11,6 +11,7 @@ import { JobController } from '../runtime/jobs/job-controller'
 import SessionSidebar from './SessionSidebar.vue'
 import MessageList from './MessageList.vue'
 import ComposerBar from './ComposerBar.vue'
+import StarModeSelector from './StarModeSelector.vue'
 import WorkspaceInspector from './WorkspaceInspector.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
@@ -24,6 +25,8 @@ const draft = ref('')
 const notice = ref('')
 const visionEnabled = ref(false)
 const executionMode = ref('unavailable')
+const solverMode = ref('legacy')
+const starEnabled = ref(false)
 const selectedFile = ref<string | undefined>()
 const selectedFileName = ref<string | undefined>()
 const sidebarOpen = ref(false)
@@ -46,7 +49,7 @@ async function send(): Promise<void> {
   submitting.value = true
   notice.value = ''
   try {
-    const result = await api.createJob(message, sessions.currentId, createIdempotencyKey(), selectedFile.value)
+    const result = await api.createJob(message, sessions.currentId, createIdempotencyKey(), selectedFile.value, solverMode.value)
     if (!result.success || !result.job_id || !result.status) throw new Error(result.error ?? '任务未被接受')
     jobs.start(result.job_id, sessions.currentId, result.status)
     observeJob(result.job_id)
@@ -113,6 +116,7 @@ async function initialize(): Promise<void> {
     if (capabilities.execution?.mode === 'live' && capabilities.execution.status !== 'configured') {
       notice.value = 'live 模式未检测到 Intern API 凭证。'
     }
+    starEnabled.value = capabilities.solver_modes?.some((mode) => mode.solver_mode === 'star_limited' && mode.enabled) ?? false
     visionEnabled.value = capabilities.files.upload.enabled
     if (visionEnabled.value) await files.load()
   } catch (error) {
@@ -157,7 +161,7 @@ onUnmounted(() => jobController.stopAll())
       <div v-if="current?.status === 'waiting_input'" class="notice notice--warning workspace-notice" role="status">运行需要补充条件，请在输入栏填写后继续。</div>
       <section class="conversation-area" aria-label="数学对话">
         <div class="conversation-scroll"><div v-if="loading" class="loading-state" role="status" aria-busy="true">正在加载会话…<div v-for="n in 3" :key="n" class="skeleton"></div></div><MessageList v-else-if="!loadFailed" :messages="sessions.messages" @starter="useStarter" /><ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" /></div>
-        <ComposerBar v-model="draft" :disabled="loading || loadFailed || submitting || Boolean(current && current.status !== 'waiting_input')" :running="Boolean(current)" :waiting="current?.status === 'waiting_input'" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile" />
+        <ComposerBar v-model="draft" :disabled="loading || loadFailed || submitting || Boolean(current && current.status !== 'waiting_input')" :running="Boolean(current)" :waiting="current?.status === 'waiting_input'" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><StarModeSelector v-model="solverMode" :enabled="starEnabled" :disabled="Boolean(current) || submitting" /></template></ComposerBar>
       </section>
     </main>
     <WorkspaceInspector :open="inspectorOpen" :job="selectedJob" :report="report" @close="inspectorOpen = false" />

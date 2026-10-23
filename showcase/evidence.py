@@ -55,6 +55,7 @@ class EvidencePackExporter:
             "tools": [_tool_summary(result) for result in tool_results],
             "request_attempts": _attempts(snapshot),
             "budget": (snapshot.get("result") or {}).get("budget"),
+            "solver": {key: (snapshot.get("result") or {}).get(key) for key in ("solver_mode", "missing_capabilities", "evidence_kind", "solver")},
             "verification": verification_data,
             "artifacts": [redact(artifact) for artifact in artifacts],
             "feature_status": {
@@ -87,6 +88,7 @@ class EvidencePackExporter:
             "answer": answer,
             "request_attempts": _attempts(snapshot),
             "budget": (snapshot.get("result") or {}).get("budget"),
+            "solver": {key: (snapshot.get("result") or {}).get(key) for key in ("solver_mode", "missing_capabilities", "evidence_kind", "solver")},
             "public_summary": summary,
             "stage": snapshot.get("stage"),
             "asset_refs": snapshot.get("asset_refs", []),
@@ -124,7 +126,7 @@ def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
         "summary": event.get("summary", ""),
         "error_category": event.get("error_category"),
     }
-    for key in ("tool_call_id", "protocol", "tool_name"):
+    for key in ("tool_call_id", "protocol", "tool_name", "solver_event_id", "solver_revision", "solver_event_type"):
         if event.get(key) is not None:
             summary[key] = event[key]
     return summary
@@ -172,7 +174,7 @@ def _multimodal_status(snapshot: Mapping[str, Any]) -> str:
 
 def _mode(snapshot: Mapping[str, Any]) -> str:
     value = snapshot.get("run_mode") or snapshot.get("execution_mode") or snapshot.get("mode")
-    return value if value in {"live", "fake", "replay", "experimental", "unavailable", "planned"} else "unavailable"
+    return value if value in {"live", "fake", "replay", "experimental", "unavailable", "planned", "star_limited"} else "unavailable"
 
 
 def replay_evidence(pack: Mapping[str, Any]) -> dict[str, Any]:
