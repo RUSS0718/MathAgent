@@ -57,6 +57,12 @@ SCHEMAS = {
             "verdict": {"enum": ["ACCEPT", "CHALLENGE", "TRACE_BACK", "PROPOSE_REPLAN"]},
             "objection": TEXT,
             "trace_back_to": TARGET,
+            "answer_claim": obj({
+                "claim_index": {"type": "integer", "minimum": 0},
+                "both_directions_proved": {"type": "boolean"},
+                "assumptions": TEXTS,
+                "approach": TEXT,
+            }),
         },
         ["goal_gate", "logic_gate", "verdict", "objection"],
     ),
@@ -119,6 +125,12 @@ SCHEMAS = {
 
 def response_schema(request):
     role = request["role"]
+    if role == "researcher" and request.get("action") == "counterexample_check":
+        return obj({
+            "verdict": {"enum": ["FOUND_COUNTEREXAMPLE", "NOT_FOUND"]},
+            "counterexample": TEXT, "assumptions_checked": TEXTS,
+            "violated_conclusion": TEXT, "searched_scope": TEXT,
+        })
     if role in {"meta", "meta_strategist"} and request.get("action") == "delegate_research_task":
         return SCHEMAS["research_delegation"]
     if role in {"meta", "meta_strategist"} and request.get("action") == "preplan_hint":
