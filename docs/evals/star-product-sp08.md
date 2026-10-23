@@ -33,6 +33,14 @@
 - 前端 `npm ci --no-audit --no-fund` 成功；`npm audit --audit-level=high` 为 0 vulnerabilities；`npm run check` 通过类型、13 个单元测试和构建。
 - Chromium `star-recovery.spec.ts`：320/1440px 两项 PASS；人工点击前零 resume、SSE 重连零 resume、点击发送新 UUID 与旧调用引用；无横向溢出、无页面错误、Axe 零违规。该证据仅证明界面与请求合同，不代替 Python 产品验收。
 
+## 独立审查后的恢复限额修复
+
+独立合并审查发现最终候选循环恢复时重新获得完整 `max_final_solution_retries + 1` 次数。新增公共 RED 用例：同一计划尝试先拒绝两个候选，第三候选审查 unknown；显式重试第三次审查为 REJECT，并向提供方准备第四、第五候选回复。未修复时真实出站记录出现五次 final_generator，而允许上限是三次。
+
+修复按持久 `final_solution_attempts` 中同一 `plan_version` / `attempt_index` 计算剩余生成额度，并继续注入该尝试最近的审查。已生成的待审候选不再占用新生成额度，仍允许合法的显式审查重试：第三候选重试为 ACCEPT 可完成并绑定新调用；重试为 REJECT 则在三次生成、四次审查（包含旧 unknown 与新重试）、总计 11 次出站后终止，不生成第四候选。拒绝用例保留 25 次共享调用预算，证明限制来自候选额度而非共享硬预算兜底。
+
+先执行新拒绝回归、既有最终审查/生成恢复及最终绑定相关测试：18 tests PASS，16.917s。随后执行 `uv run python -m unittest tests.test_star_product_recovery tests.test_solver_harness_finalize tests.test_star_product_final_binding tests.test_star_product_traceback tests.test_star_product_planning -q`：45 tests PASS，89.175s，包含生成额度用尽时待审第三候选重试 ACCEPT 的正例。最新集成 `6027068` 已包含。此修复仅更正恢复后的候选生成次数，不增加其他机制。
+
 ## 边界与下一切片
 
 unknown 显示为现有 failed Job 的 needs_review 恢复信息，不新增一套 Job 状态或预算。角色数学状态、控制事务、唯一 S3 账本与 checkpoint 继续分别拥有原有职责。内部重试决定不进入公开 Job/Run 输出；公开调用 ID 继续脱敏。

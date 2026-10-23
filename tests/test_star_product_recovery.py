@@ -232,6 +232,63 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
         self.assert_unknown_role([NEED_PLAN, PLAN, STEP, VERDICT, {"final_response": "2"},
                                   requests.Timeout("unknown final review"), ACCEPT], 7, FEATURES)
 
+    def test_rejecting_retried_third_candidate_cannot_reset_final_retry_limit(self):
+        from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
+        from tests.test_star_product_planning import STEP, FEATURES
+
+        reject = {"verdict": "REJECT", "reason": "Candidate does not resolve the problem"}
+        self.open_star([
+            NEED_PLAN, PLAN, STEP, VERDICT,
+            {"final_response": "candidate one"}, reject,
+            {"final_response": "candidate two"}, reject,
+            {"final_response": "candidate three"}, requests.Timeout("unknown third review"),
+            reject,
+            # These replies expose a restored invocation that incorrectly resets the limit.
+            {"final_response": "forbidden fourth"}, reject,
+            {"final_response": "forbidden fifth"}, ACCEPT,
+        ], SHOWCASE_STAR_FEATURES=FEATURES,
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=25, max_http_attempts=25))
+        job_id = self.create_job()
+        initial = self.terminal(job_id)
+        unknown = initial["result"]["solver"]["recovery"]["unknown_calls"]
+        self.assertEqual(1, len(unknown))
+        response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={"retry_call": {
+            "call_id": unknown[0]["call_id"], "new_call_id": str(uuid.uuid4())}}, headers=self.headers())
+        self.assertEqual(202, response.status_code, response.get_json())
+        final = self.terminal(job_id)
+        generators = [request for request in self.outbound if request["role"] == "final_generator"]
+        reviews = [request for request in self.outbound if request["role"] == "whole_solution_verifier"]
+        self.assertEqual(3, len(generators))
+        self.assertEqual(4, len(reviews))
+        self.assertEqual(11, len(self.outbound))
+        self.assertEqual("failed", final["status"])
+        self.assertEqual("partial_aborted", final["result"]["solver"]["status"])
+        self.assertEqual(initial["result"]["budget"]["deadline_at"], final["result"]["budget"]["deadline_at"])
+        self.assertEqual(11, final["result"]["budget"]["http_attempts"])
+        self.assertEqual(1, final["result"]["budget"]["unknown_attempts"])
+        self.assertEqual(25, final["result"]["budget"]["limits"]["max_model_calls"])
+        report = self.report(job_id)
+        self.assertIn("final_review_retries_exhausted", report["answer"])
+        evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
+        self.assertEqual(final["result"]["budget"], evidence["budget"])
+
+    def test_retried_third_candidate_can_still_be_accepted_at_generation_limit(self):
+        from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
+        from tests.test_star_product_planning import STEP, FEATURES
+
+        reject = {"verdict": "REJECT", "reason": "Candidate is incomplete"}
+        self.assert_unknown_role([
+            NEED_PLAN, PLAN, STEP, VERDICT,
+            {"final_response": "candidate one"}, reject,
+            {"final_response": "candidate two"}, reject,
+            {"final_response": "candidate three"}, requests.Timeout("unknown third review"),
+            ACCEPT,
+        ], 11, FEATURES)
+        self.assertEqual(3, len([request for request in self.outbound
+                                if request["role"] == "final_generator"]))
+        self.assertEqual(4, len([request for request in self.outbound
+                                if request["role"] == "whole_solution_verifier"]))
+
     def test_unknown_planner_retries_original_action(self):
         from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
         from tests.test_star_product_planning import STEP, FEATURES

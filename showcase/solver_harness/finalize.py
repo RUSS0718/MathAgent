@@ -122,18 +122,25 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
     if isinstance(retries, bool) or not isinstance(retries, int) or not 0 <= retries <= 20:
         raise ValueError("config.max_final_solution_retries must be 0..20")
     attempts = deepcopy(state.get("final_solution_attempts", []))
-    previous_review = None
+    current_attempts = [attempt for attempt in attempts
+                        if attempt["plan_version"] == state["plan_version"]
+                        and attempt["attempt_index"] == state["attempt_index"]]
+    previous_review = current_attempts[-1].get("review") if current_attempts else None
+    pending_review = (getattr(harness, "_product_recovery", False)
+                      and current_attempts and current_attempts[-1].get("review") is None)
+    # Reviewing the existing candidate spends no new candidate-generation slot.
+    remaining = retries + 1 - len(current_attempts) + int(bool(pending_review))
     facts = valid_facts(state)
-    for number in range(retries + 1):
+    for _ in range(max(0, remaining)):
         reason = budget_reason(run["state"], config)
         if reason:
             return finish(harness, run, "partial_budget_exhausted", reason)
         if model_port is None:
             return finish(harness, run, "partial_aborted", "final_generator_unavailable")
         pending_review = (getattr(harness, "_product_recovery", False)
-                          and attempts and attempts[-1].get("review") is None)
+                          and current_attempts and current_attempts[-1].get("review") is None)
         if pending_review:
-            attempt = attempts[-1]
+            attempt = current_attempts[-1]
             candidate = attempt["candidate"]
             session = attempt["session_key"]
         else:
@@ -164,6 +171,7 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
                 "session_key": session,
             }
             attempts.append(attempt)
+            current_attempts.append(attempt)
             run = commit(
                 harness,
                 run,
