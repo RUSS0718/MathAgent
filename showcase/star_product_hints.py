@@ -1,6 +1,7 @@
 """Bounded private Job hints and public categorical provenance."""
 
 from .solver_harness.star_routing import is_valid_hint
+from .star_product_modes import STAR_MODES
 
 
 def validate_hint(hint, solver_mode):
@@ -8,7 +9,7 @@ def validate_hint(hint, solver_mode):
         return
     from .workspace import WorkspaceError
 
-    if solver_mode not in {"star_limited", "star_limited_best_effort"} or not is_valid_hint(hint):
+    if solver_mode not in STAR_MODES or not is_valid_hint(hint):
         raise WorkspaceError("solver_hint_invalid", status=400)
 
 

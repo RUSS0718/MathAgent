@@ -8,6 +8,32 @@ OPTIONAL_FEATURES = frozenset({
     "final_generation", "final_solution_review", "local_code_tool", "meta_guidance",
     "reexplore_after_replan", "skills",
 })
+CORE_FEATURES = frozenset({
+    "star_routing", "persistent_sessions", "stream_recovery", *OPTIONAL_FEATURES,
+})
+
+
+def full_config(budget, features=None):
+    if features is not None and (not isinstance(features, Mapping) or any(
+        key not in CORE_FEATURES or type(value) is not bool for key, value in features.items()
+    )):
+        raise ValueError("star_full_features_invalid")
+    enabled = dict.fromkeys(CORE_FEATURES, True) if features is None else dict(features)
+    return {
+        "features": enabled, "allowed_tools": ["polynomial_check", "python_math"],
+        "max_model_calls": budget.max_model_calls, "max_tool_calls": budget.max_tool_calls,
+        "max_total_duration_seconds": max(1, int(budget.max_runtime_seconds)),
+        "max_explore_rounds": 2, "max_challenge_rounds": 5,
+        "max_replans": 3, "max_final_solution_retries": 2,
+    }
+
+
+def core_gaps(config):
+    features = config.get("features", {})
+    missing = [f"feature:{key}" for key in sorted(CORE_FEATURES) if features.get(key) is not True]
+    if "python_math" not in config.get("allowed_tools", []):
+        missing.append("isolated_python_registry")
+    return missing
 
 
 def limited_config(budget, features=None, registry=None):

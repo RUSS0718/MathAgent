@@ -36,6 +36,7 @@ from .run_service import (
     RunValidationError,
 )
 from .server import create_live_pipeline, create_live_service
+from .star_product_modes import STAR_MODES
 from .verification import LightweightVerificationHook
 from .workspace import WorkspaceError, WorkspaceService
 
@@ -207,7 +208,7 @@ def create_app(
                 "profile": profile,
                 "jobs": {"enabled": True, "status": "available"},
                 "sse": {"enabled": True, "status": "available"},
-                "solver_modes": star_capabilities(star_pipeline is not None),
+                "solver_modes": star_capabilities(star_pipeline is not None, star_pipeline),
                 "verification_mode": VERIFICATION_MODES,
                 "files": {"upload": upload},
                 "execution": {
@@ -585,9 +586,7 @@ def create_app(
             job = workspace_service.get_job(job_id, session.user_id)
         except WorkspaceError as exc:
             return _workspace_error(exc)
-        if (job.get("result") or {}).get("solver_mode") not in {
-            "star_limited", "star_limited_best_effort"
-        }:
+        if (job.get("result") or {}).get("solver_mode") not in STAR_MODES:
             return _json_error("star_replay_unavailable", 409)
         from .star_product_candidates import replay_candidates
         from .star_product_projection import persisted_solver
@@ -669,9 +668,11 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8090)
     parser.add_argument("--mode", choices=("fake", "live"), default="fake")
     parser.add_argument("--data-dir", default=None)
-    parser.add_argument("--star-limited", action="store_true", help="Enable explicit limited STAR selection; full reference remains unavailable")
+    parser.add_argument("--star-limited", action="store_true", help="Enable explicit limited STAR selection")
+    parser.add_argument("--star-full", action="store_true", help="Enable full STAR presets after isolated runtime preflight; requires exact image configuration")
     args = parser.parse_args()
-    config: dict[str, Any] = {"SHOWCASE_MODE": args.mode, "SHOWCASE_STAR_ENABLED": args.star_limited}
+    config: dict[str, Any] = {"SHOWCASE_MODE": args.mode, "SHOWCASE_STAR_ENABLED": args.star_limited,
+                              "SHOWCASE_STAR_FULL_ENABLED": args.star_full}
     if args.data_dir:
         config["SHOWCASE_DATA_DIR"] = args.data_dir
     app = create_app(config)

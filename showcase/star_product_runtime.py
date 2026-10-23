@@ -10,7 +10,8 @@ from .tools import ToolRegistry
 
 def create_star_product_pipeline(database_path, *, storage_root, config):
     """Keep container execution disabled unless the operator supplies an exact image ID."""
-    if config.get("SHOWCASE_STAR_ENABLED") is not True:
+    full_enabled = config.get("SHOWCASE_STAR_FULL_ENABLED") is True
+    if config.get("SHOWCASE_STAR_ENABLED") is not True and not full_enabled:
         return None
 
     registry = config.get("SHOWCASE_STAR_REGISTRY")
@@ -41,5 +42,8 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
         budget=budget,
         features=features,
         registry=registry,
+        full_enabled=full_enabled,
+        full_features=config.get("SHOWCASE_STAR_FULL_FEATURES"),
+        full_budget=config.get("SHOWCASE_STAR_FULL_BUDGET"),
         hint_mode=config.get("SHOWCASE_STAR_HINT_MODE", "none"),
         evidence_kind=config.get("SHOWCASE_STAR_EVIDENCE_KIND", "live"))
