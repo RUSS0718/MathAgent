@@ -62,10 +62,13 @@ def check_matrix(payload):
             if not record.get("tests") or any(test not in available for test in record["tests"]):
                 raise ValueError(f"matrix_test_missing:{identity}")
     live = payload.get("live_gate", {})
+    tool_calls = live.get("tool_calls")
     if (
         live.get("status") != "needs_review"
         or live.get("legacy_v02_ac06") != "unavailable"
-        or live.get("tool_calls") != 0
+        or isinstance(tool_calls, bool)
+        or not isinstance(tool_calls, int)
+        or tool_calls < 0
     ):
         raise ValueError("live_evidence_overstated")
     print("acceptance_matrix=PASS ac=44 sc=43")
@@ -135,7 +138,10 @@ def main():
             + hashlib.sha256((ROOT / "BASELINE.json").read_bytes()).hexdigest()
         )
         if args.require_live:
-            print("live_release=BLOCKED status=needs_review legacy_v02_ac06=unavailable tools=0")
+            print(
+                "live_release=BLOCKED status=needs_review "
+                f"legacy_v02_ac06=unavailable tools={payload['live_gate']['tool_calls']}"
+            )
             return 1
         pending = [
             identity

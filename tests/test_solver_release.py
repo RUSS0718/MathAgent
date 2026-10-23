@@ -1,5 +1,8 @@
 """Release decisions through the credential-free gate CLI."""
 
+import contextlib
+import io
+import json
 import subprocess
 import sys
 import unittest
@@ -10,6 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class SolverReleaseTest(unittest.TestCase):
     def test_full_live_release_remains_blocked(self):
+        matrix = json.loads(
+            (ROOT / "docs/evals/showcase-solver-v1.2-matrix.json").read_text(encoding="utf-8")
+        )
+        tool_calls = matrix["live_gate"]["tool_calls"]
         result = subprocess.run(
             [sys.executable, "scripts/check_solver_release.py", "--require-live"],
             cwd=ROOT,
@@ -17,8 +24,30 @@ class SolverReleaseTest(unittest.TestCase):
             text=True,
         )
         self.assertEqual(1, result.returncode)
-        self.assertIn("live_release=BLOCKED", result.stdout)
-        self.assertIn("needs_review", result.stdout)
+        self.assertIn(
+            "live_release=BLOCKED status=needs_review "
+            f"legacy_v02_ac06=unavailable tools={tool_calls}",
+            result.stdout,
+        )
+
+    def test_positive_tool_calls_pass_matrix_validation_without_releasing_live_gate(self):
+        from scripts.check_solver_release import MATRIX, check_matrix
+
+        payload = json.loads(MATRIX.read_text(encoding="utf-8"))
+        payload["live_gate"]["tool_calls"] = 1
+        with contextlib.redirect_stdout(io.StringIO()):
+            check_matrix(payload)
+
+    def test_live_tool_calls_must_be_non_bool_nonnegative_integers(self):
+        from scripts.check_solver_release import MATRIX, check_matrix
+
+        for tool_calls in (True, -1, 1.0, "1"):
+            with self.subTest(tool_calls=tool_calls):
+                payload = json.loads(MATRIX.read_text(encoding="utf-8"))
+                payload["live_gate"]["tool_calls"] = tool_calls
+                with contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaisesRegex(ValueError, "live_evidence_overstated"):
+                        check_matrix(payload)
 
     def test_evidence_matrix_validates_actual_discoverable_test_ids(self):
         result = subprocess.run(
