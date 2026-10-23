@@ -1,7 +1,6 @@
 """Same-step objection replies with bounded verifier sessions."""
 
-from datetime import UTC, datetime
-
+from .budget import budget_reason
 from .step import _normalize_report, run_step
 from .traceback import apply_traceback
 from .verification import verify_step
@@ -28,14 +27,8 @@ def run_challenges(
         step_id = state["current_step"]
         record = state["steps"][step_id]
         session = f"verify:{run['run_id']}:plan{state['plan_version']}:step{step_id}{suffix}"
-        elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
-        reason = (
-            "runtime_budget_exhausted"
-            if elapsed >= max_runtime_seconds
-            else "model_call_budget_exhausted"
-            if state["counters"]["model_calls"] >= max_model_calls
-            else None
-        )
+        reason = budget_reason(state, {"max_model_calls": max_model_calls,
+                                       "max_total_duration_seconds": max_runtime_seconds})
         if reason:
             return harness.commit_event(
                 run["run_id"],
@@ -237,7 +230,8 @@ def run_plan(
         run = apply_traceback(harness, run)
         if (
             run["state"]["phase"] != "STEP_EXECUTE"
-            or run["state"]["counters"]["model_calls"] >= max_model_calls
+            or budget_reason(run["state"], {"max_model_calls": max_model_calls,
+                                             "max_total_duration_seconds": max_runtime_seconds})
         ):
             return run
     return run

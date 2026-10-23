@@ -1,7 +1,6 @@
 """Tool-free, persistent Meta diagnostics; only the controller commits decisions."""
 
 from copy import deepcopy
-from datetime import UTC, datetime
 
 from ..redaction import redact
 from .explore import ModelPort, ScriptedModelPort
@@ -75,13 +74,11 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
             "stuck",
         }:
             raise ValueError("invalid_meta_failure_type")
-    elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
-    if state["counters"]["model_calls"] >= max_model_calls or elapsed >= max_runtime_seconds:
-        reason = (
-            "runtime_budget_exhausted"
-            if elapsed >= max_runtime_seconds
-            else "model_call_budget_exhausted"
-        )
+    from .budget import budget_reason
+
+    reason = budget_reason(state, {"max_model_calls": max_model_calls,
+                                   "max_total_duration_seconds": max_runtime_seconds})
+    if reason:
         return harness.commit_event(
             run["run_id"],
             expected_revision=run["state_revision"],

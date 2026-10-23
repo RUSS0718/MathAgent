@@ -6,6 +6,7 @@ from .adapters import InternModelAdapter
 from .run_budget import RunBudgetLimits, current_budget
 from .run_control import check_control
 from .solver_harness import SolverHarness
+from .solver_harness.controller import advance_product
 from .solver_harness.intern_port import InternModelPort
 from .solver_harness.result import export_result
 from .solver_harness.tool_ports import RegistryToolPort
@@ -58,6 +59,7 @@ class StarProductPipeline:
                                tool_port=RegistryToolPort(self.registry) if self.registry else None,
                                event_observer=observe) as harness:
                 run = harness.solve(problem, {"run_id": run_id})
+                run = advance_product(harness, run, problem)
                 math = run["state"]
                 reviewed = math["status"] == "completed_llm_reviewed"
                 result = {
