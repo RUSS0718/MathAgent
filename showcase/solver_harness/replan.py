@@ -3,6 +3,7 @@
 from copy import deepcopy
 
 from ..redaction import redact
+from .budget import remaining_model_calls
 from .plan import validate_plan
 
 
@@ -195,7 +196,7 @@ def _research(harness, run, port, config, calls, seconds):
     if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 8:
         raise ValueError("config.max_reexploration_tasks must be 0..8")
     # Reserve at least one global call for Planner; research is optional.
-    if calls - run["state"]["counters"]["model_calls"] <= 1 or _budget(
+    if remaining_model_calls(run["state"], {"max_model_calls": calls}) <= 1 or _budget(
         run["state"], calls, seconds
     ):
         return _commit(
@@ -228,7 +229,7 @@ def _research(harness, run, port, config, calls, seconds):
         timeout = task.get("timeout_seconds", 60)
         if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 300:
             continue
-        if calls - run["state"]["counters"]["model_calls"] <= 1 or _budget(
+        if remaining_model_calls(run["state"], {"max_model_calls": calls}) <= 1 or _budget(
             run["state"], calls, seconds
         ):
             break

@@ -306,6 +306,10 @@ class RunService:
         snapshot = self._store.get_run(run_id)
         if snapshot is None:
             raise RunNotFoundError(run_id)
+        if (snapshot.get("result") or {}).get("solver_mode") == "star_limited":
+            from .star_product_projection import current_solver
+
+            snapshot["result"]["solver"] = current_solver(self._store._connection, run_id)
         budget = self._budget_ledger.snapshot(run_id)
         if budget is not None and not (snapshot.get("result") or {}).get("budget"):
             snapshot["result"] = {**(snapshot.get("result") or {}), "budget": budget}

@@ -4,7 +4,6 @@ import hashlib
 import json
 from collections.abc import Mapping
 from copy import deepcopy
-from datetime import UTC, datetime
 
 from ..redaction import redact
 
@@ -170,10 +169,12 @@ def retry_call(harness, run, problem, decision):
     state = run["state"]
     if state["phase"] == "TERMINAL":
         return run
-    elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
-    if elapsed >= harness._config.get("max_total_duration_seconds", 3600):
+    from .budget import budget_reason
+
+    reason = budget_reason(state, harness._config)
+    if reason == "runtime_budget_exhausted":
         raise ValueError("retry runtime budget exhausted")
-    if state["counters"]["model_calls"] >= harness._config.get("max_model_calls", 2):
+    if reason:
         raise ValueError("retry model call budget exhausted")
     role = old["role"]
     from .roles import role_operation

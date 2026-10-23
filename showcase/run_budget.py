@@ -105,6 +105,7 @@ class RunBudgetLedger:
         role=None,
         tool_call_id=None,
         attempt_event=None,
+        solver_call_id=None,
     ):
         if kind not in {"logical", "http", "tool"}:
             raise ValueError("run_budget_kind_invalid")
@@ -136,11 +137,12 @@ class RunBudgetLedger:
                     "id": action_id,
                     "kind": kind,
                     "logical_call_id": logical_call_id,
+                    "solver_call_id": solver_call_id,
                     "role": role,
                     "tool_call_id": tool_call_id,
                     "input_estimate": input_estimate,
                     "output_cap": output_cap,
-                    "public_attempt": ({**public_attempt(attempt_event, run_id=run_id, role=role), "started_at_utc": attempt_event.get("started_at_utc"), "dispatch_status": "reserved_dispatch_unconfirmed"} if attempt_event is not None else None),
+                    "public_attempt": ({**public_attempt(attempt_event, run_id=run_id, role=role), "started_at_utc": attempt_event.get("started_at_utc"), "dispatch_status": "reserved_dispatch_unconfirmed", "solver_call_id": solver_call_id} if attempt_event is not None else None),
                     "status": "reserved",
                     "usage": provider_usage(None),
                 }
@@ -152,7 +154,7 @@ class RunBudgetLedger:
             for action in state["actions"]:
                 if action["id"] == action_id:
                     if action["kind"] == "http":
-                        action["public_attempt"] = {**public_attempt(event, run_id=run_id, role=action["role"]), "started_at_utc": event.get("started_at_utc"), "dispatch_status": "transport_observed"}
+                        action["public_attempt"] = {**public_attempt(event, run_id=run_id, role=action["role"]), "started_at_utc": event.get("started_at_utc"), "dispatch_status": "transport_observed", "solver_call_id": action.get("solver_call_id")}
                     action.update(
                         status=event.get("status", "unknown"),
                         usage=provider_usage(event),
@@ -178,9 +180,9 @@ class RunBudget:
     def __init__(self, ledger, run_id):
         self.ledger, self.run_id = ledger, run_id
 
-    def model_call(self, role=None):
-        action_id, _remaining = self.ledger.reserve(self.run_id, "logical", role=role)
-        return ModelCallBudget(self.ledger, self.run_id, action_id, role)
+    def model_call(self, role=None, *, solver_call_id=None):
+        action_id, _remaining = self.ledger.reserve(self.run_id, "logical", role=role, solver_call_id=solver_call_id)
+        return ModelCallBudget(self.ledger, self.run_id, action_id, role, solver_call_id)
 
     def before_attempt(self, event, input_estimate):
         check_control()
@@ -193,6 +195,7 @@ class RunBudget:
             output_cap=event["max_tokens"],
             role=event.get("role"),
             attempt_event=event,
+            solver_call_id=event.get("solver_call_id"),
         )[1]
 
     def after_attempt(self, event):
@@ -206,13 +209,15 @@ class RunBudget:
 
 
 class ModelCallBudget(RunBudget):
-    def __init__(self, ledger, run_id, logical_call_id, role):
+    def __init__(self, ledger, run_id, logical_call_id, role, solver_call_id=None):
         super().__init__(ledger, run_id)
         self.logical_call_id, self.role = logical_call_id, role
+        self.solver_call_id = solver_call_id
 
     def before_attempt(self, event, input_estimate):
         event["logical_call_id"] = self.logical_call_id
         event["role"] = self.role
+        event["solver_call_id"] = self.solver_call_id
         return super().before_attempt(event, input_estimate)
 
 

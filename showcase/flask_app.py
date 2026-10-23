@@ -88,6 +88,9 @@ def create_app(
 
     star_pipeline = (StarProductPipeline(resolved_database,
         adapter=app.config.get("SHOWCASE_STAR_ADAPTER"),
+        budget=app.config.get("SHOWCASE_STAR_BUDGET"),
+        features=app.config.get("SHOWCASE_STAR_FEATURES"),
+        registry=app.config.get("SHOWCASE_STAR_REGISTRY"),
         evidence_kind=app.config.get("SHOWCASE_STAR_EVIDENCE_KIND", "live"))
         if app.config.get("SHOWCASE_STAR_ENABLED") is True else None)
     loopback_store = LoopbackStore(resolved_database)

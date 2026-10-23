@@ -5,10 +5,12 @@ import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from contextvars import copy_context
 from copy import deepcopy
 from datetime import UTC, datetime
 
 from ..redaction import redact
+from ..run_budget import current_budget
 
 POLICY_VERSION = "solver-local-precheck-1"
 SAFE_TOOLS = frozenset({"polynomial_check", "python_math"})
@@ -122,7 +124,7 @@ def _execute(harness, run, request, config, port, step_id, claim_index):
     }
     started = time.monotonic()
     pool = ThreadPoolExecutor(max_workers=1)
-    future = pool.submit(port.execute, invocation)
+    future = pool.submit(copy_context().run, port.execute, invocation)
     try:
         result = future.result(timeout=timeout)
         if not isinstance(result, Mapping):
@@ -188,6 +190,9 @@ def _execute(harness, run, request, config, port, step_id, claim_index):
 
 
 def _remaining(state, config):
+    shared = current_budget()
+    if shared is not None:
+        return shared.snapshot()["deadline_at"] - time.time()
     elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
     return config.get("max_total_duration_seconds", 3600) - elapsed
 
@@ -215,7 +220,10 @@ def _denial(state, run_id, request, config, port):
         return "tool_not_allowed"
     if _remaining(state, config) <= 0:
         return "runtime_budget_exhausted"
-    if state["counters"]["tool_calls"] >= config.get("max_tool_calls", 8):
+    shared = current_budget()
+    used = shared.snapshot()["tool_calls"] if shared else state["counters"]["tool_calls"]
+    limit = shared.snapshot()["limits"]["max_tool_calls"] if shared else config.get("max_tool_calls", 8)
+    if used >= limit:
         return "tool_call_budget_exhausted"
     if config.get("tool_timeout_seconds", 3) <= 0:
         return "timeout_budget_exhausted"

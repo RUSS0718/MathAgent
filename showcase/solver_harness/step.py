@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from typing import Any
 
 from .explore import ModelPort, _HarnessOperations
@@ -30,12 +29,10 @@ def run_step(
     suffix = f"-attempt-{attempt}" if attempt else ""
     session = f"reasoner:{run['run_id']}:plan{plan['version']}:attempt{attempt}"
     counters = dict(state["counters"])
-    elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
-    reason = None
-    if elapsed >= max_runtime_seconds:
-        reason = "runtime_budget_exhausted"
-    elif counters["model_calls"] >= max_model_calls:
-        reason = "model_call_budget_exhausted"
+    from .budget import budget_reason
+
+    reason = budget_reason(state, {"max_model_calls": max_model_calls,
+                                   "max_total_duration_seconds": max_runtime_seconds})
     if reason is not None:
         return harness.commit_event(
             run["run_id"],

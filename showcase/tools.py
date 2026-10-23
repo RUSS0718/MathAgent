@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from contextvars import copy_context
 from dataclasses import dataclass
 from typing import Any
 
@@ -195,7 +196,7 @@ class ToolRegistry:
         self._call_count += 1
         executor = ThreadPoolExecutor(max_workers=1)
         try:
-            future = executor.submit(handler, dict(arguments))
+            future = executor.submit(copy_context().run, handler, dict(arguments))
             budget = current_budget()
             timeout = min(spec.timeout_seconds, budget.remaining_seconds()) if budget else spec.timeout_seconds
             value = future.result(timeout=timeout)

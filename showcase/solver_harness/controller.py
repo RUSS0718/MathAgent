@@ -121,3 +121,26 @@ def advance(harness, run, metadata, problem):
         verifier_port=harness._verifier_port,
         config=harness._config,
     )
+
+
+def advance_product(harness, run, problem):
+    """Continue the existing phases under S3; never replay an interrupted action."""
+    from ..run_control import check_control
+
+    for _ in range(64):
+        if run["state"]["phase"] == "TERMINAL" or run["state"]["status"] in {
+            "interrupted", "recovered_pending_validation"
+        }:
+            return run
+        check_control()
+        revision = run["state_revision"]
+        from .budget import HardBudgetStop
+        from .calls import CallInterrupted
+
+        try:
+            run = advance(harness, run, {}, problem)
+        except (HardBudgetStop, CallInterrupted):
+            return harness.get_run(run["run_id"])
+        if run["state_revision"] == revision:
+            return run
+    return run  # Explicitly incomplete; bridge never calls this a reviewed success.

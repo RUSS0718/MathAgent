@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 from typing import Any, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -84,14 +83,10 @@ def run_exploration(
         revision = latest["state_revision"]
         counters = dict(latest["state"].get("counters", {}))
         model_calls = counters.get("model_calls", 0)
-        elapsed = (
-            datetime.now(UTC) - datetime.fromisoformat(latest["state"]["created_at"])
-        ).total_seconds()
-        reason = None
-        if elapsed >= max_runtime_seconds:
-            reason = "runtime_budget_exhausted"
-        elif model_calls >= state["max_model_calls"]:
-            reason = "model_call_budget_exhausted"
+        from .budget import budget_reason
+
+        reason = budget_reason(latest["state"], {"max_model_calls": state["max_model_calls"],
+                                               "max_total_duration_seconds": max_runtime_seconds})
         if reason is not None:
             exhausted = harness.commit_event(
                 state["run_id"],
