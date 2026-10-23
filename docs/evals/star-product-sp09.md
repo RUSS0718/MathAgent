@@ -22,6 +22,8 @@
 
 同一公共 Job 接缝强制发出 `python_math` 请求而关闭 `local_code_tool`：产生 `tool_not_allowed` receipt，S3 工具动作0，Docker event为0。另一公共 Job 运行原始 FD 输出越界探针：receipt 为 `output_limit`，保留输出不超过16000字节、观察字节多于16000、`assertion_matched=false`，且仍可完成后续审查。artifact HTTP 对无认证请求返回401；认证请求的格式错误 digest 返回409，缺失 digest 返回404。Tampered bytes 的 hash 检查另由 artifact store 回归用例覆盖。纯推理/不支持角色在工具表和执行准入两侧拒绝；MetaGuidance 对纯推理的触发归 SP-07，本票不宣称该完整切换已通过。
 
+追加的公共 Job 故障注入回归覆盖两种私有值：step ID 在 Job/Run 的内嵌工具 receipt 中显示为“步骤 1”；未知模型工具名在 top-level name 与 receipt 中显示为 `unsupported`，且工具/S3/Docker 均未派发。Report、Evidence 和事件中不包含该私有工具名。私有工具名用临时 schema bypass 注入，仅用于验证准入栅栏；正常 Intern 响应仍受受限枚举校验。该组测试只覆盖工具 receipt 与工具名投影；`request_attempts.solver_call_id` 的公开投影归 SP-04 处理。
+
 ## Docker 对抗执行
 
 命令：`$env:MATHAGENT_TEST_PYTHON_IMAGE='sha256:fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d'; uv run python -m unittest tests.test_python_executor_docker`。最终批次6项通过，41.103秒，共15个容器；每次结束后独立查询 `docker ps -a`，没有保留该 Run 标签的容器。
