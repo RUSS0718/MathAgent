@@ -43,4 +43,3 @@ for (const width of [320, 768, 1024, 1440]) {
     await page.screenshot({ path: testInfo.outputPath(`star-limited-${width}.png`), fullPage: true })
   })
 }
-

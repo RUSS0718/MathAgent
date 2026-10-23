@@ -29,4 +29,3 @@ SP-03补齐多角色/工具/并发/迟到结算及数学提交控制反例；SP-
 ## 最终回归结果
 
 主代理独立执行 uv run python scripts/check.py --offline：348 项测试通过（201.849 秒），repository_check=PASS；其中凭证无关发布门禁测试也通过。输出保留在 ignored artifacts/sp02-root-check.log。所改 Python 文件 Ruff、git diff --check 通过；官方冻结文件及 requirements.txt 差异为空。完整 STAR 前置缺口仍未关闭。
-
