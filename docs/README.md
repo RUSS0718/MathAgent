@@ -12,6 +12,8 @@
 
 SP-03 的[共享账本与控制合同](engineering/star-product-sp03-contract.md)及[公共故障验证记录](evals/star-product-sp03.md)记录模型、重试、工具和研究的同一S3准入，取消/截止的数学事务栅栏及迟到用量；不替代后续恢复、生成Python隔离和MetaGuidance切换验收。
 
+SP-04 的[产品集成验收合同](engineering/star-product-sp04-contract.md)和[产品路径验收记录](evals/star-product-sp04.md)覆盖Explore路由、合法Plan与双Gate的Job路径，并记录hint来源和隐私边界。验收使用fault-injection回复，不代表live模型效果；Challenge、Trace-Back、恢复、Python工具及最终文本绑定仍归后续票。
+
 | 当前任务 | 阅读顺序 | 读完应能判断 |
 | --- | --- | --- |
 | 了解 v0.1 做到了什么 | [能力基线](evals/v0.1-capability-baseline.md) → [开发完成记录](https://github.com/RUSS0718/MathAgent/issues/1#issuecomment-6209639217) → 下方 v0.1 文档链 | 工程完成、真实模型连接与数学效果各有什么证据 |

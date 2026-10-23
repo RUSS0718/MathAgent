@@ -17,6 +17,13 @@ POLISH = {"solution_candidate": "1+1=2"}
 ACCEPT = {"verdict": "ACCEPT", "reason": "Addition"}
 
 
+class RawProviderContent:
+    """Script provider text without JSON-encoding it in the HTTP fixture."""
+
+    def __init__(self, content):
+        self.content = content
+
+
 class StarJobFixture:
     def open_star(self, replies, *, retry=1, **config):
         folder = tempfile.TemporaryDirectory()
@@ -42,8 +49,9 @@ class StarJobFixture:
                     pass
 
                 def json(self):
+                    content = value.content if isinstance(value, RawProviderContent) else json.dumps(value)
                     return {"choices": [{"finish_reason": "stop", "message": {
-                        "content": json.dumps(value)}}], "model": "intern-s2",
+                        "content": content}}], "model": "intern-s2",
                         "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}}
 
             return Reply()

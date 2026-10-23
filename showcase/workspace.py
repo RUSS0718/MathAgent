@@ -26,6 +26,7 @@ from .redaction import redact
 from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, freeze_budget
 from .run_checkpoints import RunCheckpointSaver
 from .run_control import RunControl, RunStopped, bind_control
+from .star_product_hints import migrate_hints, validate_hint
 
 ACTIVE_JOB_STATUSES = ("queued", "running", "waiting_input")
 TERMINAL_JOB_STATUSES = ("succeeded", "failed", "canceled")
@@ -129,6 +130,7 @@ class WorkspaceStore:
             self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN verification_mode TEXT NOT NULL DEFAULT 'auto'")
         if "input_user_file_id" not in columns:
             self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN input_user_file_id TEXT")
+        migrate_hints(self._connection, columns)
         self._connection.commit()
 
     def create_session(self, user_id: str, title: str = "新对话") -> str:
@@ -213,6 +215,7 @@ class WorkspaceStore:
         verification_mode: str = "auto",
         input_user_file_id: str | None = None,
         solver_identity: Mapping[str, Any] | None = None,
+        solver_hint: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Durably accept one Job and its user message before returning."""
 
@@ -248,6 +251,8 @@ class WorkspaceStore:
                     "INSERT INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
                     (session_id, "user", problem, job_id, now),
                 )
+                if solver_hint is not None:
+                    self._connection.execute("UPDATE workspace_jobs SET solver_hint=? WHERE job_id=?", (solver_hint, job_id))
                 self._insert_run(job_id, problem, now, execution_mode)
                 self._insert_event(
                     job_id,
@@ -578,6 +583,12 @@ class WorkspaceStore:
             row = self._connection.execute("SELECT verification_mode FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
         return str(row["verification_mode"]) if row is not None else "auto"
 
+    def solver_hint(self, job_id: str) -> str | None:
+        """Read the private execution hint without adding it to the Job DTO."""
+        with self._lock:
+            row = self._connection.execute("SELECT solver_hint FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+        return str(row["solver_hint"]) if row is not None and row["solver_hint"] is not None else None
+
     def active_jobs(self, user_id: str, session_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             query = "SELECT * FROM workspace_jobs WHERE user_id=? AND status IN ('queued','running','waiting_input')"
@@ -768,10 +779,12 @@ class WorkspaceService:
         budget_limits: RunBudgetLimits | None = None,
         solver_mode: str = "legacy",
         solver_options: Any = None,
+        solver_hint: Any = None,
     ) -> tuple[dict[str, Any], bool]:
         from .star_product_modes import validate_mode
 
         identity = validate_mode(solver_mode, enabled=self.star_pipeline is not None, verification_mode=verification_mode, options=solver_options)
+        validate_hint(solver_hint, solver_mode)
         selected = self.star_pipeline if solver_mode == "star_limited" else self.pipeline
         if web_search_enabled:
             raise WorkspaceError("capability_unavailable", status=503)
@@ -783,6 +796,8 @@ class WorkspaceService:
             raise WorkspaceError("idempotency_key_invalid", status=400)
         request_parts = (session_id, problem, web_search_enabled, input_user_file_id, verification_mode)
         digest = _request_digest(*request_parts) if solver_mode == "legacy" else _request_digest(*request_parts, solver_mode)
+        if solver_hint is not None:
+            digest = _request_digest(digest, solver_hint)
         payload, existing = self.store.create_job(
             user_id=user_id,
             session_id=session_id,
@@ -791,6 +806,7 @@ class WorkspaceService:
             request_digest=digest,
             execution_mode=getattr(selected, "execution_mode", self.execution_mode),
             solver_identity={**identity, "evidence_kind": getattr(selected, "evidence_kind", self.execution_mode)},
+            solver_hint=solver_hint,
             verification_mode=verification_mode,
             input_user_file_id=input_user_file_id,
         )
@@ -856,6 +872,7 @@ class WorkspaceService:
                         self._problem(job_id),
                         verification_mode=self.store.verification_mode(job_id),
                         emit=lambda event: self.store.append_event(job_id, event),
+                        **({"solver_hint": self.store.solver_hint(job_id)} if execution_mode == "star_limited" else {}),
                     )
                 self.store.finish_live_job(job_id, state)
                 if self.checkpointer is not None and state.get("status") != "WAITING_INPUT":

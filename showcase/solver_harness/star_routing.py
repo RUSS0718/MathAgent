@@ -5,6 +5,13 @@ from .explore import run_exploration
 from .finalize import commit, dispatch, finish
 from .review import review_solution
 
+MAX_HINT_CHARS = 2000
+
+
+def is_valid_hint(hint):
+    """Return whether a hint is nonblank text within the shared size bound."""
+    return isinstance(hint, str) and bool(hint.strip()) and len(hint) <= MAX_HINT_CHARS
+
 
 def prepare_hint(harness, run, problem, metadata):
     if run["state"].get("hint_prepared"):
@@ -15,7 +22,7 @@ def prepare_hint(harness, run, problem, metadata):
     hint = None
     if mode == "user_hint":
         hint = (metadata or {}).get("user_hint")
-        if not isinstance(hint, str) or not hint.strip():
+        if not is_valid_hint(hint):
             raise ValueError("user_hint_required")
     elif mode == "meta_auto":
         reason = budget_reason(run["state"], harness._config)
@@ -35,7 +42,7 @@ def prepare_hint(harness, run, problem, metadata):
             },
         )
         hint = reply.get("hint") if isinstance(reply, dict) else None
-        if not isinstance(hint, str) or not hint.strip():
+        if not is_valid_hint(hint):
             return finish(harness, run, "partial_aborted", "invalid_preplan_hint")
     return commit(
         harness,

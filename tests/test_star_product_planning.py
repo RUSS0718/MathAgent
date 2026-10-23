@@ -4,8 +4,7 @@ import json
 import unittest
 
 from showcase.run_budget import RunBudgetLimits
-from tests.star_product_support import ACCEPT, StarJobFixture
-from tests.star_product_support import POLISH, SOLVED
+from tests.star_product_support import ACCEPT, POLISH, SOLVED, StarJobFixture
 from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
 
 STEP = {"argument": "Addition gives two", "claims": [], "blocked": False}
