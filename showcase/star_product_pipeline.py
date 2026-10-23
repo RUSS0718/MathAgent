@@ -8,13 +8,16 @@ from .run_control import check_control
 from .solver_harness import SolverHarness
 from .solver_harness.intern_port import InternModelPort
 from .solver_harness.result import export_result
+from .solver_harness.tool_ports import RegistryToolPort
+from .star_product_config import limited_config
 from .star_product_modes import mode_identity
 
 
 class StarProductPipeline:
     execution_mode = "star_limited"
 
-    def __init__(self, database_path, *, adapter=None, evidence_kind="live", budget=None):
+    def __init__(self, database_path, *, adapter=None, evidence_kind="live", budget=None,
+                 features=None, registry=None):
         if evidence_kind not in {"live", "scripted", "fault_injection"}:
             raise ValueError("star_evidence_kind_invalid")
         if adapter is not None and not isinstance(adapter, InternModelAdapter):
@@ -25,6 +28,8 @@ class StarProductPipeline:
         if budget is not None and not isinstance(budget, RunBudgetLimits):
             raise ValueError("star_budget_invalid")
         self.budget = budget or RunBudgetLimits(max_model_calls=3, max_http_attempts=3, max_tool_calls=0)
+        self.config = limited_config(self.budget, features, registry)
+        self.registry = registry
         self.checkpointer = None
 
     def run(self, run_id, problem, *, verification_mode="auto", emit=None):
@@ -33,13 +38,7 @@ class StarProductPipeline:
             raise RuntimeError("star_requires_product_control")
         sink = emit or (lambda _event: None)
         port = InternModelPort(self.adapter, original_problem=problem)
-        config = {
-            "features": {"star_routing": True, "persistent_sessions": True,
-                         "stream_recovery": True},
-            "max_model_calls": self.budget.max_model_calls,
-            "max_explore_rounds": 1,
-            "max_total_duration_seconds": int(self.budget.max_runtime_seconds),
-        }
+        config = self.config
 
         def observe(run, event):
             if event:
@@ -55,6 +54,8 @@ class StarProductPipeline:
         def solve():
             with SolverHarness(database_path=self.database_path, config=config,
                                model_port=port, verifier_port=port,
+                               meta_port=port,
+                               tool_port=RegistryToolPort(self.registry) if self.registry else None,
                                event_observer=observe) as harness:
                 run = harness.solve(problem, {"run_id": run_id})
                 math = run["state"]

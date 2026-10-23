@@ -5,6 +5,7 @@ import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from contextvars import copy_context
 from copy import deepcopy
 from datetime import UTC, datetime
 
@@ -122,7 +123,7 @@ def _execute(harness, run, request, config, port, step_id, claim_index):
     }
     started = time.monotonic()
     pool = ThreadPoolExecutor(max_workers=1)
-    future = pool.submit(port.execute, invocation)
+    future = pool.submit(copy_context().run, port.execute, invocation)
     try:
         result = future.result(timeout=timeout)
         if not isinstance(result, Mapping):
