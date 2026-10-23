@@ -91,7 +91,8 @@ def explore(harness, run, problem):
                 return finish(harness, run, "partial_aborted", "PARSE_ERROR")
             findings = [
                 *run["state"]["exploration_findings"][:-1],
-                {**finding, "solution_candidate": candidate},
+                {**finding, "solution_candidate": candidate,
+                 "original_solution_candidate": finding.get("solution_candidate", "")},
             ]
             run = commit(harness, run, "exploration_polished", {"exploration_findings": findings})
             return review_solution(

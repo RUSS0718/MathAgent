@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
 from .explore import _HarnessOperations
+from .final_binding import review_record
 
 
 class VerifierPort(Protocol):
@@ -116,6 +117,12 @@ def review_solution(
     )
     next_phase = "TERMINAL" if accepted else "PLAN"
     updates = {"phase": next_phase}
+    finding = state["exploration_findings"][-1]
+    record = review_record(reserved, candidate, "ACCEPT" if accepted else "REJECT",
+        call_id=f"{run_id}:whole-solution-review", origin="explore_polish",
+        versions=[{"text": finding.get("original_solution_candidate", candidate)},
+                  {"text": candidate}])
+    updates["whole_solution_reviews"] = [*state.get("whole_solution_reviews", []), record]
     if accepted:
         updates.update(status="completed_llm_reviewed", final_response=candidate)
     return harness.commit_event(
