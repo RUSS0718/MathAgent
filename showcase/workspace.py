@@ -376,7 +376,7 @@ class WorkspaceStore:
             self._insert_event(job_id, "interrupt", {"type": "interrupt", "job_id": job_id, "status": "waiting_input"})
             self._connection.commit()
 
-    def control_job(self, *, user_id: str, job_id: str, operation: str, idempotency_key: str, request_digest: str) -> tuple[dict[str, Any], bool]:
+    def control_job(self, *, user_id: str, job_id: str, operation: str, idempotency_key: str, request_digest: str, retry_call=None) -> tuple[dict[str, Any], bool]:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
@@ -405,9 +405,17 @@ class WorkspaceStore:
                         self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled", "scope": "future_dispatch", "remote_request": "cannot_revoke"})
                     result = {"success": True, "job_id": job_id, "status": "canceled"}
                 else:
-                    if status != "waiting_input":
+                    from .star_product_recovery import authorize_resume
+
+                    star_resume = authorize_resume(self._connection, row, retry_call)
+                    if status != "waiting_input" and not star_resume:
                         raise WorkspaceError("job_not_resumable", status=409)
                     now = _utc_now()
+                    if star_resume:
+                        self._connection.execute(
+                            "UPDATE run_budgets SET ledger_json=json_remove(ledger_json,'$.ended_at') WHERE run_id=?",
+                            (job_id,),
+                        )
                     self._connection.execute("UPDATE workspace_jobs SET status='queued',updated_at=? WHERE job_id=?", (now, job_id))
                     self._insert_event(job_id, "resumed", {"type": "resumed", "job_id": job_id, "status": "queued"})
                     result = {"success": True, "job_id": job_id, "status": "queued"}
@@ -707,6 +715,7 @@ class WorkspaceStore:
         }
         if include_result and row["result_json"]:
             payload["result"] = _loads(row["result_json"])
+            payload["result"].pop("retry_call", None)
         if row["error_code"]:
             payload["error"] = row["error_code"]
         return payload
@@ -816,12 +825,12 @@ class WorkspaceService:
             self._submit(payload["job_id"])
         return payload, existing
 
-    def resume_job(self, *, user_id: str, job_id: str, idempotency_key: str, answer: str = "") -> tuple[dict[str, Any], bool]:
+    def resume_job(self, *, user_id: str, job_id: str, idempotency_key: str, answer: str = "", retry_call=None) -> tuple[dict[str, Any], bool]:
         if not _is_uuid_v4(idempotency_key):
             raise WorkspaceError("idempotency_key_invalid", status=400)
-        digest = _request_digest("resume", job_id, answer)
+        digest = _request_digest("resume", job_id, answer, retry_call)
         result, existing = self.store.control_job(
-            user_id=user_id, job_id=job_id, operation="resume", idempotency_key=idempotency_key, request_digest=digest
+            user_id=user_id, job_id=job_id, operation="resume", idempotency_key=idempotency_key, request_digest=digest, retry_call=retry_call
         )
         if not existing:
             with self._submit_lock:
@@ -872,7 +881,8 @@ class WorkspaceService:
                         self._problem(job_id),
                         verification_mode=self.store.verification_mode(job_id),
                         emit=lambda event: self.store.append_event(job_id, event),
-                        **({"solver_hint": self.store.solver_hint(job_id)} if execution_mode == "star_limited" else {}),
+                        **({"solver_hint": self.store.solver_hint(job_id),
+                            "retry_call": identity.get("retry_call")} if execution_mode == "star_limited" else {}),
                     )
                 self.store.finish_live_job(job_id, state)
                 if self.checkpointer is not None and state.get("status") != "WAITING_INPUT":
@@ -905,9 +915,15 @@ class WorkspaceService:
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
         payload = self.store.get_job(job_id, user_id)
+        star = (payload.get("result") or {}).get("solver_mode") == "star_limited"
+        if star:
+            from .star_product_projection import current_solver
+
+            with self.store._lock:
+                payload["result"]["solver"] = current_solver(self.store._connection, job_id)
         if self.budget_ledger is not None:
             budget = self.budget_ledger.snapshot(job_id)
-            if budget is not None and not (payload.get("result") or {}).get("budget"):
+            if budget is not None and (star or not (payload.get("result") or {}).get("budget")):
                 payload["result"] = {**(payload.get("result") or {}), "budget": budget}
         attempts = [event["data"]["attempt"] for event in self.store.events(job_id, user_id) if event["event"] == "request_attempt"]
         attempts = list({item["attempt_id"]: item for item in [*attempts, *self.budget_ledger.attempts(job_id)]}.values())

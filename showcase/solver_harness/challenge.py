@@ -255,15 +255,16 @@ def run_plan(
 ):
     """Execute at most the supplied plan, preserving the final review boundary."""
     while True:
-        run = run_step(
-            harness,
-            run,
-            problem=problem,
-            plan=plan,
-            model_port=model_port,
-            max_model_calls=max_model_calls,
-            max_runtime_seconds=max_runtime_seconds,
-        )
+        if not getattr(harness, "_product_recovery", False) or run["state"]["phase"] in {"PLAN", "STEP_EXECUTE"}:
+            run = run_step(
+                harness,
+                run,
+                problem=problem,
+                plan=plan,
+                model_port=model_port,
+                max_model_calls=max_model_calls,
+                max_runtime_seconds=max_runtime_seconds,
+            )
         run = verify_step(
             harness,
             run,
