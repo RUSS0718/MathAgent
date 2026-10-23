@@ -145,7 +145,10 @@ function starSummary(event: DecodedSseEvent, solverEvent: string): string {
     if (!goal || !gate || !verdict || typeof event.data.valid !== 'boolean') {
       return '步骤裁决信息不完整'
     }
-    return `目标 ${goal} · 逻辑 ${gate} · ${verdict} · ${event.data.valid ? '允许推进' : '未允许推进'}`
+    const stepId = typeof event.data.step_id === 'string' && event.data.step_id.trim()
+      ? `步骤 ${event.data.step_id.trim()} · `
+      : ''
+    return `${stepId}目标 ${goal} · 逻辑 ${gate} · ${verdict} · ${event.data.valid ? '允许推进' : '未允许推进'}`
   }
   return 'STAR 状态已记录'
 }

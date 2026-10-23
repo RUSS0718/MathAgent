@@ -48,8 +48,8 @@ for (const width of [320, 768, 1024, 1440]) {
     await expect(page.getByText('Meta 决策：转入计划')).toBeVisible()
     await expect(page.getByText('整题审查：REJECT → 生成计划')).toBeVisible()
     await expect(page.getByText('计划 v1 已生成')).toBeVisible()
-    await expect(page.getByText('目标 YES · 逻辑 PASS · ACCEPT · 允许推进')).toBeVisible()
-    await expect(page.getByText('目标 NO · 逻辑 PASS · ACCEPT · 未允许推进')).toBeVisible()
+    await expect(page.getByText('步骤 sum · 目标 YES · 逻辑 PASS · ACCEPT · 允许推进')).toBeVisible()
+    await expect(page.getByText('步骤 next · 目标 NO · 逻辑 PASS · ACCEPT · 未允许推进')).toBeVisible()
 
     const visibleText = await page.locator('body').innerText()
     expect(visibleText).not.toContain(privateHint)

@@ -37,7 +37,7 @@
 | `npm ci --no-audit --no-fund` | PASS，安装66个包 |
 | `npm audit --audit-level=high` | PASS，0 vulnerabilities |
 | `npm run check` | PASS，依赖合同、类型检查、13项单元测试和构建 |
-| `npm run test:browser -- tests/browser/star-decisions.spec.ts` | PASS，320、768、1024、1440宽度各1项；Axe违规0，页面console错误/警告0 |
+| `npm run test:browser -- tests/browser/star-decisions.spec.ts --workers=1` | PASS，320、768、1024、1440宽度各1项；Axe违规0，页面console错误/警告0 |
 | 浏览器截图 | 保存在忽略的`artifacts/ui-unification/browser/star-decisions-*/star-decisions-{320,768,1024,1440}.png` |
 
 测试使用有限fault-injection回复，不能支持真实模型能力、数学正确率提升或完整STAR声明。完整模式仍需后续票完成机制和发布门槛。
