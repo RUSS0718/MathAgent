@@ -76,6 +76,10 @@ def run_check(harness, run, *, problem, declared, verifier_call_id):
             item["statement"] for item in state.get("verified_results_ledger", [])
             if isinstance(item, Mapping) and item.get("category") == "Conjecture"
             and isinstance(item.get("statement"), str)
+        ] + [
+            check["target"]["claim"] for step in state.get("steps", {}).values()
+            for check in step.get("counterexample_checks", {}).values()
+            if check.get("evidence_category") == "Conjecture"
         ],
         "suspected_false_claim": True, "allowed_tools": [], "tool_policy": {"allow": []},
         "instruction": "Independently try to refute this exact claim within all assumptions. "

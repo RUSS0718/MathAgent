@@ -164,6 +164,16 @@ class StarCounterexampleTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(["CHALLENGE", "ACCEPT"], [item["verdict"] for item in revisions])
         self.assertEqual(9, self.report(job_id)["budget"]["logical_calls"])
 
+    def test_repeated_incomplete_claim_preserves_prior_conjecture_in_new_research_session(self):
+        _, job, _ = self.start(NOT_FOUND, limit=8, tail=[STEP, ACCEPT, NOT_FOUND])
+        self.assertEqual("failed", job["status"])
+        research = [item for item in self.outbound if item["role"] == "researcher"]
+        self.assertEqual(2, len(research))
+        self.assertEqual([], research[0]["prior_conjectures"])
+        self.assertEqual([STEP["claims"][0]["statement"]], research[1]["prior_conjectures"])
+        self.assertNotEqual(research[0]["session_key"], research[1]["session_key"])
+        self.assertEqual([], research[1]["session_history"])
+
     def test_unknown_research_preserves_consumption_and_does_not_retry_on_reads(self):
         job_id, job, events = self.start(requests.Timeout())
         self.assertEqual("failed", job["status"])
