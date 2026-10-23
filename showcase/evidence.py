@@ -12,6 +12,7 @@ from llm_response import public_attempt
 from .final_evidence import bind_verification
 from .redaction import redact
 from .run_budget import public_solver_call_id
+from .star_product_modes import STAR_MODES
 from .verification import VerificationResult
 
 
@@ -182,7 +183,9 @@ def _multimodal_status(snapshot: Mapping[str, Any]) -> str:
 
 def _mode(snapshot: Mapping[str, Any]) -> str:
     value = snapshot.get("run_mode") or snapshot.get("execution_mode") or snapshot.get("mode")
-    return value if value in {"live", "fake", "replay", "experimental", "unavailable", "planned", "star_limited", "star_limited_best_effort", "star_reference", "star_best_effort"} else "unavailable"
+    return value if value in {
+        "live", "fake", "replay", "experimental", "unavailable", "planned", *STAR_MODES,
+    } else "unavailable"
 
 
 def replay_evidence(pack: Mapping[str, Any]) -> dict[str, Any]:

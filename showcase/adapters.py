@@ -198,6 +198,10 @@ class InternModelAdapter:
             tool_request_error=parsed.error_category,
         )
 
+    def ensure_configured(self) -> None:
+        """Raise ``AdapterError`` until a provider client can actually be built."""
+        self._get_client()
+
     def _get_client(self) -> Any:
         if self._client is not None:
             return self._client

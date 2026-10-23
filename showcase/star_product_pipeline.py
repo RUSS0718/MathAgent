@@ -59,12 +59,9 @@ class StarProductPipeline:
         gaps = core_gaps(self.full_config)
         if gaps:
             return gaps
-        try:
-            self.adapter._get_client()
-        except Exception:
-            return ["model_configuration_unavailable"]
-        if self.adapter.model_id != "intern-s2":
-            return ["intern_s2_required"]
+        gaps = self.dependency_gaps()
+        if gaps:
+            return gaps
         readiness = self.readiness
         if probe:
             from .star_product_readiness import isolated_readiness
@@ -72,8 +69,26 @@ class StarProductPipeline:
             readiness = isolated_readiness(self.registry)
             self.readiness = readiness
         if not readiness["available"]:
-            gaps.append(readiness["reason"])
-        return gaps
+            return [readiness["reason"]]
+        return []
+
+    def dependency_gaps(self):
+        """Provider dependency gaps for full presets; fail-closed on any doubt."""
+        try:
+            self.adapter.ensure_configured()
+        except Exception:
+            return ["model_configuration_unavailable"]
+        if self.adapter.model_id != "intern-s2":
+            return ["intern_s2_required"]
+        return []
+
+    def readiness_state(self):
+        """Latest observed isolated-preflight admission state; never an acceptance mark."""
+        return self.readiness
+
+    def preset_config(self, mode):
+        """The trusted server preset configuration that would execute this mode."""
+        return self.full_config if mode in FULL_MODES else self.config
 
     def budget_for_mode(self, mode):
         return self.full_budget if mode in FULL_MODES else self.budget
