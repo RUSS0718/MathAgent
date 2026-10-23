@@ -26,7 +26,7 @@ const notice = ref('')
 const visionEnabled = ref(false)
 const executionMode = ref('unavailable')
 const solverMode = ref('legacy')
-const starEnabled = ref(false)
+const solverModes = ref<Array<{ solver_mode: string; enabled: boolean }>>([])
 const selectedFile = ref<string | undefined>()
 const selectedFileName = ref<string | undefined>()
 const sidebarOpen = ref(false)
@@ -116,7 +116,7 @@ async function initialize(): Promise<void> {
     if (capabilities.execution?.mode === 'live' && capabilities.execution.status !== 'configured') {
       notice.value = 'live 模式未检测到 Intern API 凭证。'
     }
-    starEnabled.value = capabilities.solver_modes?.some((mode) => mode.solver_mode === 'star_limited' && mode.enabled) ?? false
+    solverModes.value = capabilities.solver_modes ?? []
     visionEnabled.value = capabilities.files.upload.enabled
     if (visionEnabled.value) await files.load()
   } catch (error) {
@@ -161,7 +161,7 @@ onUnmounted(() => jobController.stopAll())
       <div v-if="current?.status === 'waiting_input'" class="notice notice--warning workspace-notice" role="status">运行需要补充条件，请在输入栏填写后继续。</div>
       <section class="conversation-area" aria-label="数学对话">
         <div class="conversation-scroll"><div v-if="loading" class="loading-state" role="status" aria-busy="true">正在加载会话…<div v-for="n in 3" :key="n" class="skeleton"></div></div><MessageList v-else-if="!loadFailed" :messages="sessions.messages" @starter="useStarter" /><ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" /></div>
-        <ComposerBar v-model="draft" :disabled="loading || loadFailed || submitting || Boolean(current && current.status !== 'waiting_input')" :running="Boolean(current)" :waiting="current?.status === 'waiting_input'" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><StarModeSelector v-model="solverMode" :enabled="starEnabled" :disabled="Boolean(current) || submitting" /></template></ComposerBar>
+        <ComposerBar v-model="draft" :disabled="loading || loadFailed || submitting || Boolean(current && current.status !== 'waiting_input')" :running="Boolean(current)" :waiting="current?.status === 'waiting_input'" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><StarModeSelector v-model="solverMode" :modes="solverModes" :disabled="Boolean(current) || submitting" /></template></ComposerBar>
       </section>
     </main>
     <WorkspaceInspector :open="inspectorOpen" :job="selectedJob" :report="report" @close="inspectorOpen = false" />

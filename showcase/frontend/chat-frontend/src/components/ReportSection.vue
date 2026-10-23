@@ -5,7 +5,7 @@ import StatusBadge from './ui/StatusBadge.vue'
 const props = defineProps<{ title?: string; content?: string; mode?: string; status?: string; report?: { answer: string; public_summary: string; stage: string; limitations: string[]; checks?: { status?: string; findings?: string[] } } }>()
 const html = computed(() => renderSafeMarkdown(props.content ?? props.report?.answer ?? ''))
 const labels = {
-  stage: { terminal: '已完成', completed: '已完成', failed: '失败', synthesizing: '整理答案', verifying: '验证中', solving: '求解中', planning: '规划中' },
+  stage: { terminal: '执行结束', completed: '已完成', failed: '失败', synthesizing: '整理答案', verifying: '验证中', solving: '求解中', planning: '规划中' },
 } as const
 function translate(group: keyof typeof labels, value?: string): string {
   if (!value) return ''

@@ -25,6 +25,10 @@ export const useJobsStore = defineStore('jobs', {
     ),
   },
   actions: {
+    confirmResume(jobId: string): void {
+      const record = this.records[jobId]
+      if (record) { record.status = 'queued'; record.error = null }
+    },
     start(jobId: string, sessionId: string, status: Status, lastEventId = 0): JobRecord {
       const record = this.records[jobId] ?? {
         jobId,
