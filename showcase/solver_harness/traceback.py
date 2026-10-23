@@ -11,13 +11,19 @@ def apply_traceback(harness, run):
     step_id = state["current_step"]
     verification = state["steps"].get(step_id, {}).get("verification", {})
     meta = state.get("meta_decision", {})
-    from_meta = state["phase"] == "TRACE_BACK" and meta.get("decision") == "TRACE_BACK"
+    guidance = state.get("meta_guidance_decision") or {}
+    from_guidance = (
+        state["phase"] == "TRACE_BACK" and guidance.get("action_type") == "trace_back"
+    )
+    from_meta = state["phase"] == "TRACE_BACK" and (
+        meta.get("decision") == "TRACE_BACK" or from_guidance
+    )
     if from_meta:
         verification = {
-            **meta,
+            **(guidance if from_guidance else meta),
             "verdict": "TRACE_BACK",
             "valid": True,
-            "reason": meta["reason_summary"],
+            "reason": guidance.get("rationale", "") if from_guidance else meta["reason_summary"],
         }
     if verification.get("verdict") != "TRACE_BACK":
         return run
@@ -99,7 +105,7 @@ def apply_traceback(harness, run):
     invalid_steps = invalid.intersection(step["step_id"] for step in steps)
     failure = {
         "kind": "trace_back",
-        "triggered_by": "meta" if from_meta else "verifier",
+        "triggered_by": "meta_guidance" if from_guidance else ("meta" if from_meta else "verifier"),
         "reason": verification.get("reason") or verification.get("objection", ""),
         "forbidden_directions": verification.get("forbidden_directions", []),
         "plan_version": state["plan_version"],
@@ -119,6 +125,12 @@ def apply_traceback(harness, run):
             "event_id": f"trace-back-applied-{attempt}-{step_id}",
             "type": "trace_back_applied",
             "trace_back_to": target,
+            "role": "meta" if from_meta else "step_verifier",
+            "triggered_by": "meta_guidance" if from_guidance else ("meta" if from_meta else "verifier"),
+            **({
+                "action_type": "trace_back",
+                "failure_type": guidance.get("failure_type"),
+            } if from_guidance else {}),
             "attempt_index": attempt + 1,
             "from_step_index": current + 1,
             "archived_step_count": sum(key in invalid_steps for key in state["steps"]),

@@ -18,7 +18,9 @@ SP-05 的[连续Challenge合同](engineering/star-product-sp05-contract.md)和[�
 
 SP-06 的[回退与重规划合同](engineering/star-product-sp06-contract.md)及[产品验收记录](evals/star-product-sp06.md)覆盖同一 Job 的区间归档、依赖失效、合法救援、非法目标拒绝，以及 Meta 裁定的新计划实际执行；包含能识别失效事实复活的旁路探针。证据为 fault-injection，完整 reference 与 live 验收仍未完成。
 
-SP-09 的[受控 Python 合同](engineering/star-product-sp09-contract.md)与[公共 Job 和 Docker 验收记录](evals/star-product-sp09.md)记录默认关闭的固定镜像 ID Registry 接线、S3 单次工具动作、外部 stdout/stderr 总量限制和授权产物下载。纯推理的 MetaGuidance 触发仍由 SP-07 验收；完整 reference 继续拒绝启动。
+SP-07 的[记忆、Skill 与局部指导合同](engineering/star-product-sp07-contract.md)及[公共产品验收记录](evals/star-product-sp07.md)覆盖七类协议的实际注入、受限工具故障指导、纯推理权限栅栏、三种局部恢复动作、多任务研究采纳与跨 Run 隔离。未知远端请求保持待复核；证据为 scripted/fault-injection，不代表 live 效果。
+
+SP-09 的[受控 Python 合同](engineering/star-product-sp09-contract.md)与[公共 Job 和 Docker 验收记录](evals/star-product-sp09.md)记录默认关闭的固定镜像 ID Registry 接线、S3 单次工具动作、外部 stdout/stderr 总量限制和授权产物下载。纯推理与受控工具故障的 MetaGuidance 见 SP-07 验收；完整 reference 继续拒绝启动。
 
 | 当前任务 | 阅读顺序 | 读完应能判断 |
 | --- | --- | --- |

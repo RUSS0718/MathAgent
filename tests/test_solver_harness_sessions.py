@@ -75,6 +75,60 @@ class SessionsTest(unittest.TestCase):
             self.assertGreater(model.requests[0]["state_revision"], first["state_revision"])
             self.assertEqual(1, len(model.requests))
 
+    def test_recreated_role_session_keeps_history_and_injects_latest_failure_ledger(self):
+        config = {"max_model_calls": 8, "features": {"persistent_sessions": True, "skills": True}}
+
+        def decision(action):
+            return {
+                "decision": action,
+                "reason_summary": "continue from current state",
+                "plan_summary": "use current ledger",
+                "forbidden_directions": [],
+                "reusable_results": [],
+                "trace_back_to": None,
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "run.db"
+            first_meta = ScriptedModelPort([decision("CONTINUE")])
+            with SolverHarness(
+                database_path=database, config=config, meta_port=first_meta
+            ) as harness:
+                first = harness.solve(
+                    "prove", {"run_id": "role-restore", "meta_trigger": "plan-blocked"}
+                )
+                failure = {"kind": "trace_back", "reason": "restored failure ledger"}
+                updated = harness.commit_event(
+                    "role-restore",
+                    expected_revision=first["state_revision"],
+                    event={"event_id": "restore-ledger", "type": "recovery_state"},
+                    state_updates={
+                        "phase": "META_DECIDE",
+                        "failure_records": [failure],
+                        "confirmed_failures_ledger": [failure],
+                    },
+                )
+            second_meta = ScriptedModelPort([decision("ABORT")])
+            with SolverHarness(
+                database_path=database, config=config, meta_port=second_meta
+            ) as harness:
+                resumed = harness.solve(
+                    "prove", {"run_id": "role-restore", "meta_trigger": "plan-blocked"}
+                )
+                self.assertEqual(resumed, harness.get_run("role-restore"))
+            request = second_meta.requests[0]
+            first_request = first_meta.requests[0]
+            projection = next(layer for layer in request["prompt_layers"]
+                              if layer["kind"] == "projection")
+            self.assertEqual(first_request["session_key"], request["session_key"])
+            self.assertEqual(
+                "CONTINUE", request["session_history"][0]["response"]["decision"]
+            )
+            self.assertEqual([failure], projection["state"]["confirmed_failures_ledger"])
+            self.assertEqual([failure], request["failures"])
+            self.assertEqual(request["state_revision"], projection["state_revision"])
+            self.assertGreater(request["state_revision"], updated["state_revision"])
+
     def test_latest_authorized_context_copies_input_and_filters_invalid_facts(self):
         requests = []
 

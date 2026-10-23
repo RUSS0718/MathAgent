@@ -54,6 +54,9 @@ def verify_step(
     if verifier_port is None or run["state"]["phase"] != "STEP_VERIFY":
         return run
     run = harness.precheck_report(run)
+    run = _run_guidance_for_failure(harness, run, max_model_calls, max_runtime_seconds)
+    if run["state"]["phase"] != "STEP_VERIFY":
+        return run
     from .budget import budget_reason, stop
 
     reason = budget_reason(run["state"], harness._config)
@@ -223,4 +226,58 @@ def verify_step(
             **verification,
         },
         state_updates=state_updates,
+    )
+
+
+def _run_guidance_for_failure(harness, run, max_model_calls, max_runtime_seconds):
+    if (
+        harness._meta_port is None
+        or harness._config.get("features", {}).get("meta_guidance") is not True
+    ):
+        return run
+    state = run["state"]
+    step_id = state.get("current_step")
+    report = state.get("steps", {}).get(step_id, {}).get("report", {})
+    report_receipts = set(report.get("tool_evidence_refs", []))
+    failure_type = "stuck" if report.get("blocked") is True else None
+    tool_failure = None
+    for receipt in reversed(state.get("tool_receipts", [])):
+        if receipt.get("step_id") != step_id or receipt.get("receipt_id") not in report_receipts:
+            continue
+        if receipt.get("source") != "docker_isolated" or receipt.get("unknown_outcome") is True:
+            continue
+        if receipt.get("executed") is True and receipt.get("cleanup_verified") is not True:
+            continue
+        status = receipt.get("status")
+        if status == "timeout":
+            failure_type, tool_failure = "timeout", "timeout"
+        elif status in {"tool_error", "output_limit", "parse_error", "unavailable", "rejected"}:
+            failure_type, tool_failure = "code_issue", (
+                "output_mismatch" if status == "output_limit" else "execution_error"
+            )
+        elif status == "success" and receipt.get("assertion_matched") is False:
+            failure_type, tool_failure = "code_issue", "output_mismatch"
+        if failure_type:
+            break
+    if failure_type is None:
+        return run
+    if any(
+        item.get("kind") == "guidance"
+        and item.get("plan_version") == state["plan_version"]
+        and item.get("step_id") == step_id
+        for item in state.get("meta_interventions", [])
+    ):
+        return run
+    from .meta import run_meta
+
+    return run_meta(
+        harness,
+        run,
+        meta_port=harness._meta_port,
+        metadata={
+            "meta_guidance": {"failure_type": failure_type},
+            **({"tool_failure": tool_failure} if tool_failure else {}),
+        },
+        max_model_calls=max_model_calls,
+        max_runtime_seconds=max_runtime_seconds,
     )

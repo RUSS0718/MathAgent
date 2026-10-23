@@ -31,12 +31,14 @@ class StarJobFixture:
         self.data_dir = folder.name
         self.enterContext(patch.dict(os.environ, {"INTERN_API_KEY": "scripted-only"}))
         self.outbound = []
+        self.outbound_messages = []
         self.replies = list(replies)
 
         def respond(*args, **kwargs):
             request = json.loads(kwargs["data"])
             context = json.loads(request["messages"][-1]["content"])
             self.outbound.append(context)
+            self.outbound_messages.append(request["messages"])
             value = self.replies.pop(0)
             if isinstance(value, BaseException):
                 raise value

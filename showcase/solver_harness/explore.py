@@ -133,6 +133,9 @@ def run_exploration(
             "problem": state["problem"],
             "state_revision": current["state_revision"],
         }
+        guidance_task = current["state"].get("pending_guidance_task")
+        if isinstance(guidance_task, str) and guidance_task.strip():
+            request["specific_task"] = guidance_task
         return {"reply": harness.dispatch(current, state["model_port"].complete, request)}
 
     def persist_assessment(state: _ExploreGraphState) -> dict[str, Any]:
