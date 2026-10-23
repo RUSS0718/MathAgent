@@ -142,7 +142,7 @@ class RunBudgetLedger:
                     "tool_call_id": tool_call_id,
                     "input_estimate": input_estimate,
                     "output_cap": output_cap,
-                    "public_attempt": ({**public_attempt(attempt_event, run_id=run_id, role=role), "started_at_utc": attempt_event.get("started_at_utc"), "dispatch_status": "reserved_dispatch_unconfirmed"} if attempt_event is not None else None),
+                    "public_attempt": ({**public_attempt(attempt_event, run_id=run_id, role=role), "started_at_utc": attempt_event.get("started_at_utc"), "dispatch_status": "reserved_dispatch_unconfirmed", "solver_call_id": solver_call_id} if attempt_event is not None else None),
                     "status": "reserved",
                     "usage": provider_usage(None),
                 }

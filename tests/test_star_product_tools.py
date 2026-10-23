@@ -19,6 +19,22 @@ FEATURES = {"final_generation": True, "final_solution_review": True, "local_code
 
 
 class StarToolTest(StarJobFixture, unittest.TestCase):
+    def test_disabled_code_permission_does_not_exhaust_zero_tool_budget(self):
+        actual = []
+        registry = ToolRegistry()
+        registry.register("polynomial_check", lambda args: actual.append(args) or 2)
+        self.open_star([NEED_PLAN, PLAN, STEP, VERDICT, {"final_response": "2"}, ACCEPT],
+            SHOWCASE_STAR_FEATURES={**FEATURES, "local_code_tool": False},
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8, max_tool_calls=0),
+            SHOWCASE_STAR_REGISTRY=registry)
+        job_id = self.create_job()
+        self.assertEqual("succeeded", self.terminal(job_id)["status"])
+        self.assertEqual([], actual)
+        self.assertEqual(0, self.report(job_id)["budget"]["tool_calls"])
+        self.assertEqual(6, len(self.outbound))
+        reasoner = next(r for r in self.outbound if r["role"] == "reasoner")
+        self.assertEqual([], reasoner.get("allowed_tools", []))
+
     def test_cancel_during_real_tool_prevents_verifier_and_settles_tool(self):
         entered, release, returned = threading.Event(), threading.Event(), threading.Event()
         self.addCleanup(release.set)
