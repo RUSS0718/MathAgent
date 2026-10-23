@@ -108,6 +108,11 @@ def dispatch(harness, run, operation, request):
         return operation(harness.prepare_request(run, request))
     latest = harness.get_run(run["run_id"])
     record, prepared = prepare_session(latest, request)
+    if getattr(harness, "_product_recovery", False) and any(
+        item["request"].get("call_id") == prepared["call_id"]
+        for item in record["history"]
+    ):
+        return operation(harness.prepare_request(latest, prepared))
     record["last_injected_state_revision"] = latest["state_revision"] + 1
     registered = harness.commit_event(
         run["run_id"],

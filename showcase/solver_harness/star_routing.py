@@ -56,15 +56,20 @@ def explore(harness, run, problem):
     config = harness._config
     limit = min(2, config.get("max_explore_rounds", 2))
     for number in range(1, limit + 1):
-        run = run_exploration(
-            harness,
-            run,
-            problem=problem,
-            model_port=harness._model_port,
-            max_model_calls=config.get("max_model_calls", 2),
-            max_explore_rounds=number,
-            max_runtime_seconds=config.get("max_total_duration_seconds", 3600),
-        )
+        recovering_review = (getattr(harness, "_product_recovery", False)
+                             and run["state"]["phase"] == "EXPLORE_REVIEW")
+        if recovering_review:
+            number = run["state"]["exploration_findings"][-1]["round"]
+        else:
+            run = run_exploration(
+                harness,
+                run,
+                problem=problem,
+                model_port=harness._model_port,
+                max_model_calls=config.get("max_model_calls", 2),
+                max_explore_rounds=number,
+                max_runtime_seconds=config.get("max_total_duration_seconds", 3600),
+            )
         if run["state"]["phase"] == "TERMINAL":
             return run
         finding = run["state"]["exploration_findings"][-1]

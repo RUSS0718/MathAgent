@@ -37,7 +37,9 @@ def precheck_report(harness, run, *, config, tool_port):
         retries = config.get("max_tool_retries", 0)
         retries = min(2, max(0, retries)) if type(retries) is int else 0
         for attempt in range(retries + 1):
-            run, receipt = _execute(harness, run, request, config, tool_port, step_id, index)
+            receipt = _recover_receipt(harness, run, step_id, index)
+            if receipt is None:
+                run, receipt = _execute(harness, run, request, config, tool_port, step_id, index)
             receipts.append(receipt)
             if receipt["status"] not in {"tool_error", "network_error"}:
                 break
@@ -66,6 +68,21 @@ def precheck_report(harness, run, *, config, tool_port):
             "steps": {**latest["steps"], step_id: {**latest["steps"][step_id], "report": report}},
         },
     )
+
+
+def _recover_receipt(harness, run, step_id, claim_index):
+    if not getattr(harness, "_product_recovery", False):
+        return None
+    reported = max((event["state_revision"] for event in run["events"]
+                    if event["type"] == "step_reported" and event.get("step_id") == step_id),
+                   default=run["state_revision"])
+    for event in reversed(run["events"]):
+        receipt = event.get("receipt", {})
+        if (event["type"] == "tool_receipt" and event["state_revision"] > reported
+                and receipt.get("step_id") == step_id
+                and receipt.get("claim_index") == claim_index):
+            return deepcopy(receipt)
+    return None
 
 
 def _execute(harness, run, request, config, port, step_id, claim_index):

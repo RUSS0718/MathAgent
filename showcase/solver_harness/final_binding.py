@@ -11,7 +11,10 @@ def fact_reference(value):
 
 
 def review_record(run, candidate, verdict, *, call_id, origin, versions=None, facts=None):
+    from .calls import latest_retry_id
+
     state = run["state"]
+    call_id = latest_retry_id(state.get("calls", {}), call_id)
     return {
         "artifact": artifact_identity(candidate),
         "verdict": verdict,

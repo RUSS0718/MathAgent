@@ -14,6 +14,7 @@ from .solver_harness.tool_ports import RegistryToolPort
 from .star_product_config import limited_config
 from .star_product_events import decision_fields, public_solver_event_id
 from .star_product_modes import mode_identity
+from .star_product_recovery import recovery_projection, resume_solver
 
 PUBLIC_TOOL_NAMES = frozenset({"polynomial_check", "python_math"})
 
@@ -40,7 +41,8 @@ class StarProductPipeline:
         self.registry = registry
         self.checkpointer = None
 
-    def run(self, run_id, problem, *, verification_mode="auto", emit=None, solver_hint=None):
+    def run(self, run_id, problem, *, verification_mode="auto", emit=None, solver_hint=None,
+            retry_call=None):
         check_control()
         if current_budget() is None or self.checkpointer is None:
             raise RuntimeError("star_requires_product_control")
@@ -67,7 +69,16 @@ class StarProductPipeline:
                                meta_port=port,
                                tool_port=RegistryToolPort(self.registry) if self.registry else None,
                                event_observer=observe) as harness:
-                run = harness.solve(problem, {"run_id": run_id, "user_hint": solver_hint})
+                existing = harness._state_store.get_run(run_id)
+                harness._product_recovery = existing is not None
+                from .solver_harness.budget import HardBudgetStop
+                from .solver_harness.calls import CallInterrupted
+
+                try:
+                    run = (resume_solver(harness, problem, run_id, retry_call) if existing else
+                           harness.solve(problem, {"run_id": run_id, "user_hint": solver_hint}))
+                except (CallInterrupted, HardBudgetStop):
+                    run = harness.get_run(run_id)
                 run = advance_product(harness, run, problem)
                 math = run["state"]
                 answer = export_result(run)["final_response"]
@@ -104,9 +115,6 @@ class StarProductPipeline:
         builder.add_edge("star_projection", END)
         graph = builder.compile(checkpointer=self.checkpointer)
         graph_config = {"configurable": {"thread_id": run_id}}
-        # Until SP-08 validates safe stage recovery, never replay an interrupted graph.
-        if graph.get_state(graph_config).values:
-            raise RuntimeError("star_checkpoint_needs_review")
         result = solve()
         result = graph.invoke(result, graph_config, durability="sync")
         sink({"type": "final_result" if result["status"] == "COMPLETED" else "needs_review",
@@ -125,7 +133,8 @@ def projection(run, *, answer=None):
             status = "completed_unverified"
     return {"run_id": run["run_id"], "state_revision": run["state_revision"],
             "phase": state["phase"], "status": status,
-            "config_hash": state["config_hash"], "checkpoint_thread_id": run["run_id"]}
+            "config_hash": state["config_hash"], "checkpoint_thread_id": run["run_id"],
+            "recovery": recovery_projection(run)}
 
 
 def public_tools(state):
