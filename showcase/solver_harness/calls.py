@@ -15,6 +15,30 @@ class CallInterrupted(BaseException):
         self.run_id = run_id
 
 
+def pending_call(run):
+    """Return the audited action whose owning math commit has not happened."""
+    calls = run["state"].get("calls", {})
+    if not calls:
+        return None
+    record = max(calls.values(), key=lambda item: item["request_revision"])
+    audit = {"call_audit", "session_recorded", "call_retry_authorized", "session_started"}
+    if any(event["state_revision"] > record["request_revision"]
+           and event["type"] not in audit for event in run["events"]):
+        return None
+    return record
+
+
+def latest_retry_id(calls, call_id):
+    """Resolve an immutable retry lineage without changing the original call."""
+    for _ in range(len(calls)):
+        successor = next((item for item in calls.values()
+                          if item.get("retry_of") == call_id), None)
+        if successor is None:
+            break
+        call_id = successor["call_id"]
+    return call_id
+
+
 def _save(harness, run, record, *, status=None):
     latest = harness.get_run(run["run_id"])
     updates = {"calls": {**latest["state"].get("calls", {}), record["call_id"]: redact(record)}}
@@ -60,6 +84,21 @@ def _consume(value, partial, checkpoint):
 
 
 def dispatch(harness, run, operation, request, session_dispatch):
+    if getattr(harness, "_product_recovery", False):
+        pending = pending_call(run)
+        if pending is not None:
+            if pending["role"] != request["role"]:
+                raise ValueError("recovery action owner mismatch")
+            request = {**deepcopy(pending["request"]), "problem": request.get("problem")}
+    retry = run["state"].get("authorized_retry")
+    calls = run["state"].get("calls", {})
+    current_id = latest_retry_id(calls, request.get("call_id"))
+    if current_id != request.get("call_id"):
+        record = calls[current_id]
+        request = {**request, "call_id": current_id, "retry_of": record["retry_of"]}
+    if retry and current_id == retry["call_id"]:
+        request = {**request, "call_id": retry["new_call_id"], "retry_of": retry["call_id"]}
+
     def invoke(prepared):
         call_id = prepared.get("call_id")
         if not isinstance(call_id, str) or not call_id.strip():
@@ -149,7 +188,9 @@ def dispatch(harness, run, operation, request, session_dispatch):
         _save(harness, run, record)
         return response
 
-    return session_dispatch(harness, run, invoke, request)
+    result = session_dispatch(harness, run, invoke, request)
+    harness._product_recovery = False
+    return result
 
 
 def retry_call(harness, run, problem, decision):

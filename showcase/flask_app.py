@@ -462,6 +462,7 @@ def create_app(
                 job_id=job_id,
                 idempotency_key=request.headers.get("Idempotency-Key", ""),
                 answer=str(payload.get("answer", "")),
+                retry_call=payload.get("retry_call"),
             )
             return jsonify({**result, "existing": existing}), 200 if existing else 202
         except WorkspaceError as exc:

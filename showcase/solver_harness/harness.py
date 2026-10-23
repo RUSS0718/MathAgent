@@ -72,6 +72,7 @@ class SolverHarness:
         if store is not None and database_path is not None:
             raise SolverValidationError("provide either store or database_path")
         self._instance_id = uuid.uuid4().hex
+        self._product_recovery = False
         self._event_observer = event_observer
         self._config = _normalize_config(config)
         self._config_hash = _hash_json(self._config)
@@ -263,6 +264,16 @@ class SolverHarness:
         if current is None:
             raise SolverRunNotFoundError(normalized_run_id)
         self._validate_identity(current, normalized_run_id, None)
+        if self._product_recovery and normalized_event["type"].endswith("_dispatched"):
+            from .calls import pending_call
+
+            pending = pending_call(current)
+            if pending is not None:
+                return current
+            previous = next((item for item in current["events"]
+                             if item["event_id"] == normalized_event["event_id"]), None)
+            if previous is not None:
+                return current
         if (
             self._config.get("features", {}).get("stream_recovery") is True
             and current["state"]["phase"] == "TERMINAL"

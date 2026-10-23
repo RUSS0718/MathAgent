@@ -244,9 +244,11 @@ class RunService:
     def resume_run(self, run_id: str) -> dict[str, Any]:
         """Continue a recoverable graph state from the latest SQLite checkpoint."""
 
+        snapshot = self._require_run(run_id)
+        if (snapshot.get("result") or {}).get("solver_mode") == "star_limited":
+            raise RunResumeUnavailable()
         if self._execution_loop is None:
             raise RunResumeUnavailable()
-        snapshot = self._require_run(run_id)
         checkpoint = self._store.get_checkpoint(run_id)
         if checkpoint is None:
             raise RunResumeUnavailable()
@@ -309,9 +311,11 @@ class RunService:
         if (snapshot.get("result") or {}).get("solver_mode") == "star_limited":
             from .star_product_projection import current_solver
 
+            snapshot["result"].pop("retry_call", None)
             snapshot["result"]["solver"] = current_solver(self._store._connection, run_id)
         budget = self._budget_ledger.snapshot(run_id)
-        if budget is not None and not (snapshot.get("result") or {}).get("budget"):
+        if budget is not None and ((snapshot.get("result") or {}).get("solver_mode") == "star_limited"
+                                   or not (snapshot.get("result") or {}).get("budget")):
             snapshot["result"] = {**(snapshot.get("result") or {}), "budget": budget}
         attempts = [event["attempt"] for event in self._store.get_events(run_id) if event.get("type") == "request_attempt"]
         attempts = list({item["attempt_id"]: item for item in [*attempts, *self._budget_ledger.attempts(run_id)]}.values())
