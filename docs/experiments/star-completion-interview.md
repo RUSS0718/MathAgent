@@ -1,6 +1,6 @@
 # 完整 STAR 产品交付：范围访谈
 
-状态：范围已确认，spec 已发布；ticket 拆分待审阅。日期：2026-10-23。
+状态：范围与 ticket 拆分已确认，spec 和 13 张子工单均已发布。日期：2026-10-23。
 
 本轮讨论以当前研究基础设施和 Solver Harness 为起点。用户明确排除旧 v0.2 路线，不用其历史阶段命名解释当前进度。
 
@@ -72,6 +72,6 @@
 
 2026-10-23 初次环境只读预检：Docker CLI 与 WSL 命令存在，Docker Linux engine 连接失败。用户启动 Docker Desktop 后重查，Linux engine 已响应版本 29.6.1。此结果只证明引擎可连接，不证明隔离执行器的限制已经生效；实施风险验证仍需检查实际运行与限制。
 
-用户已整体确认最终合同，访谈结束。[父 spec #56](https://github.com/RUSS0718/MathAgent/issues/56) 为当前实施合同入口；拟定 SP tickets 的粒度和依赖待审阅后发布。此记录保留范围形成过程，不替代 GitHub spec/tickets。
+用户已整体确认最终合同及 ticket 拆分，访谈结束。[父 spec #56](https://github.com/RUSS0718/MathAgent/issues/56) 为当前实施合同入口，SP-01..SP-13 已发布为 [#57](https://github.com/RUSS0718/MathAgent/issues/57) 至 [#69](https://github.com/RUSS0718/MathAgent/issues/69)。父 spec 回填完整索引，子工单包含真实阻塞链接；当前可领取前沿为 SP-01 #57。此记录保留范围形成过程，不替代 GitHub spec/tickets。
 
 确认前不将上述候选范围写为 accepted ADR，不启动产品实现。确定的领域术语写入 GLOSSARY；涉及长期权衡的架构决定单独形成 ADR。
