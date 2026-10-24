@@ -212,7 +212,10 @@ class InternModelPort:
             f"You are the {role}. {role_definition} Return one JSON object only, no Markdown or commentary. "
             "Obey this exact response schema: "
             + json.dumps(schema, ensure_ascii=False)
-            + " Use only runtime allowed_tools. A tool_request is a proposed local computation, not evidence. "
+            + " Answer with a filled instance of this schema containing your actual values — "
+            "never echo the schema definition itself (a reply like "
+            '{"type": "object", "properties": ...} is a protocol failure). '
+            "Use only runtime allowed_tools. A tool_request is a proposed local computation, not evidence. "
             "Never fabricate tool receipts. Every pending tool_request MUST use label easy-verify, never verified. "
             "Group candidate substitutions into one request when possible. Omit expected_output unless the exact registered output is known; a guessed shape will not match. "
             "A successful polynomial candidate check proves substitution only, not completeness. "
