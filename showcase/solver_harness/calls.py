@@ -6,13 +6,15 @@ from collections.abc import Mapping
 from copy import deepcopy
 
 from ..redaction import redact
+from .intern_port import KNOWN_PROTOCOL_FAILURES
 
 
 class CallInterrupted(BaseException):
     """Stop role normalization while preserving a recoverable public snapshot."""
 
-    def __init__(self, run_id):
+    def __init__(self, run_id, call_id=None):
         self.run_id = run_id
+        self.call_id = call_id
 
 
 def pending_call(run):
@@ -170,15 +172,23 @@ def dispatch(harness, run, operation, request, session_dispatch):
                 stop(harness, run, "shared_admission_budget_exhausted")
                 raise HardBudgetStop(run["run_id"]) from None
             partial.append(str(getattr(exc, "partial_text", "")))
+            category = getattr(exc, "category", None)
+            # A fully received response that failed JSON/schema validation is a
+            # known protocol failure, not an unknown remote outcome: keep the
+            # provider finish reason, known usage and a safe response reference.
+            known_protocol = category in KNOWN_PROTOCOL_FAILURES
             record.update(
-                status="tool_error" if getattr(exc, "tool_error", False) else "unknown_outcome",
+                status="tool_error" if getattr(exc, "tool_error", False)
+                else "protocol_failed" if known_protocol else "unknown_outcome",
                 partial_text="".join(partial),
                 usage=getattr(exc, "usage", None),
+                finish_reason=getattr(exc, "finish_reason", None),
+                response_excerpt=getattr(exc, "response_excerpt", None),
                 error_type=type(exc).__name__,
-                error_category=getattr(exc, "category", None),
+                error_category=category,
             )
-            _save(harness, run, record, status="interrupted")
-            raise CallInterrupted(run["run_id"]) from None
+            _save(harness, run, record, status=None if known_protocol else "interrupted")
+            raise CallInterrupted(run["run_id"], record["call_id"]) from None
         latest = harness.get_run(run["run_id"])
         if latest["state"]["phase"] == "TERMINAL":
             record.update(

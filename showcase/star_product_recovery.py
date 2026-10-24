@@ -26,6 +26,21 @@ def recovery_projection(run):
         if item["status"] in {"dispatched", "streaming", "unknown_outcome"}
         and item["call_id"] not in replaced
     ]
+    # Known protocol failures stay visible for audit, but they never require a
+    # human unknown-request decision; each records how often a later action of
+    # the same role was dispatched after it (the bounded format repair).
+    protocol_failures = [
+        {"call_id": public_solver_call_id(run["run_id"], item["call_id"]),
+         "role": item["role"], "status": item["status"],
+         "error_category": item.get("error_category"),
+         "finish_reason": item.get("finish_reason"),
+         "usage": item.get("usage"),
+         "repair_attempts": sum(
+             1 for other in calls.values()
+             if other["role"] == item["role"]
+             and other["request_revision"] > item["request_revision"])}
+        for item in calls.values() if item["status"] == "protocol_failed"
+    ]
     events = run.get("events", [])
     receipts = {event["event_id"] for event in events if event["type"] == "tool_receipt"}
     unknown_tools = [
@@ -34,7 +49,8 @@ def recovery_projection(run):
         and event["event_id"].removesuffix(":dispatch") not in receipts
     ]
     return {"status": "needs_review" if unknown or unknown_tools else "safe",
-            "unknown_calls": unknown, "unknown_tools": unknown_tools, "retries": retries}
+            "unknown_calls": unknown, "unknown_tools": unknown_tools, "retries": retries,
+            "protocol_failures": protocol_failures}
 
 
 def authorize_resume(connection, row, decision):

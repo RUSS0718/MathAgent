@@ -22,4 +22,6 @@
 - **State Revision**：Solver Run 状态快照的单调版本号，用于拒绝基于过期快照的写入。
 - **STAR AC**：STAR Core 实施规格中的验收编号；引用时写作 `STAR AC-06`，不得与 v0.2 或 Solver Harness 的同号用例混用。
 - **v0.2 AC**：v0.2 Release Evidence 中的验收编号；引用时写作 `v0.2 AC-06`，例如真实 Intern 工具闭环。
+- **已知协议失败（Known Protocol Failure）**：提供方完整返回（finish_reason 与用量已知）但 JSON/schema 校验失败的响应；调用审计记录为 `protocol_failed` 并保留 finish_reason、已知用量与脱敏响应引用，可在剩余预算内以独立新调用身份有界修复或明确终止，不属于未知远端结果。
+- **未知远端结果（Unknown Outcome）**：网络中断、未完成流或在途进程退出导致请求结果不可证实的状态；调用保持 `unknown_outcome` 并进入 needs_review，零自动重发，只有用户显式选择后才以新调用身份重试，且保留未知预留与原 deadline。
 - **Verifier 计算续接（Verifier Compute Continuation）**：审查者通过回复协议提出 `tool_request`、运行时经既有 Registry 与隔离执行器实际执行、真实回执进入相同审查会话续接的机制；未完成或被拒绝的请求不得解析为接受裁决或证据升级，请求次数有界且全部计入原 Run 账本。
