@@ -63,11 +63,17 @@ SCHEMAS = {
                 "assumptions": TEXTS,
                 "approach": TEXT,
             }),
+            "tool_request": {"oneOf": [TOOL, {"enum": [None]}]},
         },
         ["goal_gate", "logic_gate", "verdict", "objection"],
     ),
     "whole_solution_verifier": obj(
-        {"verdict": {"enum": ["ACCEPT", "REJECT"]}, "reason": TEXT}, ["verdict"]
+        {
+            "verdict": {"enum": ["ACCEPT", "REJECT"]},
+            "reason": TEXT,
+            "tool_request": {"oneOf": [TOOL, {"enum": [None]}]},
+        },
+        ["verdict"],
     ),
     "final_generator": obj({"final_response": TEXT}),
     "meta": obj(
