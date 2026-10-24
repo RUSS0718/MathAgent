@@ -137,7 +137,68 @@ def run_exploration(
         guidance_task = current["state"].get("pending_guidance_task")
         if isinstance(guidance_task, str) and guidance_task.strip():
             request["specific_task"] = guidance_task
-        reply = harness.dispatch(current, state["model_port"].complete, request)
+        from .calls import CallInterrupted
+
+        # A complete but protocol-illegal explore reply is a known failure
+        # (#70 bounded recovery): one fresh explore action with its own identity
+        # may repair the format, mirroring the planner's star_routing-gated
+        # repair. The repair reserves through the same counters and S3
+        # admission; a second failure still ends dispatch honestly.
+        repair_allowed = (
+            harness._config.get("features", {}).get("star_routing") is True)
+        reply = None
+        successful_request = request
+        for attempt in range(2 if repair_allowed else 1):
+            dispatch_request = dict(request)
+            if attempt:
+                dispatch_request["call_id"] = f"{request['call_id']}:repair-1"
+                dispatch_request["repair_instruction"] = (
+                    "The previous reply was complete but not valid protocol JSON. "
+                    "Re-issue the exploration assessment as one strict JSON object "
+                    "matching the schema; escape every backslash inside code strings."
+                )
+            try:
+                reply = harness.dispatch(current, state["model_port"].complete, dispatch_request)
+                successful_request = dispatch_request
+                break
+            except CallInterrupted as exc:
+                latest = harness.get_run(state["run_id"])
+                failed = latest["state"].get("calls", {}).get(getattr(exc, "call_id", None), {})
+                if (attempt or not repair_allowed
+                        or failed.get("status") != "protocol_failed"
+                        or failed.get("error_category") not in {
+                            "invalid_json", "invalid_role_schema",
+                            "empty_response", "truncated_response"}):
+                    raise
+                noted = harness.commit_event(
+                    latest["run_id"],
+                    expected_revision=latest["state_revision"],
+                    event={
+                        "event_id": f"explore-parse-{latest['state_revision']}",
+                        "type": "explore_parse_failed",
+                        "call_id": failed["call_id"],
+                        "summary": "Explore reply failed the response protocol; "
+                                   "one bounded repair follows",
+                    },
+                    state_updates={"status": "running"},
+                )
+                current = harness.commit_event(
+                    noted["run_id"],
+                    expected_revision=noted["state_revision"],
+                    event={
+                        "event_id": f"explore-dispatched-{state['round']}-repair-1",
+                        "type": "explore_dispatched",
+                        "round": state["round"],
+                        "role": "explore",
+                        "summary": f"Explore round {state['round']} repair dispatched",
+                    },
+                    state_updates={
+                        "counters": {
+                            **noted["state"]["counters"],
+                            "model_calls": noted["state"]["counters"]["model_calls"] + 1,
+                        },
+                    },
+                )
         run = harness.get_run(state["run_id"])
         from .verifier_compute import continue_review
 
@@ -170,8 +231,8 @@ def run_exploration(
         run, reply, unfulfilled = continue_review(
             harness, run, role="explore", step_id=None, round_number=state["round"],
             attempt_index=int(run["state"].get("attempt_index") or 0),
-            base_call_id=request["call_id"], base_request=request, reply=reply,
-            reserve_and_dispatch=reserve_and_dispatch, receipt_prefix="explore-tool")
+            base_call_id=successful_request["call_id"], base_request=successful_request,
+            reply=reply, reserve_and_dispatch=reserve_and_dispatch, receipt_prefix="explore-tool")
         return {
             "run": run,
             "reply": None if unfulfilled else reply,
