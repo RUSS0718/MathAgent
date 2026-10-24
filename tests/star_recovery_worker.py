@@ -66,6 +66,25 @@ CLASSIFIED_CHALLENGE = {
          "scope": "boundary case of the base step", "claim_indexes": []},
     ],
 }
+# ALIGN-09 chain windows: one public Run crosses every new persistent boundary
+# with a real process exit at each. chain_a seeds the Job; chain_b..chain_e are
+# resume processes that die at the next boundary; the test resumes the last leg.
+CHAIN_WINDOWS = {"chain_a", "chain_b", "chain_c", "chain_d", "chain_e"}
+CHAIN_RESUME_WINDOWS = {"chain_b", "chain_c", "chain_d", "chain_e"}
+CHAIN_LEMMA = "CHAIN-LEMMA forward direction of the addition identity"
+CHAIN_CLASSIFIED = {
+    "goal_gate": "PARTIAL", "logic_gate": "UNCERTAIN", "verdict": "CHALLENGE",
+    "objection": "The computation must precede the conclusion.",
+    "classified_outcomes": [
+        {"category": "Lemma", "statement": CHAIN_LEMMA,
+         "scope": "forward direction of the base step", "claim_indexes": [0]},
+    ],
+}
+CHAIN_GUIDANCE = {
+    "action_type": "trace_back", "specific_task": "REDO_CHAIN_SENTINEL",
+    "use_pure_reasoning": False, "trace_back_to": 1,
+    "rationale": "Rebuild the base step with its own computation",
+}
 
 
 def requests_so_far(folder):
@@ -111,6 +130,60 @@ def guidance_reply(role, context, folder):
     return {"verdict": "ACCEPT", "reason": "Addition"}
 
 
+def chain_reply(role, context, folder):
+    """One Run, five boundaries: guidance, tool receipt, classified review,
+    CONTINUE new action and the final candidate, each followed by an exit."""
+    sent = requests_so_far(folder)
+
+    def seen(role_name, step_id=None):
+        return sum(1 for item in sent if item.get("role") == role_name
+                   and (step_id is None or item.get("step", {}).get("step_id") == step_id))
+
+    if role == "explore":
+        return {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
+    if role == "planner":
+        return PLAN
+    if role == "reasoner":
+        step_id = context.get("step", {}).get("step_id")
+        if step_id == "s1":
+            attempt = seen("reasoner", "s1")
+            if attempt == 2:
+                return {"argument": "Redo with its own computation CHAIN-S1R", "claims": [
+                    {"statement": "1+1=2 by the registered check", "label": "easy-verify",
+                     "tool_request": {"tool": "polynomial_check", "arguments": {},
+                                      "expected_output": 2, "scope": "finite_computation"}}],
+                    "blocked": False}
+            if attempt > 2:
+                return {"argument": "Boundary case handled CHAIN-S1B",
+                        "claims": [], "blocked": False}
+            return {"argument": "Attempt one CHAIN-S1", "claims": [], "blocked": False}
+        if step_id == "s2":
+            if seen("reasoner", "s2") == 1:
+                return {"argument": "Stuck second attempt CHAIN-S2", "claims": [],
+                        "blocked": True}
+            return {"argument": "Second fact CHAIN-S2B", "claims": [], "blocked": False}
+        if seen("reasoner", "s3") == 1:
+            return {"argument": "Conclusion attempt CHAIN-S3A", "claims": [], "blocked": False}
+        return {"argument": "Conclusion CHAIN-S3B", "claims": [], "blocked": False}
+    if role == "step_verifier":
+        step_id = context.get("step", {}).get("step_id")
+        if step_id == "s1":
+            review = seen("step_verifier", "s1")
+            if review == 2:
+                return CHAIN_CLASSIFIED
+            return ACCEPT_VERDICT
+        if step_id == "s3" and seen("step_verifier", "s3") == 1:
+            return PROPOSE_REPLAN
+        return ACCEPT_VERDICT
+    if role == "meta":
+        if context.get("guidance_request") is not None:
+            return CHAIN_GUIDANCE
+        return META_CONTINUE_DECISION
+    if role == "final_generator":
+        return {"final_response": "1+1=2 CHAIN-ANSWER"}
+    return {"verdict": "ACCEPT", "reason": "Addition"}
+
+
 def config(folder, *, crash_tools=False):
     registry = ToolRegistry()
     def tool(_arguments):
@@ -123,7 +196,8 @@ def config(folder, *, crash_tools=False):
     window = (folder / "window").read_text() if (folder / "window").exists() else ""
     # Guidance windows replay two fallback rulings; trace-back windows re-execute
     # every archived step on resume; meta_continue replays s1 as a new action.
-    calls = (24 if window in GUIDANCE_WINDOWS or window == REPLAN_GUIDANCE_WINDOW
+    calls = (32 if window in CHAIN_WINDOWS
+             else 24 if window in GUIDANCE_WINDOWS or window == REPLAN_GUIDANCE_WINDOW
              else 16 if window in TRACE_WINDOWS
              or window in {"meta_continue", "classified", "explore_tool"}
              else 12)
@@ -140,11 +214,14 @@ def config(folder, *, crash_tools=False):
                                        "local_code_tool": True,
                                        **({"meta_guidance": True}
                                           if window in GUIDANCE_WINDOWS
-                                          or window == REPLAN_GUIDANCE_WINDOW else {})}}
+                                          or window == REPLAN_GUIDANCE_WINDOW
+                                          or window in CHAIN_WINDOWS else {})}}
 
 
 def reply_value(window, context, folder):
     role = context["role"]
+    if window in CHAIN_WINDOWS:
+        return chain_reply(role, context, folder)
     if window in GUIDANCE_WINDOWS or window == REPLAN_GUIDANCE_WINDOW:
         return guidance_reply(role, context, folder)
     if role == "explore":
@@ -317,6 +394,37 @@ def main():
                     time.sleep(.01)
                 os._exit(71)
             return
+        if window in CHAIN_WINDOWS:
+            # ALIGN-09 combination windows: each dies at exactly one new
+            # persistent boundary of the same public Run.
+            if window == "chain_a" and event.get("solver_event_type") == "meta_guidance_decided":
+                while not (folder / "job_id").exists():
+                    time.sleep(.01)
+                os._exit(71)
+            if (window == "chain_b" and event.get("solver_event_type") == "tool_receipt"
+                    and last.get("role") == "reasoner"
+                    and last.get("step", {}).get("step_id") == "s1"):
+                while not (folder / "job_id").exists():
+                    time.sleep(.01)
+                os._exit(71)
+            if (window == "chain_c" and event.get("solver_event_type") == "step_reviewed"
+                    and event.get("classified_outcomes")
+                    and last.get("step", {}).get("step_id") == "s1"):
+                while not (folder / "job_id").exists():
+                    time.sleep(.01)
+                os._exit(71)
+            if (window == "chain_d" and event.get("solver_event_type") == "meta_decided"
+                    and last.get("role") == "meta"
+                    and last.get("progress", {}).get("current_step") == "s3"):
+                while not (folder / "job_id").exists():
+                    time.sleep(.01)
+                os._exit(71)
+            if (window == "chain_e"
+                    and event.get("solver_event_type") == "final_candidate_generated"):
+                while not (folder / "job_id").exists():
+                    time.sleep(.01)
+                os._exit(71)
+            return
         target = {"accepted": "step_reviewed", "response": "call_audit",
                   "unknown": "never",
                   "tool_unknown": "never",
@@ -360,6 +468,15 @@ def main():
         client = app.test_client()
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
         headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
+        if window in CHAIN_RESUME_WINDOWS:
+            # Resume the Job crashed by the previous chain window and die at the
+            # next persistent boundary of the same public Run.
+            job_id = (folder / "job_id").read_text()
+            response = client.post(f"/api/agent/jobs/{job_id}/resume", json={},
+                                   headers=headers)
+            (folder / "resume_status").write_text(str(response.status_code))
+            time.sleep(20)
+            raise RuntimeError("chain resume window was not reached")
         session = client.post("/api/new_chat", headers=headers).get_json()["new_session_id"]
         headers["Idempotency-Key"] = str(uuid.uuid4())
         response = client.post("/api/agent/jobs", json={"message": "1+1", "session_id": session,
