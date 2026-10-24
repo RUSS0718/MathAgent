@@ -23,6 +23,61 @@ PLAN = {"version": 1, "steps": [
 
 TRACE_WINDOWS = {"trace_before", "trace_after"}
 STREAM_WINDOWS = {"stream_exit"}
+META_CONTINUE_DECISION = {"decision": "CONTINUE",
+                          "reason_summary": "Re-solve the same step against the objection.",
+                          "plan_summary": "", "forbidden_directions": [],
+                          "reusable_results": [], "trace_back_to": None}
+# ALIGN-01 crash windows: die right after a ruling commit, before its executor runs.
+GUIDANCE_WINDOWS = {"guidance_decided", "meta_decided"}
+GUIDANCE_TRACE_1 = {
+    "action_type": "trace_back", "specific_task": "REDO_FROM_SENTINEL",
+    "use_pure_reasoning": False, "trace_back_to": 1,
+    "rationale": "Retry from the first step",
+}
+META_TRACE_2 = {
+    "decision": "TRACE_BACK", "reason_summary": "The rebuilt route also failed",
+    "plan_summary": "Rebuild from the second step", "forbidden_directions": [],
+    "reusable_results": [], "trace_back_to": 2,
+}
+PROPOSE_REPLAN = {"goal_gate": "NO", "logic_gate": "FAIL", "verdict": "PROPOSE_REPLAN",
+                  "objection": "The conclusion does not follow"}
+ACCEPT_VERDICT = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT", "objection": ""}
+
+
+def requests_so_far(folder):
+    path = folder / "requests.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def guidance_reply(role, context, folder):
+    """Two-fallback scenario: Guidance trace-back to 1, then a new Meta ruling to 2."""
+    sent = requests_so_far(folder)  # The current request is already appended.
+    if role == "explore":
+        return {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
+    if role == "planner":
+        return PLAN
+    if role == "reasoner":
+        step_id = context.get("step", {}).get("step_id")
+        blocked = step_id == "s2" and sum(
+            1 for item in sent if item.get("role") == "reasoner"
+            and item.get("step", {}).get("step_id") == "s2") == 1
+        return {"argument": "Addition", "claims": [], "blocked": blocked}
+    if role == "step_verifier":
+        step_id = context.get("step", {}).get("step_id")
+        reviewed = sum(1 for item in sent if item.get("role") == "step_verifier"
+                       and item.get("step", {}).get("step_id") == step_id)
+        # Only the first s3 review proposes; every other review accepts.
+        return PROPOSE_REPLAN if step_id == "s3" and reviewed == 1 else ACCEPT_VERDICT
+    if role == "meta":
+        # A guidance request carries a non-null guidance_request; a ruling does not.
+        if context.get("guidance_request") is not None:
+            return GUIDANCE_TRACE_1
+        return META_TRACE_2
+    if role == "final_generator":
+        return {"final_response": "2"}
+    return {"verdict": "ACCEPT", "reason": "Addition"}
 
 
 def config(folder, *, crash_tools=False):
@@ -35,8 +90,10 @@ def config(folder, *, crash_tools=False):
         return 2
     registry.register("polynomial_check", tool)
     window = (folder / "window").read_text() if (folder / "window").exists() else ""
-    # Trace-back windows re-execute every archived step on resume and need more calls.
-    calls = 16 if window in TRACE_WINDOWS else 12
+    # Guidance windows replay two fallback rulings; trace-back windows re-execute
+    # every archived step on resume; meta_continue replays s1 as a new action.
+    calls = (24 if window in GUIDANCE_WINDOWS
+             else 16 if window in TRACE_WINDOWS or window == "meta_continue" else 12)
     adapter = (InternStreamAdapter(InternChatClient(retry=1), max_tokens=256)
                if window in STREAM_WINDOWS
                else InternModelAdapter(InternChatClient(retry=1), max_tokens=256))
@@ -47,15 +104,21 @@ def config(folder, *, crash_tools=False):
             "SHOWCASE_STAR_BUDGET": RunBudgetLimits(max_model_calls=calls, max_http_attempts=calls),
             "SHOWCASE_STAR_REGISTRY": registry,
             "SHOWCASE_STAR_FEATURES": {"final_generation": True, "final_solution_review": True,
-                                       "local_code_tool": True}}
+                                       "local_code_tool": True,
+                                       **({"meta_guidance": True}
+                                          if window in GUIDANCE_WINDOWS else {})}}
 
 
 def reply_value(window, context, folder):
     role = context["role"]
+    if window in GUIDANCE_WINDOWS:
+        return guidance_reply(role, context, folder)
     if role == "explore":
         value = {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
     elif role == "planner":
         value = PLAN
+    elif role == "meta" and window == "meta_continue":
+        value = META_CONTINUE_DECISION
     elif role == "reasoner":
         value = {"argument": "Addition", "claims": [], "blocked": False}
         if (window in {"tool", "tool_unknown"}
@@ -63,6 +126,21 @@ def reply_value(window, context, folder):
             value["claims"] = [{"statement": "1+1=2", "label": "easy-verify",
                                "tool_request": {"tool": "polynomial_check", "arguments": {},
                                                 "expected_output": 2, "scope": "finite_computation"}}]
+    elif (
+        role == "step_verifier"
+        and window == "meta_continue"
+        and context["step"]["step_id"] == "s1"
+        and sum(
+            1
+            for line in (folder / "requests.jsonl").read_text(encoding="utf-8").splitlines()
+            if (item := json.loads(line)).get("role") == "step_verifier"
+            and item.get("step", {}).get("step_id") == "s1"
+        )
+        == 1
+    ):
+        # Only the first s1 review proposes replan; the new action's re-review accepts.
+        value = {"goal_gate": "NO", "logic_gate": "FAIL", "verdict": "PROPOSE_REPLAN",
+                 "objection": "First route is unsupported"}
     elif (
         role == "step_verifier"
         and window in TRACE_WINDOWS
@@ -157,6 +235,13 @@ def main():
         original(store, job_id, event)
         log = folder / "requests.jsonl"
         last = json.loads(log.read_text(encoding="utf-8").splitlines()[-1]) if log.exists() else {}
+        if window in GUIDANCE_WINDOWS:
+            ruling = "meta_guidance_decided" if window == "guidance_decided" else "meta_decided"
+            if event.get("solver_event_type") == ruling and last.get("role") == "meta":
+                while not (folder / "job_id").exists():
+                    time.sleep(.01)
+                os._exit(71)
+            return
         target = {"accepted": "step_reviewed", "response": "call_audit",
                   "unknown": "never",
                   "tool_unknown": "never",
@@ -165,10 +250,16 @@ def main():
                   "exchange": "session_recorded",
                   "trace_before": "step_reviewed",
                   "trace_after": "trace_back_applied",
-                  "stream_exit": "never"}[window]
-        target_role = "reasoner" if window == "tool" else "step_verifier"
+                  "stream_exit": "never",
+                  "meta_continue": "meta_decided"}[window]
+        target_role = "reasoner" if window == "tool" else (
+            "meta" if window == "meta_continue" else "step_verifier")
+        if window == "meta_continue":
+            hit_step = last.get("progress", {}).get("current_step") == "s1"
+        else:
+            hit_step = last.get("step", {}).get("step_id") == "s2"
         if (event.get("solver_event_type") == target and last.get("role") == target_role
-                and last.get("step", {}).get("step_id") == "s2"):
+                and hit_step):
             while not (folder / "job_id").exists():
                 time.sleep(.01)
             os._exit(71)

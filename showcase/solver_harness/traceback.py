@@ -3,6 +3,23 @@
 from copy import deepcopy
 
 
+def transition_decision(run, state, decision):
+    """Whether a persisted decision is the ruling this transition committed.
+
+    A decision only grants execution authority while its Run, plan version, Plan
+    Attempt, step and committing State Revision all match the transition being
+    applied and it has not been consumed before. History never re-executes.
+    """
+    return (
+        isinstance(decision, dict)
+        and decision.get("consumed") is None
+        and decision.get("run_id") == run["run_id"]
+        and decision.get("plan_version") == state["plan_version"]
+        and decision.get("attempt_index") == state["attempt_index"]
+        and decision.get("step_id") == state["current_step"]
+    )
+
+
 def apply_traceback(harness, run):
     """Apply only an explicit valid target; retain immutable failure snapshots."""
     state = run["state"]
@@ -13,10 +30,13 @@ def apply_traceback(harness, run):
     meta = state.get("meta_decision", {})
     guidance = state.get("meta_guidance_decision") or {}
     from_guidance = (
-        state["phase"] == "TRACE_BACK" and guidance.get("action_type") == "trace_back"
+        state["phase"] == "TRACE_BACK"
+        and guidance.get("action_type") == "trace_back"
+        and transition_decision(run, state, guidance)
     )
     from_meta = state["phase"] == "TRACE_BACK" and (
-        meta.get("decision") == "TRACE_BACK" or from_guidance
+        (meta.get("decision") == "TRACE_BACK" and transition_decision(run, state, meta))
+        or from_guidance
     )
     if from_meta:
         verification = {
@@ -118,6 +138,15 @@ def apply_traceback(harness, run):
         "invalidated_results": invalidated,
         "rescued_results": rescued,
     }
+    # Record the consumption result on the ruling this archive actually executed;
+    # a consumed ruling can never authorize a later transition again.
+    ruling = guidance if from_guidance else meta
+    decision_revision = ruling.get("decided_at_revision") if from_meta else None
+    consumption = {
+        "event_type": "trace_back_applied",
+        "state_revision": run["state_revision"] + 1,
+        "trace_back_to": target,
+    }
     return harness.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],
@@ -131,6 +160,8 @@ def apply_traceback(harness, run):
                 "action_type": "trace_back",
                 "failure_type": guidance.get("failure_type"),
             } if from_guidance else {}),
+            **({"decision_revision": decision_revision}
+               if isinstance(decision_revision, int) else {}),
             "attempt_index": attempt + 1,
             "from_step_index": current + 1,
             "archived_step_count": sum(key in invalid_steps for key in state["steps"]),
@@ -148,5 +179,9 @@ def apply_traceback(harness, run):
             "rescued_results": rescued,
             "failure_records": [*state["failure_records"], failure],
             "confirmed_failures_ledger": [*state["confirmed_failures_ledger"], failure],
+            **({"meta_guidance_decision": {**guidance, "consumed": consumption}}
+               if from_guidance else {}),
+            **({"meta_decision": {**meta, "consumed": consumption}}
+               if from_meta and not from_guidance else {}),
         },
     )

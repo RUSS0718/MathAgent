@@ -4,7 +4,8 @@ import json
 import unittest
 
 from showcase.run_budget import RunBudgetLimits
-from tests.star_product_support import POLISH, SOLVED, StarJobFixture
+from tests.star_product_support import (POLISH, SOLVED, StarJobFixture,
+                                        assert_no_uncalibrated_probability)
 
 
 class StarRealContradictionReplayTest(StarJobFixture, unittest.TestCase):
@@ -45,7 +46,7 @@ class StarRealContradictionReplayTest(StarJobFixture, unittest.TestCase):
         self.assertEqual('low', replayed['confidence_level'])
         self.assertEqual('low', replayed['evidence_grade']['confidence_level'])
         self.assertIn('same_rank_candidate_conflict', replayed['evidence_grade']['reason_codes'])
-        self.assertNotIn('0.95', json.dumps(first))
+        assert_no_uncalibrated_probability(self, first)
         self.assertEqual(2, len(self.outbound))
         evidence = self.client.get(f'/api/runs/{job_id}/evidence').get_json()
         self.assertEqual(decision, evidence['verification']['selection'])
@@ -116,8 +117,8 @@ class StarUncalibratedProbabilityTest(StarJobFixture, unittest.TestCase):
                              self.client.get(f'/api/runs/{job_id}/evidence').get_json(),
                              self.client.get(f'/api/agent/jobs/{job_id}/candidate-replay')
                              .get_json()])
-        self.assertNotIn('0.95', public)
-        self.assertNotIn('"confidence"', public)
+        # A raw-text '0.95' scan misfires on wall-clock fields; scan parsed output.
+        assert_no_uncalibrated_probability(self, public)
         self.assertNotIn('calibrated', public)
         self.assertEqual([], job['result']['solver']['candidate_history'])
 
@@ -140,7 +141,8 @@ class StarUncalibratedProbabilityTest(StarJobFixture, unittest.TestCase):
                     and json.loads(line[6:]).get('solver_event_type') == 'step_reviewed']
         self.assertTrue(reviewed)
         self.assertNotIn('ACCEPT', [event.get('verdict') for event in reviewed])
-        public = stream + json.dumps([job, self.report(job_id),
-                                      self.client.get(f'/api/runs/{job_id}/evidence').get_json()])
-        self.assertNotIn('0.95', public)
+        evidence = self.client.get(f'/api/runs/{job_id}/evidence').get_json()
+        public = stream + json.dumps([job, self.report(job_id), evidence])
+        # A raw-text '0.95' scan misfires on wall-clock fields; scan parsed output.
+        assert_no_uncalibrated_probability(self, stream, job, self.report(job_id), evidence)
         self.assertNotIn('"confidence"', public)
