@@ -204,37 +204,6 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         "explore_more": "EXPLORE",
         "retry_different_method": "STEP_EXECUTE",
     }[action]
-    updates = {
-        "phase": phase,
-        "meta_history": history,
-        "session_refs": {**state["session_refs"], "meta": session},
-        "meta_interventions": [
-            *state["meta_interventions"],
-            {
-                **({"kind": "guidance", "failure_type": guidance["failure_type"],
-                    "step_id": state["current_step"], "plan_version": state["plan_version"],
-                    "attempt_index": state["attempt_index"]}
-                   if guidance is not None else {}),
-                "session_key": session,
-                **({
-                    "trigger": trigger,
-                    "meta_trigger": trigger,
-                    "upgrade_reason": "round_limit_reached",
-                    "step_id": state["current_step"],
-                    "plan_version": state["plan_version"],
-                    "attempt_index": state["attempt_index"],
-                } if upgrade is not None else {}),
-                **decision,
-            },
-        ],
-    }
-    if guidance is None:
-        updates["meta_decision"] = decision
-    else:
-        updates["meta_guidance_decision"] = decision
-        updates["pending_guidance_task"] = decision["specific_task"]
-        if decision["action_type"] in {"retry_different_method", "explore_more"}:
-            updates["attempt_index"] = state["attempt_index"] + 1
     # 合法 CONTINUE 离开步骤审查裁决时发起新的求解动作：沿用既有 attempt 约定，
     # 让再次求解获得独立的事件与调用身份；已完成动作的身份、审计和核验结果
     # 保持不变，恢复重放仍按原身份复用（calls.pending_call / 事件幂等重放）。
@@ -246,6 +215,51 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         and state["phase"] == "META_DECIDE"
         and decision["decision"] == "CONTINUE"
     )
+    # Source identity of this intervention: executors may only consume a decision
+    # whose Run, plan version, Plan Attempt, step and committing State Revision all
+    # match the transition they are applying, and only while it stays unconsumed.
+    # Retry/explore guidance and the CONTINUE new action take effect on the attempt
+    # this commit creates.
+    identity = {
+        "run_id": run["run_id"],
+        "plan_version": state["plan_version"],
+        "attempt_index": state["attempt_index"] + (
+            1 if new_action or (
+                guidance is not None
+                and decision["action_type"] in {"retry_different_method", "explore_more"}
+            ) else 0
+        ),
+        "step_id": state["current_step"],
+        "decided_at_revision": run["state_revision"] + 1,
+        "consumed": None,
+    }
+    updates = {
+        "phase": phase,
+        "meta_history": history,
+        "session_refs": {**state["session_refs"], "meta": session},
+        "meta_interventions": [
+            *state["meta_interventions"],
+            {
+                **({"kind": "guidance", "failure_type": guidance["failure_type"]}
+                   if guidance is not None else {}),
+                **identity,
+                "session_key": session,
+                **({
+                    "trigger": trigger,
+                    "meta_trigger": trigger,
+                    "upgrade_reason": "round_limit_reached",
+                } if upgrade is not None else {}),
+                **decision,
+            },
+        ],
+    }
+    if guidance is None:
+        updates["meta_decision"] = {**decision, **identity}
+    else:
+        updates["meta_guidance_decision"] = {**decision, **identity}
+        updates["pending_guidance_task"] = decision["specific_task"]
+        if decision["action_type"] in {"retry_different_method", "explore_more"}:
+            updates["attempt_index"] = state["attempt_index"] + 1
     if new_action:
         updates["attempt_index"] = state["attempt_index"] + 1
     if action == "ABORT":

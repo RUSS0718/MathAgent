@@ -139,6 +139,9 @@ def run_step(
                 "failure_type": failure_type,
                 "action_type": action_type,
                 "specific_task_consumed": True,
+                **({"decision_revision": guidance["decided_at_revision"]}
+                   if isinstance(guidance, Mapping)
+                   and isinstance(guidance.get("decided_at_revision"), int) else {}),
             },
         )
     return run

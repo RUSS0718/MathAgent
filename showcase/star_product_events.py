@@ -25,6 +25,7 @@ def decision_fields(event, state, invocations=()):
         "archived_plan_version", "archived_step_count", "invalidated_result_count",
         "rescued_result_count", "failure_type", "action_type", "use_pure_reasoning",
         "specific_task_consumed", "triggered_by", "counterexample_verdict",
+        "decision_revision",
     ) if key in event}
     roles = {
         "step_reported": "reasoner",
