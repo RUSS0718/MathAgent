@@ -22,3 +22,4 @@
 - **State Revision**：Solver Run 状态快照的单调版本号，用于拒绝基于过期快照的写入。
 - **STAR AC**：STAR Core 实施规格中的验收编号；引用时写作 `STAR AC-06`，不得与 v0.2 或 Solver Harness 的同号用例混用。
 - **v0.2 AC**：v0.2 Release Evidence 中的验收编号；引用时写作 `v0.2 AC-06`，例如真实 Intern 工具闭环。
+- **Verifier 计算续接（Verifier Compute Continuation）**：审查者通过回复协议提出 `tool_request`、运行时经既有 Registry 与隔离执行器实际执行、真实回执进入相同审查会话续接的机制；未完成或被拒绝的请求不得解析为接受裁决或证据升级，请求次数有界且全部计入原 Run 账本。

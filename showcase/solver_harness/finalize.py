@@ -49,8 +49,9 @@ def dispatch(harness, run, operation, request):
         request["finalization_scope"] = True
 
     def invoke(prepared):
-        prepared = deepcopy(prepared)
-        prepared.update(allowed_tools=[], tool_policy={"allow": []})
+        if request["role"] == "final_generator":
+            prepared = deepcopy(prepared)
+            prepared.update(allowed_tools=[], tool_policy={"allow": []})
         return operation(prepared)
 
     try:
@@ -188,25 +189,45 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
         reason = budget_reason(run["state"], config)
         if reason:
             return finish(harness, run, "partial_budget_exhausted", reason, candidate)
-        run, review = dispatch(
-            harness,
-            run,
-            verifier_port.verify,
-            {
-                "role": "whole_solution_verifier",
-                "call_id": f"whole-review:{session}",
-                "session_key": f"whole_verify:{session}",
-                "problem": problem,
-                "solution_candidate": candidate,
-                "accepted_results": facts,
-                "review_criteria": [
-                    "original_problem_consistency",
-                    "completeness",
-                    "cross_step_logic",
-                    "output_format",
-                ],
-            },
-        )
+        base_request = {
+            "role": "whole_solution_verifier",
+            "call_id": f"whole-review:{session}",
+            "session_key": f"whole_verify:{session}",
+            "problem": problem,
+            "solution_candidate": candidate,
+            "accepted_results": facts,
+            "review_criteria": [
+                "original_problem_consistency",
+                "completeness",
+                "cross_step_logic",
+                "output_format",
+            ],
+        }
+        run, review = dispatch(harness, run, verifier_port.verify, base_request)
+        from .verifier_compute import continue_review, declared_request
+
+        if isinstance(review, Mapping) and declared_request(review) is not None:
+
+            def reserve_and_dispatch(current, _seq, _call_id, continuation):
+                return dispatch(harness, current, verifier_port.verify, continuation)
+
+            run, review, unfulfilled = continue_review(
+                harness,
+                run,
+                role="whole_solution_verifier",
+                step_id=None,
+                round_number=0,
+                attempt_index=state["attempt_index"],
+                base_call_id=f"whole-review:{session}",
+                base_request=base_request,
+                reply=review,
+                reserve_and_dispatch=reserve_and_dispatch,
+            )
+            if unfulfilled:
+                review = {
+                    "verdict": "UNAVAILABLE",
+                    "reason": "verifier_tool_request_unfulfilled",
+                }
         valid = (
             isinstance(review, Mapping)
             and isinstance(review.get("verdict"), str)
