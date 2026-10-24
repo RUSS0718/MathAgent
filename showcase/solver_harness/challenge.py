@@ -2,7 +2,7 @@
 
 from .budget import budget_reason
 from .step import _normalize_report, run_step
-from .traceback import apply_traceback
+from .traceback import apply_traceback, transition_decision
 from .verification import verify_step
 
 
@@ -284,9 +284,12 @@ def run_plan(
             max_runtime_seconds=max_runtime_seconds,
         )
         run = apply_traceback(harness, run)
+        explore_guidance = run["state"].get("meta_guidance_decision")
         if (
             run["state"]["phase"] == "EXPLORE"
-            and run["state"].get("meta_guidance_decision", {}).get("action_type") == "explore_more"
+            and isinstance(explore_guidance, dict)
+            and explore_guidance.get("action_type") == "explore_more"
+            and transition_decision(run, run["state"], explore_guidance)
         ):
             run = _explore_after_guidance(
                 harness, run, problem, model_port, max_model_calls, max_runtime_seconds
@@ -328,6 +331,16 @@ def _explore_after_guidance(harness, run, problem, model_port, max_model_calls, 
             "action_type": "explore_more",
             "specific_task_consumed": True,
             "role": "explore",
+            **({"decision_revision": guidance["decided_at_revision"]}
+               if isinstance(guidance.get("decided_at_revision"), int) else {}),
         },
-        state_updates={"phase": "STEP_EXECUTE", "pending_guidance_task": None},
+        state_updates={
+            "phase": "STEP_EXECUTE",
+            "pending_guidance_task": None,
+            "meta_guidance_decision": {**guidance, "consumed": {
+                "event_type": "meta_guidance_applied",
+                "state_revision": run["state_revision"] + 1,
+                "role": "explore",
+            }},
+        },
     )
