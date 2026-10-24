@@ -204,6 +204,21 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         "explore_more": "EXPLORE",
         "retry_different_method": "STEP_EXECUTE",
     }[action]
+    # Source identity of this intervention: executors may only consume a decision
+    # whose Run, plan version, Plan Attempt, step and committing State Revision all
+    # match the transition they are applying, and only while it stays unconsumed.
+    # Retry and explore guidance take effect on the attempt this commit creates.
+    identity = {
+        "run_id": run["run_id"],
+        "plan_version": state["plan_version"],
+        "attempt_index": state["attempt_index"] + (
+            1 if guidance is not None
+            and decision["action_type"] in {"retry_different_method", "explore_more"} else 0
+        ),
+        "step_id": state["current_step"],
+        "decided_at_revision": run["state_revision"] + 1,
+        "consumed": None,
+    }
     updates = {
         "phase": phase,
         "meta_history": history,
@@ -211,27 +226,23 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         "meta_interventions": [
             *state["meta_interventions"],
             {
-                **({"kind": "guidance", "failure_type": guidance["failure_type"],
-                    "step_id": state["current_step"], "plan_version": state["plan_version"],
-                    "attempt_index": state["attempt_index"]}
+                **({"kind": "guidance", "failure_type": guidance["failure_type"]}
                    if guidance is not None else {}),
+                **identity,
                 "session_key": session,
                 **({
                     "trigger": trigger,
                     "meta_trigger": trigger,
                     "upgrade_reason": "round_limit_reached",
-                    "step_id": state["current_step"],
-                    "plan_version": state["plan_version"],
-                    "attempt_index": state["attempt_index"],
                 } if upgrade is not None else {}),
                 **decision,
             },
         ],
     }
     if guidance is None:
-        updates["meta_decision"] = decision
+        updates["meta_decision"] = {**decision, **identity}
     else:
-        updates["meta_guidance_decision"] = decision
+        updates["meta_guidance_decision"] = {**decision, **identity}
         updates["pending_guidance_task"] = decision["specific_task"]
         if decision["action_type"] in {"retry_different_method", "explore_more"}:
             updates["attempt_index"] = state["attempt_index"] + 1
