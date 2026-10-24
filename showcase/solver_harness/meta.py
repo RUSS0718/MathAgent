@@ -204,16 +204,30 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         "explore_more": "EXPLORE",
         "retry_different_method": "STEP_EXECUTE",
     }[action]
+    # 合法 CONTINUE 离开步骤审查裁决时发起新的求解动作：沿用既有 attempt 约定，
+    # 让再次求解获得独立的事件与调用身份；已完成动作的身份、审计和核验结果
+    # 保持不变，恢复重放仍按原身份复用（calls.pending_call / 事件幂等重放）。
+    # Challenge 轮次升级的 CONTINUE 不在此列：其身份已由
+    # challenge-continuation 后缀区分，且每步每 attempt 的升级续算保持有界。
+    new_action = (
+        guidance is None
+        and upgrade is None
+        and state["phase"] == "META_DECIDE"
+        and decision["decision"] == "CONTINUE"
+    )
     # Source identity of this intervention: executors may only consume a decision
     # whose Run, plan version, Plan Attempt, step and committing State Revision all
     # match the transition they are applying, and only while it stays unconsumed.
-    # Retry and explore guidance take effect on the attempt this commit creates.
+    # Retry/explore guidance and the CONTINUE new action take effect on the attempt
+    # this commit creates.
     identity = {
         "run_id": run["run_id"],
         "plan_version": state["plan_version"],
         "attempt_index": state["attempt_index"] + (
-            1 if guidance is not None
-            and decision["action_type"] in {"retry_different_method", "explore_more"} else 0
+            1 if new_action or (
+                guidance is not None
+                and decision["action_type"] in {"retry_different_method", "explore_more"}
+            ) else 0
         ),
         "step_id": state["current_step"],
         "decided_at_revision": run["state_revision"] + 1,
@@ -246,6 +260,8 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         updates["pending_guidance_task"] = decision["specific_task"]
         if decision["action_type"] in {"retry_different_method", "explore_more"}:
             updates["attempt_index"] = state["attempt_index"] + 1
+    if new_action:
+        updates["attempt_index"] = state["attempt_index"] + 1
     if action == "ABORT":
         updates.update(
             status="partial_aborted", final_response="Run aborted: " + decision["reason_summary"]
@@ -266,6 +282,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
                 "action_type": decision["action_type"],
                 "use_pure_reasoning": decision["use_pure_reasoning"],
             } if guidance_event else {"decision": decision}),
+            **({"attempt_index": updates["attempt_index"]} if new_action else {}),
             **({"trigger": trigger, "upgrade_reason": "round_limit_reached", "role": "meta"} if upgrade is not None else {}),
             **({"role": "meta"} if guidance_event else {}),
         },
