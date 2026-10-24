@@ -16,6 +16,7 @@
 - **完整 STAR 参考模式（STAR Reference）**：按完整 STAR Core 行为合同组织数学任务的求解模式，各机制按适用条件参与执行并保留可审查结果；项目的 Best-Effort 扩展独立验收。该名称不代表复现论文成绩或证明数学正确性。
 - **Solver Run**：Solver Harness 的一次隔离执行，拥有独立的 `run_id`、状态版本和事件记录；与产品 Run 共用数据库，但状态存在独立表中。
 - **Plan Attempt**：同一 Solver Run 内一次可被回退或重规划替换的计划尝试；它也是 Reasoner 会话的隔离边界。
+- **ReplanDecision**：`Guidance.action_type=replan` 之后进入的独立审批裁决；只有当前转换的有效 `APPROVE_REPLAN` 才归档换计划并传入本次禁止方向与救援成果，Guidance 请求本身不取得执行权（ALIGN-03）。
 - **Candidate**：可被最终选择的完整答案版本；候选不是已证定理，必须保留来源、证据和失效状态。
 - **Best-Effort Finalization**：预算耗尽后仅根据已持久化候选和证据选择答案的过程；它不新增模型或工具调用。
 - **State Revision**：Solver Run 状态快照的单调版本号，用于拒绝基于过期快照的写入。

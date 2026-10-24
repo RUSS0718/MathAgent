@@ -2,6 +2,7 @@
 
 import json
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -33,6 +34,13 @@ CONTINUE_WITH_OLD_DIRECTION = {
     "forbidden_directions": ["STALE_DIRECTION"],
     "reusable_results": ["RESCUE_SENTINEL"], "trace_back_to": None,
 }
+# The independent ReplanDecision that must approve a replan Guidance before any
+# archive happens; a Guidance request never replaces a plan by itself.
+REPLAN_RULING = {
+    "decision": "APPROVE_REPLAN", "reason_summary": "The blocked route needs a new plan",
+    "plan_summary": "Plan a direct addition", "forbidden_directions": [],
+    "reusable_results": [], "trace_back_to": None,
+}
 
 
 def guidance(action, *, trace_back_to=None):
@@ -60,6 +68,17 @@ class StarGuidanceTest(StarJobFixture, unittest.TestCase):
         self.assertTrue(protocol["trigger"].strip())
         self.assertTrue(protocol["permissions"])
         return protocol
+
+    def terminal(self, job_id):
+        # The replan decision adds a meta round trip to long scripted Jobs; poll
+        # longer than the shared 8s window before calling the observation a stall.
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            job = self.job(job_id)
+            if job["status"] in {"succeeded", "failed", "canceled"}:
+                return job
+            time.sleep(0.05)
+        self.fail("public STAR observation timed out")
 
     def run_public(self, replies, **config):
         registry = config.pop("SHOWCASE_STAR_REGISTRY", None)
@@ -152,8 +171,6 @@ class StarGuidanceTest(StarJobFixture, unittest.TestCase):
                               {"final_response": "2"}, ACCEPT], "explore", "DO_EXPLORE_MORE"),
             ("trace_back", [STEP, VERDICT, {"final_response": "2"}, ACCEPT],
              "reasoner", "DO_TRACE_BACK"),
-            ("replan", [PLAN_V2, STEP, VERDICT, {"final_response": "2"}, ACCEPT],
-             "planner", "DO_REPLAN"),
         ]
         for action, tail, role, task in cases:
             with self.subTest(action=action):
@@ -192,6 +209,30 @@ class StarGuidanceTest(StarJobFixture, unittest.TestCase):
                         if event.get("solver_event_type") == "trace_back_applied"
                     )
                     self.assertEqual(trace["active_skill_ids"], evidence_trace["active_skill_ids"])
+
+    def test_replan_guidance_goes_through_the_independent_replan_decision(self):
+        # A replan Guidance no longer replaces the plan directly: an independent
+        # ReplanDecision approves it, and the replacement Planner is instructed by
+        # the ruling instead of the Guidance task.
+        job_id, job, events = self.run_public([
+            NEED_PLAN, PLAN, {**PLAIN, "blocked": True},
+            guidance("replan"), REPLAN_RULING,
+            PLAN_V2, STEP, VERDICT, {"final_response": "2"}, ACCEPT,
+        ])
+        self.assertEqual("succeeded", job["status"], job)
+        guidance_decided = next(event for event in events
+                                if event.get("solver_event_type") == "meta_guidance_decided")
+        self.assertEqual("replan", guidance_decided.get("action_type"))
+        rulings = [event for event in events if event.get("solver_event_type") == "meta_decided"]
+        self.assertEqual("APPROVE_REPLAN", rulings[-1].get("decision"), rulings)
+        replaced = [event for event in events
+                    if event.get("solver_event_type") == "plan_replaced"]
+        self.assertEqual(1, len(replaced), replaced)
+        planner = next(item for item in self.outbound
+                       if item["role"] == "planner" and item.get("plan_version") == 2)
+        self.assertNotIn("specific_task", planner)
+        self.assertEqual(REPLAN_RULING["forbidden_directions"],
+                         planner["forbidden_directions"])
 
     def test_known_managed_tool_failure_triggers_code_issue_protocol(self):
         registry = ToolRegistry()
@@ -271,12 +312,12 @@ class StarGuidanceTest(StarJobFixture, unittest.TestCase):
                     "tool": "python_math", "arguments": {"code": "print(2)"},
                     "scope": "finite_computation", "expected_output": "2"}}]}
             job_id, job, _events = self.run_public([
-                NEED_PLAN, PLAN, failed_step, guidance("replan"),
+                NEED_PLAN, PLAN, failed_step, guidance("replan"), REPLAN_RULING,
                 REUSED_PLAN_V2,
                 PLAIN, VERDICT, {"final_response": "2"}, ACCEPT,
             ], SHOWCASE_STAR_REGISTRY=registry)
         self.assertEqual("succeeded", job["status"], job)
-        self.assertEqual(1, len([item for item in self.outbound if item["role"] == "meta"]))
+        self.assertEqual(2, len([item for item in self.outbound if item["role"] == "meta"]))
         self.assertTrue(any(
             item["role"] == "planner" and item.get("plan_version") == 2
             for item in self.outbound
@@ -324,7 +365,8 @@ class StarGuidanceTest(StarJobFixture, unittest.TestCase):
     def test_multiple_research_tasks_are_bounded_and_used_by_replacement_plan(self):
         features = {"reexplore_after_replan": True}
         job_id, job, _events = self.run_public([
-            NEED_PLAN, PLAN, {**PLAIN, "blocked": True}, guidance("replan"), DELEGATE_TWO,
+            NEED_PLAN, PLAN, {**PLAIN, "blocked": True}, guidance("replan"), REPLAN_RULING,
+            DELEGATE_TWO,
             {"findings": ["RESEARCH_FINDING_A"]},
             {"findings": ["RESEARCH_FINDING_B"]},
             PLAN_V2, PLAIN, VERDICT, {"final_response": "2"}, ACCEPT,
@@ -342,11 +384,14 @@ class StarGuidanceTest(StarJobFixture, unittest.TestCase):
         self.assertTrue(all(finding["provenance"] == "unverified_exploration"
                             for finding in findings))
         meta_requests = [item for item in self.outbound if item["role"] == "meta"]
-        self.assertEqual(2, len(meta_requests))
-        self.assertEqual(meta_requests[0]["session_key"], meta_requests[1]["session_key"])
-        self.assertEqual(1, len(meta_requests[1]["session_history"]))
-        self.assertEqual("meta", meta_requests[1]["session_history"][0]["request"]["role"])
-        self.assertEqual([], meta_requests[1]["forbidden_directions"])
+        self.assertEqual(3, len(meta_requests))
+        self.assertTrue(
+            all(request["session_key"] == meta_requests[0]["session_key"]
+                for request in meta_requests))
+        delegate = meta_requests[-1]
+        self.assertEqual(2, len(delegate["session_history"]))
+        self.assertEqual("meta", delegate["session_history"][0]["request"]["role"])
+        self.assertEqual([], delegate["forbidden_directions"])
 
     def test_guidance_replan_research_does_not_reuse_stale_meta_directions(self):
         replies = [
@@ -355,7 +400,7 @@ class StarGuidanceTest(StarJobFixture, unittest.TestCase):
             PLAIN, CHALLENGE_VERDICT, PLAIN, CHALLENGE_VERDICT,
             PLAIN, CHALLENGE_VERDICT, PLAIN, CHALLENGE_VERDICT,
             CONTINUE_WITH_OLD_DIRECTION,
-            {**PLAIN, "blocked": True}, guidance("replan"),
+            {**PLAIN, "blocked": True}, guidance("replan"), REPLAN_RULING,
             {"tasks": [{"prompt": "Find an alternative derivation",
                         "permitted_tools": [], "timeout_seconds": 2}]},
             {"findings": ["ALTERNATE_DERIVATION"]},
