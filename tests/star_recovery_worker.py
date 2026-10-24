@@ -23,6 +23,10 @@ PLAN = {"version": 1, "steps": [
 
 TRACE_WINDOWS = {"trace_before", "trace_after"}
 STREAM_WINDOWS = {"stream_exit"}
+META_CONTINUE_DECISION = {"decision": "CONTINUE",
+                          "reason_summary": "Re-solve the same step against the objection.",
+                          "plan_summary": "", "forbidden_directions": [],
+                          "reusable_results": [], "trace_back_to": None}
 
 
 def config(folder, *, crash_tools=False):
@@ -33,8 +37,9 @@ def config(folder, *, crash_tools=False):
         return 2
     registry.register("polynomial_check", tool)
     window = (folder / "window").read_text() if (folder / "window").exists() else ""
-    # Trace-back windows re-execute every archived step on resume and need more calls.
-    calls = 16 if window in TRACE_WINDOWS else 12
+    # Trace-back windows re-execute every archived step on resume and need more calls;
+    # meta_continue replays s1 as a new action after the CONTINUE decision.
+    calls = 16 if window in TRACE_WINDOWS or window == "meta_continue" else 12
     adapter = (InternStreamAdapter(InternChatClient(retry=1), max_tokens=256)
                if window in STREAM_WINDOWS
                else InternModelAdapter(InternChatClient(retry=1), max_tokens=256))
@@ -54,6 +59,8 @@ def reply_value(window, context, folder):
         value = {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
     elif role == "planner":
         value = PLAN
+    elif role == "meta" and window == "meta_continue":
+        value = META_CONTINUE_DECISION
     elif role == "reasoner":
         value = {"argument": "Addition", "claims": [], "blocked": False}
         if (window in {"tool", "tool_unknown"}
@@ -61,6 +68,21 @@ def reply_value(window, context, folder):
             value["claims"] = [{"statement": "1+1=2", "label": "easy-verify",
                                "tool_request": {"tool": "polynomial_check", "arguments": {},
                                                 "expected_output": 2, "scope": "finite_computation"}}]
+    elif (
+        role == "step_verifier"
+        and window == "meta_continue"
+        and context["step"]["step_id"] == "s1"
+        and sum(
+            1
+            for line in (folder / "requests.jsonl").read_text(encoding="utf-8").splitlines()
+            if (item := json.loads(line)).get("role") == "step_verifier"
+            and item.get("step", {}).get("step_id") == "s1"
+        )
+        == 1
+    ):
+        # Only the first s1 review proposes replan; the new action's re-review accepts.
+        value = {"goal_gate": "NO", "logic_gate": "FAIL", "verdict": "PROPOSE_REPLAN",
+                 "objection": "First route is unsupported"}
     elif (
         role == "step_verifier"
         and window in TRACE_WINDOWS
@@ -149,10 +171,16 @@ def main():
                   "exchange": "session_recorded",
                   "trace_before": "step_reviewed",
                   "trace_after": "trace_back_applied",
-                  "stream_exit": "never"}[window]
-        target_role = "reasoner" if window == "tool" else "step_verifier"
+                  "stream_exit": "never",
+                  "meta_continue": "meta_decided"}[window]
+        target_role = "reasoner" if window == "tool" else (
+            "meta" if window == "meta_continue" else "step_verifier")
+        if window == "meta_continue":
+            hit_step = last.get("progress", {}).get("current_step") == "s1"
+        else:
+            hit_step = last.get("step", {}).get("step_id") == "s2"
         if (event.get("solver_event_type") == target and last.get("role") == target_role
-                and last.get("step", {}).get("step_id") == "s2"):
+                and hit_step):
             while not (folder / "job_id").exists():
                 time.sleep(.01)
             os._exit(71)
