@@ -23,3 +23,4 @@
 - **STAR AC**：STAR Core 实施规格中的验收编号；引用时写作 `STAR AC-06`，不得与 v0.2 或 Solver Harness 的同号用例混用。
 - **v0.2 AC**：v0.2 Release Evidence 中的验收编号；引用时写作 `v0.2 AC-06`，例如真实 Intern 工具闭环。
 - **Verifier 计算续接（Verifier Compute Continuation）**：审查者通过回复协议提出 `tool_request`、运行时经既有 Registry 与隔离执行器实际执行、真实回执进入相同审查会话续接的机制；未完成或被拒绝的请求不得解析为接受裁决或证据升级，请求次数有界且全部计入原 Run 账本。
+- **探索计算续接（Explore Compute Continuation）**：Explore 通过回复协议提出受控 `tool_request`、运行时经既有 Registry 与隔离执行器实际执行、真实回执以 `explore-tool:` 身份进入相同探索会话续接的机制；计算产出与来源随探索发现进入后续探索与 Planner 实际请求，探索发现始终保持 `unverified_exploration` 身份、不得进入已证引理账本，未完成或重复的请求不得解析为探索结论，请求次数有界且全部计入原 Run 账本。
