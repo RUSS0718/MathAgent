@@ -17,6 +17,46 @@ POLISH = {"solution_candidate": "1+1=2"}
 ACCEPT = {"verdict": "ACCEPT", "reason": "Addition"}
 
 
+def assert_no_uncalibrated_probability(case, *sources):
+    """AC-40: an uncalibrated 0.95 never becomes a displayed calibrated probability.
+
+    Wall-clock fields (ISO timestamps, float durations) legitimately contain the
+    digit run '0.95', so a raw-text substring scan misfires on pure timing noise;
+    the leak check therefore walks parsed structures instead: no key named
+    ``confidence`` of any value, and no numeric or bare-string ``0.95`` value.
+    String sources may be SSE stream text (``data:`` lines parsed per line) or
+    JSON text; non-string sources are scanned as parsed payloads.
+    """
+    parsed = []
+    for source in sources:
+        if isinstance(source, str):
+            parsed.extend(json.loads(line[6:]) for line in source.splitlines()
+                          if line.startswith("data: "))
+            try:
+                parsed.append(json.loads(source))
+            except ValueError:
+                pass
+        else:
+            parsed.append(source)
+
+    def walk(value):
+        if isinstance(value, dict):
+            for name, item in value.items():
+                case.assertNotEqual("confidence", str(name))
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+        elif isinstance(value, bool) or value is None:
+            return
+        elif isinstance(value, (int, float)):
+            case.assertNotEqual(0.95, value)
+        elif isinstance(value, str):
+            case.assertNotEqual("0.95", value.strip())
+    for payload in parsed:
+        walk(payload)
+
+
 class RawProviderContent:
     """Script provider text without JSON-encoding it in the HTTP fixture."""
 

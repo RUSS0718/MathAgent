@@ -14,7 +14,8 @@ from llm_client import InternChatClient
 from showcase.adapters import InternModelAdapter, InternStreamAdapter
 from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
-from tests.star_product_support import ACCEPT, POLISH, SOLVED, StarJobFixture
+from tests.star_product_support import (ACCEPT, POLISH, SOLVED, StarJobFixture,
+                                        assert_no_uncalibrated_probability)
 from tests.test_star_product_planning import FEATURES, STEP
 from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
 
@@ -243,8 +244,10 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         # The streamed complete package never became a normalized candidate.
         self.assertEqual([], failed["result"]["solver"]["candidate_history"])
         stream, dumps = self.public_outputs(job_id)
-        self.assertNotIn("0.95", stream + dumps)
-        self.assertNotIn("confidence", stream + dumps)
+        # A raw-text '0.95' scan misfires on wall-clock fields (an ISO timestamp
+        # like ...T06:47:20.9537650Z contains '0.95'); the leak check walks the
+        # parsed public output instead.
+        assert_no_uncalibrated_probability(self, stream, dumps)
         old_id = recovery["unknown_calls"][0]["call_id"]
         response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={"retry_call": {
             "call_id": old_id, "new_call_id": str(uuid.uuid4())}}, headers=self.headers())
