@@ -67,8 +67,8 @@ def verifier_receipts(state, *, role, step_id, round_number, attempt_index):
 
 
 def execute_request(harness, run, *, request, role, step_id, round_number, attempt_index, seq,
-                    review_call_id):
-    """Run one verifier computation on the shared precheck path with review identity."""
+                    review_call_id, receipt_prefix="verifier-tool"):
+    """Run one reviewer computation on the shared precheck path with review identity."""
     extras = {
         "source_role": role,
         "review_round": round_number,
@@ -79,12 +79,13 @@ def execute_request(harness, run, *, request, role, step_id, round_number, attem
     }
     return _execute(
         harness, run, request, harness._config, harness._tool_port, step_id, seq,
-        receipt_prefix="verifier-tool", receipt_extras=extras, commit_state_receipts=True,
+        receipt_prefix=receipt_prefix, receipt_extras=extras, commit_state_receipts=True,
     )
 
 
 def continue_review(harness, run, *, role, step_id, round_number, attempt_index, base_call_id,
-                    base_request, reply, reserve_and_dispatch, reply_from=None):
+                    base_request, reply, reserve_and_dispatch, reply_from=None,
+                    receipt_prefix="verifier-tool"):
     """Resolve computation requests, then continue the review with real receipts.
 
     Returns ``(run, reply, unfulfilled)``. ``reply`` is the last reviewer reply;
@@ -109,7 +110,8 @@ def continue_review(harness, run, *, role, step_id, round_number, attempt_index,
             return run, reply, True
         run, matching = execute_request(
             harness, run, request=request, role=role, step_id=step_id, round_number=round_number,
-            attempt_index=attempt_index, seq=len(receipts), review_call_id=base_call_id)
+            attempt_index=attempt_index, seq=len(receipts), review_call_id=base_call_id,
+            receipt_prefix=receipt_prefix)
     elif reply_from is not None:
         # The reviewer repeated an already-answered request instead of continuing.
         return run, reply, True
@@ -134,4 +136,5 @@ def continue_review(harness, run, *, role, step_id, round_number, attempt_index,
     return continue_review(
         harness, run, role=role, step_id=step_id, round_number=round_number,
         attempt_index=attempt_index, base_call_id=base_call_id, base_request=base_request,
-        reply=reply, reserve_and_dispatch=reserve_and_dispatch, reply_from=call_id)
+        reply=reply, reserve_and_dispatch=reserve_and_dispatch, reply_from=call_id,
+        receipt_prefix=receipt_prefix)

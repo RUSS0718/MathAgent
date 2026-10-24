@@ -59,6 +59,7 @@ class _ExploreGraphState(TypedDict, total=False):
     model_port: ModelPort
     call_reserved: bool
     reply: Mapping[str, Any]
+    unfulfilled: str
     assessment: str
     next_phase: str
     next_action: str
@@ -136,7 +137,46 @@ def run_exploration(
         guidance_task = current["state"].get("pending_guidance_task")
         if isinstance(guidance_task, str) and guidance_task.strip():
             request["specific_task"] = guidance_task
-        return {"reply": harness.dispatch(current, state["model_port"].complete, request)}
+        reply = harness.dispatch(current, state["model_port"].complete, request)
+        run = harness.get_run(state["run_id"])
+        from .verifier_compute import continue_review
+
+        def reserve_and_dispatch(reserved, seq, _continuation_call_id, continuation_request):
+            committed = harness.commit_event(
+                state["run_id"],
+                expected_revision=reserved["state_revision"],
+                event={
+                    "event_id": f"explore-dispatched-{state['round']}-compute-{seq + 1}",
+                    "type": "explore_dispatched",
+                    "round": state["round"],
+                    "role": "explore",
+                    "summary": f"Explore round {state['round']} computation "
+                               f"continuation {seq + 1} dispatched",
+                },
+                state_updates={
+                    "counters": {
+                        **reserved["state"]["counters"],
+                        "model_calls": reserved["state"]["counters"]["model_calls"] + 1,
+                    },
+                },
+            )
+            continuation_reply = harness.dispatch(
+                committed, state["model_port"].complete, continuation_request)
+            return harness.get_run(state["run_id"]), continuation_reply
+
+        # A declared computation runs on the shared #75 precheck path and the real
+        # receipt continues this same exploration session; a pending or refused
+        # request never lets the paired assessment stand.
+        run, reply, unfulfilled = continue_review(
+            harness, run, role="explore", step_id=None, round_number=state["round"],
+            attempt_index=int(run["state"].get("attempt_index") or 0),
+            base_call_id=request["call_id"], base_request=request, reply=reply,
+            reserve_and_dispatch=reserve_and_dispatch, receipt_prefix="explore-tool")
+        return {
+            "run": run,
+            "reply": None if unfulfilled else reply,
+            "unfulfilled": "explore_tool_request_unfulfilled" if unfulfilled else None,
+        }
 
     def persist_assessment(state: _ExploreGraphState) -> dict[str, Any]:
         assessment_data = _normalize_assessment(state.get("reply", {}))
@@ -150,8 +190,35 @@ def run_exploration(
             next_phase = "PLAN"
 
         latest = harness.get_run(state["run_id"])
+        from .verifier_compute import verifier_receipts
+
+        receipts = verifier_receipts(
+            latest["state"], role="explore", step_id=None, round_number=round_number,
+            attempt_index=int(latest["state"].get("attempt_index") or 0))
+        unfulfilled = state.get("unfulfilled")
         findings = list(latest["state"].get("exploration_findings", []))
         finding = {"round": round_number, **assessment_data}
+        if receipts or unfulfilled:
+            # Computed exploration stays unverified exploration: the record keeps
+            # its provenance and never mints a ledger-grade evidence claim.
+            finding["provenance"] = "unverified_exploration"
+            finding["computation"] = {
+                "provenance": "unverified_exploration",
+                "scope": "finite_computation",
+                "receipts": [
+                    {
+                        "receipt_id": receipt.get("receipt_id"),
+                        "tool": receipt.get("tool"),
+                        "status": receipt.get("status"),
+                        "executed": receipt.get("executed") is True,
+                        "output": receipt.get("output"),
+                        "assertion_matched": receipt.get("assertion_matched") is True,
+                        "unknown_outcome": receipt.get("unknown_outcome") is True,
+                    }
+                    for receipt in receipts
+                ],
+                **({"unfulfilled": unfulfilled} if unfulfilled else {}),
+            }
         findings.append(finding)
         committed = harness.commit_event(
             state["run_id"],
@@ -162,6 +229,7 @@ def run_exploration(
                 "assessment": assessment,
                 "round": round_number,
                 "next_phase": next_phase,
+                **({"unfulfilled": unfulfilled} if unfulfilled else {}),
                 "summary": f"Explore round {round_number} assessed as {assessment}; next phase {next_phase}",
             },
             state_updates={"phase": next_phase, "exploration_findings": findings},

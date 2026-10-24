@@ -285,7 +285,10 @@ class PairedRunTest(unittest.TestCase):
                 )
         self.assertEqual(2, post.call_count)
         for arm in report["arms"].values():
-            self.assertEqual("unknown_outcome", arm["status"])
+            # ALIGN-04: a finish_reason=length reply is a known protocol
+            # failure (the provider definitively stopped), so the run ends
+            # partial_aborted instead of an interrupted unknown outcome.
+            self.assertEqual("failed", arm["status"])
             self.assertEqual(1, arm["physical_attempt_count"])
             self.assertEqual("length", arm["provider_attempts"][0]["finish_reason"])
             self.assertEqual("truncated_response", arm["invocations"][0]["error_category"])

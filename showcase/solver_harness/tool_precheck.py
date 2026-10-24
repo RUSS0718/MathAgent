@@ -283,7 +283,7 @@ def allowed_tool_ids(run, role, config, port):
     if (
         config.get("features", {}).get("local_code_tool") is not True
         or port is None
-        or role not in {"reasoner", "step_verifier", "whole_solution_verifier"}
+        or role not in {"reasoner", "step_verifier", "whole_solution_verifier", "explore"}
         or run["state"].get("reasoning_mode") == "reason_noncoding"
     ):
         return []

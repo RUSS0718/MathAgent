@@ -124,7 +124,8 @@ def config(folder, *, crash_tools=False):
     # Guidance windows replay two fallback rulings; trace-back windows re-execute
     # every archived step on resume; meta_continue replays s1 as a new action.
     calls = (24 if window in GUIDANCE_WINDOWS or window == REPLAN_GUIDANCE_WINDOW
-             else 16 if window in TRACE_WINDOWS or window in {"meta_continue", "classified"}
+             else 16 if window in TRACE_WINDOWS
+             or window in {"meta_continue", "classified", "explore_tool"}
              else 12)
     adapter = (InternStreamAdapter(InternChatClient(retry=1), max_tokens=256)
                if window in STREAM_WINDOWS
@@ -148,6 +149,16 @@ def reply_value(window, context, folder):
         return guidance_reply(role, context, folder)
     if role == "explore":
         value = {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
+        if window == "explore_tool" and sum(
+            1
+            for line in (folder / "requests.jsonl").read_text(encoding="utf-8").splitlines()
+            if (item := json.loads(line)).get("role") == "explore"
+        ) == 1:
+            # The first exploration demands its own computation before concluding.
+            value = {"assessment": "SOLVED", "worked": [], "failed": [], "candidates": [],
+                     "solution_candidate": "2", "tool_request": {
+                         "tool": "polynomial_check", "arguments": {},
+                         "scope": "finite_computation", "expected_output": 2}}
     elif role == "planner":
         value = PLAN
     elif role == "meta" and window == "meta_continue":
@@ -294,6 +305,14 @@ def main():
         if window in GUIDANCE_WINDOWS:
             ruling = "meta_guidance_decided" if window == "guidance_decided" else "meta_decided"
             if event.get("solver_event_type") == ruling and last.get("role") == "meta":
+                while not (folder / "job_id").exists():
+                    time.sleep(.01)
+                os._exit(71)
+            return
+        if window == "explore_tool":
+            # ALIGN-06 crash window: die after the exploration's own tool receipt
+            # commits, before the continuation reply is requested.
+            if event.get("solver_event_type") == "tool_receipt" and last.get("role") == "explore":
                 while not (folder / "job_id").exists():
                     time.sleep(.01)
                 os._exit(71)
