@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from copy import deepcopy
 
+from ..final_evidence import artifact_identity
 from ..redaction import redact
 from .budget import budget_reason
 from .final_binding import review_record
@@ -123,6 +124,69 @@ def valid_facts(state):
     return facts
 
 
+def proof_basis(state):
+    """Complete reports of still-valid accepted steps plus their computation basis.
+
+    Final synthesis must integrate the accepted derivations themselves, not
+    only their one-line conclusions. Only reports recorded on live plan steps
+    can be delivered: an archived or invalidated derivation lives in the
+    failure records and its proof body never returns here. Each delivered
+    proof carries the controller-recorded review ruling, the challenge
+    history and the actually executed receipts (code input, real output,
+    sandbox source), so the final generator and the whole-solution reviewer
+    can check the candidate against the real computation basis. Every proof
+    carries the resolvable artifact identity of its original argument.
+    """
+    proofs = []
+    for step in state.get("plan", {}).get("steps", []):
+        record = state.get("steps", {}).get(step["step_id"])
+        if not isinstance(record, Mapping):
+            continue
+        verification = record.get("verification", {})
+        if (
+            verification.get("verdict") != "ACCEPT"
+            or verification.get("valid") is not True
+        ):
+            continue
+        report = record.get("report", {})
+        receipts = [
+            deepcopy(item)
+            for item in state.get("tool_receipts", [])
+            if isinstance(item, Mapping)
+            and item.get("step_id") == step["step_id"]
+            and item.get("executed") is True
+            and item.get("status") == "success"
+        ]
+        argument = report.get("argument", "")
+        proof = {
+            "step_id": step["step_id"],
+            "argument": argument,
+            "claims": [
+                {
+                    key: deepcopy(claim[key])
+                    for key in (
+                        "statement", "label", "verification_scope", "tool_evidence_refs"
+                    )
+                    if key in claim
+                }
+                for claim in report.get("claims", [])
+                if isinstance(claim, Mapping)
+            ],
+            "tool_receipts": receipts,
+            "review": {
+                key: verification[key]
+                for key in ("verdict", "goal_gate", "logic_gate")
+                if key in verification
+            },
+            "artifact": artifact_identity(argument if isinstance(argument, str) else ""),
+        }
+        history = record.get("challenge_history", [])
+        if history:
+            proof["challenge_history"] = deepcopy(history)
+        proofs.append(proof)
+    return proofs
+
+
 def run_finalization(harness, run, *, problem, model_port, verifier_port, config):
     features = config.get("features", {})
     if not features.get("final_generation") or run["state"]["phase"] != "FINAL_GENERATE":
@@ -148,6 +212,7 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
     # Reviewing the existing candidate spends no new candidate-generation slot.
     remaining = retries + 1 - len(current_attempts) + int(bool(pending_review))
     facts = valid_facts(state)
+    proofs = proof_basis(state)
     for _ in range(max(0, remaining)):
         reason = budget_reason(run["state"], config)
         if reason:
@@ -171,8 +236,10 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
                     "session_key": session,
                     "problem": problem,
                     "accepted_results": facts,
+                    "step_proofs": deepcopy(proofs),
                     "previous_review": previous_review,
-                    "instruction": "Synthesize a complete answer to the original problem from only the accepted facts. Return final_response.",
+                    "instruction": "Synthesize a complete answer to the original problem from "
+                    "only the accepted facts and the delivered step proofs. Return final_response.",
                 },
             )
             candidate = reply.get("final_response") if isinstance(reply, Mapping) else None
@@ -212,6 +279,7 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
             "problem": problem,
             "solution_candidate": candidate,
             "accepted_results": facts,
+            "step_proofs": deepcopy(proofs),
             "review_criteria": [
                 "original_problem_consistency",
                 "completeness",
@@ -262,7 +330,7 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
              "whole_solution_reviews": [*run["state"].get("whole_solution_reviews", []),
                  review_record(run, candidate, attempt["review"]["verdict"],
                      call_id=f"whole-review:{session}",
-                     origin="final_generator", facts=facts)]},
+                     origin="final_generator", facts=facts, proofs=proofs)]},
             review=attempt["review"],
         )
         if not valid:

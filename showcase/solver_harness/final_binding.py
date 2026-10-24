@@ -1,5 +1,6 @@
 """Controller-owned records of the actual whole-solution review object."""
 
+from collections.abc import Mapping
 from copy import deepcopy
 
 from ..final_evidence import artifact_identity, bind_verification
@@ -10,7 +11,31 @@ def fact_reference(value):
     return "fact:" + artifact_identity(value)["sha256"]
 
 
-def review_record(run, candidate, verdict, *, call_id, origin, versions=None, facts=None):
+def _proof_source(proof, plan):
+    """Public-safe source line of one delivered proof: ordinal, artifact, receipts.
+
+    Step identifiers can contain private hints; only the plan ordinal, the
+    resolvable argument artifact and receipt references are published.
+    """
+    step_id = proof.get("step_id") if isinstance(proof, Mapping) else None
+    ordinal = next(
+        (index for index, item in enumerate(plan.get("steps", []), 1)
+         if isinstance(item, Mapping) and item.get("step_id") == step_id),
+        None,
+    )
+    receipts = proof.get("tool_receipts", []) if isinstance(proof, Mapping) else []
+    return {
+        "step_ordinal": ordinal,
+        "argument": proof.get("artifact") if isinstance(proof, Mapping) else None,
+        "receipt_ids": [
+            item["receipt_id"] for item in receipts
+            if isinstance(item, Mapping) and item.get("receipt_id")
+        ],
+    }
+
+
+def review_record(run, candidate, verdict, *, call_id, origin, versions=None, facts=None,
+                  proofs=None):
     from .calls import latest_retry_id
 
     state = run["state"]
@@ -35,6 +60,9 @@ def review_record(run, candidate, verdict, *, call_id, origin, versions=None, fa
              "statement_artifact": artifact_identity(fact["statement"]),
              "rescued": fact in state.get("rescued_results", [])}
             for fact in (facts or [])
+        ],
+        "proof_sources": [
+            _proof_source(proof, state.get("plan", {})) for proof in (proofs or [])
         ],
     }
 
@@ -62,7 +90,8 @@ def delivery_verification(run, answer):
         "checker_version": "star-whole-review-v1", "scope": "whole_solution_llm_review",
         "findings": ["llm_whole_review_" + record["verdict"].lower()],
         "limitations": ["LLM review does not prove mathematical correctness or completeness."],
-        **{key: record[key] for key in ("artifact", "source", "versions", "fact_sources")
+        **{key: record[key] for key in ("artifact", "source", "versions", "fact_sources",
+                                        "proof_sources")
            if key in record},
     })["history"][0] for record in records]
     check = bind_verification(answer, {

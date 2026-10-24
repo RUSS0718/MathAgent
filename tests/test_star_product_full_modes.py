@@ -54,6 +54,24 @@ class StarFullModeTest(StarJobFixture, unittest.TestCase):
         self.assertTrue(receipt["cleanup_verified"])
         self.assertEqual(IMAGE, receipt["image"])
         self.assertEqual("same_artifact", report["checks"]["binding"])
+        # The final generator and the whole-solution reviewer receive the
+        # complete proof body of the accepted step with its real isolated
+        # receipt; the delivered basis is identical for both roles.
+        final = next(r for r in self.outbound if r["role"] == "final_generator")
+        proofs = final["step_proofs"]
+        self.assertEqual(["factor"], [p["step_id"] for p in proofs])
+        self.assertEqual("Factor the difference of squares", proofs[0]["argument"])
+        proof_receipts = proofs[0]["tool_receipts"]
+        self.assertEqual(1, len(proof_receipts))
+        self.assertTrue(proof_receipts[0]["executed"])
+        self.assertEqual("success", proof_receipts[0]["status"])
+        self.assertEqual("docker_isolated", proof_receipts[0]["source"])
+        self.assertEqual(IMAGE, proof_receipts[0]["image"])
+        self.assertEqual("(x - 1)*(x + 1)\n", proof_receipts[0]["output"])
+        self.assertEqual("verified", proofs[0]["claims"][0]["label"])
+        self.assertEqual("finite_computation", proofs[0]["claims"][0]["verification_scope"])
+        review = next(r for r in self.outbound if r["role"] == "whole_solution_verifier")
+        self.assertEqual(final["step_proofs"], review["step_proofs"])
         initial = self.outbound[0]
         self.assertIn("exploration-protocol", initial["active_skill_ids"])
         evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
