@@ -44,6 +44,7 @@ SCHEMAS = {
             "failed": TEXTS,
             "candidates": TEXTS,
             "solution_candidate": TEXT,
+            "tool_request": {"oneOf": [TOOL, {"enum": [None]}]},
         },
         ["assessment", "worked", "failed", "candidates"],
     ),
