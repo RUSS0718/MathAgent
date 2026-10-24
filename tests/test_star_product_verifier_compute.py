@@ -1,11 +1,14 @@
 """Verifier-initiated controlled computation through the public STAR Job entry."""
 
 import json
+import os
 import unittest
 
 from showcase.run_budget import RunBudgetLimits
 from showcase.tools import ToolRegistry
 from tests.star_product_support import ACCEPT, POLISH, SOLVED, StarJobFixture
+
+IMAGE = os.environ.get("MATHAGENT_TEST_PYTHON_IMAGE")
 
 NEED_PLAN = {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
 PLAN = {"version": 1, "steps": [{"step_id": "sum", "title": "Add", "objective": "Compute 1+1"}]}
@@ -196,6 +199,66 @@ class StarVerifierComputeTest(StarJobFixture, unittest.TestCase):
         self.assertEqual("whole_solution_verifier", receipt["source_role"])
         self.assertEqual("success", receipt["status"])
         self.assertEqual(2, self.report(job_id)["budget"]["tool_calls"])
+
+
+@unittest.skipUnless(IMAGE, "requires independently validated local Docker image ID")
+class StarFullReferenceVerifierComputeTest(StarJobFixture, unittest.TestCase):
+    def solver_events(self, job_id):
+        text = self.client.get(f"/api/agent/jobs/{job_id}/events").get_data(as_text=True)
+        events = []
+        for line in text.splitlines():
+            if line.startswith("data: "):
+                data = json.loads(line[6:])
+                if data.get("solver_event_type"):
+                    events.append((data["solver_event_type"], data.get("solver_revision")))
+        return events
+
+    def test_reference_step_verifier_executes_own_isolated_computation(self):
+        code = "import sympy as sp\nx=sp.symbols('x')\nprint(sp.factor(x**2-1))"
+        expected = "(x - 1)*(x + 1)\n"
+        premature = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
+                     "objection": "", "tool_request": {
+                         "tool": "python_math", "arguments": {"code": code},
+                         "scope": "finite_computation", "expected_output": expected}}
+        self.open_star(
+            [NEED_PLAN, PLAN, STEP, premature, CONTINUE,
+             {"final_response": "x^2 - 1 = (x - 1)(x + 1)."}, ACCEPT],
+            SHOWCASE_STAR_FULL_ENABLED=True, SHOWCASE_STAR_PYTHON_IMAGE_ID=IMAGE)
+        response = self.client.post("/api/agent/jobs", json={
+            "message": "Factor x^2-1.", "session_id": self.session,
+            "solver_mode": "star_reference"}, headers=self.headers())
+        self.assertEqual(202, response.status_code, response.get_json())
+        job_id = response.get_json()["job_id"]
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        self.assertEqual("star_reference", job["result"]["execution_mode"])
+        self.assertEqual([], job["result"]["missing_capabilities"])
+        reviews = [context for context in self.outbound if context["role"] == "step_verifier"]
+        self.assertEqual(2, len(reviews), [c["role"] for c in self.outbound])
+        receipt = reviews[1]["report"]["tool_receipts"][0]
+        self.assertEqual("step_verifier", receipt["source_role"])
+        self.assertEqual("success", receipt["status"])
+        self.assertTrue(receipt["executed"])
+        self.assertTrue(receipt["cleanup_verified"])
+        self.assertEqual(IMAGE, receipt["image"])
+        self.assertEqual(expected, receipt["output"])
+        self.assertTrue(receipt["assertion_matched"])
+        # The verifier's own code and stdout resolve through the public artifact seam.
+        resolved = self.client.get(
+            f"/api/agent/jobs/{job_id}/artifacts/{receipt['code_ref']['sha256']}")
+        self.assertEqual(200, resolved.status_code)
+        self.assertEqual(code.encode("utf-8"), resolved.data)
+        stdout = self.client.get(
+            f"/api/agent/jobs/{job_id}/artifacts/{receipt['stdout_ref']['sha256']}")
+        self.assertEqual(expected.encode("utf-8"), stdout.data)
+        report = self.report(job_id)
+        self.assertEqual(7, report["budget"]["logical_calls"])
+        self.assertEqual(1, report["budget"]["tool_calls"])
+        events = self.solver_events(job_id)
+        reviewed = [revision for kind, revision in events if kind == "step_reviewed"]
+        self.assertEqual(1, len(reviewed), events)
+        receipt_revision = next(revision for kind, revision in events if kind == "tool_receipt")
+        self.assertLess(receipt_revision, reviewed[0])
 
 
 if __name__ == "__main__":
