@@ -58,6 +58,20 @@ def _parse(reply, guidance):
     return redact(deepcopy(reply))
 
 
+def _pending_replan_guidance(run, state):
+    """The unconsumed replan Guidance attached to the current transition, if any."""
+    from .traceback import transition_decision
+
+    guidance = state.get("meta_guidance_decision")
+    if (
+        isinstance(guidance, dict)
+        and guidance.get("action_type") == "replan"
+        and transition_decision(run, state, guidance)
+    ):
+        return guidance
+    return None
+
+
 def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_seconds):
     """Route a strict response, retaining only safe summaries in the run session."""
     if meta_port is None or run["state"]["phase"] == "TERMINAL":
@@ -121,6 +135,10 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         )
     history = deepcopy(state.get("meta_history", []))
     session = f"meta:{run['run_id']}"
+    # An outstanding replan Guidance rides along as decision context (STAR Core:
+    # intervention history flows back into the Meta view). The field is deliberately
+    # not "guidance_request": that key would switch the strict response schema.
+    pending_replan = None if guidance is not None else _pending_replan_guidance(run, state)
     request = {
         "role": "meta",
         "run_id": run["run_id"],
@@ -128,12 +146,14 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         "allowed_tools": [],
         "tool_policy": {"allow": []},
         "trigger": str(trigger or ("failure" if guidance else "plan-blocked")),
-        "guidance_request": redact(deepcopy(guidance)),
+        "guidance_request": redact(deepcopy(guidance)) if guidance is not None else None,
         "history": history,
         "plan_version": state["plan_version"],
         "progress": {"current_step": state["current_step"], "phase": state["phase"]},
         "failures": redact(deepcopy(state["failure_records"])),
         "budget": {"max_model_calls": max_model_calls, **state["counters"]},
+        **({"pending_replan_request": redact(deepcopy(pending_replan))}
+           if pending_replan is not None else {}),
     }
     if isinstance(metadata.get("tool_failure"), str):
         request["tool_failure"] = metadata["tool_failure"]
@@ -194,13 +214,16 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         ]
     )
     action = decision.get("decision", decision.get("action_type"))
+    # Guidance.action_type=replan never replaces a plan by itself: it enters the
+    # independent ReplanDecision stage (META_DECIDE), where a Meta ruling with its
+    # own identity decides CONTINUE / TRACE_BACK / APPROVE_REPLAN / ABORT.
     phase = {
         "CONTINUE": "STEP_EXECUTE",
         "TRACE_BACK": "TRACE_BACK",
         "APPROVE_REPLAN": "REPLAN",
         "ABORT": "TERMINAL",
         "trace_back": "TRACE_BACK",
-        "replan": "REPLAN",
+        "replan": "META_DECIDE",
         "explore_more": "EXPLORE",
         "retry_different_method": "STEP_EXECUTE",
     }[action]
@@ -255,9 +278,23 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
     }
     if guidance is None:
         updates["meta_decision"] = {**decision, **identity}
+        if pending_replan is not None:
+            # The independent ReplanDecision settles the outstanding replan request:
+            # the Guidance keeps its history but loses execution authority here.
+            updates["meta_guidance_decision"] = {
+                **pending_replan,
+                "consumed": {
+                    "event_type": "meta_decided",
+                    "state_revision": run["state_revision"] + 1,
+                    "decision": decision["decision"],
+                },
+            }
     else:
         updates["meta_guidance_decision"] = {**decision, **identity}
-        updates["pending_guidance_task"] = decision["specific_task"]
+        # A replan request hands no task to an executor role; it waits for the
+        # independent ReplanDecision instead of pending_guidance_task.
+        if decision["action_type"] != "replan":
+            updates["pending_guidance_task"] = decision["specific_task"]
         if decision["action_type"] in {"retry_different_method", "explore_more"}:
             updates["attempt_index"] = state["attempt_index"] + 1
     if new_action:

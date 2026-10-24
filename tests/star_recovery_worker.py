@@ -29,6 +29,9 @@ META_CONTINUE_DECISION = {"decision": "CONTINUE",
                           "reusable_results": [], "trace_back_to": None}
 # ALIGN-01 crash windows: die right after a ruling commit, before its executor runs.
 GUIDANCE_WINDOWS = {"guidance_decided", "meta_decided"}
+# ALIGN-03 crash window: die after the replan Guidance commit, before the
+# independent ReplanDecision is consulted.
+REPLAN_GUIDANCE_WINDOW = "replan_guidance_decided"
 GUIDANCE_TRACE_1 = {
     "action_type": "trace_back", "specific_task": "REDO_FROM_SENTINEL",
     "use_pure_reasoning": False, "trace_back_to": 1,
@@ -38,6 +41,16 @@ META_TRACE_2 = {
     "decision": "TRACE_BACK", "reason_summary": "The rebuilt route also failed",
     "plan_summary": "Rebuild from the second step", "forbidden_directions": [],
     "reusable_results": [], "trace_back_to": 2,
+}
+REPLAN_GUIDANCE = {
+    "action_type": "replan", "specific_task": "REPLAN_WORKER_SENTINEL",
+    "use_pure_reasoning": False, "trace_back_to": None,
+    "rationale": "The blocked route needs a new plan",
+}
+REPLAN_RULING = {
+    "decision": "APPROVE_REPLAN", "reason_summary": "Switch to the direct route",
+    "plan_summary": "Plan the direct route", "forbidden_directions": ["WORKER_DIRECTION"],
+    "reusable_results": [], "trace_back_to": None,
 }
 PROPOSE_REPLAN = {"goal_gate": "NO", "logic_gate": "FAIL", "verdict": "PROPOSE_REPLAN",
                   "objection": "The conclusion does not follow"}
@@ -54,9 +67,13 @@ def requests_so_far(folder):
 def guidance_reply(role, context, folder):
     """Two-fallback scenario: Guidance trace-back to 1, then a new Meta ruling to 2."""
     sent = requests_so_far(folder)  # The current request is already appended.
+    window = (folder / "window").read_text()
     if role == "explore":
         return {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
     if role == "planner":
+        if window == REPLAN_GUIDANCE_WINDOW:
+            # The replacement planner must be told this ruling's directions.
+            return {**PLAN, "version": context.get("plan_version", 1)}
         return PLAN
     if role == "reasoner":
         step_id = context.get("step", {}).get("step_id")
@@ -66,6 +83,9 @@ def guidance_reply(role, context, folder):
         return {"argument": "Addition", "claims": [], "blocked": blocked}
     if role == "step_verifier":
         step_id = context.get("step", {}).get("step_id")
+        if window == REPLAN_GUIDANCE_WINDOW:
+            # The replan window stays bounded: every review accepts.
+            return ACCEPT_VERDICT
         reviewed = sum(1 for item in sent if item.get("role") == "step_verifier"
                        and item.get("step", {}).get("step_id") == step_id)
         # Only the first s3 review proposes; every other review accepts.
@@ -73,8 +93,8 @@ def guidance_reply(role, context, folder):
     if role == "meta":
         # A guidance request carries a non-null guidance_request; a ruling does not.
         if context.get("guidance_request") is not None:
-            return GUIDANCE_TRACE_1
-        return META_TRACE_2
+            return REPLAN_GUIDANCE if window == REPLAN_GUIDANCE_WINDOW else GUIDANCE_TRACE_1
+        return REPLAN_RULING if window == REPLAN_GUIDANCE_WINDOW else META_TRACE_2
     if role == "final_generator":
         return {"final_response": "2"}
     return {"verdict": "ACCEPT", "reason": "Addition"}
@@ -90,7 +110,7 @@ def config(folder, *, crash_tools=False):
     window = (folder / "window").read_text() if (folder / "window").exists() else ""
     # Guidance windows replay two fallback rulings; trace-back windows re-execute
     # every archived step on resume; meta_continue replays s1 as a new action.
-    calls = (24 if window in GUIDANCE_WINDOWS
+    calls = (24 if window in GUIDANCE_WINDOWS or window == REPLAN_GUIDANCE_WINDOW
              else 16 if window in TRACE_WINDOWS or window == "meta_continue" else 12)
     adapter = (InternStreamAdapter(InternChatClient(retry=1), max_tokens=256)
                if window in STREAM_WINDOWS
@@ -104,12 +124,13 @@ def config(folder, *, crash_tools=False):
             "SHOWCASE_STAR_FEATURES": {"final_generation": True, "final_solution_review": True,
                                        "local_code_tool": True,
                                        **({"meta_guidance": True}
-                                          if window in GUIDANCE_WINDOWS else {})}}
+                                          if window in GUIDANCE_WINDOWS
+                                          or window == REPLAN_GUIDANCE_WINDOW else {})}}
 
 
 def reply_value(window, context, folder):
     role = context["role"]
-    if window in GUIDANCE_WINDOWS:
+    if window in GUIDANCE_WINDOWS or window == REPLAN_GUIDANCE_WINDOW:
         return guidance_reply(role, context, folder)
     if role == "explore":
         value = {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
@@ -220,6 +241,15 @@ def main():
         original(store, job_id, event)
         log = folder / "requests.jsonl"
         last = json.loads(log.read_text(encoding="utf-8").splitlines()[-1]) if log.exists() else {}
+        if window == REPLAN_GUIDANCE_WINDOW:
+            # Die after the replan Guidance commits, before the independent
+            # ReplanDecision is consulted; resume must rule exactly once.
+            if (event.get("solver_event_type") == "meta_guidance_decided"
+                    and event.get("action_type") == "replan" and last.get("role") == "meta"):
+                while not (folder / "job_id").exists():
+                    time.sleep(.01)
+                os._exit(71)
+            return
         if window in GUIDANCE_WINDOWS:
             ruling = "meta_guidance_decided" if window == "guidance_decided" else "meta_decided"
             if event.get("solver_event_type") == ruling and last.get("role") == "meta":
