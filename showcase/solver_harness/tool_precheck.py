@@ -85,9 +85,10 @@ def _recover_receipt(harness, run, step_id, claim_index):
     return None
 
 
-def _execute(harness, run, request, config, port, step_id, claim_index):
+def _execute(harness, run, request, config, port, step_id, claim_index, *, receipt_prefix="tool",
+             receipt_extras=None, commit_state_receipts=False):
     state = run["state"]
-    receipt_id = f"tool:{run['run_id']}:{run['state_revision']}:{claim_index}"
+    receipt_id = f"{receipt_prefix}:{run['run_id']}:{run['state_revision']}:{claim_index}"
     receipt = {
         "receipt_id": receipt_id,
         "tool": request.get("tool") if isinstance(request, Mapping) else None,
@@ -107,6 +108,13 @@ def _execute(harness, run, request, config, port, step_id, claim_index):
         "stderr_ref": None,
         "unknown_outcome": False,
     }
+    if receipt_extras:
+        receipt.update(deepcopy(dict(receipt_extras)))
+    state_receipts = (
+        {"tool_receipts": [*state.get("tool_receipts", []), receipt]}
+        if commit_state_receipts
+        else None
+    )
     reason = _denial(state, run["run_id"], request, config, port)
     if reason:
         receipt["reason"] = reason
@@ -114,6 +122,7 @@ def _execute(harness, run, request, config, port, step_id, claim_index):
             run["run_id"],
             expected_revision=run["state_revision"],
             event={"event_id": receipt_id, "type": "tool_precheck_skipped", "reason": reason},
+            state_updates=state_receipts,
         )
         return run, receipt
     timeout = min(float(config.get("tool_timeout_seconds", 3)), _remaining(state, config))
@@ -216,6 +225,7 @@ def _execute(harness, run, request, config, port, step_id, claim_index):
         run["run_id"],
         expected_revision=run["state_revision"],
         event={"event_id": receipt_id, "type": "tool_receipt", "receipt": receipt},
+        state_updates=state_receipts,
     )
     return run, receipt
 

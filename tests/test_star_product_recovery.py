@@ -56,6 +56,62 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
     def test_process_exit_after_tool_receipt_does_not_repeat_tool(self):
         self.assert_process_window("tool")
 
+    def test_process_exit_after_verifier_tool_receipt_reuses_the_computation(self):
+        import json
+        import os
+        import subprocess
+        import sys
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from showcase.flask_app import create_app
+        from tests.star_recovery_worker import config, provider
+
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            process = subprocess.run(
+                [sys.executable, "-m", "tests.star_recovery_worker", directory, "verifier_tool"],
+                capture_output=True, timeout=30)
+            self.assertEqual(71, process.returncode, process.stderr.decode(errors="replace"))
+            job_id = (folder / "job_id").read_text()
+            before = [json.loads(line) for line in (folder / "requests.jsonl").read_text().splitlines()]
+            self.assertEqual(6, len(before))
+            self.assertEqual(1, len((folder / "tool_runs.txt").read_text().splitlines()))
+            with patch.dict(os.environ, {"INTERN_API_KEY": "scripted-only"}), patch(
+                    "llm_client.requests.post", side_effect=lambda *a, **kw: provider(folder, kw)):
+                app = create_app(config(folder))
+                try:
+                    self.app = app
+                    self.client = app.test_client()
+                    self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
+                    original = self.job(job_id)["result"]["budget"]
+                    response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={},
+                                                headers=self.headers())
+                    self.assertEqual(202, response.status_code, response.get_json())
+                    final = self.terminal(job_id)
+                    self.assertEqual("succeeded", final["status"], final)
+                    # The committed verifier computation is reused, never re-executed.
+                    self.assertEqual(1, len((folder / "tool_runs.txt").read_text().splitlines()))
+                    self.assertEqual(1, final["result"]["budget"]["tool_calls"])
+                    after = [json.loads(line) for line in (folder / "requests.jsonl").read_text().splitlines()]
+                    self.assertEqual("step_verifier", after[6]["role"])
+                    self.assertEqual("s2", after[6]["step"]["step_id"])
+                    receipts = after[6]["report"]["tool_receipts"]
+                    self.assertEqual(1, len(receipts))
+                    self.assertEqual("step_verifier", receipts[0]["source_role"])
+                    self.assertEqual("success", receipts[0]["status"])
+                    self.assertEqual(original["deadline_at"], final["result"]["budget"]["deadline_at"])
+                    stream = self.client.get(f"/api/agent/jobs/{job_id}/events").get_data(as_text=True)
+                    events = [json.loads(line[6:]) for line in stream.splitlines()
+                              if line.startswith("data: ")]
+                    reviewed = [event for event in events
+                                if event.get("solver_event_type") == "step_reviewed"]
+                    self.assertEqual(3, len(reviewed))
+                finally:
+                    for name in ("showcase_workspace_service", "showcase_run_service", "loopback_store"):
+                        app.extensions[name].close()
+
     def test_process_exit_inside_tool_refuses_unsafe_replay(self):
         self.assert_process_window("tool_unknown")
 

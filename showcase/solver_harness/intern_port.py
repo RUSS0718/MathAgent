@@ -197,7 +197,8 @@ class InternModelPort:
             "Never fabricate tool receipts. Every pending tool_request MUST use label easy-verify, never verified. "
             "Group candidate substitutions into one request when possible. Omit expected_output unless the exact registered output is known; a guessed shape will not match. "
             "A successful polynomial candidate check proves substitution only, not completeness. "
-            "If a report already contains tool_receipts, review those actual inputs/outputs and continue the proof; do not claim you executed them yourself."
+            "If a report already contains tool_receipts, review those actual inputs/outputs and continue the review; the runtime executed them, not you. "
+            "A reviewer may propose at most one tool_request per reply while its verdict is still pending; judge only from recorded receipts, never from assumed outputs."
         )
         system = [{"role": "system", "content": instructions}]
         system.extend(

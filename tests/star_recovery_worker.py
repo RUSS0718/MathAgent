@@ -30,6 +30,8 @@ def config(folder, *, crash_tools=False):
     def tool(_arguments):
         if crash_tools:
             os._exit(71)
+        with (folder / "tool_runs.txt").open("a", encoding="utf-8") as output:
+            output.write("executed\n")
         return 2
     registry.register("polynomial_check", tool)
     window = (folder / "window").read_text() if (folder / "window").exists() else ""
@@ -78,6 +80,19 @@ def reply_value(window, context, folder):
                  "trace_back_to": 1, "objection": "First route is unsupported"}
     elif role == "step_verifier":
         value = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT", "objection": ""}
+        if window == "verifier_tool" and context["step"]["step_id"] == "s2":
+            seen = sum(
+                1
+                for line in (folder / "requests.jsonl").read_text(encoding="utf-8").splitlines()
+                if (item := json.loads(line)).get("role") == "step_verifier"
+                and item.get("step", {}).get("step_id") == "s2"
+            )
+            if seen == 1:
+                # The first s2 review demands its own computation before accepting.
+                value = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
+                         "objection": "", "tool_request": {
+                             "tool": "polynomial_check", "arguments": {},
+                             "scope": "finite_computation", "expected_output": 2}}
     elif role == "final_generator":
         value = {"final_response": "2"}
     else:
@@ -146,6 +161,7 @@ def main():
                   "unknown": "never",
                   "tool_unknown": "never",
                   "tool": "tool_receipt",
+                  "verifier_tool": "tool_receipt",
                   "exchange": "session_recorded",
                   "trace_before": "step_reviewed",
                   "trace_after": "trace_back_applied",
