@@ -218,7 +218,10 @@ class StarProductChallengeTest(StarJobFixture, unittest.TestCase):
         job_id, job, events = self.run_challenge(replies, budget=16)
 
         self.assertEqual("failed", job["status"], job)
-        self.assertEqual("interrupted", job["result"]["solver"]["status"])
+        # ALIGN-04: the meta reply with an out-of-schema decision arrived
+        # completely, so it is a known protocol failure that ends dispatch
+        # honestly instead of an interrupted unknown awaiting review.
+        self.assertEqual("partial_aborted", job["result"]["solver"]["status"])
         self.assertEqual("meta", self.outbound[-1]["role"])
         self.assertEqual(11, len(self.outbound))
         self.assertEqual(1, sum(request["role"] == "meta" for request in self.outbound))

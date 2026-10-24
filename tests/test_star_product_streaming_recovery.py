@@ -240,7 +240,12 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         failed = self.terminal(job_id)
         self.assertEqual("failed", failed["status"], failed)
         recovery = failed["result"]["solver"]["recovery"]
-        self.assertEqual(1, len(recovery["unknown_calls"]))
+        # ALIGN-04: the complete streamed package that fails the strict schema
+        # is a known protocol failure, never an unknown remote outcome.
+        self.assertEqual([], recovery["unknown_calls"])
+        self.assertEqual(1, len(recovery["protocol_failures"]))
+        self.assertEqual("explore", recovery["protocol_failures"][0]["role"])
+        self.assertEqual("invalid_role_schema", recovery["protocol_failures"][0]["error_category"])
         # The streamed complete package never became a normalized candidate.
         self.assertEqual([], failed["result"]["solver"]["candidate_history"])
         stream, dumps = self.public_outputs(job_id)
@@ -248,13 +253,11 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         # like ...T06:47:20.9537650Z contains '0.95'); the leak check walks the
         # parsed public output instead.
         assert_no_uncalibrated_probability(self, stream, dumps)
-        old_id = recovery["unknown_calls"][0]["call_id"]
-        response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={"retry_call": {
-            "call_id": old_id, "new_call_id": str(uuid.uuid4())}}, headers=self.headers())
-        self.assertEqual(202, response.status_code, response.get_json())
-        final = self.terminal(job_id)
-        self.assertEqual("succeeded", final["status"], final)
-        self.assertEqual(7, len(self.outbound))
+        # The known failure ends dispatch honestly; no retry decision applies.
+        rejected = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={},
+                                    headers=self.headers())
+        self.assertEqual(409, rejected.status_code)
+        self.assertEqual(1, len(self.outbound))
 
     def test_process_exit_mid_stream_keeps_unknown_and_requires_explicit_new_identity(self):
         import subprocess

@@ -142,8 +142,13 @@ class StarProductPipeline:
                 try:
                     run = (resume_solver(harness, problem, run_id, retry_call) if existing else
                            harness.solve(problem, {"run_id": run_id, "user_hint": solver_hint}))
-                except (CallInterrupted, HardBudgetStop):
+                except (CallInterrupted, HardBudgetStop) as exc:
                     run = harness.get_run(run_id)
+                    from .solver_harness.controller import protocol_failure_exit
+
+                    terminated = protocol_failure_exit(harness, run, exc)
+                    if terminated is not None:
+                        run = terminated
                 except RunStopped as exc:
                     if solver_mode not in BEST_EFFORT_MODES or exc.category != "run_deadline_exhausted":
                         raise
@@ -188,7 +193,11 @@ class StarProductPipeline:
                     "verification": verification,
                     "request_attempts": attempts,
                     "tool_results": public_tools(math),
-                    "error": None if reviewed and verification_mode != "required" else {"category": "verification_needs_review" if reviewed else "star_needs_review"},
+                    "error": None if reviewed and verification_mode != "required" else {
+                        "category": ("protocol_failure_unrepaired"
+                                     if math.get("result_reason") == "protocol_failure_unrepaired"
+                                     else "verification_needs_review" if reviewed
+                                     else "star_needs_review")},
                 }
                 check_control(allow_expired_selection=math.get("best_effort_decision") is not None)
                 return result
