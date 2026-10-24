@@ -245,6 +245,17 @@ def verify_step(
         directions = reply.get("forbidden_directions")
         if isinstance(directions, list) and all(isinstance(item, str) for item in directions):
             verification["forbidden_directions"] = directions
+    # Classifications are the reviewer's explicit ruling under any verdict; the
+    # controller verifies each declaration before anything reaches the ledger.
+    # An unfulfilled or invalid review never promotes evidence.
+    outcomes, rejections = [], []
+    if verification["valid"] and not unfulfilled:
+        from .classified import build_entries
+
+        outcomes, rejections = build_entries(
+            state, reply, step_id=step_id, report=report, review_call_id=call_id,
+            suffix=suffix, plan_version=plan["version"], attempt_index=attempt,
+        )
     accepted = verification["valid"] and verification["verdict"] == "ACCEPT"
     phase = "STEP_VERIFY"
     current_step = step_id
@@ -273,6 +284,11 @@ def verify_step(
             "TRACE_BACK": "TRACE_BACK",
             "PROPOSE_REPLAN": "META_DECIDE",
         }[verification["verdict"]]
+    # The classified ledger is the single authoritative record: proven entries
+    # reach final synthesis and rescue through its dependency-checked readers,
+    # while Conjectures stay confined there and never become proven premises.
+    from .classified import outcome_counts
+
     state_updates = {
         "phase": phase,
         "current_step": current_step,
@@ -285,18 +301,26 @@ def verify_step(
             },
         },
         "accepted_results": [*state["accepted_results"], *evidence],
+        "verified_results_ledger": [
+            *state.get("verified_results_ledger", []), *outcomes
+        ],
     }
     if not verification["valid"]:
         state_updates["status"] = "partial_aborted"
+    event = {
+        "event_id": f"step-reviewed-{step_id}{suffix}",
+        "type": "step_reviewed",
+        "step_id": step_id,
+        **verification,
+    }
+    if outcomes:
+        event["classified_outcomes"] = outcome_counts(outcomes)
+    if rejections:
+        event["rejected_outcomes"] = len(rejections)
     return harness.commit_event(
         run["run_id"],
         expected_revision=reserved["state_revision"],
-        event={
-            "event_id": f"step-reviewed-{step_id}{suffix}",
-            "type": "step_reviewed",
-            "step_id": step_id,
-            **verification,
-        },
+        event=event,
         state_updates=state_updates,
     )
 

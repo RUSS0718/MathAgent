@@ -80,15 +80,26 @@ def apply_traceback(harness, run):
         )
     archived_ids = {step["step_id"] for step in steps[target - 1 : current + 1]}
     invalid = set(archived_ids)
-    results = state["accepted_results"]
+    # Classified ledger entries share the accepted ledger's invalidation and
+    # rescue semantics: their sources, receipts and dependencies participate in
+    # the same closure, so dead outcomes never survive and valid ones do.
+    accepted = state["accepted_results"]
+    ledger = [
+        item for item in state.get("verified_results_ledger", []) if isinstance(item, dict)
+    ]
+    accepted_count = len(accepted)
+    results = [*accepted, *ledger]
     known = {step["step_id"] for step in steps} | {
         result["result_id"] for result in results if result.get("result_id")
     }
     invalid_records = set()
     for index, result in enumerate(results):
         dependencies = result.get("dependencies")
+        unsupported = index < accepted_count and result.get("evidence_level") not in {
+            "llm_reviewed", "tool_verified"
+        }
         if (not isinstance(dependencies, list) or any(dep not in known for dep in dependencies)
-            or result.get("evidence_level") not in {"llm_reviewed", "tool_verified"}
+            or unsupported
             or not result.get("valid", True) or result.get("invalidated", False)
             or result.get("status") in {"INVALIDATED", "invalidated"}):
             invalid_records.add(index)
@@ -112,6 +123,9 @@ def apply_traceback(harness, run):
         changed = before != invalid
     invalidated = []
     rescued = []
+    dead = set()
+    seen_dead = set()
+    seen_live = set()
     for index, result in enumerate(results):
         if (
             index in invalid_records
@@ -119,9 +133,29 @@ def apply_traceback(harness, run):
             or result.get("result_id") in invalid
             or invalid.intersection(result.get("dependencies") or [])
         ):
+            dead.add(index)
+            # The same outcome can be visible through both ledgers; it dies once.
+            key = result.get("result_id")
+            if isinstance(key, str):
+                if key in seen_dead:
+                    continue
+                seen_dead.add(key)
             invalidated.append({**result, "invalidated": True})
-        else:
+        elif index < accepted_count:
+            key = result.get("result_id")
+            if isinstance(key, str):
+                if key in seen_live:
+                    continue
+                seen_live.add(key)
             rescued.append(deepcopy(result))
+    # Classified ledger entries keep their identity in the ledger: survivors
+    # stay classified, dead ones carry the invalidation mark so no stale fact
+    # can be revived later.
+    ledger = [
+        {**result, "invalidated": True} if index in dead else result
+        for index, result in enumerate(results)
+        if index >= accepted_count
+    ]
     invalid_steps = invalid.intersection(step["step_id"] for step in steps)
     failure = {
         "kind": "trace_back",
@@ -177,6 +211,7 @@ def apply_traceback(harness, run):
             },
             "accepted_results": rescued,
             "rescued_results": rescued,
+            "verified_results_ledger": ledger,
             "failure_records": [*state["failure_records"], failure],
             "confirmed_failures_ledger": [*state["confirmed_failures_ledger"], failure],
             **({"meta_guidance_decision": {**guidance, "consumed": consumption}}

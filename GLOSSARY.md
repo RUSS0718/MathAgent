@@ -23,3 +23,4 @@
 - **STAR AC**：STAR Core 实施规格中的验收编号；引用时写作 `STAR AC-06`，不得与 v0.2 或 Solver Harness 的同号用例混用。
 - **v0.2 AC**：v0.2 Release Evidence 中的验收编号；引用时写作 `v0.2 AC-06`，例如真实 Intern 工具闭环。
 - **Verifier 计算续接（Verifier Compute Continuation）**：审查者通过回复协议提出 `tool_request`、运行时经既有 Registry 与隔离执行器实际执行、真实回执进入相同审查会话续接的机制；未完成或被拒绝的请求不得解析为接受裁决或证据升级，请求次数有界且全部计入原 Run 账本。
+- **分类成果（Classified Outcome）**：Verifier 在步骤裁决回复中明确裁定的 Lemma、Conjecture、Computation、Definition 或 Answer；控制器核验分类、报告来源、真实工具回执与依赖后原子追加权威账本（`verified_results_ledger`）。部分成果的成立与整步是否推进无关；Conjecture 的证据等级为 `conjecture`，永不进入已证前提；失效按来源与依赖闭包就地标记，救援由当前裁决控制。

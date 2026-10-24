@@ -31,6 +31,19 @@ CLAIM = obj(
     },
     ["statement", "label"],
 )
+# Reviewer-classified outcome: the verifier explicitly rules what a review
+# established (or left unproven); the controller verifies the declaration.
+OUTCOME = obj(
+    {
+        "category": {"enum": ["Lemma", "Conjecture", "Computation", "Definition", "Answer"]},
+        "statement": TEXT,
+        "scope": TEXT,
+        "claim_indexes": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "receipt_ids": TEXTS,
+        "dependencies": TEXTS,
+    },
+    ["category", "statement", "scope"],
+)
 STEP = obj(
     {"argument": TEXT, "claims": {"type": "array", "items": CLAIM}, "blocked": {"type": "boolean"},
      "solution_candidate": TEXT, "answer_completeness": {"enum": ["complete", "partial"]}},
@@ -64,6 +77,7 @@ SCHEMAS = {
                 "approach": TEXT,
             }),
             "tool_request": {"oneOf": [TOOL, {"enum": [None]}]},
+            "classified_outcomes": {"type": "array", "items": OUTCOME},
         },
         ["goal_gate", "logic_gate", "verdict", "objection"],
     ),

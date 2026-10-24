@@ -126,6 +126,29 @@ def run_replan(harness, run, *, problem, model_port, config):
             },
         )
     rescued, excluded = _reusable(state, decision)
+    # The same established result can be visible through both the accepted
+    # ledger and the classified ledger; a ruling rescues the outcome once.
+    unique = []
+    seen_ids = set()
+    for item in rescued:
+        key = item.get("result_id")
+        if isinstance(key, str):
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+        unique.append(item)
+    rescued = unique
+    # Cross-plan rescue of classified outcomes is controlled by this ruling:
+    # rescued entries stay valid in the classified ledger, and every entry the
+    # ruling did not select (including Conjectures) is marked invalidated so no
+    # stale outcome survives the archive.
+    ledger = [
+        item
+        if isinstance(item, dict) and isinstance(item.get("result_id"), str)
+        and item["result_id"] in seen_ids
+        else {**item, "invalidated": True}
+        for item in state.get("verified_results_ledger", [])
+    ]
     failure = {
         "kind": "replan",
         "plan_version": state["plan_version"],
@@ -164,6 +187,7 @@ def run_replan(harness, run, *, problem, model_port, config):
             "confirmed_failures_ledger": [*state["confirmed_failures_ledger"], failure],
             "accepted_results": rescued,
             "rescued_results": rescued,
+            "verified_results_ledger": ledger,
             "steps": {},
             "current_step": None,
             "meta_decision": {**decision, "consumed": consumption},
@@ -384,7 +408,15 @@ def _research(harness, run, port, config, calls, seconds, forbidden_directions):
 
 
 def _reusable(state, decision=None):
-    pending = deepcopy(state["accepted_results"])
+    accepted = deepcopy(state["accepted_results"])
+    # Classified proven outcomes share the accepted ledger's rescue rules;
+    # Conjectures are open questions, never rescued as proven premises.
+    classified = [
+        deepcopy(item)
+        for item in state.get("verified_results_ledger", [])
+        if isinstance(item, dict) and item.get("category") != "Conjecture"
+    ]
+    pending = [*accepted, *classified]
     rescued = []
     valid_ids = set()
     old_steps = {step["step_id"] for step in state.get("plan", {}).get("steps", [])}
