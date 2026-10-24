@@ -1,5 +1,8 @@
 """Whitelist persisted mathematical progress without model text or internal IDs."""
 
+from .final_evidence import artifact_identity
+from .redaction import redact_text
+
 
 def progress_summary(state):
     plan = state.get("plan") or {}
@@ -19,4 +22,13 @@ def progress_summary(state):
             "invalidated_count": len(item.get("invalidated_results", [])),
             "rescued_count": len(item.get("rescued_results", []))}
             for item in state.get("failure_records", [])],
+        "classified_results": [
+            {"category": item["category"],
+             "scope": redact_text(str(item.get("scope", "")))[:200],
+             "proven": item.get("proven") is True,
+             "invalidated": bool(item.get("invalidated"))
+             or item.get("status") in {"INVALIDATED", "invalidated"},
+             "statement_digest": artifact_identity(str(item.get("statement", "")))["sha256"]}
+            for item in state.get("verified_results_ledger", [])
+            if isinstance(item, dict) and isinstance(item.get("category"), str)],
         "meta_decision": (state.get("meta_decision") or {}).get("decision")}

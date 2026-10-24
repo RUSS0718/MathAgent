@@ -78,7 +78,23 @@ def valid_facts(state):
         if result.get("result_id")
     }
     known = set(accepted_steps)
-    pending = deepcopy(state.get("accepted_results", []))
+    # The classified ledger is authoritative for reviewer-established facts:
+    # its proven entries join the accepted facts under the same dependency and
+    # evidence filters, while Conjectures (evidence level "conjecture") and
+    # invalidated records never become proven premises. A rescued outcome can
+    # be visible through both ledgers; it is delivered once.
+    combined = [
+        *state.get("accepted_results", []),
+        *(item for item in state.get("verified_results_ledger", []) if isinstance(item, dict)),
+    ]
+    pending, seen_ids = [], set()
+    for fact in deepcopy(combined):
+        key = fact.get("result_id") if isinstance(fact, dict) else None
+        if isinstance(key, str):
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+        pending.append(fact)
     facts = []
     while pending:
         selected = []

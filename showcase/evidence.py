@@ -135,6 +135,7 @@ def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
         "skill_protocols", "prompt_fingerprint", "stream_metrics",
         "trace_back_to", "from_step_index", "archived_step_count",
         "invalidated_result_count", "rescued_result_count", "decision_revision",
+        "classified_outcomes", "rejected_outcomes",
     ):
         if event.get(key) is not None:
             summary[key] = event[key]

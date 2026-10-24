@@ -55,6 +55,17 @@ REPLAN_RULING = {
 PROPOSE_REPLAN = {"goal_gate": "NO", "logic_gate": "FAIL", "verdict": "PROPOSE_REPLAN",
                   "objection": "The conclusion does not follow"}
 ACCEPT_VERDICT = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT", "objection": ""}
+# ALIGN-07 classified-outcome crash window: die right after the step-reviewed
+# commit that appended the classified outcome, before the challenge continues.
+CLASSIFIED_LEMMA = "Forward direction holds for the boundary case"
+CLASSIFIED_CHALLENGE = {
+    "goal_gate": "PARTIAL", "logic_gate": "UNCERTAIN", "verdict": "CHALLENGE",
+    "objection": "The reverse direction is not justified.",
+    "classified_outcomes": [
+        {"category": "Lemma", "statement": CLASSIFIED_LEMMA,
+         "scope": "boundary case of the base step", "claim_indexes": []},
+    ],
+}
 
 
 def requests_so_far(folder):
@@ -113,8 +124,9 @@ def config(folder, *, crash_tools=False):
     # Guidance windows replay two fallback rulings; trace-back windows re-execute
     # every archived step on resume; meta_continue replays s1 as a new action.
     calls = (24 if window in GUIDANCE_WINDOWS or window == REPLAN_GUIDANCE_WINDOW
-             else 16 if window in TRACE_WINDOWS or window == "meta_continue"
-             or window == "explore_tool" else 12)
+             else 16 if window in TRACE_WINDOWS
+             or window in {"meta_continue", "classified", "explore_tool"}
+             else 12)
     adapter = (InternStreamAdapter(InternChatClient(retry=1), max_tokens=256)
                if window in STREAM_WINDOWS
                else InternModelAdapter(InternChatClient(retry=1), max_tokens=256))
@@ -188,6 +200,20 @@ def reply_value(window, context, folder):
         # Only the first s2 review demands the archive; the re-executed attempt accepts.
         value = {"goal_gate": "NO", "logic_gate": "FAIL", "verdict": "TRACE_BACK",
                  "trace_back_to": 1, "objection": "First route is unsupported"}
+    elif (
+        role == "step_verifier"
+        and window == "classified"
+        and context["step"]["step_id"] == "s1"
+        and sum(
+            1
+            for line in (folder / "requests.jsonl").read_text(encoding="utf-8").splitlines()
+            if (item := json.loads(line)).get("role") == "step_verifier"
+            and item.get("step", {}).get("step_id") == "s1"
+        )
+        == 1
+    ):
+        # The first s1 review challenges and classifies; the continuation accepts.
+        value = CLASSIFIED_CHALLENGE
     elif role == "step_verifier":
         value = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT", "objection": ""}
         if window == "verifier_tool" and context["step"]["step_id"] == "s2":
@@ -300,13 +326,14 @@ def main():
                   "trace_before": "step_reviewed",
                   "trace_after": "trace_back_applied",
                   "stream_exit": "never",
-                  "meta_continue": "meta_decided"}[window]
+                  "meta_continue": "meta_decided",
+                  "classified": "step_reviewed"}[window]
         target_role = "reasoner" if window == "tool" else (
             "meta" if window == "meta_continue" else "step_verifier")
         if window == "meta_continue":
             hit_step = last.get("progress", {}).get("current_step") == "s1"
         else:
-            hit_step = last.get("step", {}).get("step_id") == "s2"
+            hit_step = last.get("step", {}).get("step_id") == ("s1" if window == "classified" else "s2")
         if (event.get("solver_event_type") == target and last.get("role") == target_role
                 and hit_step):
             while not (folder / "job_id").exists():
