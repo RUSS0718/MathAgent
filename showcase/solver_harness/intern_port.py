@@ -22,6 +22,25 @@ class InternPortError(RuntimeError):
         super().__init__(category)
 
 
+# Response failures where the provider reply arrived completely: the finish
+# reason and usage are known facts, unlike a network interruption or an
+# unfinished stream whose remote outcome stays unknown.
+KNOWN_PROTOCOL_FAILURES = frozenset({
+    "invalid_json", "invalid_role_schema", "empty_response", "truncated_response",
+})
+
+MAX_RESPONSE_EXCERPT_CHARS = 400
+
+
+def _protocol_failure(category, record, text):
+    """Build the known protocol failure with its provider-known evidence."""
+    error = InternPortError(category)
+    error.usage = record.get("usage")
+    error.finish_reason = record.get("finish_reason")
+    error.response_excerpt = redact(str(text or ""))[:MAX_RESPONSE_EXCERPT_CHARS]
+    return error
+
+
 def _request_metadata(request):
     """Pure adapter metadata mapping for one invocation; no metering inside."""
     return {
@@ -93,17 +112,17 @@ class InternModelPort:
                 response=redact(response.text),
             )
             if response.finish_reason == "length":
-                raise InternPortError("truncated_response")
+                raise _protocol_failure("truncated_response", record, response.text)
             if response.error_category:
                 raise InternPortError(response.error_category)
             if not response.text.strip():
-                raise InternPortError("empty_response")
+                raise _protocol_failure("empty_response", record, response.text)
             try:
                 parsed = json.loads(response.text)
             except (TypeError, ValueError) as exc:
-                raise InternPortError("invalid_json") from exc
+                raise _protocol_failure("invalid_json", record, response.text) from exc
             if not isinstance(parsed, Mapping) or schema_error(parsed, schema):
-                raise InternPortError("invalid_role_schema")
+                raise _protocol_failure("invalid_role_schema", record, response.text)
             record["status"] = "success"
             return dict(parsed)
         except AdapterError as exc:
@@ -150,16 +169,16 @@ class InternModelPort:
                 request_attempts=list(envelope.get("attempts") or ()),
             )
             if envelope.get("finish_reason") == "length":
-                raise InternPortError("truncated_response")
+                raise _protocol_failure("truncated_response", record, envelope.get("text"))
             text = envelope.get("text")
             if not isinstance(text, str) or not text.strip():
-                raise InternPortError("empty_response")
+                raise _protocol_failure("empty_response", record, text)
             try:
                 parsed = json.loads(text)
             except (TypeError, ValueError) as exc:
-                raise InternPortError("invalid_json") from exc
+                raise _protocol_failure("invalid_json", record, text) from exc
             if not isinstance(parsed, Mapping) or schema_error(parsed, schema):
-                raise InternPortError("invalid_role_schema")
+                raise _protocol_failure("invalid_role_schema", record, text)
             record["status"] = "success"
             metrics["status"] = "completed"
             yield {"result": dict(parsed), "usage": dict(envelope.get("usage") or {})}

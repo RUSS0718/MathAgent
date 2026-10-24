@@ -110,9 +110,17 @@ class StarUncalibratedProbabilityTest(StarJobFixture, unittest.TestCase):
         job = self.terminal(job_id)
         self.assertEqual('failed', job['status'], job)
         recovery = job['result']['solver']['recovery']
-        self.assertEqual('needs_review', recovery['status'])
-        self.assertEqual(1, len(recovery['unknown_calls']))
-        self.assertEqual('reasoner', recovery['unknown_calls'][0]['role'])
+        # ALIGN-04: a complete reply with an extra field is a known protocol
+        # failure, not an unknown remote outcome awaiting human review.
+        self.assertEqual('safe', recovery['status'])
+        self.assertEqual([], recovery['unknown_calls'])
+        self.assertEqual(1, len(recovery['protocol_failures']))
+        failure = recovery['protocol_failures'][0]
+        self.assertEqual('reasoner', failure['role'])
+        self.assertEqual('invalid_role_schema', failure['error_category'])
+        self.assertEqual('stop', failure['finish_reason'])
+        self.assertEqual('partial_aborted', job['result']['solver']['status'])
+        self.assertEqual(3, len(self.outbound))
         public = json.dumps([job, self.report(job_id),
                              self.client.get(f'/api/runs/{job_id}/evidence').get_json(),
                              self.client.get(f'/api/agent/jobs/{job_id}/candidate-replay')

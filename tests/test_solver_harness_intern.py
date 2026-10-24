@@ -230,11 +230,13 @@ class InternPortTest(unittest.TestCase):
         ) as harness:
             result = harness.solve("public", {"run_id": "interrupted"})
             self.assertEqual(result, harness.get_run("interrupted"))
-        self.assertEqual("interrupted", result["state"]["status"])
-        self.assertEqual("EXPLORE", result["state"]["phase"])
+        # ALIGN-04: the complete schema-invalid reply is a known protocol
+        # failure that ends dispatch honestly, not an interrupted unknown.
+        self.assertEqual("partial_aborted", result["state"]["status"])
+        self.assertEqual("TERMINAL", result["state"]["phase"])
         self.assertEqual([], result["state"]["exploration_findings"])
         call = next(iter(result["state"]["calls"].values()))
-        self.assertEqual("unknown_outcome", call["status"])
+        self.assertEqual("protocol_failed", call["status"])
         self.assertEqual("invalid_role_schema", port.invocations[0]["error_category"])
 
     def test_evidence_runner_uses_physical_attempt_budget_and_terminal_safe_audit(self):
@@ -280,7 +282,9 @@ class InternPortTest(unittest.TestCase):
         self.assertEqual(1, report["budget"]["limits"]["max_tool_calls"])
         self.assertEqual(120, report["budget"]["limits"]["max_runtime_seconds"])
         self.assertIsNone(report["invocations"][0]["usage"]["total_tokens"])
-        self.assertEqual("interrupted", report["final_status"])
+        # ALIGN-04: the schema-invalid reply ends the run as a known protocol
+        # failure instead of an interrupted unknown outcome.
+        self.assertEqual("partial_aborted", report["final_status"])
         self.assertEqual("needs_review", report["status"])
         event = snapshot["events"][-1]
         self.assertEqual("intern_evidence_recorded", event["type"])
