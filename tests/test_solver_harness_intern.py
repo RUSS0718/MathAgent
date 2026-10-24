@@ -276,14 +276,16 @@ class InternPortTest(unittest.TestCase):
                 adapter, Path(directory), execution_source="offline_injected", followup=True
             )
             snapshot = json.loads((folder / "run.json").read_text(encoding="utf-8"))
-        self.assertEqual(1, post.call_count)
-        self.assertEqual(1, report["budget"]["http_attempts"])
+        # The probe config enables star_routing, so the explore entry takes its
+        # one bounded format repair (ALIGN-10 round 2): both physical attempts
+        # receive the same schema-invalid body and the run still ends as a
+        # known protocol failure, never an interrupted unknown outcome.
+        self.assertEqual(2, post.call_count)
+        self.assertEqual(2, report["budget"]["http_attempts"])
         self.assertEqual(4, report["budget"]["limits"]["max_http_attempts"])
         self.assertEqual(1, report["budget"]["limits"]["max_tool_calls"])
         self.assertEqual(120, report["budget"]["limits"]["max_runtime_seconds"])
         self.assertIsNone(report["invocations"][0]["usage"]["total_tokens"])
-        # ALIGN-04: the schema-invalid reply ends the run as a known protocol
-        # failure instead of an interrupted unknown outcome.
         self.assertEqual("partial_aborted", report["final_status"])
         self.assertEqual("needs_review", report["status"])
         event = snapshot["events"][-1]

@@ -48,20 +48,23 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
         # The provider finished the reasoner response (finish_reason=stop, usage
         # known) but the body is not JSON. The Job must name the known protocol
         # failure; it must not list an unknown call or wait for human review.
-        job_id = self.open_plan([NEED_PLAN, PLAN, RawProviderContent("not json"), VERDICT,
-                                 {"final_response": "2"}, ACCEPT])
+        # The step executor owns one bounded format repair, so the run only ends
+        # after the repair reply fails the same way.
+        job_id = self.open_plan([NEED_PLAN, PLAN, RawProviderContent("not json"),
+                                 RawProviderContent("still not json")])
         job = self.terminal(job_id)
         self.assertEqual("failed", job["status"], job)
         recovery = job["result"]["solver"]["recovery"]
         self.assertEqual("safe", recovery["status"])
         self.assertEqual([], recovery["unknown_calls"])
-        self.assertEqual(1, len(recovery["protocol_failures"]))
-        failure = recovery["protocol_failures"][0]
-        self.assertEqual("reasoner", failure["role"])
-        self.assertEqual("invalid_json", failure["error_category"])
-        self.assertEqual("stop", failure["finish_reason"])
-        self.assertEqual(CALL_USAGE, failure["usage"])
-        self.assertEqual(0, failure["repair_attempts"])
+        self.assertEqual(2, len(recovery["protocol_failures"]))
+        self.assertEqual({"reasoner"},
+                         {item["role"] for item in recovery["protocol_failures"]})
+        self.assertEqual({"invalid_json"},
+                         {item["error_category"] for item in recovery["protocol_failures"]})
+        self.assertEqual("stop", recovery["protocol_failures"][0]["finish_reason"])
+        self.assertEqual(CALL_USAGE, recovery["protocol_failures"][0]["usage"])
+        self.assertEqual(1, sum(item["repair_attempts"] for item in recovery["protocol_failures"]))
         self.assertEqual("partial_aborted", job["result"]["solver"]["status"])
         self.assertEqual("TERMINAL", job["result"]["solver"]["phase"])
         events = self.timeline(job_id)
@@ -71,11 +74,11 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
         self.assertEqual("reasoner", terminal[0]["role"])
         self.assertEqual("invalid_json", terminal[0]["error_category"])
         # The known failure ends dispatch: no automatic resend, no new request.
-        self.assertEqual(3, len(self.outbound))
+        self.assertEqual(4, len(self.outbound))
         budget = job["result"]["budget"]
-        self.assertEqual(3, budget["http_attempts"])
+        self.assertEqual(4, budget["http_attempts"])
         self.assertEqual(0, budget["unknown_attempts"])
-        self.assertEqual({"prompt_tokens": 21, "completion_tokens": 9, "total_tokens": 30},
+        self.assertEqual({"prompt_tokens": 28, "completion_tokens": 12, "total_tokens": 40},
                          budget["provider_known"])
         # The failed response body never reaches public outputs.
         public = json.dumps([job, self.report(job_id),
@@ -169,6 +172,103 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(1, len(repairs))
         budget = job["result"]["budget"]
         self.assertEqual(7, budget["http_attempts"])
+        self.assertEqual(0, budget["unknown_attempts"])
+
+    def test_reasoner_invalid_json_repairs_once_with_new_identity_and_completes(self):
+        # ALIGN-10 round-2: the step executor gets the same gated bounded format
+        # repair as the planner and the explore entry; a fresh reasoner identity
+        # may salvage the step report instead of losing the whole run.
+        job_id = self.open_plan([NEED_PLAN, PLAN, RawProviderContent("not json"), STEP,
+                                 VERDICT, {"final_response": "2"}, ACCEPT])
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        reasoners = [request for request in self.outbound if request["role"] == "reasoner"]
+        self.assertEqual(2, len(reasoners), self.outbound)
+        self.assertTrue(reasoners[1]["call_id"].endswith(":repair-1"), reasoners[1]["call_id"])
+        self.assertIn("strict JSON", reasoners[1]["repair_instruction"])
+        recovery = job["result"]["solver"]["recovery"]
+        self.assertEqual([], recovery["unknown_calls"])
+        self.assertEqual("safe", recovery["status"])
+        self.assertEqual(1, len(recovery["protocol_failures"]))
+        failure = recovery["protocol_failures"][0]
+        self.assertEqual("reasoner", failure["role"])
+        self.assertEqual("invalid_json", failure["error_category"])
+        self.assertEqual(1, failure["repair_attempts"])
+        events = self.timeline(job_id)
+        repairs = [event for event in events
+                   if event.get("solver_event_type") == "reasoner_parse_failed"]
+        self.assertEqual(1, len(repairs))
+        budget = job["result"]["budget"]
+        self.assertEqual(7, budget["http_attempts"])
+        self.assertEqual(0, budget["unknown_attempts"])
+
+    def test_step_verifier_invalid_json_repairs_once_with_new_identity_and_completes(self):
+        job_id = self.open_plan([NEED_PLAN, PLAN, STEP, RawProviderContent("not json"),
+                                 VERDICT, {"final_response": "2"}, ACCEPT])
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        verifiers = [request for request in self.outbound if request["role"] == "step_verifier"]
+        self.assertEqual(2, len(verifiers), self.outbound)
+        self.assertTrue(verifiers[1]["call_id"].endswith(":repair-1"), verifiers[1]["call_id"])
+        self.assertIn("strict JSON", verifiers[1]["repair_instruction"])
+        recovery = job["result"]["solver"]["recovery"]
+        self.assertEqual(1, len(recovery["protocol_failures"]))
+        self.assertEqual("step_verifier", recovery["protocol_failures"][0]["role"])
+        self.assertEqual(1, recovery["protocol_failures"][0]["repair_attempts"])
+        events = self.timeline(job_id)
+        repairs = [event for event in events
+                   if event.get("solver_event_type") == "step_review_parse_failed"]
+        self.assertEqual(1, len(repairs))
+        budget = job["result"]["budget"]
+        self.assertEqual(7, budget["http_attempts"])
+        self.assertEqual(0, budget["unknown_attempts"])
+
+    def test_final_whole_review_invalid_json_repairs_once_with_new_identity(self):
+        # Live ALIGN-10 batch ...-6a1828b2 died here: the whole reviewer echoed
+        # the schema definition instead of a verdict. The finalization review
+        # now owns one bounded repair with a fresh identity.
+        job_id = self.open_plan([NEED_PLAN, PLAN, STEP, VERDICT, {"final_response": "2"},
+                                 RawProviderContent("not json"), ACCEPT])
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        reviews = [request for request in self.outbound
+                   if request["role"] == "whole_solution_verifier"]
+        self.assertEqual(2, len(reviews), self.outbound)
+        self.assertTrue(reviews[1]["call_id"].endswith(":repair-1"), reviews[1]["call_id"])
+        self.assertIn("never the schema definition", reviews[1]["repair_instruction"])
+        recovery = job["result"]["solver"]["recovery"]
+        self.assertEqual(1, len(recovery["protocol_failures"]))
+        self.assertEqual("whole_solution_verifier", recovery["protocol_failures"][0]["role"])
+        self.assertEqual(1, recovery["protocol_failures"][0]["repair_attempts"])
+        events = self.timeline(job_id)
+        repairs = [event for event in events
+                   if event.get("solver_event_type") == "finalization_parse_failed"]
+        self.assertEqual(1, len(repairs))
+        budget = job["result"]["budget"]
+        self.assertEqual(7, budget["http_attempts"])
+        self.assertEqual(0, budget["unknown_attempts"])
+        self.assertEqual("same_artifact", self.report(job_id)["checks"]["binding"])
+
+    def test_explore_fast_path_whole_review_invalid_repairs_once_and_completes(self):
+        from tests.star_product_support import POLISH, SOLVED
+
+        job_id = self.open_plan([SOLVED, POLISH, RawProviderContent("not json"), ACCEPT])
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        reviews = [request for request in self.outbound
+                   if request["role"] == "whole_solution_verifier"]
+        self.assertEqual(2, len(reviews), self.outbound)
+        self.assertTrue(reviews[1]["call_id"].endswith(":repair-1"), reviews[1]["call_id"])
+        recovery = job["result"]["solver"]["recovery"]
+        self.assertEqual(1, len(recovery["protocol_failures"]))
+        self.assertEqual("whole_solution_verifier", recovery["protocol_failures"][0]["role"])
+        self.assertEqual(1, recovery["protocol_failures"][0]["repair_attempts"])
+        events = self.timeline(job_id)
+        repairs = [event for event in events
+                   if event.get("solver_event_type") == "solution_review_parse_failed"]
+        self.assertEqual(1, len(repairs))
+        budget = job["result"]["budget"]
+        self.assertEqual(4, budget["http_attempts"])
         self.assertEqual(0, budget["unknown_attempts"])
 
     def test_explore_repair_exhaustion_stops_dispatch_with_explicit_exit(self):
@@ -369,9 +469,10 @@ class StarFullReferenceProtocolFailureTest(StarJobFixture, unittest.TestCase):
         }, headers=self.headers())
 
     def test_full_reference_reasoner_invalid_json_is_known_failure_and_ends_dispatch(self):
+        # The reasoner owns one bounded format repair, so the honest end needs
+        # the repair reply to fail the same way (ALIGN-10 round 2).
         self.open_full([NEED_PLAN, TWO_STEPS, STEP, VERDICT,
-                        RawProviderContent("not json"), VERDICT,
-                        {"final_response": "2"}, ACCEPT])
+                        RawProviderContent("not json"), RawProviderContent("still not json")])
         job_id = self.submit().get_json()["job_id"]
         job = self.terminal(job_id)
         self.assertEqual("failed", job["status"], job)
@@ -379,16 +480,17 @@ class StarFullReferenceProtocolFailureTest(StarJobFixture, unittest.TestCase):
         recovery = job["result"]["solver"]["recovery"]
         self.assertEqual("safe", recovery["status"])
         self.assertEqual([], recovery["unknown_calls"])
-        self.assertEqual(1, len(recovery["protocol_failures"]))
+        self.assertEqual(2, len(recovery["protocol_failures"]))
+        self.assertEqual({"reasoner"}, {item["role"] for item in recovery["protocol_failures"]})
         failure = recovery["protocol_failures"][0]
-        self.assertEqual("reasoner", failure["role"])
         self.assertEqual("invalid_json", failure["error_category"])
         self.assertEqual("stop", failure["finish_reason"])
         self.assertEqual(CALL_USAGE, failure["usage"])
+        self.assertEqual(1, sum(item["repair_attempts"] for item in recovery["protocol_failures"]))
         self.assertEqual("partial_aborted", job["result"]["solver"]["status"])
         self.assertEqual("protocol_failure_unrepaired", job["error"])
-        self.assertEqual(5, len(self.outbound))
-        self.assertEqual(5, job["result"]["budget"]["http_attempts"])
+        self.assertEqual(6, len(self.outbound))
+        self.assertEqual(6, job["result"]["budget"]["http_attempts"])
         self.assertEqual(0, job["result"]["budget"]["unknown_attempts"])
         stream = self.client.get(f"/api/agent/jobs/{job_id}/events").get_data(as_text=True)
         terminal = [json.loads(line[6:]) for line in stream.splitlines()

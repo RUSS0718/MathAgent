@@ -113,12 +113,13 @@ def review_solution(
         reply = harness.dispatch(reserved, verifier_port.verify, continuation_request)
         return harness.get_run(current["run_id"]), reply
 
-    try:
-        reply = harness.dispatch(reserved, verifier_port.verify, request)
-    except Exception:
+    from . import protocol_repair
+    from .calls import CallInterrupted
+
+    def review_failed(current):
         return harness.commit_event(
-            run_id,
-            expected_revision=reserved["state_revision"],
+            current["run_id"],
+            expected_revision=current["state_revision"],
             event={
                 "event_id": "review-failed",
                 "type": "solution_review_failed",
@@ -130,6 +131,52 @@ def review_solution(
                 "final_response": "Solution review failed; no verified answer is available.",
             },
         )
+
+    try:
+        reply = harness.dispatch(reserved, verifier_port.verify, request)
+    except CallInterrupted as exc:
+        failed = protocol_repair.interrupted_call(harness, run_id, exc)
+        if (
+            failed is None
+            or not protocol_repair.repair_enabled(harness._config)
+            or not protocol_repair.known_protocol_failure(failed)
+        ):
+            raise
+        # One gated format repair with a fresh reviewer identity; a second
+        # failure re-raises and still ends dispatch honestly.
+        latest = harness.get_run(run_id)
+        noted = harness.commit_event(
+            run_id,
+            expected_revision=latest["state_revision"],
+            event={
+                "event_id": f"solution-review-parse-{latest['state_revision']}",
+                "type": "solution_review_parse_failed",
+                "role": "whole_solution_verifier",
+                "summary": "Whole-solution review reply failed the response "
+                           "protocol; one bounded repair follows",
+            },
+            state_updates={"status": "running"},
+        )
+        reserved = harness.commit_event(
+            run_id,
+            expected_revision=noted["state_revision"],
+            event={
+                "event_id": "review-dispatched-repair-1",
+                "type": "solution_review_dispatched",
+                "role": "whole_solution_verifier",
+            },
+            state_updates={
+                "counters": {
+                    **noted["state"]["counters"],
+                    "model_calls": noted["state"]["counters"]["model_calls"] + 1,
+                },
+            },
+        )
+        base_call_id = f"{base_call_id}:repair-1"
+        request = protocol_repair.repair_request(request)
+        reply = harness.dispatch(reserved, verifier_port.verify, request)
+    except Exception:
+        return review_failed(reserved)
     from .verifier_compute import continue_review
 
     run, reply, unfulfilled = continue_review(
@@ -154,7 +201,7 @@ def review_solution(
     updates = {"phase": next_phase}
     finding = state["exploration_findings"][-1]
     record = review_record(run, candidate, "ACCEPT" if accepted else "REJECT",
-        call_id=f"{run_id}:whole-solution-review", origin="explore_polish",
+        call_id=base_call_id, origin="explore_polish",
         versions=[{"text": finding.get("original_solution_candidate", candidate)},
                   {"text": candidate}])
     updates["whole_solution_reviews"] = [*state.get("whole_solution_reviews", []), record]
