@@ -17,9 +17,12 @@ def prepare_role_context(run, request, *, include_exploration=False):
     )
     context = {key: deepcopy(state[key]) for key in keys if key in state}
     if request.get("finalization_scope") is True:
-        # Final synthesis and review receive the already dependency-checked facts only.
+        # Final synthesis and review receive the already dependency-checked facts
+        # plus the proof bodies of still-valid accepted steps with their real
+        # computation receipts; dead derivations live only in failure records.
         context.pop("confirmed_failures_ledger", None)
         context["accepted_results"] = deepcopy(request.get("accepted_results", []))
+        context["step_proofs"] = deepcopy(request.get("step_proofs", []))
         return {
             "run_id": run["run_id"],
             "state_revision": run["state_revision"],
