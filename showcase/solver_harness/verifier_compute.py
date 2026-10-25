@@ -22,7 +22,15 @@ KNOWN_RESPONSE_FAILURES = {
 
 
 def configured_bound(config):
-    """Bounded number of verifier computations per review; misconfig clamps safely."""
+    """Return the compatible per-scope computation limit, not a global budget.
+
+    Explore and both Verifier roles share this trusted preset option. Only exact
+    integers 0..16 are accepted (bool is not an integer here); absent or invalid
+    values fall back to 2, never clamp. Zero leaves requests unfulfilled. Receipt
+    identity preserves the count across recovery within role/step/review round/
+    attempt; a distinct review scope has its own count. S3 and the original
+    deadline always take precedence, including before a model continuation.
+    """
     value = config.get("max_verifier_tool_requests", DEFAULT_MAX_VERIFIER_TOOL_REQUESTS)
     return value if type(value) is int and 0 <= value <= 16 else DEFAULT_MAX_VERIFIER_TOOL_REQUESTS
 
