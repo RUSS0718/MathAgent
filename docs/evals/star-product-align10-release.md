@@ -94,9 +94,23 @@
 
 1. `c73561d` **步骤与整题审查无协议修复属主**：reasoner/step_verifier/final_generator/whole_solution_verifier（终路与快通道两处）的一次 star_routing 门控格式修复（统一 `protocol_repair` 模块、`:repair-1` 独立身份）；CallInterrupted 显式捕获、不可修复原样上抛；S4 配套 `review_record` 解析完成态修复子调用。四条公共用例 RED→GREEN；149 项相关回归 + Docker 门控 31 项通过。
 2. `20ed31e`/`96d5cec` **回复协议指令歧义**：live 证据（schema 回声、枚举外 PENDING）驱动的指令明确化——填值实例而非 schema 定义、待决 tool_request 仍带临时枚举裁决。
-3. `439dd2c` **隔离执行预算系统性过紧**：8s 墙钟/3s CPU 使 sympy 导入级脚本普遍被杀为 unknown；校准 20s/10-15s（上游 600s，仍远低于），SP-09 合同补记校准；80M 求和公共 Docker 用例 RED（tool_error）→GREEN（成功、清理核验）。
+3. `439dd2c` **隔离执行预算系统性过紧**：8s 墙钟/3s CPU 使 sympy 导入级脚本普遍被杀为 unknown；校准 20s/10-15s（上游 600s，仍远低于），SP-09 合同补记校准；80M 求和公共 Docker 用例 RED（tool_error）→GREEN（成功、清理核验）。**复审更正：** 该校准当时未真正到达产品路径——`full_config`/`limited_config` 都没有 `tool_timeout_seconds`，`tool_precheck` 落回默认 3s，`container_tool` 的 `min()` 又把它压住，执行器声明的 20s 永远轮不到；配套 Docker 用例直接构造执行器、绕开了这条 seam，因此抓不到。见 §四B 修复。
 4. `b1624b7` **完整回复内非法转义整体报废**：严格解析恰为 Invalid \escape 时仅对该类别加倍非法反斜杠重析一次；其他畸形仍失败、schema 仍严格。公共用例 RED→GREEN；"not json"等真畸形反例不变。
 5. `b3d55e1` **修复回复长文再失败**：修复指令约束字符串 600 字符纯文本、无反斜杠/LaTeX。
+
+## 四B、复审轮发现并修复的缺陷（RED→GREEN）
+
+独立代码评审（标准轴 + 规格轴）在集成分支 `showcase-star-align` 上复核本轮交付，发现并修复：
+
+1. **隔离执行预算未到达产品路径（最高优先级）**：`showcase/star_product_pipeline.py` 现在从已注册执行器继承 `tool_timeout_seconds` 写入 `config`/`full_config`，使 `tool_precheck` 下发的界与执行器声明一致。新公共用例 `test_product_config_carries_the_executor_tool_timeout_for_precheck` 先失败（键缺失）后通过，并在该键再次缺失或被压回 3 秒时失败。
+2. **旁路探针把「注入造成崩溃」当成「识别成功」**：六份 `tests/*_mutations.py` 原先用 `not failures and not errors` 判定，注入一个抛 `TypeError` 的补丁同样会打印 "bypass detected"。新增 `tests/mutation_support.py` 的 `require_assertion_failure`，要求失败必须是断言失败、探针崩溃则明确报错；`tests/test_mutation_support.py` 用崩溃/断言失败/通过三种情况锁住该判定。
+3. **旁路敏感性检查未接入门禁（AC-16）**：`scripts/check.py` 现在逐个执行六份探针，任何一项未识别即让仓库检查失败。
+4. **AC-09 缺回执完整性与「不存在的审查」核验**：`showcase/solver_harness/classified.py` 新增 `_complete_receipt_ids`（回执须带 code/stdout 引用、输入与已结算状态）与 `_review_call_exists`（裁决所指审查调用必须真实存在且角色为审查者），拒绝原因分别为 `damaged_tool_receipt`、`unknown_review_source`；公共用例 `test_damaged_receipts_and_absent_review_source_are_rejected` 覆盖。
+5. **AC-05 缺 easy-verify 独立重算覆盖**：新增 `test_verifier_independently_recomputes_an_easy_verify_claim`，验证审查者用不同参数独立重算并拿到自己的回执，而非复用 Reasoner 的 precheck。
+6. **Definition 分类无正向用例**：新增 `test_definition_classification_is_established_and_reusable`，Definition 作为已证类别进入账本与 SSE。
+7. **文档计数矛盾**：§八 的「599 项 / 29 跳过」改为最终态「605 项 / 30 跳过」，与 §1 一致。
+
+以上修复不产生新的 live 证据，ALIGN-AC-18 仍维持 not_covered。
 
 ## 四、本轮发现并修复的产品缺陷（RED→GREEN）
 
@@ -130,7 +144,7 @@
 
 ## 八、发布判断
 
-- 工程合同面（ALIGN-AC-19）：门禁全过（含最终离线复跑 599 项 29 跳过全部归因、镜像全量 0 跳过、发布检查 PASS、前端审计修复后 0 漏洞、浏览器回归 12/12）；官方冻结字节与导入边界不变。
+- 工程合同面（ALIGN-AC-19）：门禁全过（含最终离线复跑 605 项 30 跳过全部归因、镜像全量 0 跳过、发布检查 PASS、前端审计修复后 0 漏洞、浏览器回归 12/12）；官方冻结字节与导入边界不变。
 - 语义修复面（ALIGN-AC-16/17）：旁路敏感性检查全部实际执行且有效；来源映射完成并有逐项证据。
 - 真实能力面（ALIGN-AC-18）：**未完成**。两轮 29 批后非 Explore 快通道 live 闭环仍未取得（最接近批次 `6f62aea8` 已实证前置全链路，残余为提供方 thinking 长尾超时与长文回复破坏 JSON 两类方差，见 §3.2）；产品侧全部已知阻断缺陷已修复并有 live 逐项验证。本票整体保持未完成状态；快通道 live 工具闭环（两例，含一例诚实 REJECT）与全部失败路径的真实记录不升级为完整能力结论。
 - 不自动关闭父 Issue #70；历史 #56/#69 记录不改写。
