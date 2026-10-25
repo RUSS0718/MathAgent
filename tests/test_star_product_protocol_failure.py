@@ -160,6 +160,28 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
         self.assertEqual([], recovery["protocol_failures"])
         self.assertEqual([], recovery["unknown_calls"])
 
+    def test_mixed_escapes_preserve_text_without_format_reask(self):
+        raw = (r'{"assessment":"NEED_PLAN","worked":[],"failed":[],'
+               r'"candidates":["regex \\d+ and path C:\Users"],'
+               r'"solution_candidate":null,"tool_request":null}')
+        job_id = self.open_plan([RawProviderContent(raw), PLAN, STEP, VERDICT,
+                                 {"final_response": "2"}, ACCEPT])
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        self.assertEqual(6, len(self.outbound))
+        planner = next(item for item in self.outbound if item["role"] == "planner")
+        self.assertEqual([r"regex \d+ and path C:\Users"],
+                         planner["exploration_findings"][0]["candidates"])
+        self.assertEqual([], job["result"]["solver"]["recovery"]["protocol_failures"])
+        self.assertEqual([], job["result"]["solver"]["recovery"]["unknown_calls"])
+        self.assertEqual(60, job["result"]["budget"]["provider_known"]["total_tokens"])
+        self.assertEqual("2", job["result"]["final_response"])
+        # This limited fixture does not claim a full reference proof acceptance.
+        self.assertEqual("needs_review", job["result"]["verification"]["acceptance"])
+        self.assertEqual("same_artifact", job["result"]["verification"]["binding"])
+        evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
+        self.assertIn("2", json.dumps(evidence))
+
     def test_explore_invalid_json_repairs_once_with_new_identity_and_completes(self):
         # Live ALIGN-10 batches repeatedly delivered complete explore replies
         # whose embedded code strings broke strict JSON (finish_reason=stop).

@@ -86,15 +86,21 @@ def _loads_known_escape_rescue(text):
     Live Intern replies embed code whose strings carry single backslashes
     ("\\d", Windows paths): a well-formed JSON object except for escapes JSON
     does not allow. Doubling only the invalid backslashes recovers the model's
-    evident intent without loosening anything else — every other malformed
-    body still fails and the strict schema still gates the parsed result.
+    evident intent without loosening anything else. Legal escape pairs are
+    consumed atomically, including escaped backslashes; malformed Unicode,
+    truncated bodies and structural errors still fail. Schema validation remains
+    separate and mandatory; raw response audit content is never rewritten.
     """
     try:
         return json.loads(text)
     except ValueError as strict_error:
         if "Invalid \\escape" not in str(strict_error):
             raise
-        rescued = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
+        # Consume legal escape pairs atomically: the second slash of \\\\
+        # must never be reconsidered as the start of an illegal escape.
+        rescued = re.sub(r'\\(?:["\\/bfnrtu]|[^"\\/bfnrtu])',
+                         lambda match: (match[0] if match[0][1] in '"\\/bfnrtu'
+                                        else '\\' + match[0]), text)
         return json.loads(rescued)
 
 
