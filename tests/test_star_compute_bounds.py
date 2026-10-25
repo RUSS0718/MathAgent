@@ -135,10 +135,73 @@ class StarComputeBoundsTest(StarJobFixture, unittest.TestCase):
             self.assertEqual(1, len(receipts))
             self.assertTrue(receipts[0]["executed"])
             self.assertEqual(2, receipts[0]["output"])
+        self.assertEqual(reviews[-1]["call_id"],
+                         self.report(job_id)["checks"]["source"]["call_id"])
         self.assertEqual(8, self.post.call_count)
         self.assertEqual(2, self.report(job_id)["budget"]["tool_calls"])
         self.assertEqual(2, len(self.client.get(
             f"/api/runs/{job_id}/evidence").get_json()["tools"]))
+
+    def test_whole_review_source_follows_computation_and_format_repair(self):
+        for path in ("explore", "final"):
+            for order in ("tool", "repair-tool", "tool-repair"):
+                with self.subTest(path=path, order=order):
+                    prefix = [SOLVED, POLISH] if path == "explore" else [
+                        NEED_PLAN, PLAN, STEP, CONTINUE, {"final_response": "1+1=2"}]
+                    request = self.request(2, "whole_solution_verifier")
+                    replies = {"tool": [request, ACCEPT],
+                               "repair-tool": [RawProviderContent("{"), request, ACCEPT],
+                               "tool-repair": [request, RawProviderContent("{"), ACCEPT]}[order]
+                    self.open_bounded([*prefix, *replies], 1)
+                    job_id = self.create_job()
+                    job = self.terminal(job_id)
+                    # The fast review deliberately does not repair a malformed
+                    # tool continuation: it must not promote the pending request.
+                    if path == "explore" and order == "tool-repair":
+                        self.assertNotEqual("succeeded", job["status"])
+                    else:
+                        self.assertEqual("succeeded", job["status"], job)
+                        reviews = [r for r in self.outbound
+                                   if r["role"] == "whole_solution_verifier"]
+                        self.assertEqual(reviews[-1]["call_id"], self.report(job_id)[
+                            "checks"]["source"]["call_id"])
+                        self.assertEqual(2, reviews[-1]["report"]["tool_receipts"][-1]["output"])
+                        self.assertEqual("llm_whole_review_accepted", self.report(job_id)[
+                            "checks"]["findings"][0])
+                    self.assertEqual([{"coefficients": [2]}], self.executed)
+                    # Close each fixture before opening the next subcase.
+                    self.doCleanups()
+
+    def test_whole_tool_unknown_retry_binds_actual_explicit_completion(self):
+        import uuid
+        import requests
+
+        for path in ("explore", "final"):
+            with self.subTest(path=path):
+                prefix = [SOLVED, POLISH] if path == "explore" else [
+                    NEED_PLAN, PLAN, STEP, CONTINUE, {"final_response": "1+1=2"}]
+                self.open_bounded([*prefix, self.request(2, "whole_solution_verifier"),
+                                   requests.Timeout("unknown verdict"), ACCEPT], 1)
+                job_id = self.create_job()
+                initial = self.terminal(job_id)
+                unknown = initial["result"]["solver"]["recovery"]["unknown_calls"]
+                self.assertEqual(1, len(unknown))
+                before = len(self.outbound)
+                new_id = str(uuid.uuid4())
+                response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={
+                    "retry_call": {"call_id": unknown[0]["call_id"], "new_call_id": new_id}},
+                    headers=self.headers())
+                self.assertEqual(202, response.status_code, response.get_json())
+                job = self.terminal(job_id)
+                self.assertEqual("succeeded", job["status"], job)
+                self.assertEqual(before + 1, len(self.outbound))
+                self.assertEqual(new_id, self.outbound[-1]["call_id"])
+                self.assertEqual(new_id, self.report(job_id)["checks"]["source"]["call_id"])
+                self.assertEqual(2, self.outbound[-1]["report"]["tool_receipts"][-1]["output"])
+                self.assertEqual([{"coefficients": [2]}], self.executed)
+                self.assertEqual(initial["result"]["budget"]["deadline_at"],
+                                 job["result"]["budget"]["deadline_at"])
+                self.doCleanups()
 
     def test_repeated_answered_request_never_executes_twice(self):
         self.open_bounded([NEED_PLAN, PLAN, STEP, PREMATURE, PREMATURE], 1)

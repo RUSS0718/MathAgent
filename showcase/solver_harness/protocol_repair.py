@@ -52,17 +52,50 @@ def repair_call_id(call_id):
 
 
 def completed_call_id(calls, call_id):
-    """Resolve explicit retries and the completed format-repair response."""
+    """Follow only this review's retry, repair and computation lineage.
+
+    Tool identities belong to the review root (not necessarily the repaired or
+    explicitly retried reply). Never select an unrelated most-recent call.
+    """
     from .calls import latest_retry_id
 
-    call_id = latest_retry_id(calls, call_id)
-    original = calls.get(call_id, {})
-    repaired = repair_call_id(call_id)
-    candidate = calls.get(repaired, {})
-    if (original.get("status") != "completed"
-            and candidate.get("status") == "completed"
-            and candidate.get("role") == original.get("role")):
-        return repaired
+    root = call_id
+    original = calls.get(root, {})
+    tool_roots = [root]
+    seq = 1
+    for _ in range(len(calls) + 1):
+        resolved = latest_retry_id(calls, call_id)
+        current = calls.get(resolved, {})
+        if (any(current.get(key) != original.get(key)
+                for key in ("role", "run_id"))
+                or current.get("request", {}).get("solution_candidate")
+                != original.get("request", {}).get("solution_candidate")):
+            return call_id
+        call_id = resolved
+        repaired = repair_call_id(call_id)
+        candidate = calls.get(repaired, {})
+        if (current.get("status") != "completed" and candidate
+                and all(candidate.get(key) == original.get(key)
+                        for key in ("role", "run_id"))):
+            call_id = repaired
+            if seq == 1:
+                tool_roots.append(repaired)
+            continue
+        if current.get("status") != "completed" or not isinstance(
+                current.get("response", {}).get("tool_request"), dict):
+            return call_id
+        successor = next((f"{base}:tool-{seq}" for base in tool_roots
+                          if f"{base}:tool-{seq}" in calls), None)
+        if successor is None:
+            return call_id
+        candidate = calls[successor]
+        if (any(candidate.get(key) != original.get(key)
+                for key in ("role", "run_id"))
+                or candidate.get("request", {}).get("solution_candidate")
+                != original.get("request", {}).get("solution_candidate")):
+            return call_id
+        call_id = successor
+        seq += 1
     return call_id
 
 
