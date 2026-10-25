@@ -39,6 +39,24 @@ def _load_local_env() -> None:
 _load_local_env()
 
 
+def _not_submitted(error: BaseException | None) -> bool:
+    """Only positive connection-establishment evidence permits automatic resend."""
+    from urllib3.exceptions import NewConnectionError
+
+    seen = set()
+    pending = [error]
+    while pending:
+        item = pending.pop()
+        if not isinstance(item, BaseException) or id(item) in seen:
+            continue
+        seen.add(id(item))
+        if isinstance(item, (requests.ConnectTimeout, NewConnectionError)):
+            return True
+        pending.extend([item.__cause__, item.__context__, getattr(item, "reason", None)])
+        pending.extend(arg for arg in item.args if isinstance(arg, BaseException))
+    return False
+
+
 class ChatClientError(RuntimeError):
     """A sanitized failure category suitable for trace and local reports."""
 
@@ -159,7 +177,9 @@ class InternChatClient:
         last_category = "request"
         started = time.perf_counter()
         self.last_response_metadata = None
-        for attempt in range(self.retry):
+        # Only the explicit metered product path opts into conservative retries.
+        attempts_limit = min(self.retry, 3) if _attempt_budget is not None else self.retry
+        for attempt in range(attempts_limit):
             attempt_started = time.perf_counter()
             request_event: dict[str, Any] = {
                 **request_metadata,
@@ -294,12 +314,36 @@ class InternChatClient:
                         ),
                     )
                 if _attempt_budget is not None:
+                    if _not_submitted(failure):
+                        request_event.update(status="not_submitted", prompt_tokens=0,
+                                             completion_tokens=0, total_tokens=0)
                     _attempt_budget.after_attempt(request_event)
                 self.request_diagnostics.append(request_event)
                 if _attempt_records is not None:
                     _attempt_records.append(dict(request_event))
                 self._request_sequence += 1
-            if attempt + 1 < self.retry:
+            if _attempt_budget is not None:
+                # ConnectTimeout is documented by requests as safe to retry.
+                # Generic connection errors may occur after submission; never infer
+                # non-execution from an HTTP 5xx or a broken response connection.
+                delay = 2**attempt
+                safe = _not_submitted(failure)
+                if response is not None and response.status_code == 429:
+                    from email.utils import parsedate_to_datetime
+                    retry_after = response.headers.get("Retry-After", "")
+                    try:
+                        delay = float(retry_after)
+                    except (TypeError, ValueError):
+                        try:
+                            delay = parsedate_to_datetime(retry_after).timestamp() - time.time()
+                        except (TypeError, ValueError, OverflowError):
+                            delay = -1
+                    safe = delay >= 0
+                if not safe or delay >= _attempt_budget.remaining_seconds():
+                    break
+                if attempt + 1 < attempts_limit:
+                    time.sleep(delay)
+            elif attempt + 1 < attempts_limit:
                 time.sleep(2**attempt)
 
         raise ChatClientError(last_category, self.last_failure_type)

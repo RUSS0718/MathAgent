@@ -287,17 +287,17 @@ class RunBudgetContractTest(unittest.TestCase):
         self.assertEqual(report["budget"]["started_at"], report["budget"]["deadline_at"])
 
     def test_successful_retry_uses_one_logical_call_and_two_attempts(self):
-        from requests import Timeout
+        from requests import ConnectTimeout
 
         job, report, _evidence, post = self.run_job(
-            responses=[Timeout("private"), Response(), Response(), Response()]
+            responses=[ConnectTimeout("private"), Response(), Response(), Response()]
         )
         self.assertEqual("succeeded", job["status"])
         self.assertEqual(4, post.call_count)
         self.assertEqual(3, report["budget"]["logical_calls"])
         self.assertEqual(4, report["budget"]["http_attempts"])
-        self.assertEqual(1, report["budget"]["unresolved_attempts"])
-        self.assertGreater(report["budget"]["reserved_tokens"], 256)
+        self.assertEqual(0, report["budget"]["unresolved_attempts"])
+        self.assertEqual(0, report["budget"]["reserved_tokens"])
 
     def test_langgraph_run_and_resume_keep_the_same_persisted_budget(self):
         from pathlib import Path

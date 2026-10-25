@@ -31,7 +31,7 @@ class StarProductPipeline:
         if adapter is not None and not isinstance(adapter, InternModelAdapter):
             raise ValueError("star_adapter_invalid")
         self.database_path = database_path
-        self.adapter = adapter or InternModelAdapter(client_timeout=180, client_retry=1)
+        self.adapter = adapter or InternModelAdapter(client_timeout=180, client_retry=3)
         self.evidence_kind = evidence_kind
         if budget is not None and not isinstance(budget, RunBudgetLimits):
             raise ValueError("star_budget_invalid")

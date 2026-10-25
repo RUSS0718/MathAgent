@@ -19,8 +19,8 @@ class StarBudgetTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(0, budget["reserved_tokens"])
         self.assertEqual(1, budget["logical_calls"])
 
-    def test_retry_is_one_logical_call_and_preserves_unknown_attempt(self):
-        self.open_star([requests.Timeout(), SOLVED, POLISH, ACCEPT], retry=2,
+    def test_safe_retry_is_one_logical_call_without_unknown_reservation(self):
+        self.open_star([requests.ConnectTimeout(), SOLVED, POLISH, ACCEPT], retry=2,
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=3, max_http_attempts=4))
         job_id = self.create_job()
         job = self.terminal(job_id)
@@ -29,8 +29,8 @@ class StarBudgetTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(4, len(self.outbound))
         self.assertEqual(3, budget["logical_calls"])
         self.assertEqual(4, budget["http_attempts"])
-        self.assertEqual(1, budget["unresolved_attempts"])
-        self.assertGreater(budget["reserved_tokens"], 0)
+        self.assertEqual(0, budget["unresolved_attempts"])
+        self.assertEqual(0, budget["reserved_tokens"])
         self.assertEqual(30, budget["provider_known"]["total_tokens"])
         attempts = self.report(job_id)["request_attempts"]
         self.assertTrue(all(attempt["solver_call_id"] for attempt in attempts))
