@@ -12,6 +12,7 @@ stale or cyclic dependencies are rejected individually and never promoted.
 from collections.abc import Mapping
 
 from .computation_evidence import has_computation_output
+from .counterexample import missing_direction, target
 
 CATEGORIES = ("Lemma", "Conjecture", "Computation", "Definition", "Answer")
 CONJECTURE = "Conjecture"
@@ -121,6 +122,7 @@ def build_entries(state, reply, *, step_id, report, review_call_id, suffix,
     complete = _complete_receipt_ids(state)
     known = _established_ids(state)
     review_recorded = _review_call_exists(state, review_call_id)
+    declared = target(report, reply.get("answer_claim")) if isinstance(reply, Mapping) else None
     entries, rejections = [], []
     for index, item in enumerate(declarations(reply)):
         category = item.get("category")
@@ -142,6 +144,11 @@ def build_entries(state, reply, *, step_id, report, review_call_id, suffix,
             or any(type(value) is not int or not 0 <= value < len(claims) for value in indexes)
         ):
             reason = "invalid_report_source"
+        if (reason is None and declared and missing_direction(declared)
+                and category in PROVEN_CATEGORIES
+                and (not indexes or declared["claim_index"] in indexes
+                     or statement == declared["claim"])):
+            reason = "missing_proof_direction"
         refs = item.get("receipt_ids", [])
         if reason is None and (
             not isinstance(refs, list)

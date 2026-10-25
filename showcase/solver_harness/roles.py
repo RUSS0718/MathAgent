@@ -1,17 +1,17 @@
 """Role definitions, aliases and invocation ports used by dispatch and replay."""
 
 ROLE_DEFINITIONS = {
-    "explore": "Explore the problem; distinguish observations from proofs and report structured assessment. Do not alter authoritative state.",
+    "explore": "Explore the problem; distinguish observations from proofs and report structured assessment. SOLVED requires a self-contained solution_candidate satisfying every original requirement, including any requested brief explanation, conditions, domain and answer format. Include the complete reasoning needed for independent whole-solution review; put gaps in partial progress instead. Do not alter authoritative state.",
     "reasoner": "Solve only the current objective using accepted results and relevant failures. Return a labeled StepReport; respond to the current objection during Challenge. Do not alter authoritative state.",
     "reason_noncoding": "Prove the current objective by pure reasoning, without executable tools. Return a labeled StepReport. Do not alter authoritative state.",
     "step_verifier": "Independently review the current objective and proof. Return exactly one structured verdict and concrete objections. Do not alter authoritative state or access other runs.",
-    "whole_solution_verifier": "Independently review the full candidate against the original problem and proof obligations. Return ACCEPT or REJECT. Do not alter authoritative state or access other runs.",
+    "whole_solution_verifier": "Independently review the full candidate against every original requirement, including any requested brief explanation, conditions, domain, answer format and applicable proof obligations. Reject omissions even when the final number is correct. Return ACCEPT or REJECT. Do not alter authoritative state or access other runs.",
     "meta": "Select a strategy from progress, failures and budget. Do not take over the proof, execute code or alter authoritative state.",
 }
 
 ROLE_DEFINITIONS.update(
     {
-        "explore_polish": "Polish the current Explore candidate in its existing session; do not invent unsupported facts.",
+        "explore_polish": "Polish the current Explore candidate in its existing session. Preserve every original requirement, including any requested brief explanation, conditions, domain and answer format. Keep the complete reasoning and conclusion together in a self-contained solution_candidate for a fresh whole-solution verifier; do not replace a derivation with just its answer or invent unsupported facts.",
         "planner": "Return a numbered executable Plan with explicit goals and earlier-step dependencies.",
         "researcher": "Perform only the bounded noncoding research task; report unverified findings and limitations.",
         "final_generator": "Synthesize a complete final answer using only accepted facts and their evidence scope.",

@@ -14,6 +14,8 @@ spec #70（ALIGN-01..ALIGN-10，#71..#80）承接 #56 的语义偏移修复与�
 
 RB-01 的仓库公共离线入口与证据边界见 [交付来源与离线复评 API](engineering/star-rb01-offline-acceptance.md)。该接口不派发模型或工具，历史重判不自动升级 #80 验收。
 
+RB-03 的增量 `answer_claim.claim_type`、旧声明兼容、短题完整交付和受控测试边界见 [短题完整交付与证明义务合同](engineering/star-rb03-proof-obligations.md)。三调用受控测试不替代 RB-08 的真实模型验收。
+
 ## 历史 SP 集成语境
 
 以下 SP-01..SP-11 段落保留各阶段当时状态；其中“尚未完成”“拒绝启动”“未验证”不是当前 ALIGN 状态判断，请先读上方当前入口。

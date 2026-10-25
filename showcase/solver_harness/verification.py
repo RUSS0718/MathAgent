@@ -231,7 +231,7 @@ def verify_step(
         declared = counterexample.target(report, reply["answer_claim"])
         if declared is None:
             verification.update(valid=False, reason="invalid_answer_claim_target")
-        elif not declared["both_directions_proved"]:
+        elif verification["valid"] and counterexample.missing_direction(declared):
             reserved = counterexample.run_check(
                 harness, reserved, problem=problem, declared=declared, verifier_call_id=call_id,
             )
