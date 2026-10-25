@@ -352,6 +352,26 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(7, budget["http_attempts"])
         self.assertEqual(0, budget["unknown_attempts"])
 
+    def test_final_generator_repair_preserves_answer_and_review_input(self):
+        answer = "By addition, 1+1=2. " + "The proof remains necessary. " * 30
+        job_id = self.open_plan([NEED_PLAN, PLAN, STEP, VERDICT,
+                                 RawProviderContent("not json"),
+                                 {"final_response": answer}, ACCEPT])
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        self.assertEqual(answer, job["result"]["final_response"])
+        self.assertEqual(["explore", "planner", "reasoner", "step_verifier",
+                          "final_generator", "final_generator", "whole_solution_verifier"],
+                         [request["role"] for request in self.outbound])
+        self.assertEqual(self.outbound[4]["call_id"] + ":repair-1",
+                         self.outbound[5]["call_id"])
+        self.assertEqual(answer, self.outbound[6]["solution_candidate"])
+        self.assertEqual("same_artifact", self.report(job_id)["checks"]["binding"])
+        evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
+        self.assertIn(answer, json.dumps(evidence))
+        self.assertEqual(7, job["result"]["budget"]["http_attempts"])
+        self.assertEqual([], job["result"]["solver"]["recovery"]["unknown_calls"])
+
     def test_final_whole_review_invalid_json_repairs_once_with_new_identity(self):
         # Live ALIGN-10 batch ...-6a1828b2 died here: the whole reviewer echoed
         # the schema definition instead of a verdict. The finalization review
@@ -514,13 +534,13 @@ class StarProtocolFenceTest(StarJobFixture, unittest.TestCase):
         # fence before it can be parsed: no math commit and no re-dispatch, the
         # ledger keeps the real usage, and the original deadline is not reset.
         def slow_invalid(_context):
-            time.sleep(1.1)
+            time.sleep(3.1)
             return RawProviderContent("not json")
 
         job_id = self.open_plan([NEED_PLAN, slow_invalid, PLAN, STEP, VERDICT,
                                  {"final_response": "2"}, ACCEPT],
                                 max_model_calls=8, max_http_attempts=8,
-                                max_runtime_seconds=1)
+                                max_runtime_seconds=3)
         job = self.terminal(job_id)
         self.assertEqual("failed", job["status"], job)
         self.assertEqual("run_deadline_exhausted", job["error"])
@@ -535,7 +555,7 @@ class StarProtocolFenceTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(409, rejected.status_code)
         self.assertEqual(2, len(self.outbound))
         budget = job["result"]["budget"]
-        self.assertAlmostEqual(1, budget["deadline_at"] - budget["started_at"], delta=0.2)
+        self.assertAlmostEqual(3, budget["deadline_at"] - budget["started_at"], delta=0.2)
         self.assertIsNotNone(budget["ended_at"])
         self.assertEqual({"prompt_tokens": 14, "completion_tokens": 6, "total_tokens": 20},
                          budget["provider_known"])

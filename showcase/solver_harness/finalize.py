@@ -33,6 +33,8 @@ def finish(harness, run, status, reason, candidate=""):
 
 
 def dispatch(harness, run, operation, request, _repair_attempt=0):
+    from . import protocol_repair
+
     state = run["state"]
     run = commit(
         harness,
@@ -47,7 +49,7 @@ def dispatch(harness, run, operation, request, _repair_attempt=0):
         "allowed_tools": [],
         "tool_policy": {"allow": []},
         **request,
-        "call_id": base_call_id + (":repair-1" if _repair_attempt else ""),
+        "call_id": protocol_repair.repair_call_id(base_call_id) if _repair_attempt else base_call_id,
     }
     if request["role"] in {"final_generator", "whole_solution_verifier"}:
         request["finalization_scope"] = True
@@ -62,8 +64,6 @@ def dispatch(harness, run, operation, request, _repair_attempt=0):
         reply = harness.dispatch(run, invoke, request)
         return run, redact(deepcopy(dict(reply)))
     except CallInterrupted as exc:
-        from . import protocol_repair
-
         failed = protocol_repair.interrupted_call(harness, run["run_id"], exc)
         if (
             _repair_attempt == 0
@@ -77,18 +77,13 @@ def dispatch(harness, run, operation, request, _repair_attempt=0):
             # One gated format repair: the note bumps the revision, so the
             # recursive dispatch reserves again and answers under a fresh
             # revision-derived call identity. A second failure re-raises.
-            latest = harness.get_run(run["run_id"])
-            noted = harness.commit_event(
-                latest["run_id"],
-                expected_revision=latest["state_revision"],
-                event={
+            noted = protocol_repair.reserve_repair(
+                harness, run["run_id"], exc,
+                failure_event=lambda latest, failed: {
                     "event_id": f"finalization-parse-{request['role']}-{latest['state_revision']}",
-                    "type": "finalization_parse_failed",
-                    "role": request["role"],
-                    "summary": "Finalization reply failed the response protocol; "
-                               "one bounded repair follows",
+                    "type": "finalization_parse_failed", "role": request["role"],
+                    "summary": "Finalization reply failed the response protocol; one bounded repair follows",
                 },
-                state_updates={"status": "running"},
             )
             return dispatch(
                 harness, noted, operation,

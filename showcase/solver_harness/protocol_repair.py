@@ -46,7 +46,53 @@ def known_protocol_failure(call):
             and call.get("error_category") in KNOWN_RESPONSE_FAILURES)
 
 
+def repair_call_id(call_id):
+    """Keep historical repair identities readable and deterministic."""
+    return f"{call_id}:repair-1"
+
+
+def completed_call_id(calls, call_id):
+    """Resolve explicit retries and the completed format-repair response."""
+    from .calls import latest_retry_id
+
+    call_id = latest_retry_id(calls, call_id)
+    original = calls.get(call_id, {})
+    repaired = repair_call_id(call_id)
+    candidate = calls.get(repaired, {})
+    if (original.get("status") != "completed"
+            and candidate.get("status") == "completed"
+            and candidate.get("role") == original.get("role")):
+        return repaired
+    return call_id
+
+
+def reserve_repair(harness, run_id, exc, *, failure_event, dispatch_event=None):
+    """Record one known failure and reserve its next action on the same ledger.
+
+    Owners call this only for their first response failure. Planner structure
+    repair remains in plan_generation: it validates dependencies and versions,
+    not just the response protocol. Dispatch remains at the owner boundary so
+    its exception/termination semantics are unchanged.
+    S3 still owns admission, cancellation, deadline and actual billing.
+    """
+    failed = interrupted_call(harness, run_id, exc)
+    if (failed is None or not repair_enabled(harness._config)
+            or not known_protocol_failure(failed)):
+        raise exc
+    latest = harness.get_run(run_id)
+    noted = harness.commit_event(
+        run_id, expected_revision=latest["state_revision"],
+        event=failure_event(latest, failed), state_updates={"status": "running"})
+    if dispatch_event is None:
+        return noted  # Finalization reserves through its existing dispatch wrapper.
+    return harness.commit_event(
+        run_id, expected_revision=noted["state_revision"], event=dispatch_event,
+        state_updates={"counters": {
+            **noted["state"]["counters"],
+            "model_calls": noted["state"]["counters"]["model_calls"] + 1}})
+
+
 def repair_request(request, *, instruction=REPAIR_INSTRUCTION):
     """A fresh identity for the same question: ``:repair-1`` plus instruction."""
-    return {**request, "call_id": f"{request['call_id']}:repair-1",
+    return {**request, "call_id": repair_call_id(request["call_id"]),
             "repair_instruction": instruction}
