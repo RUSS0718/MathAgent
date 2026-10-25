@@ -8,6 +8,7 @@ from ..redaction import redact
 from .budget import budget_reason
 from .calls import CallInterrupted
 from .final_binding import review_record
+from .results import stable_unique_results
 
 
 def commit(harness, run, kind, updates, **details):
@@ -127,14 +128,7 @@ def valid_facts(state):
         *state.get("accepted_results", []),
         *(item for item in state.get("verified_results_ledger", []) if isinstance(item, dict)),
     ]
-    pending, seen_ids = [], set()
-    for fact in deepcopy(combined):
-        key = fact.get("result_id") if isinstance(fact, dict) else None
-        if isinstance(key, str):
-            if key in seen_ids:
-                continue
-            seen_ids.add(key)
-        pending.append(fact)
+    pending = stable_unique_results(deepcopy(combined))
     facts = []
     while pending:
         selected = []
