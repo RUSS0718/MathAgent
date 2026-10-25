@@ -11,6 +11,8 @@ stale or cyclic dependencies are rejected individually and never promoted.
 
 from collections.abc import Mapping
 
+from .computation_evidence import has_computation_output
+
 CATEGORIES = ("Lemma", "Conjecture", "Computation", "Definition", "Answer")
 CONJECTURE = "Conjecture"
 PROVEN_CATEGORIES = ("Lemma", "Computation", "Definition", "Answer")
@@ -34,6 +36,7 @@ def _real_receipt_ids(state):
         if isinstance(receipt, Mapping)
         and receipt.get("executed") is True
         and receipt.get("status") == "success"
+        and has_computation_output(receipt)
         and isinstance(receipt.get("receipt_id"), str)
     }
 
