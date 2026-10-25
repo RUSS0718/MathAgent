@@ -268,11 +268,43 @@ class InternStreamAdapter(InternModelAdapter):
             if call_budget is not None:
                 effective_timeout = min(
                     effective_timeout, call_budget.before_attempt(attempt, len(body)))
-            response = requests.post(
-                client.api_base, headers=headers, data=body,
-                timeout=effective_timeout, stream=True,
-            )
-            response.raise_for_status()
+            from llm_client import _not_submitted, product_retry_delay
+            limit = min(getattr(client, "retry", 1), 3) if call_budget else 1
+            for index in range(limit):
+                try:
+                    response = requests.post(
+                        client.api_base, headers=headers, data=body,
+                        timeout=effective_timeout, stream=True,
+                    )
+                    response.raise_for_status()
+                    break
+                except requests.RequestException as failure:
+                    delay = product_retry_delay(failure, response, index, call_budget) if call_budget else None
+                    if call_budget and _not_submitted(failure):
+                        attempt.update(status="not_submitted", prompt_tokens=0,
+                                       completion_tokens=0, total_tokens=0)
+                    else:
+                        attempt.update(status="error")
+                    if delay is None or index + 1 >= limit:
+                        raise
+                    attempt.update(error_category=_request_failure_category(failure),
+                                   error_type=type(failure).__name__,
+                                   http_status=getattr(response, "status_code", None),
+                                   duration_seconds=round(time.monotonic() - started, 3))
+                    attempts.append(dict(attempt))
+                    call_budget.after_attempt(attempt)
+                    if response is not None:
+                        response.close()
+                    response = None
+                    time.sleep(delay)
+                    attempt = {**attempt, "attempt_id": uuid.uuid4().hex,
+                               "attempt_index": index + 2, "status": "pending",
+                               "started_at_utc": datetime.now(UTC).isoformat()}
+                    for key in ("prompt_tokens", "completion_tokens", "total_tokens",
+                                "error_category", "error_type", "http_status"):
+                        attempt.pop(key, None)
+                    started = time.monotonic()
+                    effective_timeout = min(effective_timeout, call_budget.before_attempt(attempt, len(body)))
             attempt.update(status="success", http_status=getattr(response, "status_code", None))
             parts: list[str] = []
             usage: dict[str, Any] = {}
@@ -325,7 +357,9 @@ class InternStreamAdapter(InternModelAdapter):
             raise
         except Exception as exc:  # noqa: BLE001 - provider details stay out of events
             category = _request_failure_category(exc)
-            attempt.update(status="error", error_category=category, error_type=type(exc).__name__)
+            from llm_client import _not_submitted
+            attempt.update(status="not_submitted" if _not_submitted(exc) else "error",
+                           error_category=category, error_type=type(exc).__name__)
             attempt["duration_seconds"] = round(time.monotonic() - started, 3)
             attempts.append(dict(attempt))
             error = AdapterError(category, type(exc).__name__)

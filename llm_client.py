@@ -43,6 +43,10 @@ def _not_submitted(error: BaseException | None) -> bool:
     """Only positive connection-establishment evidence permits automatic resend."""
     from urllib3.exceptions import NewConnectionError
 
+    # The current failure wins over stale exception-handler context. Only
+    # explicit transport wrappers (reason/args) carry establishment evidence.
+    if isinstance(error, requests.ReadTimeout):
+        return False
     seen = set()
     pending = [error]
     while pending:
@@ -52,9 +56,33 @@ def _not_submitted(error: BaseException | None) -> bool:
         seen.add(id(item))
         if isinstance(item, (requests.ConnectTimeout, NewConnectionError)):
             return True
-        pending.extend([item.__cause__, item.__context__, getattr(item, "reason", None)])
+        if isinstance(item, requests.ReadTimeout):
+            return False
+        pending.append(getattr(item, "reason", None))
         pending.extend(arg for arg in item.args if isinstance(arg, BaseException))
     return False
+
+
+def product_retry_delay(failure, response, attempt_index, budget):
+    """Shared metered transport retry policy; None means unknown/terminal."""
+    import math
+    from email.utils import parsedate_to_datetime
+
+    delay = 2**attempt_index
+    safe = _not_submitted(failure)
+    if response is not None and response.status_code == 429:
+        value = response.headers.get("Retry-After", "")
+        try:
+            delay = float(value)
+        except (TypeError, ValueError):
+            try:
+                delay = parsedate_to_datetime(value).timestamp() - time.time()
+            except (TypeError, ValueError, OverflowError):
+                return None
+        safe = math.isfinite(delay) and delay >= 0
+    if not safe or delay >= budget.remaining_seconds():
+        return None
+    return delay
 
 
 class ChatClientError(RuntimeError):
@@ -323,23 +351,8 @@ class InternChatClient:
                     _attempt_records.append(dict(request_event))
                 self._request_sequence += 1
             if _attempt_budget is not None:
-                # ConnectTimeout is documented by requests as safe to retry.
-                # Generic connection errors may occur after submission; never infer
-                # non-execution from an HTTP 5xx or a broken response connection.
-                delay = 2**attempt
-                safe = _not_submitted(failure)
-                if response is not None and response.status_code == 429:
-                    from email.utils import parsedate_to_datetime
-                    retry_after = response.headers.get("Retry-After", "")
-                    try:
-                        delay = float(retry_after)
-                    except (TypeError, ValueError):
-                        try:
-                            delay = parsedate_to_datetime(retry_after).timestamp() - time.time()
-                        except (TypeError, ValueError, OverflowError):
-                            delay = -1
-                    safe = delay >= 0
-                if not safe or delay >= _attempt_budget.remaining_seconds():
+                delay = product_retry_delay(failure, response, attempt, _attempt_budget)
+                if delay is None:
                     break
                 if attempt + 1 < attempts_limit:
                     time.sleep(delay)

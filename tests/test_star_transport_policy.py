@@ -26,6 +26,15 @@ class StarTransportPolicyTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(1, self.post.call_count)
         self.assertGreater(result["result"]["budget"]["reserved_tokens"], 0)
 
+    def test_default_production_job_sends_180_seconds(self):
+        self.open_star([SOLVED, POLISH, ACCEPT], SHOWCASE_STAR_ADAPTER=None)
+        job_id = self.create_job()
+        result = self.terminal(job_id)
+        self.assertEqual("succeeded", result["status"], result)
+        self.assertEqual(180, self.post.call_args_list[0].kwargs["timeout"])
+        self.assertEqual("1+1=2", result["result"]["final_response"])
+        self.assertEqual(3, self.post.call_count)
+
     def test_retry_after_missing(self):
         self.check_rejected_retry_after(None)
 
@@ -132,6 +141,22 @@ class StarTransportPolicyTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(3, self.post.call_count)
         self.assertEqual(0, result["result"]["budget"]["reserved_tokens"])
 
+
+    def test_suppressed_old_connect_failure_cannot_make_read_timeout_safe(self):
+        from urllib3.exceptions import NewConnectionError
+        try:
+            try:
+                raise NewConnectionError(None, "old connection")
+            except NewConnectionError:
+                raise requests.ReadTimeout("current request sent") from None
+        except requests.ReadTimeout as error:
+            failure = error
+        self.open_star([failure, SOLVED, POLISH, ACCEPT], retry=3)
+        job_id = self.create_job()
+        result = self.terminal(job_id)
+        self.assertEqual("failed", result["status"])
+        self.assertEqual(1, len(self.outbound))
+        self.assertGreater(result["result"]["budget"]["reserved_tokens"], 0)
 
     def test_read_timeout_is_not_automatically_resent(self):
         self.open_star([requests.ReadTimeout("unknown"), SOLVED, POLISH, ACCEPT], retry=3,
