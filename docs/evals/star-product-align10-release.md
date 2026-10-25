@@ -1,10 +1,43 @@
 # ALIGN-10 来源复核、真实批次与发布判断记录
 
+## 当前维护证据边界（#85，第一部分）
+
+核对日期：2026-10-25；维护起点 `showcase-star-align-maintenance@b09dd05d5edd5a838d52fd65bd2f1d47734c67db`。本节是当前判断；下文第 1/2 轮及复审轮均为历史记录，不是维护分支的最终验收。
+
+- 当前最终门禁尚未运行；最终代码汇合后的固定 SHA、命令、日志产物身份和结果待主会话提供后续补记。发现数不等于执行数：#85 建票时的 612 仅是发现记录，不能写作 612 通过，也不代表此后测试数量不变。
+- 历史 raw 当前缺失：本地历史 runner 不存在，历史 live 原始产物及门禁原文尚未取得。历史表格与公开评论是二手记录，不能独立核验逐批运行 SHA、HTTP attempts、费用或计数。保留历史失败及 unknown，不补造原文，不拼接不同版本的数字。
+- 当前版本 Docker 实际执行待最终证据；本地固定镜像可用仅是环境事实，不是通过。不得沿用旧 Docker 0skip 为当前结果。历史 30 项逐项名称及当前 skip 原因仍待同一最终 SHA 的日志核对，§1.1 的 29 项模块聚合不能冒充 30 项逐项归因。
+- 已修历史缺陷见 §四/四A/四B；这些修复记录不产生复审后的 live 证据。`b09dd05` 仍确认存在混合转义救助缺陷 #81：公共 Job 可成功但额外消耗一次格式修复，尚未证明 Job 未捕获崩溃或它解释所有 live 失败；并行修复状态以对应提交及公共 Job 回归为准。
+- 维护债务：#82 协议修复生命周期/身份、#83 成果稳定去重；合同与覆盖完善：#84 计算次数配置边界。它们不是已证实的新 live 故障，也不是 AC-18 的人为强制前置。
+- 提供方假设：thinking 长尾、长文本破坏协议与格式约束损害证明均须由 #86 区分产品配置、预算、上下文与提供方责任，不能先验把剩余失败归因提供方。
+- #80 的 ALIGN-AC-18 未通过；Challenge/Trace-Back/Replan 等未触发 live 分支保持 not_covered，#70 不自动关闭。本部分只校正文档与结构，不升级完整参考能力。
+
+### 历史累计算术冲突（未独立核实）
+
+§三原文为 31 调用 / 208,194 tokens / 8 工具，§三A原文为 97 / 1,013,322 / 22；两轮逐项相加应为 128 / 1,221,516 / 30，而历史累计原文为 116 / 1,281,244 / 37。下文保留各原文历史声明以便追溯，但这三组累计不一致，不能选任一组当作已核实实际累计；raw/runner 缺失，当前无法重算。unknown 的 2+9=11 仅算术一致，也不是原始批次的独立核验。#86 新发现的流式 timeout 配置问题不证明历史 runner 使用流式，亦不解释全部历史 420s 超时。
+
+### 历史 SHA 归因与可追溯性限制
+
+下列 SHA 由 Git 文档提交及其父提交核对，是记录归属，不是运行 SHA 的独立证明。缺少门禁原文时，不把父 SHA 推定为实际运行环境。
+
+| 历史记录 | 文档提交 / 可确定的代码上下界 | 历史声明的发现或运行总数 / 实际通过 / skip / fail | 当前可核验边界 |
+| --- | --- | --- | --- |
+| 第 1 轮离线终跑 | 文档 `0d6e9ff`；父 `f1512e24b20ebc20cb344cda749a119746676efe` | 599 / 570 / 29 / 0（历史 OK） | 原文称含当轮提交；运行 SHA 待 raw 核验 |
+| 第 1 轮 Docker | 同一文档明确为两笔修复前基点；`96a1c29` 为该轮集成起点，不等于已证实运行 SHA | 596 / 596 / 0 / 0（历史 OK） | 不能称覆盖之后的 599 项或本轮维护提交 |
+| 第 2 轮离线、独立 discover | 文档 `135c795`；父 `75102759beb5ffec1aad94d5f6cbcd5f4383c19a` | 各 605 / 575 / 30 / 0（历史 OK） | 通过数仅按历史 OK 减 skip 展开；原文及运行 SHA 待核验 |
+| 第 2 轮 Docker | 同上 | 605 / 605 / 0 / 0（历史 OK） | 不覆盖后续复审或维护代码 |
+| 复审轮 | `4bd8155`、`eb65bae`、文档 `c55672c`，其后 `b09dd05` | 无可追溯的新全量计数 | 不能沿用前轮 605/30 作为复审最终结果 |
+| 当前维护最终复验 | 待全部相关代码合并后固定 SHA | 未运行 / 未知 / 未知 / 未知 | 不从收集数量推导通过数；Docker 独立记录 |
+
+公开工单历史声明见 [首轮发布评论](https://github.com/RUSS0718/MathAgent/issues/80#issuecomment-6394603882)；随后 [遗留项核对评论](https://github.com/RUSS0718/MathAgent/issues/80#issuecomment-6394817999) 已限定 `b09dd05` 的已知缺陷与未验边界，后者优先于旧的“产品清零”归因。工单更新由主会话负责，本部分不关闭工单。
+
+## 历史执行记录（保留原轮次，不代表当前通过）
+
 状态：ALIGN-10（#80）第 1+2 轮实际执行记录。完成声明以本文件证据为准；真实非快通道闭环两轮共 29 批仍未取得，ALIGN-AC-18 记 not_covered（见 §3、§3.2），不因其余门禁通过而升级。日期：2026-10-25。固定基点：分支 `fix/star-align-10-source-release`（基 `showcase-star-align` 尖端 `96a1c29`，ALIGN-01..09 全部合入），本票提交：第 1 轮 `0abf438`（null 候选协议）、`f9861b3`（探索有界格式修复，含 star_routing 特性门）、`f1512e2`（zod 升级）、`0d6e9ff`（文档）；第 2 轮 `c73561d`（步骤/审查修复属主）、`20ed31e`（禁回声 schema 指令）、`96d5cec`（枚举与待决计算指令）、`b1624b7`（非法转义救助重析）、`439dd2c`（隔离执行预算校准）、`b3d55e1`（修复指令长度约束）及文档提交。
 
 本记录不宣称数学正确率、论文成绩复现或所有题型可解；LLM 接受不是形式化证明。父 Issue #70 与历史 #56/#69 不由本票关闭或改写。
 
-## 一、全量门禁（ALIGN-AC-19）
+## 一、历史全量门禁声明（ALIGN-AC-19，运行 SHA 待原文核验）
 
 | 门禁 | 命令 | 结果 |
 | --- | --- | --- |
@@ -18,7 +51,7 @@
 
 ### 1.1 跳过逐项归因（修复前离线套件 29 项）
 
-全部为 `MATHAGENT_TEST_PYTHON_IMAGE` 门控，不含 xfail：`test_star_product_full_modes` 11、`test_python_executor_docker` 6、`test_star_product_python` 3、`test_star_product_protocol_failure` 2、`test_star_product_explore_compute` 1、`test_star_product_classified_outcomes` 1、`test_star_product_verifier_compute` 1、`test_star_product_continue_identity` 1、`test_star_product_guidance_consumption` 1、`test_star_product_replan_decision` 1、`test_star_product_align_recovery` 1。上表镜像全量以同一套件把 29 项全部真实执行（0 skip）。
+全部为 `MATHAGENT_TEST_PYTHON_IMAGE` 门控，不含 xfail：`test_star_product_full_modes` 11、`test_python_executor_docker` 6、`test_star_product_python` 3、`test_star_product_protocol_failure` 2、`test_star_product_explore_compute` 1、`test_star_product_classified_outcomes` 1、`test_star_product_verifier_compute` 1、`test_star_product_continue_identity` 1、`test_star_product_guidance_consumption` 1、`test_star_product_replan_decision` 1、`test_star_product_align_recovery` 1。历史第 1 轮 Docker 实为修复前 596 项，不能据此推定修复后 599 项全部执行；第 2 轮 30 项逐项归因尚缺原文。
 
 ### 1.2 官方冻结与导入边界
 
@@ -87,7 +120,7 @@
 ### 3.2 第 2 轮结论与仍存的 not_covered
 
 - **新增取得（live）**：reasoner 修复属主触发并救回步骤报告（`aab5ffb7`、`9b2862f0`）；探索修复属主多次触发救回；非法转义救助重析生效（`f2778974` 之前同类批次全部终止，修复后同类回复继续前进）；隔离执行 20s/15s CPU 预算下模型自然脚本（含 sympy）全部真实完成；`867a48f9` 第二次快通道工具+S4 闭环；`5f25cd6f` 快通道整题审查对可疑候选诚实 REJECT（completed_unverified，非接受）。
-- **仍未取得（ALIGN-AC-18 维持 not_covered）**：非 Explore 快通道完整闭环。两轮最接近批次 `6f62aea8` 已实证 NEED_PLAN→合法 Plan→步骤审查通过→自然计算回执的全前置链路，其后未走完仅因当时批次 token 硬预算与两类残余方差：①提供方 thinking 长尾——单次模型调用偶发超 420s（全部按真 unknown 保留、零重发）；②长文本回复破坏 JSON——整题审查偶发 6.8k token 长文（修复指令已加长度约束，样本尚不足以证明消除）。产品侧已无已知阻断缺陷；不以 29 批中的片段证据或 scripted 验收冒充完整 live 闭环。
+- **仍未取得（ALIGN-AC-18 维持 not_covered）**：非 Explore 快通道完整闭环。两轮最接近批次 `6f62aea8` 已实证 NEED_PLAN→合法 Plan→步骤审查通过→自然计算回执的全前置链路，其后未走完仅因当时批次 token 硬预算与两类残余方差：①提供方 thinking 长尾——单次模型调用偶发超 420s（全部按真 unknown 保留、零重发）；②长文本回复破坏 JSON——整题审查偶发 6.8k token 长文（修复指令已加长度约束，样本尚不足以证明消除）。该轮曾判断产品侧阻断已清零（已被当前 #81/#86 核对限定，不作为当前结论）；不以 29 批中的片段证据或 scripted 验收冒充完整 live 闭环。
 - live 自然 Challenge/Trace-Back/Replan 与分类账本/证明传递的 live 观察维持 not_covered（同第 1 轮口径）。
 
 ## 四A、第 2 轮发现并修复的产品缺陷（RED→GREEN）
@@ -136,15 +169,15 @@
 | ALIGN-07 #77 | `tests.test_star_product_classified_outcomes` + `classified_outcomes_mutations` | scripted | live 分类裁定未观察到（批次未进入步骤审查） | 计入离线套件 |
 | ALIGN-08 #78 | `tests.test_star_product_final_proof` + `final_proof_mutations` | scripted | live 证明正文传递未观察到（同上） | 同上 |
 | ALIGN-09 #79 | `tests.test_star_product_align_recovery`（五窗口真实退出、镜像 reference 链） | 真实子进程退出 + scripted | live 恢复未触发 | 计入离线套件 |
-| ALIGN-10 #80（本票） | §1 门禁、§2 旁路汇总、§3/§3A live 批次（29 批）、§4/§4A 七笔 RED→GREEN 修复、§5 模式复核、来源映射文档 | live + scripted + 故障注入 + replay | AC-18 live 闭环 not_covered（产品侧阻断已清零，残余为提供方差差）；live Challenge/Trace-Back/Replan not_covered | 两轮 29 批 live（116 调用/1,281,244 tokens/37 工具/11 unknown 全保留）+ 两轮全量门禁机时 |
+| ALIGN-10 #80（本票） | §1 门禁、§2 旁路汇总、§3/§3A live 批次（29 批）、§4/§4A 七笔 RED→GREEN 修复、§5 模式复核、来源映射文档 | live + scripted + 故障注入 + replay | AC-18 live 闭环 not_covered（历史曾作产品清零及提供方归因，当前需 #81/#86 重新核对）；live Challenge/Trace-Back/Replan not_covered | 两轮 29 批 live（116 调用/1,281,244 tokens/37 工具/11 unknown 全保留）+ 两轮全量门禁机时 |
 
 ## 七、来源映射入口
 
 全机制映射与七类修复来源复核见 [ALIGN-10 来源映射](star-product-align10-source-mapping.md)（固定论文 arXiv:2605.19338v1 + 上游 commit `5f2a86b5…`，逐项标一致/缺失/有意适配/项目扩展/冲突）。
 
-## 八、发布判断
+## 八、历史发布判断（不适用于当前维护尖端）
 
 - 工程合同面（ALIGN-AC-19）：门禁全过（含最终离线复跑 605 项 30 跳过全部归因、镜像全量 0 跳过、发布检查 PASS、前端审计修复后 0 漏洞、浏览器回归 12/12）；官方冻结字节与导入边界不变。
 - 语义修复面（ALIGN-AC-16/17）：旁路敏感性检查全部实际执行且有效；来源映射完成并有逐项证据。
-- 真实能力面（ALIGN-AC-18）：**未完成**。两轮 29 批后非 Explore 快通道 live 闭环仍未取得（最接近批次 `6f62aea8` 已实证前置全链路，残余为提供方 thinking 长尾超时与长文回复破坏 JSON 两类方差，见 §3.2）；产品侧全部已知阻断缺陷已修复并有 live 逐项验证。本票整体保持未完成状态；快通道 live 工具闭环（两例，含一例诚实 REJECT）与全部失败路径的真实记录不升级为完整能力结论。
+- 真实能力面（ALIGN-AC-18）：**未完成**。两轮 29 批后非 Explore 快通道 live 闭环仍未取得（最接近批次 `6f62aea8` 已实证前置全链路，残余为提供方 thinking 长尾超时与长文回复破坏 JSON 两类方差，见 §3.2）；该轮曾作产品阻断清零声明；当前 #81 已确认新缺陷，责任归因由 #86 继续核对。本票整体保持未完成状态；快通道 live 工具闭环（两例，含一例诚实 REJECT）与全部失败路径的真实记录不升级为完整能力结论。
 - 不自动关闭父 Issue #70；历史 #56/#69 记录不改写。

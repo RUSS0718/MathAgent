@@ -6,11 +6,19 @@
 
 ## 先读哪些文档
 
-当前完整 STAR 产品集成由 [spec #56](https://github.com/RUSS0718/MathAgent/issues/56) 及 SP-01..SP-13（#57..#69）承载，承接 #23 基础设施与 #32 求解机制；当前从 [SP-01 #57](https://github.com/RUSS0718/MathAgent/issues/57) 的来源审计和风险验证开始。状态职责和恢复合同见 [ADR-0014](adr/0014-star-product-state-and-recovery.md)，范围形成过程见 [访谈记录](experiments/star-completion-interview.md)。新 spec 尚未完成；历史工单关闭不表示 Workbench 已贯通完整 STAR。
-
-本次执行记录见 [产品集成执行合同](engineering/star-product-execution.md)。SP-01 已形成 [固定来源与全量验收映射](experiments/star-product-source-audit.md) 和 [风险报告](experiments/star-product-risk-sp01.md)：公共旧流程恢复有实测证据，但 STAR 接受步骤恢复尚未验证，Docker 原型输出限制存在已复现旁路。完整模式门槛仍未通过；SP-02 明确受限纵切的实现边界见 [合同](engineering/star-product-sp02-contract.md) 与 [实际验收记录](evals/star-product-sp02.md)；完整模式仍拒绝启动。
+## 当前 ALIGN 状态
 
 spec #70（ALIGN-01..ALIGN-10，#71..#80）承接 #56 的语义偏移修复与重新验收：裁决消费与新动作身份、独立 ReplanDecision、Verifier/Explore 受控计算、分类账本与证明传递、协议失败与 unknown 分离、跨流程恢复，最终来源复核与发布判断见 [ALIGN-10 来源映射](evals/star-product-align10-source-mapping.md) 与 [ALIGN-10 发布记录](evals/star-product-align10-release.md)。记录区分 scripted/故障注入/live/replay 证据；真实非 Explore 快通道闭环尚未取得，历史工单关闭不升级为完整能力结论。
+
+当前维护 #81–#86、后续 #82 及最终证据边界见发布记录顶部；#80 的 ALIGN-AC-18 仍未通过，#70 不自动关闭。最终门禁尚未运行，不沿用历史计数。
+
+## 历史 SP 集成语境
+
+以下 SP-01..SP-11 段落保留各阶段当时状态；其中“尚未完成”“拒绝启动”“未验证”不是当前 ALIGN 状态判断，请先读上方当前入口。
+
+历史完整 STAR 产品集成由 [spec #56](https://github.com/RUSS0718/MathAgent/issues/56) 及 SP-01..SP-13（#57..#69）承载，承接 #23 基础设施与 #32 求解机制；当时从 [SP-01 #57](https://github.com/RUSS0718/MathAgent/issues/57) 的来源审计和风险验证开始。状态职责和恢复合同见 [ADR-0014](adr/0014-star-product-state-and-recovery.md)，范围形成过程见 [访谈记录](experiments/star-completion-interview.md)。当时新 spec 尚未完成；历史工单关闭不表示 Workbench 已贯通完整 STAR。
+
+本次执行记录见 [产品集成执行合同](engineering/star-product-execution.md)。SP-01 已形成 [固定来源与全量验收映射](experiments/star-product-source-audit.md) 和 [风险报告](experiments/star-product-risk-sp01.md)：公共旧流程恢复有实测证据，但 STAR 接受步骤恢复尚未验证，Docker 原型输出限制存在已复现旁路。完整模式门槛仍未通过；SP-02 明确受限纵切的实现边界见 [合同](engineering/star-product-sp02-contract.md) 与 [实际验收记录](evals/star-product-sp02.md)；完整模式仍拒绝启动。
 
 SP-03 的[共享账本与控制合同](engineering/star-product-sp03-contract.md)及[公共故障验证记录](evals/star-product-sp03.md)记录模型、重试、工具和研究的同一S3准入，取消/截止的数学事务栅栏及迟到用量；不替代后续恢复、生成Python隔离和MetaGuidance切换验收。
 
