@@ -372,7 +372,7 @@ def _run_guidance_for_failure(harness, run, max_model_calls, max_runtime_seconds
             failure_type, tool_failure = "code_issue", (
                 "output_mismatch" if status == "output_limit" else "execution_error"
             )
-        elif status == "success" and receipt.get("assertion_matched") is False:
+        elif status == "success" and receipt.get("comparison_status") == "mismatched":
             failure_type, tool_failure = "code_issue", "output_mismatch"
         if failure_type:
             break

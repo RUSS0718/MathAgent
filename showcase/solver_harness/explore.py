@@ -240,6 +240,8 @@ def run_exploration(
                         "executed": receipt.get("executed") is True,
                         "output": receipt.get("output"),
                         "assertion_matched": receipt.get("assertion_matched") is True,
+                        "comparison_status": receipt.get("comparison_status", "not_compared"),
+                        "output_available": receipt.get("output_available", False),
                         "unknown_outcome": receipt.get("unknown_outcome") is True,
                     }
                     for receipt in receipts
