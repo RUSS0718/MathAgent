@@ -49,6 +49,13 @@ class StarProductPipeline:
             raise ValueError("star_budget_invalid")
         self.full_config = full_config(self.full_budget, full_features)
         self.full_config["hint_mode"] = hint_mode
+        # The registered executor owns the real wall-clock budget; tool_precheck
+        # reads config["tool_timeout_seconds"] and its 3s default silently
+        # overrode a larger executor budget through container_tool's min().
+        executor = getattr(registry, "container_python_executor", None)
+        if executor is not None:
+            self.config["tool_timeout_seconds"] = executor.timeout_seconds
+            self.full_config["tool_timeout_seconds"] = executor.timeout_seconds
         self.readiness = {"available": False, "reason": "full_mode_not_enabled"}
         if self.full_enabled:
             self.full_gaps(probe=True)

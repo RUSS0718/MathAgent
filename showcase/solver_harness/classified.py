@@ -38,6 +38,36 @@ def _real_receipt_ids(state):
     }
 
 
+def _complete_receipt_ids(state):
+    """Executed successes whose receipt still carries its integrity references.
+
+    A receipt ID alone is a claim; the references make it auditable. A receipt
+    whose code/output reference or input payload went missing is a damaged
+    receipt and cannot back a classified outcome.
+    """
+    return {
+        receipt.get("receipt_id")
+        for receipt in state.get("tool_receipts", [])
+        if isinstance(receipt, Mapping)
+        and receipt.get("executed") is True
+        and receipt.get("status") == "success"
+        and isinstance(receipt.get("receipt_id"), str)
+        and isinstance(receipt.get("code_ref"), str) and receipt["code_ref"]
+        and isinstance(receipt.get("stdout_ref"), str) and receipt["stdout_ref"]
+        and receipt.get("input") is not None
+        and receipt.get("unknown_outcome") is not True
+    }
+
+
+def _review_call_exists(state, review_call_id):
+    """The recorded review call this ruling claims to come from."""
+    if not isinstance(review_call_id, str) or not review_call_id:
+        return False
+    call = state.get("calls", {}).get(review_call_id)
+    return isinstance(call, Mapping) and call.get("role") in {
+        "step_verifier", "whole_solution_verifier"}
+
+
 def _established_ids(state):
     """Accepted step IDs and result IDs of valid proven records."""
     ids = {
@@ -73,7 +103,9 @@ def build_entries(state, reply, *, step_id, report, review_call_id, suffix,
     """
     claims = report.get("claims", []) if isinstance(report, Mapping) else []
     receipts = _real_receipt_ids(state)
+    complete = _complete_receipt_ids(state)
     known = _established_ids(state)
+    review_recorded = _review_call_exists(state, review_call_id)
     entries, rejections = [], []
     for index, item in enumerate(declarations(reply)):
         category = item.get("category")
@@ -81,7 +113,9 @@ def build_entries(state, reply, *, step_id, report, review_call_id, suffix,
         scope = item.get("scope")
         result_id = f"{step_id}:outcome-{len(entries) + 1}{suffix}"
         reason = None
-        if category not in CATEGORIES:
+        if not review_recorded:
+            reason = "unknown_review_source"
+        elif category not in CATEGORIES:
             reason = "unknown_category"
         elif not isinstance(statement, str) or not statement.strip():
             reason = "missing_statement"
@@ -100,6 +134,8 @@ def build_entries(state, reply, *, step_id, report, review_call_id, suffix,
             or any(value not in receipts for value in refs)
         ):
             reason = "unverified_tool_receipt"
+        elif reason is None and any(value not in complete for value in refs):
+            reason = "damaged_tool_receipt"
         elif reason is None and category == "Computation" and not refs:
             reason = "unsupported_computation"
         dependencies = item.get("dependencies", [])
