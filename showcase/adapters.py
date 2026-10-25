@@ -266,7 +266,8 @@ class InternStreamAdapter(InternModelAdapter):
         started = time.monotonic()
         try:
             if call_budget is not None:
-                effective_timeout = call_budget.before_attempt(attempt, len(body))
+                effective_timeout = min(
+                    effective_timeout, call_budget.before_attempt(attempt, len(body)))
             response = requests.post(
                 client.api_base, headers=headers, data=body,
                 timeout=effective_timeout, stream=True,

@@ -44,6 +44,39 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
         return [json.loads(line[6:]) for line in stream.splitlines()
                 if line.startswith("data: ")]
 
+    def test_stream_transport_respects_adapter_timeout_inside_public_job_budget(self):
+        from llm_client import InternChatClient
+        from showcase.adapters import InternStreamAdapter
+        from tests.star_product_support import SOLVED, POLISH
+
+        adapter = InternStreamAdapter(InternChatClient(timeout=5, retry=1), max_tokens=256)
+        self.open_star([SOLVED, POLISH, ACCEPT], SHOWCASE_STAR_FEATURES=FEATURES,
+                       SHOWCASE_STAR_ADAPTER=adapter,
+                       SHOWCASE_STAR_BUDGET=RunBudgetLimits(
+                           max_model_calls=8, max_http_attempts=8, max_runtime_seconds=60))
+        original = self.post.side_effect
+        timeouts = []
+
+        def stream_reply(*args, **kwargs):
+            timeouts.append(kwargs["timeout"])
+            reply = original(*args, **kwargs)
+            package = reply.json()
+            content = package["choices"][0]["message"]["content"]
+            packet = {"choices": [{"delta": {"content": content}, "finish_reason": "stop"}],
+                      "model": "intern-s2", "usage": KNOWN_USAGE}
+            reply.iter_lines = lambda **options: iter(["data: " + json.dumps(packet), "data: [DONE]"])
+            reply.close = lambda: None
+            return reply
+
+        self.post.side_effect = stream_reply
+        job_id = self.create_job()
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        self.assertEqual(3, len(timeouts))
+        self.assertTrue(all(0 < seconds <= 5 for seconds in timeouts), timeouts)
+        self.assertEqual("same_artifact", self.report(job_id)["checks"]["binding"])
+        self.assertEqual(3, job["result"]["budget"]["http_attempts"])
+
     def test_complete_invalid_json_is_a_known_protocol_failure_never_unknown(self):
         # The provider finished the reasoner response (finish_reason=stop, usage
         # known) but the body is not JSON. The Job must name the known protocol
@@ -244,6 +277,59 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
         budget = job["result"]["budget"]
         self.assertEqual(7, budget["http_attempts"])
         self.assertEqual(0, budget["unknown_attempts"])
+
+    def test_format_repair_preserves_long_proof_and_json_escaped_math(self):
+        proof = "Proof detail: " + "For each integer the same addition identity holds. " * 20 + r" Therefore \alpha=2."
+
+        def repair(context):
+            return {**STEP, "argument": proof}
+
+        job_id = self.open_plan([NEED_PLAN, PLAN, RawProviderContent("not json"),
+                                 repair, VERDICT, {"final_response": proof}, ACCEPT])
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        repaired = [r for r in self.outbound if r["role"] == "reasoner"][1]
+        instruction = repaired["repair_instruction"]
+        self.assertNotIn("under 600", instruction)
+        self.assertNotIn("no backslashes", instruction)
+        self.assertIn("Preserve", instruction)
+        self.assertIn("tool", instruction)
+        reviewer = next(r for r in self.outbound if r["role"] == "step_verifier")
+        self.assertIn(proof, json.dumps(reviewer, ensure_ascii=False).replace("\\\\", "\\"))
+        self.assertEqual(proof, job["result"]["final_response"])
+        self.assertEqual("same_artifact", self.report(job_id)["checks"]["binding"])
+        self.assertEqual(7, job["result"]["budget"]["http_attempts"])
+        self.assertEqual([], job["result"]["solver"]["recovery"]["unknown_calls"])
+
+    def test_repaired_verifier_request_is_executed_before_acceptance(self):
+        from showcase.tools import ToolRegistry
+        from tests.test_star_product_verifier_compute import PREMATURE, CONTINUE
+
+        actual = []
+        registry = ToolRegistry()
+        registry.register("polynomial_check", lambda args: actual.append(args) or 2)
+        self.open_star(
+            [NEED_PLAN, PLAN, STEP, RawProviderContent("not json"), PREMATURE,
+             CONTINUE, {"final_response": "2"}, ACCEPT],
+            SHOWCASE_STAR_FEATURES={**FEATURES, "local_code_tool": True},
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(
+                max_model_calls=16, max_http_attempts=16, max_tool_calls=2),
+            SHOWCASE_STAR_REGISTRY=registry)
+        job_id = self.create_job()
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        self.assertEqual([{"coefficients": [1]}], actual)
+        reviews = [r for r in self.outbound if r["role"] == "step_verifier"]
+        self.assertIn("executable tool request", reviews[1]["repair_instruction"])
+        receipt = reviews[2]["report"]["tool_receipts"][0]
+        self.assertTrue(receipt["executed"])
+        self.assertEqual(2, receipt["output"])
+        self.assertEqual({"coefficients": [1]}, receipt["input"])
+        evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
+        self.assertIn(receipt["receipt_id"], [t.get("tool_call_id") for t in evidence["tools"]])
+        self.assertEqual("2", job["result"]["final_response"])
+        self.assertEqual("same_artifact", self.report(job_id)["checks"]["binding"])
+        self.assertEqual(8, job["result"]["budget"]["http_attempts"])
 
     def test_step_verifier_invalid_json_repairs_once_with_new_identity_and_completes(self):
         job_id = self.open_plan([NEED_PLAN, PLAN, STEP, RawProviderContent("not json"),
