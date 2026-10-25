@@ -30,7 +30,7 @@ class StarProductRuntimeTest(unittest.TestCase):
             self.assertEqual(["polynomial_check", "python_math"], [tool["name"] for tool in tools])
             self.assertEqual(["calculation", "isolated_mathematical_python"], tools[1]["capabilities"])
             self.assertEqual([SHOWCASE_PROFILE], tools[1]["allowed_profiles"])
-            self.assertEqual(8.0, tools[1]["timeout_seconds"])
+            self.assertEqual(20.0, tools[1]["timeout_seconds"])
             self.assertEqual(["polynomial_check", "python_math"], pipeline.config["allowed_tools"])
             self.assertTrue(pipeline.config["features"]["final_generation"])
             self.assertTrue(pipeline.config["features"]["final_solution_review"])

@@ -101,8 +101,9 @@ class StarUncalibratedProbabilityTest(StarJobFixture, unittest.TestCase):
         from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
 
         confident = {**STEP, 'confidence': 0.95}
-        self.open_star([NEED_PLAN, PLAN, confident, VERDICT, {'final_response': '2'},
-                        {'verdict': 'ACCEPT', 'reason': 'ok'}],
+        # The reasoner owns one bounded format repair (ALIGN-10 round 2): the
+        # uncalibrated reply must fail twice before the honest end.
+        self.open_star([NEED_PLAN, PLAN, confident, confident],
                        SHOWCASE_STAR_FEATURES=FEATURES,
                        SHOWCASE_STAR_BUDGET=RunBudgetLimits(
                            max_model_calls=16, max_http_attempts=16))
@@ -114,13 +115,14 @@ class StarUncalibratedProbabilityTest(StarJobFixture, unittest.TestCase):
         # failure, not an unknown remote outcome awaiting human review.
         self.assertEqual('safe', recovery['status'])
         self.assertEqual([], recovery['unknown_calls'])
-        self.assertEqual(1, len(recovery['protocol_failures']))
+        self.assertEqual(2, len(recovery['protocol_failures']))
+        self.assertEqual({'reasoner'}, {item['role'] for item in recovery['protocol_failures']})
         failure = recovery['protocol_failures'][0]
-        self.assertEqual('reasoner', failure['role'])
         self.assertEqual('invalid_role_schema', failure['error_category'])
         self.assertEqual('stop', failure['finish_reason'])
+        self.assertEqual(1, sum(item['repair_attempts'] for item in recovery['protocol_failures']))
         self.assertEqual('partial_aborted', job['result']['solver']['status'])
-        self.assertEqual(3, len(self.outbound))
+        self.assertEqual(4, len(self.outbound))
         public = json.dumps([job, self.report(job_id),
                              self.client.get(f'/api/runs/{job_id}/evidence').get_json(),
                              self.client.get(f'/api/agent/jobs/{job_id}/candidate-replay')
@@ -136,7 +138,8 @@ class StarUncalibratedProbabilityTest(StarJobFixture, unittest.TestCase):
 
         confident = {'goal_gate': 'YES', 'logic_gate': 'PASS', 'verdict': 'ACCEPT',
                      'objection': '', 'confidence': 0.95}
-        self.open_star([NEED_PLAN, PLAN, STEP, confident],
+        # The verifier's bounded format repair gets the same uncalibrated body.
+        self.open_star([NEED_PLAN, PLAN, STEP, confident, confident],
                        SHOWCASE_STAR_FEATURES=FEATURES,
                        SHOWCASE_STAR_BUDGET=RunBudgetLimits(
                            max_model_calls=16, max_http_attempts=16))

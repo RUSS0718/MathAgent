@@ -226,14 +226,13 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
     def test_schema_invalid_complete_stream_is_not_normalized_and_never_shows_probability(self):
         uncalibrated = {"assessment": "SOLVED", "worked": [], "failed": [], "candidates": [],
                         "solution_candidate": "2", "confidence": 0.95}
+        # ALIGN-10 gives the explore entry one bounded format repair, so the
+        # invalid streamed reply is followed by a single repair dispatch; the
+        # second invalid reply exhausts the bound and the run still ends
+        # honestly with no retry decision to make.
         self.open_stream([
             [*split_fragments(uncalibrated), {"type": "result"}],
-            [*split_fragments(NEED_PLAN), {"type": "result"}],
-            [*split_fragments(PLAN), {"type": "result"}],
-            [*split_fragments(STEP), {"type": "result"}],
-            [*split_fragments(VERDICT), {"type": "result"}],
-            [*split_fragments({"final_response": "2"}), {"type": "result"}],
-            [*split_fragments(ACCEPT), {"type": "result"}],
+            [*split_fragments(uncalibrated), {"type": "result"}],
         ], SHOWCASE_STAR_FEATURES=FEATURES,
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=16, max_http_attempts=16))
         job_id = self.create_job()
@@ -243,9 +242,11 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         # ALIGN-04: the complete streamed package that fails the strict schema
         # is a known protocol failure, never an unknown remote outcome.
         self.assertEqual([], recovery["unknown_calls"])
-        self.assertEqual(1, len(recovery["protocol_failures"]))
-        self.assertEqual("explore", recovery["protocol_failures"][0]["role"])
-        self.assertEqual("invalid_role_schema", recovery["protocol_failures"][0]["error_category"])
+        self.assertEqual(2, len(recovery["protocol_failures"]))
+        self.assertEqual({"explore"}, {item["role"] for item in recovery["protocol_failures"]})
+        self.assertEqual({"invalid_role_schema"},
+                         {item["error_category"] for item in recovery["protocol_failures"]})
+        self.assertEqual(1, sum(item["repair_attempts"] for item in recovery["protocol_failures"]))
         # The streamed complete package never became a normalized candidate.
         self.assertEqual([], failed["result"]["solver"]["candidate_history"])
         stream, dumps = self.public_outputs(job_id)
@@ -257,7 +258,7 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         rejected = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={},
                                     headers=self.headers())
         self.assertEqual(409, rejected.status_code)
-        self.assertEqual(1, len(self.outbound))
+        self.assertEqual(2, len(self.outbound))
 
     def test_process_exit_mid_stream_keeps_unknown_and_requires_explicit_new_identity(self):
         import subprocess

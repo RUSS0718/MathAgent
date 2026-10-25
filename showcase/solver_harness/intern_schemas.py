@@ -13,6 +13,10 @@ def obj(properties, required=None):
 TEXT = {"type": "string"}
 TEXTS = {"type": "array", "items": TEXT}
 TARGET = {"oneOf": [{"type": "integer", "minimum": 1}, {"enum": [None]}]}
+# A live NEED_PLAN reply or an intermediate step report naturally states the
+# optional candidate as an explicit null ("no complete solution yet"); the
+# reply protocol accepts that empty value instead of failing the whole run.
+OPTIONAL_TEXT = {"oneOf": [TEXT, {"enum": [None]}]}
 TOOL = obj(
     {
         "tool": {"enum": ["polynomial_check", "python_math"]},
@@ -46,7 +50,7 @@ OUTCOME = obj(
 )
 STEP = obj(
     {"argument": TEXT, "claims": {"type": "array", "items": CLAIM}, "blocked": {"type": "boolean"},
-     "solution_candidate": TEXT, "answer_completeness": {"enum": ["complete", "partial"]}},
+     "solution_candidate": OPTIONAL_TEXT, "answer_completeness": {"enum": ["complete", "partial"]}},
     ["argument", "claims", "blocked"],
 )
 SCHEMAS = {
@@ -56,7 +60,7 @@ SCHEMAS = {
             "worked": TEXTS,
             "failed": TEXTS,
             "candidates": TEXTS,
-            "solution_candidate": TEXT,
+            "solution_candidate": OPTIONAL_TEXT,
             "tool_request": {"oneOf": [TOOL, {"enum": [None]}]},
         },
         ["assessment", "worked", "failed", "candidates"],

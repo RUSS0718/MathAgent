@@ -1,6 +1,7 @@
 """Explicit Intern bridge; injected adapters remain fully offline-testable."""
 
 import json
+import re
 import time
 from collections.abc import Mapping
 from copy import deepcopy
@@ -79,6 +80,24 @@ def _invocation_record(request, model_id, *, stream=False):
     return record
 
 
+def _loads_known_escape_rescue(text):
+    """Parse strictly; rescue exactly the invalid-escape failure class.
+
+    Live Intern replies embed code whose strings carry single backslashes
+    ("\\d", Windows paths): a well-formed JSON object except for escapes JSON
+    does not allow. Doubling only the invalid backslashes recovers the model's
+    evident intent without loosening anything else — every other malformed
+    body still fails and the strict schema still gates the parsed result.
+    """
+    try:
+        return json.loads(text)
+    except ValueError as strict_error:
+        if "Invalid \\escape" not in str(strict_error):
+            raise
+        rescued = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
+        return json.loads(rescued)
+
+
 class InternModelPort:
     """Reasoner/Verifier/Meta bridge, with no implicit live adapter creation."""
 
@@ -118,7 +137,7 @@ class InternModelPort:
             if not response.text.strip():
                 raise _protocol_failure("empty_response", record, response.text)
             try:
-                parsed = json.loads(response.text)
+                parsed = _loads_known_escape_rescue(response.text)
             except (TypeError, ValueError) as exc:
                 raise _protocol_failure("invalid_json", record, response.text) from exc
             if not isinstance(parsed, Mapping) or schema_error(parsed, schema):
@@ -174,7 +193,7 @@ class InternModelPort:
             if not isinstance(text, str) or not text.strip():
                 raise _protocol_failure("empty_response", record, text)
             try:
-                parsed = json.loads(text)
+                parsed = _loads_known_escape_rescue(text)
             except (TypeError, ValueError) as exc:
                 raise _protocol_failure("invalid_json", record, text) from exc
             if not isinstance(parsed, Mapping) or schema_error(parsed, schema):
@@ -212,7 +231,13 @@ class InternModelPort:
             f"You are the {role}. {role_definition} Return one JSON object only, no Markdown or commentary. "
             "Obey this exact response schema: "
             + json.dumps(schema, ensure_ascii=False)
-            + " Use only runtime allowed_tools. A tool_request is a proposed local computation, not evidence. "
+            + " Answer with a filled instance of this schema containing your actual values — "
+            "never echo the schema definition itself (a reply like "
+            '{"type": "object", "properties": ...} is a protocol failure). '
+            "Enum fields must take one of their listed values only; while a tool_request is "
+            "pending, still state your provisional enum verdict — the runtime withholds any "
+            "acceptance until the real receipt exists. "
+            "Use only runtime allowed_tools. A tool_request is a proposed local computation, not evidence. "
             "Never fabricate tool receipts. Every pending tool_request MUST use label easy-verify, never verified. "
             "Group candidate substitutions into one request when possible. Omit expected_output unless the exact registered output is known; a guessed shape will not match. "
             "A successful polynomial candidate check proves substitution only, not completeness. "

@@ -41,17 +41,25 @@ class StarGateTest(StarJobFixture, unittest.TestCase):
                 self.assertEqual("STEP_VERIFY", gate["solver"]["phase"])
 
     def test_malformed_verifier_reply_is_persisted_as_needs_review(self):
+        # The verifier owns one bounded format repair (ALIGN-10 round 2), so
+        # the invalid review is only persisted after the repair reply fails
+        # the same way; the run still ends unaccepted, never unknown.
         job_id, job, events = self.start([
             NEED_PLAN, TWO_STEPS, STEP, {"unexpected": "shape"},
+            RawProviderContent("still not json"),
         ])
         self.assertEqual("failed", job["status"])
-        self.assertEqual(4, len(self.outbound))
+        self.assertEqual(5, len(self.outbound))
         self.assertEqual("partial_aborted", job["result"]["solver"]["status"])
         self.assertEqual("STEP_VERIFY", job["result"]["solver"]["phase"])
         run = self.client.get(f"/api/runs/{job_id}").get_json()
         self.assertEqual("partial_aborted", run["result"]["solver"]["status"])
-        self.assertEqual(["explore", "planner", "reasoner", "step_verifier"],
+        self.assertEqual(["explore", "planner", "reasoner", "step_verifier", "step_verifier"],
                          [request["role"] for request in self.outbound])
+        recovery = job["result"]["solver"]["recovery"]
+        self.assertEqual([], recovery["unknown_calls"])
+        self.assertEqual(2, len(recovery["protocol_failures"]))
+        self.assertEqual(1, sum(item["repair_attempts"] for item in recovery["protocol_failures"]))
         gate = next(e for e in events if e.get("solver_event_type") == "step_reviewed")
         self.assertFalse(gate["valid"])
         self.assertEqual("STEP_VERIFY", gate["solver"]["phase"])

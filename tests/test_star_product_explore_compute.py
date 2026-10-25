@@ -29,6 +29,10 @@ ENUMERATE = {"assessment": "SOLVED", "worked": ["small cases"], "failed": [],
 CONTINUE = {"assessment": "SOLVED", "worked": ["enumeration executed"], "failed": [],
             "candidates": [], "solution_candidate": "1+1=2"}
 NEED_PLAN = {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
+# A live NEED_PLAN reply naturally carries an explicit null candidate: no
+# complete solution exists yet, so the model states that instead of omitting
+# or faking the optional field. The same natural null appears in step reports.
+NEED_PLAN_NULL = {**NEED_PLAN, "solution_candidate": None}
 PLAN = {"version": 1, "steps": [{"step_id": "sum", "title": "Add", "objective": "Compute 1+1"}]}
 STEP = {"argument": "addition", "blocked": False, "claims": [
     {"statement": "1+1=2 for every carrier", "label": "hard-verify"}]}
@@ -106,6 +110,37 @@ class StarExploreComputeTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(1, len(reviewed), events)
         receipt_revision = next(revision for kind, revision in events if kind == "tool_receipt")
         self.assertLess(receipt_revision, reviewed[0])
+
+    def test_need_plan_reply_with_null_candidate_enters_the_plan_path(self):
+        """A natural NEED_PLAN reply may state ``solution_candidate: null``.
+
+        Live ALIGN-10 finding (batch star-align10-live-...-d6812cac): the real
+        model answered NEED_PLAN with an explicit null candidate and a finite
+        enumeration request; the strict reply protocol rejected the null as
+        ``invalid_role_schema`` and the public Job ended in an unrepaired
+        protocol failure before the Planner was ever consulted. The reply
+        protocol must accept the natural empty value and route to planning.
+        """
+        registry = ToolRegistry()
+        registry.register("polynomial_check", lambda args: 2)
+        step_null = {**STEP, "solution_candidate": None}
+        self.open_star(
+            [NEED_PLAN_NULL, PLAN, step_null, STEP_VERDICT,
+             {"final_response": "1+1=2"}, ACCEPT],
+            SHOWCASE_STAR_FEATURES=PLAN_FEATURES, SHOWCASE_STAR_BUDGET=BUDGET,
+            SHOWCASE_STAR_REGISTRY=registry)
+        job_id = self.create_job()
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        planner = next(context for context in self.outbound if context["role"] == "planner")
+        finding = planner["exploration_findings"][0]
+        self.assertEqual("NEED_PLAN", finding["assessment"])
+        self.assertNotIn("solution_candidate", finding)
+        # The step report's explicit null stays absent instead of aborting the run.
+        self.assertEqual(
+            ["explore", "planner", "reasoner", "step_verifier",
+             "final_generator", "whole_solution_verifier"],
+            [context["role"] for context in self.outbound])
 
     def test_explore_counterexample_computation_reaches_planner_request(self):
         counter = {"found": True, "counterexample": "n=3", "violated": "every n is odd"}

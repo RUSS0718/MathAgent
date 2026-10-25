@@ -39,7 +39,16 @@ def review_record(run, candidate, verdict, *, call_id, origin, versions=None, fa
     from .calls import latest_retry_id
 
     state = run["state"]
-    call_id = latest_retry_id(state.get("calls", {}), call_id)
+    calls = state.get("calls", {})
+    call_id = latest_retry_id(calls, call_id)
+    if calls.get(call_id, {}).get("status") != "completed":
+        # A bounded format repair answers under ``<call_id>:repair-1``; the
+        # review must cite the call that actually carried the verdict, never
+        # the protocol-failed original (S4 binding depends on it).
+        repaired = f"{call_id}:repair-1"
+        if (calls.get(repaired, {}).get("status") == "completed"
+                and calls[repaired].get("role") == calls.get(call_id, {}).get("role")):
+            call_id = repaired
     return {
         "artifact": artifact_identity(candidate),
         "verdict": verdict,

@@ -22,7 +22,14 @@ IMAGE_LABELS = {
 
 
 class DockerPythonExecutor:
-    def __init__(self, *, image, artifact_root, timeout_seconds=8, max_output_bytes=16000):
+    # The wall/CPU budget is calibrated for real mathematical scripts: live
+    # ALIGN-10 batches kept losing natural computations (sympy imports, DP
+    # over 10^4 states) to the old 8s wall / 3s CPU caps, turning every
+    # explore computation into an unknown timeout. Upstream budgets code at
+    # 600s; 20s stays far below while letting multi-second scripts finish.
+    # Everything else (network=none, memory caps, output caps, fail-closed
+    # cleanup verification) is unchanged.
+    def __init__(self, *, image, artifact_root, timeout_seconds=20, max_output_bytes=16000):
         if not isinstance(image, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
             raise ValueError("star_python_image_id_invalid")
         self.image = image
@@ -90,7 +97,7 @@ class DockerPythonExecutor:
                 "--label=mathagent.run_id=" + run_id, "--label=mathagent.call_id=" + call_id,
                 "--label=mathagent.sandbox.policy=" + POLICY,
                 "--memory=256m", "--memory-swap=256m", "--cpus=.5", "--pids-limit=32",
-                "--ulimit=cpu=2:3", "--ulimit=fsize=1048576:1048576", "--log-driver=none",
+                "--ulimit=cpu=10:15", "--ulimit=fsize=1048576:1048576", "--log-driver=none",
                 "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777", "-i", self.image,
                 "python", "-I", "-u", "-c", "import sys; exec(compile(sys.stdin.buffer.read(), '<math>', 'exec'))",
             ])

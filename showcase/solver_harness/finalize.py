@@ -6,6 +6,7 @@ from copy import deepcopy
 from ..final_evidence import artifact_identity
 from ..redaction import redact
 from .budget import budget_reason
+from .calls import CallInterrupted
 from .final_binding import review_record
 
 
@@ -30,7 +31,7 @@ def finish(harness, run, status, reason, candidate=""):
     return commit(harness, run, "finalization_completed", updates, reason=reason)
 
 
-def dispatch(harness, run, operation, request):
+def dispatch(harness, run, operation, request, _repair_attempt=0):
     state = run["state"]
     run = commit(
         harness,
@@ -39,12 +40,13 @@ def dispatch(harness, run, operation, request):
         {"counters": {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1}},
         role=request["role"],
     )
+    base_call_id = request.get("call_id") or f"{run['run_id']}:{request['role']}:{run['state_revision']}"
     request = {
         "run_id": run["run_id"],
-        "call_id": f"{run['run_id']}:{request['role']}:{run['state_revision']}",
         "allowed_tools": [],
         "tool_policy": {"allow": []},
         **request,
+        "call_id": base_call_id + (":repair-1" if _repair_attempt else ""),
     }
     if request["role"] in {"final_generator", "whole_solution_verifier"}:
         request["finalization_scope"] = True
@@ -58,6 +60,43 @@ def dispatch(harness, run, operation, request):
     try:
         reply = harness.dispatch(run, invoke, request)
         return run, redact(deepcopy(dict(reply)))
+    except CallInterrupted as exc:
+        from . import protocol_repair
+
+        failed = protocol_repair.interrupted_call(harness, run["run_id"], exc)
+        if (
+            _repair_attempt == 0
+            # The planner owns its bounded repair (plan_generation); this
+            # wrapper only repairs the roles with no other owner.
+            and request["role"] != "planner"
+            and failed is not None
+            and protocol_repair.repair_enabled(harness._config)
+            and protocol_repair.known_protocol_failure(failed)
+        ):
+            # One gated format repair: the note bumps the revision, so the
+            # recursive dispatch reserves again and answers under a fresh
+            # revision-derived call identity. A second failure re-raises.
+            latest = harness.get_run(run["run_id"])
+            noted = harness.commit_event(
+                latest["run_id"],
+                expected_revision=latest["state_revision"],
+                event={
+                    "event_id": f"finalization-parse-{request['role']}-{latest['state_revision']}",
+                    "type": "finalization_parse_failed",
+                    "role": request["role"],
+                    "summary": "Finalization reply failed the response protocol; "
+                               "one bounded repair follows",
+                },
+                state_updates={"status": "running"},
+            )
+            return dispatch(
+                harness, noted, operation,
+                {key: value for key, value in request.items()
+                 if key not in {"run_id", "allowed_tools", "tool_policy"}}
+                | {"repair_instruction": protocol_repair.REPAIR_INSTRUCTION},
+                _repair_attempt=1,
+            )
+        raise
     except Exception:
         return run, None
 
