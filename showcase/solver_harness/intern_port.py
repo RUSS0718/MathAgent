@@ -1,6 +1,7 @@
 """Explicit Intern bridge; injected adapters remain fully offline-testable."""
 
 import json
+import re
 import time
 from collections.abc import Mapping
 from copy import deepcopy
@@ -79,6 +80,24 @@ def _invocation_record(request, model_id, *, stream=False):
     return record
 
 
+def _loads_known_escape_rescue(text):
+    """Parse strictly; rescue exactly the invalid-escape failure class.
+
+    Live Intern replies embed code whose strings carry single backslashes
+    ("\\d", Windows paths): a well-formed JSON object except for escapes JSON
+    does not allow. Doubling only the invalid backslashes recovers the model's
+    evident intent without loosening anything else — every other malformed
+    body still fails and the strict schema still gates the parsed result.
+    """
+    try:
+        return json.loads(text)
+    except ValueError as strict_error:
+        if "Invalid \\escape" not in str(strict_error):
+            raise
+        rescued = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
+        return json.loads(rescued)
+
+
 class InternModelPort:
     """Reasoner/Verifier/Meta bridge, with no implicit live adapter creation."""
 
@@ -118,7 +137,7 @@ class InternModelPort:
             if not response.text.strip():
                 raise _protocol_failure("empty_response", record, response.text)
             try:
-                parsed = json.loads(response.text)
+                parsed = _loads_known_escape_rescue(response.text)
             except (TypeError, ValueError) as exc:
                 raise _protocol_failure("invalid_json", record, response.text) from exc
             if not isinstance(parsed, Mapping) or schema_error(parsed, schema):
@@ -174,7 +193,7 @@ class InternModelPort:
             if not isinstance(text, str) or not text.strip():
                 raise _protocol_failure("empty_response", record, text)
             try:
-                parsed = json.loads(text)
+                parsed = _loads_known_escape_rescue(text)
             except (TypeError, ValueError) as exc:
                 raise _protocol_failure("invalid_json", record, text) from exc
             if not isinstance(parsed, Mapping) or schema_error(parsed, schema):

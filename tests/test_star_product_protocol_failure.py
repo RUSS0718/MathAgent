@@ -139,6 +139,27 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(3, budget["http_attempts"])
         self.assertEqual(0, budget["unknown_attempts"])
 
+    def test_invalid_escape_in_complete_reply_is_parsed_and_continues(self):
+        # Live ALIGN-10 batches (5f25cd6f/ad2329a6): the model's complete
+        # reply embeds code whose strings carry single backslashes ("\\d",
+        # Windows paths) — a well-formed JSON object except for invalid
+        # escapes. The port rescues exactly this class by re-parsing with the
+        # invalid escapes doubled; the strict schema still applies afterwards
+        # and unfixable bodies remain known protocol failures.
+        need_plan_bad_escape = (
+            '{"assessment": "NEED_PLAN", "worked": [], "failed": [], '
+            '"candidates": ["parity DP over \\d ranges and path C:\\Users"], '
+            '"solution_candidate": null, "tool_request": null}')
+        job_id = self.open_plan([RawProviderContent(need_plan_bad_escape), PLAN, STEP,
+                                 VERDICT, {"final_response": "2"}, ACCEPT])
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        planner = next(request for request in self.outbound if request["role"] == "planner")
+        self.assertEqual("NEED_PLAN", planner["exploration_findings"][0]["assessment"])
+        recovery = job["result"]["solver"]["recovery"]
+        self.assertEqual([], recovery["protocol_failures"])
+        self.assertEqual([], recovery["unknown_calls"])
+
     def test_explore_invalid_json_repairs_once_with_new_identity_and_completes(self):
         # Live ALIGN-10 batches repeatedly delivered complete explore replies
         # whose embedded code strings broke strict JSON (finish_reason=stop).
@@ -148,7 +169,7 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
         broken = RawProviderContent(
             '{"assessment": "NEED_PLAN", "worked": [], "failed": [], '
             '"candidates": ["parity DP"], "solution_candidate": null, '
-            '"tool_request": null, "note": "escape \\d in regex"}')
+            '"tool_request": null, "note": "unbalanced')
         job_id = self.open_plan([broken, NEED_PLAN, PLAN, STEP, VERDICT,
                                  {"final_response": "2"}, ACCEPT])
         job = self.terminal(job_id)
