@@ -6,8 +6,9 @@ LLM acceptance is not an independent mathematical correctness assessment.
 """
 
 from .final_evidence import artifact_identity
-from .solver_harness.final_binding import _proof_source
+from .solver_harness.final_binding import _proof_source, review_binding
 from .solver_harness.protocol_repair import completed_call_id
+from .star_result_semantics import result_semantics
 
 RUNNER_VERSION = "star-delivery-replay-v1"
 
@@ -36,11 +37,9 @@ def _evaluate_delivery(job, run, contexts):
     source = record.get("source", {})
     calls = state.get("calls", {})
     answer = (job.get("result") or {}).get("final_response", "")
-    identity = artifact_identity(answer)
     call_id = source.get("call_id")
     call = calls.get(call_id, {})
     request = call.get("request", {})
-    response = call.get("response", {})
     wire = [item for item in contexts if item.get("call_id") == call_id]
     valid = (
         job.get("status") == "succeeded"
@@ -48,17 +47,7 @@ def _evaluate_delivery(job, run, contexts):
         and job.get("job_id") == run.get("run_id") == source.get("run_id")
         and state.get("final_response") == answer
         and state.get("status") == "completed_llm_reviewed"
-        and record.get("artifact") == identity
-        and record.get("verdict") == "ACCEPT"
-        and source.get("candidate_version") == len(records)
-        and source.get("plan_version") == state.get("plan_version")
-        and source.get("attempt_index") == state.get("attempt_index")
-        and call.get("run_id") == run["run_id"]
-        and call.get("role") == "whole_solution_verifier"
-        and call.get("status") == "completed"
-        and response.get("verdict") == "ACCEPT"
-        and response.get("tool_request") is None
-        and artifact_identity(request.get("solution_candidate", "")) == identity
+        and review_binding(run, answer) == {"whole_review": "accepted", "binding": "same_artifact"}
         and len(wire) == 1
         and wire[0].get("run_id") == run["run_id"]
         and wire[0].get("role") == "whole_solution_verifier"
@@ -141,7 +130,19 @@ def _evaluate_delivery(job, run, contexts):
 def evaluate_delivery(job, run, contexts):
     """Public zero-dispatch API; malformed saved provenance cannot imply success."""
     try:
-        return _evaluate_delivery(job, run, contexts)
+        result = _evaluate_delivery(job, run, contexts)
+        if run and isinstance(run.get("state"), dict):
+            lifecycle = {"succeeded": "COMPLETED"}.get(job.get("status"), str(job.get("status", "")).upper())
+            if job.get("status") == "failed" and job.get("error") in {
+                "needs_review", "star_needs_review", "verification_needs_review",
+            }:
+                lifecycle = "NEEDS_REVIEW"
+            result["semantics"] = result_semantics(
+                run, (job.get("result") or {}).get("final_response", ""),
+                verification_mode=job.get("verification_mode", "auto"),
+                execution_status=lifecycle,
+            )
+        return result
     except (KeyError, TypeError, AttributeError, ValueError):
         return dict(
             runner_version=RUNNER_VERSION,
