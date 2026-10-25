@@ -10,7 +10,7 @@
 
 spec #70（ALIGN-01..ALIGN-10，#71..#80）承接 #56 的语义偏移修复与重新验收：裁决消费与新动作身份、独立 ReplanDecision、Verifier/Explore 受控计算、分类账本与证明传递、协议失败与 unknown 分离、跨流程恢复，最终来源复核与发布判断见 [ALIGN-10 来源映射](evals/star-product-align10-source-mapping.md) 与 [ALIGN-10 发布记录](evals/star-product-align10-release.md)。记录区分 scripted/故障注入/live/replay 证据；真实非 Explore 快通道闭环尚未取得，历史工单关闭不升级为完整能力结论。
 
-当前维护 #81–#86、后续 #82 及最终证据边界见发布记录顶部；#80 的 ALIGN-AC-18 仍未通过，#70 不自动关闭。最终门禁尚未运行，不沿用历史计数。
+当前维护 #81–#86、后续 #82 及最终证据边界见发布记录顶部；#80 的 ALIGN-AC-18 仍未通过，#70 不自动关闭。当前 47dc522 发布检查 PASS，但完整 AC-19 的浏览器与最终零 skip 详证未覆盖，AC-18 仍未通过；离线同树 648 项中 618 通过、30 跳过，不沿用历史计数。详见发布记录与[脱敏证据摘要](evals/star-maintenance-evidence-summary.json)。
 
 ## 历史 SP 集成语境
 
