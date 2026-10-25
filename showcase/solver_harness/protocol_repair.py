@@ -19,10 +19,12 @@ KNOWN_RESPONSE_FAILURES = {
 REPAIR_INSTRUCTION = (
     "The previous reply was complete but not valid protocol JSON. Re-issue "
     "your reply as one strict JSON object matching the schema; return the "
-    "actual answer values, never the schema definition itself. Keep every "
-    "string field under 600 characters of plain text with no backslashes, "
-    "no LaTeX and no embedded JSON; summarize longer reasoning instead of "
-    "pasting it."
+    "actual answer values, never the schema definition itself. Preserve the "
+    "mathematical claims, necessary proof details, verdict and any executable "
+    "tool request with its code and arguments; repair serialization only, "
+    "without shortening proofs or changing the requested action. Encode "
+    "backslashes, quotes and newlines with valid JSON escapes, including "
+    "inside mathematical text and code strings. Do not add unrelated prose."
 )
 
 
