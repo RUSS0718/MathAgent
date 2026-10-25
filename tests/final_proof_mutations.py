@@ -4,6 +4,7 @@ import io
 import unittest
 from unittest.mock import patch
 
+from tests.mutation_support import require_assertion_failure
 from tests.test_star_product_final_binding import StarFinalBindingTest
 from tests.test_star_product_final_proof import StarFinalProofTest
 
@@ -61,8 +62,7 @@ def main():
     for name, case, mutation in probes:
         with mutation:
             result = unittest.TextTestRunner(stream=io.StringIO()).run(case)
-        if not result.failures and not result.errors:
-            raise AssertionError(f"bypass was not detected by the expected invariant: {name}")
+        require_assertion_failure(result, name)
         print(f"{name}: bypass detected by public acceptance failure")
 
 

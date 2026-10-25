@@ -4,13 +4,14 @@ import io
 import unittest
 from unittest.mock import patch
 
+from tests.mutation_support import require_assertion_failure
 from tests.test_star_product_protocol_failure import StarProtocolFailureTest
 
 
 def _run(case_name):
     result = unittest.TextTestRunner(stream=io.StringIO()).run(
         StarProtocolFailureTest(case_name))
-    return bool(result.failures or result.errors)
+    return require_assertion_failure(result, case_name) > 0
 
 
 def main():

@@ -44,3 +44,6 @@ coverage/
 # Operating system files
 .DS_Store
 Thumbs.db
+
+# Local review scratch (fetched issue bodies)
+/.review/

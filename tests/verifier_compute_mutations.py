@@ -5,6 +5,7 @@ import unittest
 from copy import deepcopy
 from unittest.mock import patch
 
+from tests.mutation_support import require_assertion_failure
 from tests.test_star_product_verifier_compute import StarVerifierComputeTest
 
 FORGED = {
@@ -51,8 +52,7 @@ def main():
         with mutation:
             result = unittest.TextTestRunner(stream=io.StringIO()).run(
                 StarVerifierComputeTest(method))
-        if not result.failures and not result.errors:
-            raise AssertionError(f"bypass was not detected by the expected invariant: {name}")
+        require_assertion_failure(result, name)
         print(f"{name}: bypass detected by public acceptance failure")
 
 

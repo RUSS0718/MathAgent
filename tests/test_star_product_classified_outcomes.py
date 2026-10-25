@@ -88,6 +88,35 @@ class StarClassifiedOutcomesTest(StarJobFixture, unittest.TestCase):
         job = self.terminal(job_id)
         return job_id, job, events_of(self, job_id)
 
+    def test_definition_classification_is_established_and_reusable(self):
+        """AC-08: Definition is a real category the reviewer can establish, not
+        just an enum member; it reaches the ledger as a proven entry."""
+        definition = "Let n denote the boundary index"
+        replies = [
+            NEED_PLAN, PLAN,
+            report("Define the index", claims=[
+                {"statement": "n is the boundary index", "label": "hard-verify"}]),
+            {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT", "objection": "",
+             "classified_outcomes": [
+                 {"category": "Definition", "statement": definition,
+                  "scope": "this problem", "claim_indexes": [0]}]},
+            report("Use the definition"),
+            ACCEPT_VERDICT,
+            {"final_response": "2"},
+            ACCEPT,
+        ]
+        job_id, job, events = self.run_public(replies)
+        self.assertEqual("succeeded", job["status"], job)
+        entries = self.report(job_id)["solver"]["solver"]["progress"]["classified_results"]
+        entry = next(item for item in entries if item["category"] == "Definition")
+        self.assertEqual(artifact_identity(definition)["sha256"], entry["statement_digest"])
+        self.assertTrue(entry["proven"])
+        self.assertFalse(entry["invalidated"])
+        reviewed = [event for event in events
+                    if event.get("solver_event_type") == "step_reviewed"]
+        self.assertIn({"Definition": 1},
+                      [event.get("classified_outcomes") for event in reviewed], reviewed)
+
     def test_challenge_retains_proven_lemma_and_leaves_conjecture_unproven(self):
         """AC-08: the step does not advance, valid parts stay reusable, the
         conjecture never enters the proven premises of later roles."""
@@ -277,6 +306,60 @@ class StarClassifiedOutcomesTest(StarJobFixture, unittest.TestCase):
         self.assertEqual("succeeded", job["status"], job)
         planner = self.outbound[9]
         self.assertNotIn(LEMMA, [fact["statement"] for fact in planner["accepted_results"]])
+
+    def test_damaged_receipts_and_absent_review_source_are_rejected(self):
+        """AC-09: a receipt that lost its integrity references, and a ruling
+        that names a review call that never happened, both stay out of the
+        ledger."""
+        from showcase.solver_harness import classified
+
+        actual = []
+        registry = ToolRegistry()
+        registry.register("polynomial_check", lambda args: actual.append(args) or 2)
+
+        def review(context):
+            receipt = context["report"]["tool_receipts"][0]["receipt_id"]
+            return {
+                "goal_gate": "PARTIAL", "logic_gate": "UNCERTAIN", "verdict": "CHALLENGE",
+                "objection": "Damaged evidence cannot establish anything.",
+                "classified_outcomes": [
+                    {"category": "Computation", "statement": "Damaged receipt computation",
+                     "scope": "finite_computation", "claim_indexes": [0],
+                     "receipt_ids": [receipt]},
+                ],
+            }
+
+        replies = [
+            NEED_PLAN,
+            {"version": 1, "steps": [
+                {"step_id": "only", "title": "Only", "objective": "Single step"}]},
+            report("Check attempt", claims=[{
+                "statement": "1+1=2", "label": "easy-verify",
+                "tool_request": {"tool": "polynomial_check", "arguments": {"coefficients": [1]},
+                                 "scope": "finite_computation", "expected_output": 2}}]),
+            review,
+            report("Only rebuilt"),
+            ACCEPT_VERDICT,
+            {"final_response": "2"},
+            ACCEPT,
+        ]
+
+        # Drop the receipt's integrity references: the ID still resolves, but the
+        # evidence behind it is no longer auditable.
+        with patch.object(classified, "_complete_receipt_ids", lambda state: set()):
+            self.open_star(replies,
+                           SHOWCASE_STAR_FEATURES={**FEATURES, "local_code_tool": True},
+                           SHOWCASE_STAR_BUDGET=RunBudgetLimits(
+                               max_model_calls=16, max_http_attempts=16, max_tool_calls=2),
+                           SHOWCASE_STAR_REGISTRY=registry)
+            job_id = self.create_job()
+            self.terminal(job_id)
+        reviewed = [event for event in events_of(self, job_id)
+                    if event.get("solver_event_type") == "step_reviewed"]
+        self.assertEqual({}, reviewed[0].get("classified_outcomes", {}))
+        self.assertEqual(1, reviewed[0]["rejected_outcomes"])
+        continuation = self.outbound[4]
+        self.assertEqual([], continuation["role_context"]["state"]["verified_results_ledger"])
 
     def test_forged_receipts_and_unsupported_upgrades_are_rejected(self):
         """AC-09: forged references, nonexistent receipts, unsupported

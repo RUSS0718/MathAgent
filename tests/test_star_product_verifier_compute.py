@@ -90,6 +90,48 @@ class StarVerifierComputeTest(StarJobFixture, unittest.TestCase):
         receipt_revision = next(revision for kind, revision in events if kind == "tool_receipt")
         self.assertLess(receipt_revision, reviewed[0])
 
+    def test_verifier_independently_recomputes_an_easy_verify_claim(self):
+        """AC-05: easy-verify supports independent execution or an independent
+        recomputation. The precheck already ran the claim's own request; the
+        reviewer then picks its own check of the same claim and the recomputed
+        receipt — not the Reasoner's — is what its continuation sees."""
+        from showcase.run_budget import current_budget
+
+        actual = []
+        registry = ToolRegistry()
+        registry.register(
+            "polynomial_check", lambda args: actual.append(args) or 2)
+        easy_claim = {
+            "argument": "substitution", "blocked": False, "claims": [{
+                "statement": "1+1=2", "label": "easy-verify",
+                "tool_request": {"tool": "polynomial_check", "arguments": {"coefficients": [1]},
+                                 "scope": "finite_computation", "expected_output": 2}}]}
+        # A different argument set: the reviewer recomputes instead of trusting.
+        independent = {"tool": "polynomial_check", "arguments": {"coefficients": [2]},
+                       "scope": "finite_computation", "expected_output": 2}
+        first_review = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
+                        "objection": "", "tool_request": independent}
+        second_review = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
+                         "objection": "Independent recomputation agrees."}
+        self.open_star([NEED_PLAN, PLAN, easy_claim, first_review, second_review,
+                        {"final_response": "2"}, ACCEPT],
+            SHOWCASE_STAR_FEATURES=FEATURES,
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(
+                max_model_calls=10, max_http_attempts=10, max_tool_calls=4),
+            SHOWCASE_STAR_REGISTRY=registry)
+        job_id = self.create_job()
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        # Two real executions: the claim's own precheck and the reviewer's own check.
+        self.assertEqual([{"coefficients": [1]}, {"coefficients": [2]}], actual)
+        reviews = [context for context in self.outbound if context["role"] == "step_verifier"]
+        self.assertEqual(2, len(reviews), self.outbound)
+        receipt = reviews[1]["report"]["tool_receipts"][-1]
+        self.assertEqual("step_verifier", receipt["source_role"])
+        self.assertEqual("success", receipt["status"])
+        self.assertEqual({"coefficients": [2]}, receipt["input"])
+        self.assertEqual(2, self.report(job_id)["budget"]["tool_calls"])
+
     def test_whole_solution_verifier_request_executes_and_continues_review(self):
         from showcase.run_budget import current_budget
 

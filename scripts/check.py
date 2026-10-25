@@ -9,6 +9,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# ALIGN-AC-16: deliberate bypass probes. Each injects a mutation that skips the
+# mechanism under test and fails loudly unless the public acceptance test
+# rejects it, so a silently disabled gate cannot pass the ordinary suite.
+MUTATION_PROBES = (
+    "tests.verifier_compute_mutations",
+    "tests.explore_compute_mutations",
+    "tests.classified_outcomes_mutations",
+    "tests.final_proof_mutations",
+    "tests.star_protocol_failure_mutations",
+    "tests.star_recovery_mutations",
+)
+
 
 def _run(command: list[str]) -> None:
     completed = subprocess.run(command, cwd=ROOT, check=False)
@@ -27,6 +39,8 @@ def main() -> int:
     _run(workspace)
     _run([sys.executable, "scripts/check_test_seams.py"])
     _run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"])
+    for probe in MUTATION_PROBES:
+        _run([sys.executable, "-m", probe])
     _run([sys.executable, "demo_server.py", "--help"])
     _run([sys.executable, "showcase_server.py", "--help"])
     print("repository_check=PASS")

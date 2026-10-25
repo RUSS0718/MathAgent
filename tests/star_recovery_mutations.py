@@ -4,6 +4,7 @@ import io
 import unittest
 from unittest.mock import patch
 
+from tests.mutation_support import require_assertion_failure
 from tests.test_star_product_recovery import StarRecoveryTest
 
 
@@ -20,8 +21,7 @@ def main():
     for name, method, mutation in probes:
         with mutation:
             result = unittest.TextTestRunner(stream=io.StringIO()).run(StarRecoveryTest(method))
-        if not result.failures or result.errors:
-            raise AssertionError(f"bypass was not detected by the expected invariant: {name}")
+        require_assertion_failure(result, name)
         print(f"{name}: bypass detected by public acceptance failure")
 
 
