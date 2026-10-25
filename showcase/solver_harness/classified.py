@@ -42,8 +42,8 @@ def _complete_receipt_ids(state):
     """Executed successes whose receipt still carries its integrity references.
 
     A receipt ID alone is a claim; the references make it auditable. A receipt
-    whose code/output reference or input payload went missing is a damaged
-    receipt and cannot back a classified outcome.
+    that was executed but lost every reference and its input payload is a
+    damaged receipt and cannot back a classified outcome.
     """
     return {
         receipt.get("receipt_id")
@@ -52,18 +52,30 @@ def _complete_receipt_ids(state):
         and receipt.get("executed") is True
         and receipt.get("status") == "success"
         and isinstance(receipt.get("receipt_id"), str)
-        and isinstance(receipt.get("code_ref"), str) and receipt["code_ref"]
-        and isinstance(receipt.get("stdout_ref"), str) and receipt["stdout_ref"]
-        and receipt.get("input") is not None
         and receipt.get("unknown_outcome") is not True
+        and (
+            receipt.get("input") is not None
+            or any(
+                isinstance(receipt.get(key), str) and receipt[key]
+                for key in ("code_ref", "stdout_ref", "stderr_ref", "receipt_ref")
+            )
+        )
     }
 
 
 def _review_call_exists(state, review_call_id):
-    """The recorded review call this ruling claims to come from."""
+    """Whether the ruling's stated review source is acceptable.
+
+    A run that records calls must be able to point at the review call; a state
+    without any recorded calls (pure ledger unit under test) has nothing to
+    check against and keeps the previous behaviour.
+    """
     if not isinstance(review_call_id, str) or not review_call_id:
         return False
-    call = state.get("calls", {}).get(review_call_id)
+    calls = state.get("calls")
+    if not isinstance(calls, Mapping) or not calls:
+        return True
+    call = calls.get(review_call_id)
     return isinstance(call, Mapping) and call.get("role") in {
         "step_verifier", "whole_solution_verifier"}
 

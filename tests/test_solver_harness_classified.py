@@ -80,7 +80,8 @@ class BuildEntriesTest(unittest.TestCase):
                          [item["reason"] for item in rejections])
 
     def test_forged_or_unexecuted_receipts_are_rejected(self):
-        receipts = [{"receipt_id": "tool:r:5:0", "executed": True, "status": "success"},
+        receipts = [{"receipt_id": "tool:r:5:0", "executed": True, "status": "success",
+                     "code_ref": "tool:r:5:0:input", "stdout_ref": "tool:r:5:0:output"},
                     {"receipt_id": "tool:r:6:0", "executed": False, "status": "not_executed"},
                     {"receipt_id": "tool:r:7:0", "executed": True, "status": "timeout"}]
         reply = {"classified_outcomes": [
