@@ -4,13 +4,79 @@
 
 核对日期：2026-10-25；维护起点 `showcase-star-align-maintenance@b09dd05d5edd5a838d52fd65bd2f1d47734c67db`。本节是当前判断；下文第 1/2 轮及复审轮均为历史记录，不是维护分支的最终验收。
 
-- 当前最终门禁尚未运行；最终代码汇合后的固定 SHA、命令、日志产物身份和结果待主会话提供后续补记。发现数不等于执行数：#85 建票时的 612 仅是发现记录，不能写作 612 通过，也不代表此后测试数量不变。
+- 当前维护最终检查与未覆盖项见下节；发现数不等于执行数，#85 建票时 612 仅为发现记录。第一部分中的待验项现按固定身份补记，不把部分检查升级为完整发布。
 - 历史 raw 当前缺失：本地历史 runner 不存在，历史 live 原始产物及门禁原文尚未取得。历史表格与公开评论是二手记录，不能独立核验逐批运行 SHA、HTTP attempts、费用或计数。保留历史失败及 unknown，不补造原文，不拼接不同版本的数字。
-- 当前版本 Docker 实际执行待最终证据；本地固定镜像可用仅是环境事实，不是通过。不得沿用旧 Docker 0skip 为当前结果。历史 30 项逐项名称及当前 skip 原因仍待同一最终 SHA 的日志核对，§1.1 的 29 项模块聚合不能冒充 30 项逐项归因。
+- 当前 Docker 的失败、测试修正后发布脚本 PASS 及详细计数缺口见下节；历史 raw 缺失与旧版本 0skip 不作为当前结果。
 - 已修历史缺陷见 §四/四A/四B；这些修复记录不产生复审后的 live 证据。`b09dd05` 仍确认存在混合转义救助缺陷 #81：公共 Job 可成功但额外消耗一次格式修复，尚未证明 Job 未捕获崩溃或它解释所有 live 失败；并行修复状态以对应提交及公共 Job 回归为准。
 - 维护债务：#82 协议修复生命周期/身份、#83 成果稳定去重；合同与覆盖完善：#84 计算次数配置边界。它们不是已证实的新 live 故障，也不是 AC-18 的人为强制前置。
 - 提供方假设：thinking 长尾、长文本破坏协议与格式约束损害证明均须由 #86 区分产品配置、预算、上下文与提供方责任，不能先验把剩余失败归因提供方。
 - #80 的 ALIGN-AC-18 未通过；Challenge/Trace-Back/Replan 等未触发 live 分支保持 not_covered，#70 不自动关闭。本部分只校正文档与结构，不升级完整参考能力。
+
+## 当前集成复验与发布判断（#85 / #80）
+
+固定代码提交 `47dc52241b0cac29e1e3c321f24cbea78e1dce89`。脱敏产物清单及 SHA-256 见 [证据摘要](star-maintenance-evidence-summary.json)；原始日志留在仓外 `D:/project/工程化MathAgent/notes/star-maintenance`，不提交 raw、完整 prompt、题目答案或凭证。该摘要只抽取必要身份和结论，不复制包含题面正文的原归档。
+
+| 检查 | 实际执行身份、命令与产物 | 结果及限制 |
+| --- | --- | --- |
+| 离线合同 | `uv run python scripts/check.py --offline`；`review-fix-offline.log`；`fbcdb1716c87f9655698469dffc503bd7b0ac295` | 648 发现 / 618 通过 / 30 skip / 0 fail。与集成 `8c87e3c29ba1123de77729ecd25b567b499d1118` 同树 `5a08f746586345e72c0d14ffae93f1dfdacf6587`，是同树证据复用，不是在 47dc522 重跑 |
+| 独立 unittest | `uv run python -m unittest discover -s tests -p "test_*.py"`；`review-fix-full.log`；同上树身份 | 648 发现 / 618 通过 / 30 skip / 0 fail；skip 不计通过 |
+| 固定镜像全套（修正前） | `MATHAGENT_TEST_PYTHON_IMAGE=sha256:fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d uv run python -m unittest discover -s tests -p "test_*.py" -v`；8c87e3c；`final-docker.log` | 外层 648 / 646 通过 / 0 skip / 2 fail，原文 `FAILED (failures=2)`，不可隐藏。一个是 full_modes 配置 hash 期望遗漏实际 `tool_timeout_seconds=20`；另一个是 release 用例嵌套执行同一失败，并非两个独立产品根因。内层 648 / 646 通过 / 1 skip / 1 fail |
+| 配置 hash 最小修正 | `config-hash-red.log` / `config-hash-green.log`；单用例；提交 47dc522 | 测试期望补入实际工具时限 20 后红→绿；不把单用例绿当全套独立重跑 |
+| 修正后固定镜像发布检查 | `uv run python scripts/check_showcase_release.py`；47dc522；`final-release-fixed.log` | exit 0，`showcase_release=PASS`。脚本捕获 stdout，无详细套件计数，因此不推断 0 skip 或“648 全部实际通过” |
+| 前端基点 | b09dd05；`frontend-baseline.log`；`npm ci --no-audit --no-fund`、`npm audit --audit-level=high`、`npm run check` | 66 packages、0 漏洞、依赖/类型/14 unit 通过且 0 skip/build PASS；前端树未变化，复用基点证据，只有 bundle>500kB 警告 |
+| 浏览器 | 本轮未重跑浏览器 12 项 | 未验证；不沿用旧版本 12/12 |
+
+`test_replay_release.ReplayReleaseTest.test_release_gate_is_credential_free` 在 `SHOWCASE_RELEASE_GATE=1` 内层主动 skip（`release gate is already running`），是防止发布检查递归的有意保护，不是 Docker 镜像缺失，也不能计为 PASS。修正后发布日志没有输出该内层的逐项结果，不能据脚本 exit 0 消去这个覆盖边界。
+
+### 本轮产品修复、维护债务与未覆盖
+
+- #81 混合合法/非法 JSON 转义修复已合入（4539cf3），公共 Job 不再为可救助样本额外格式重问；此为确定性缺陷修复，不证明所有历史失败同因。
+- #86 两项确定性产品修复 2742ff4（集成 7924b3e）：格式修复指令保留证明、反斜杠与可执行工具内容，不再强迫所有字符串小于 600；显式流式 Adapter timeout 取有效模型/请求时限和 S3 剩余时间的较小值。有限提供方公共 Job 出站、回执、用户交付及 S4 回归支撑，不证明历史 runner 用流式或历史全部 420s 超时同因。
+- #82 协议修复生命周期与完成身份收敛（6d578d6，集成 3cf220e）；复审发现整题工具续接 S4 P1 来源身份问题，fbcdb17（集成 8c87e3c，Refs: #82 / #80）绑定实际完成审查调用，不能以最初工具请求充当最终裁决。公共回归包含真实续接后的接受/拒绝、候选及 S4 来源；这是本轮额外确定性修复，不归为提供方假设。
+- #83 稳定成果去重和历史恢复公共组合验收、#84 次数配置合同与边界已合入；维护重构与覆盖完善不等于新 live 能力证据，也非 AC-18 的任意强制前置。
+
+### 真实 #80 有界复验（live，失败保留）
+
+47dc522 的一批认证完整 reference 公共 Job：实际模型 intern-s2，Explore 首个 HTTP 请求有效 timeout=180s 后 ReadTimeout；1 model / 1 HTTP / 0 tool，约 181.925s。首个 unknown 即停止整轮，无第二批、无自动或人工重发。16472 是输入字节估算 8280 + 输出预留 8192 的保留，不是已测提供方 tokens；提供方用量与 cost 缺失不等于零，未知预留及原 deadline 保持。runner SHA-256 `b509d0c6965d6de8fa97e4a827ebfe368d4813e2d1fd79bd3c9f493bc31086b9`；结果归档身份见摘要中的 `issue80-final-result.json`。
+
+用户未取得完整答案，proof_delivered=false。失败记录即便带 `same_artifact` 字段也不是 S4 接受交付证据。Plan、步骤、自然计算/隔离 live 回执、整题审查、S4 接受交付，以及 Challenge/Trace-Back/Replan/分类账本的本轮 live 观察均未覆盖。ALIGN-AC-18 incomplete，不先验归咎提供方。
+
+**最终状态：已取得上述工程检查通过证据，但完整 ALIGN-AC-19 仍未完整验收（浏览器未重跑、最终零 skip 详细证据未取得）；ALIGN-AC-18 未通过。#80 / #70 保持 open，不升级为完整发布。** #85 完成证据校正并保留这些未覆盖项，不代替 #80 补造能力证据。本人第一部分全套任务已按要求中止，`issue-85-offline.log` / `issue-85-discover.log` 为中止日志，不计 PASS；本次只运行文档最小一致性检查。
+
+### 30 项镜像门控逐项归因
+
+以下按测试 AST 的类/方法 skipUnless 元数据静态核对，共 30 项；在无 `MATHAGENT_TEST_PYTHON_IMAGE` 的离线套件中均因“需要独立验证的本地 exact Docker image ID”跳过，不是失败，也不计通过。固定镜像下修正前全套实际执行结果见上表，不能拿本清单推导最终全绿。历史 §1.1 的 DockerExecutor 6 项如今为 7 项（增加默认 CPU 预算用例），解释 29→30 的模块差异。
+
+- `test_python_executor_docker.DockerExecutorTest.test_fixed_mathematical_environment_actually_executes` — 未设置验证镜像环境变量。
+- `test_python_executor_docker.DockerExecutorTest.test_external_guard_catches_direct_fd_and_combined_streams` — 未设置验证镜像环境变量。
+- `test_python_executor_docker.DockerExecutorTest.test_container_restrictions_have_actual_failure_examples` — 未设置验证镜像环境变量。
+- `test_python_executor_docker.DockerExecutorTest.test_timeout_kills_container_with_descendant` — 未设置验证镜像环境变量。
+- `test_python_executor_docker.DockerExecutorTest.test_cpu_limit_terminates_a_busy_loop` — 未设置验证镜像环境变量。
+- `test_python_executor_docker.DockerExecutorTest.test_product_default_cpu_budget_runs_multi_second_computations` — 未设置验证镜像环境变量。
+- `test_python_executor_docker.DockerExecutorTest.test_cancellation_kills_a_sleeping_container` — 未设置验证镜像环境变量。
+- `test_star_product_align_recovery.StarFullReferenceChainTest.test_reference_chain_completes_with_real_isolated_computation` — 未设置验证镜像环境变量。
+- `test_star_product_classified_outcomes.StarFullReferenceClassifiedOutcomeTest.test_reference_classified_computation_carries_real_isolated_receipt` — 未设置验证镜像环境变量。
+- `test_star_product_continue_identity.StarFullReferenceContinueTest.test_reference_continue_completes_new_action_and_whole_review` — 未设置验证镜像环境变量。
+- `test_star_product_explore_compute.StarFullReferenceExploreComputeTest.test_reference_explore_executes_own_isolated_computation` — 未设置验证镜像环境变量。
+- `test_star_product_full_modes.StarFullModeTest.test_reference_runs_same_public_job_with_real_tool_and_whole_review` — 未设置验证镜像环境变量。
+- `test_star_product_full_modes.StarFullModeTest.test_capabilities_expose_verifiable_preflight_artifact_reference` — 未设置验证镜像环境变量。
+- `test_star_product_full_modes.StarFullModeTest.test_reference_preset_is_exactly_nine_core_features_and_registry_inactive` — 未设置验证镜像环境变量。
+- `test_star_product_full_modes.StarFullModeTest.test_capabilities_expose_verifiable_preflight_budget_ledger` — 未设置验证镜像环境变量。
+- `test_star_product_full_modes.StarFullModeTest.test_full_best_effort_selects_after_one_call_and_replays_without_dispatch` — 未设置验证镜像环境变量。
+- `test_star_product_full_modes.StarFullModeTest.test_each_core_feature_missing_or_disabled_rejects_before_enqueue` — 未设置验证镜像环境变量。
+- `test_star_product_full_modes.StarFullModeTest.test_runtime_isolation_failure_after_startup_rejects_without_model_or_job` — 未设置验证镜像环境变量。
+- `test_star_product_full_modes.StarFullModeTest.test_full_options_and_disabled_review_reject_before_model` — 未设置验证镜像环境变量。
+- `test_star_product_full_modes.StarFullModeTest.test_full_flag_does_not_upgrade_limited_mode_or_default_legacy` — 未设置验证镜像环境变量。
+- `test_star_product_full_modes.StarFullModeTest.test_full_unknown_call_requires_new_identity_and_preserves_shared_deadline` — 未设置验证镜像环境变量。
+- `test_star_product_full_modes.StarFullModeTest.test_full_best_effort_deadline_selects_only_previously_committed_candidate` — 未设置验证镜像环境变量。
+- `test_star_product_guidance_consumption.StarGuidanceConsumptionTest.test_reference_preset_second_traceback_consumes_only_the_new_meta_ruling` — 未设置验证镜像环境变量。
+- `test_star_product_protocol_failure.StarFullReferenceProtocolFailureTest.test_full_reference_reasoner_invalid_json_is_known_failure_and_ends_dispatch` — 未设置验证镜像环境变量。
+- `test_star_product_protocol_failure.StarFullReferenceProtocolFailureTest.test_full_reference_planner_invalid_json_repairs_with_new_identity` — 未设置验证镜像环境变量。
+- `test_star_product_python.StarProductPythonTest.test_public_job_runs_registered_python_once_and_keeps_verified_artifacts` — 未设置验证镜像环境变量。
+- `test_star_product_python.StarProductPythonTest.test_public_job_policy_denial_never_dispatches_python` — 未设置验证镜像环境变量。
+- `test_star_product_python.StarProductPythonTest.test_public_job_output_limit_keeps_finite_claim_unverified` — 未设置验证镜像环境变量。
+- `test_star_product_replan_decision.StarReplanDecisionTest.test_reference_preset_rulings_cover_all_three_branches` — 未设置验证镜像环境变量。
+- `test_star_product_verifier_compute.StarFullReferenceVerifierComputeTest.test_reference_step_verifier_executes_own_isolated_computation` — 未设置验证镜像环境变量。
 
 ### 历史累计算术冲突（未独立核实）
 
@@ -27,7 +93,7 @@
 | 第 2 轮离线、独立 discover | 文档 `135c795`；父 `75102759beb5ffec1aad94d5f6cbcd5f4383c19a` | 各 605 / 575 / 30 / 0（历史 OK） | 通过数仅按历史 OK 减 skip 展开；原文及运行 SHA 待核验 |
 | 第 2 轮 Docker | 同上 | 605 / 605 / 0 / 0（历史 OK） | 不覆盖后续复审或维护代码 |
 | 复审轮 | `4bd8155`、`eb65bae`、文档 `c55672c`，其后 `b09dd05` | 无可追溯的新全量计数 | 不能沿用前轮 605/30 作为复审最终结果 |
-| 当前维护最终复验 | 待全部相关代码合并后固定 SHA | 未运行 / 未知 / 未知 / 未知 | 不从收集数量推导通过数；Docker 独立记录 |
+| 当前维护复验 | 47dc522 与前序同树证据分别记录 | 见上方当前集成复验表 | 不拼接不同 SHA 或隐去失败/skip |
 
 公开工单历史声明见 [首轮发布评论](https://github.com/RUSS0718/MathAgent/issues/80#issuecomment-6394603882)；随后 [遗留项核对评论](https://github.com/RUSS0718/MathAgent/issues/80#issuecomment-6394817999) 已限定 `b09dd05` 的已知缺陷与未验边界，后者优先于旧的“产品清零”归因。工单更新由主会话负责，本部分不关闭工单。
 
