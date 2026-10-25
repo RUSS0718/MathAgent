@@ -59,6 +59,7 @@ class EvidencePackExporter:
             "budget": (snapshot.get("result") or {}).get("budget"),
             "solver": {key: (snapshot.get("result") or {}).get(key) for key in ("solver_mode", "missing_capabilities", "evidence_kind", "solver")},
             "verification": verification_data,
+            "semantics": ((snapshot.get("result") or {}).get("solver") or {}).get("semantics"),
             "artifacts": [redact(artifact) for artifact in artifacts],
             "feature_status": {
                 "execution": "implemented",
@@ -97,6 +98,7 @@ class EvidencePackExporter:
             "vision_status": snapshot.get("vision_status"),
             "tool_summaries": [_tool_summary(item) for item in tool_results],
             "checks": check,
+            "semantics": (result.get("solver") or {}).get("semantics"),
             "limitations": ["公开报告省略完整提示、隐藏推理、凭证和原始图片。"],
         })
 
@@ -135,7 +137,7 @@ def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
         "skill_protocols", "prompt_fingerprint", "stream_metrics",
         "trace_back_to", "from_step_index", "archived_step_count",
         "invalidated_result_count", "rescued_result_count", "decision_revision",
-        "classified_outcomes", "rejected_outcomes",
+        "classified_outcomes", "rejected_outcomes", "semantics",
     ):
         if event.get(key) is not None:
             summary[key] = event[key]

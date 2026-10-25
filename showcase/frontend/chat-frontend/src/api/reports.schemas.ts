@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { resultSemanticsSchema } from './result-semantics.schemas.ts'
 
 export const recoverySchema = z.object({
   status: z.enum(['safe', 'needs_review']),
@@ -20,7 +21,8 @@ export const reportSchema = z.object({
     public_summary: z.string(),
     stage: z.string(),
     tool_summaries: z.array(z.record(z.string(), z.unknown())),
-    checks: z.object({ status: z.string().optional(), findings: z.array(z.string()).optional() }).passthrough(),
+    checks: z.object({ status: z.string().optional(), findings: z.array(z.string()).optional(), history: z.array(z.record(z.string(), z.unknown())).optional() }).passthrough(),
+    semantics: resultSemanticsSchema.nullable().optional(),
     limitations: z.array(z.string()),
   }),
 })

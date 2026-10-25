@@ -44,6 +44,7 @@ class DeliveredReviewTest(StarJobFixture, unittest.TestCase):
         first_review = next(c for c in self.outbound if c["role"] == "whole_solution_verifier")
         self.assertNotEqual(first_final["step_proofs"], first_review.get("step_proofs"))
         result = evaluate_delivery(job, run, self.outbound)
+        self.assertEqual(self.report(job_id)["semantics"], result.get("semantics"))
         self.assertTrue(result["review_bound"], result)
         self.assertTrue(result["proof_delivered"], result)
         self.assertTrue(result["nonfastpath"], result)
