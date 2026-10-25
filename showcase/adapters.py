@@ -157,6 +157,8 @@ class InternModelAdapter:
             kwargs["tools"] = [dict(tool) for tool in tools]
         if self.thinking_mode is not None and _accepts_keyword(client.chat, "thinking_mode"):
             kwargs["thinking_mode"] = self.thinking_mode
+        if _accepts_keyword(client.chat, "request_purpose"):
+            kwargs["request_purpose"] = (metadata or {}).get("purpose") or (metadata or {}).get("role", "model_response")
         try:
             transport = getattr(client, "chat_response", client.chat)
             requested_timeout = (metadata or {}).get("timeout_seconds")
@@ -236,10 +238,14 @@ class InternStreamAdapter(InternModelAdapter):
             raise AdapterError("stream_transport_unavailable")
         normalized = [_normalize_message(message) for message in messages]
         model_id = getattr(client, "model", None) or self.model_id
-        body = json.dumps({
+        thinking_mode = self.thinking_mode if self.thinking_mode is not None else getattr(client, "thinking_mode", None)
+        payload = {
             "model": model_id, "messages": normalized, "stream": True,
             "temperature": self.temperature, "max_tokens": self.max_tokens,
-        }, ensure_ascii=False).encode("utf-8")
+        }
+        if thinking_mode is not None:
+            payload["thinking_mode"] = thinking_mode
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers = {"Content-Type": "application/json", "Authorization": client.authorization}
         role = (metadata or {}).get("role")
         attempt = {
@@ -251,7 +257,21 @@ class InternStreamAdapter(InternModelAdapter):
             "solver_call_id": (metadata or {}).get("call_id"),
             "started_at_utc": datetime.now(UTC).isoformat(),
             "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "thinking_mode": thinking_mode,
+            "request_purpose": (metadata or {}).get("purpose") or role or "model_response",
+            "provider_stream": True,
+            "requests_stream": True,
             "message_count": len(normalized),
+            "response_headers_seconds": None,
+            "first_byte_seconds": None,
+            "first_event_seconds": None,
+            "first_reasoning_seconds": None,
+            "first_content_seconds": None,
+            "completion_seconds": None,
+            "reasoning_chars": 0,
+            "content_bytes": 0,
+            "event_count": 0,
             "status": "pending",
         }
         budget = current_budget()
@@ -264,19 +284,159 @@ class InternStreamAdapter(InternModelAdapter):
         attempts: list[dict[str, Any]] = []
         response = None
         started = time.monotonic()
+        logical_deadline = started + effective_timeout
+        if call_budget is not None:
+            logical_deadline = min(logical_deadline, started + call_budget.remaining_seconds())
+        limit = min(getattr(client, "retry", 1), 3) if call_budget else 1
+        attempt["effective_timeout_seconds"] = effective_timeout
+        attempt["requests_timeout_seconds"] = configured or effective_timeout
+        attempt["retry_limit"] = limit
         try:
-            if call_budget is not None:
-                effective_timeout = min(
-                    effective_timeout, call_budget.before_attempt(attempt, len(body)))
             from llm_client import _not_submitted, product_retry_delay
-            limit = min(getattr(client, "retry", 1), 3) if call_budget else 1
+
+            from .request_transport import response_events
             for index in range(limit):
+                attempt_started = time.monotonic()
                 try:
-                    response = requests.post(
-                        client.api_base, headers=headers, data=body,
-                        timeout=effective_timeout, stream=True,
-                    )
-                    response.raise_for_status()
+                    remaining = logical_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise requests.ReadTimeout("logical_deadline_exceeded")
+                    attempt_timeout = min(effective_timeout, remaining)
+                    if call_budget is not None:
+                        attempt_timeout = min(attempt_timeout, call_budget.before_attempt(attempt, len(body)))
+                    attempt["effective_timeout_seconds"] = attempt_timeout
+
+                    def settle_late(response, raw_body, headers_seconds, completion_seconds,
+                                    late_attempt=attempt):
+                        late_usage = {}
+                        late_finish = None
+                        late_model = None
+                        late_reasoning_chars = 0
+                        late_content_bytes = 0
+                        late_event_count = 0
+                        for raw_line in raw_body.splitlines():
+                            line = raw_line.decode("utf-8", errors="replace").strip()
+                            if not line.startswith("data:"):
+                                continue
+                            late_event_count += 1
+                            try:
+                                late_chunk = json.loads(line[len("data:"):].strip())
+                            except ValueError:
+                                continue
+                            choices = late_chunk.get("choices")
+                            choice = choices[0] if isinstance(choices, list) and choices else {}
+                            delta = choice.get("delta") if isinstance(choice, Mapping) else None
+                            if isinstance(delta, Mapping):
+                                reasoning = delta.get("reasoning_content")
+                                content = delta.get("content")
+                                if isinstance(reasoning, str):
+                                    late_reasoning_chars += len(reasoning)
+                                if isinstance(content, str):
+                                    late_content_bytes += len(content.encode("utf-8"))
+                            if isinstance(choice.get("finish_reason"), str):
+                                late_finish = choice["finish_reason"]
+                            if isinstance(late_chunk.get("model"), str):
+                                late_model = late_chunk["model"]
+                            if isinstance(late_chunk.get("usage"), Mapping):
+                                late_usage.update(late_chunk["usage"])
+                        if not late_usage:
+                            return
+                        late_attempt.update(
+                            status="success",
+                            http_status=response.status_code,
+                            response_headers_seconds=headers_seconds,
+                            completion_seconds=completion_seconds,
+                            response_model_id=late_model,
+                            finish_reason=late_finish,
+                            reasoning_chars=late_reasoning_chars,
+                            content_bytes=late_content_bytes,
+                            event_count=late_event_count,
+                            **{key: late_usage.get(key) for key in
+                               ("prompt_tokens", "completion_tokens", "total_tokens")},
+                        )
+                        if call_budget is not None:
+                            call_budget.after_attempt(late_attempt)
+
+                    line_buffer = bytearray()
+                    parts: list[str] = []
+                    usage: dict[str, Any] = {}
+                    finish_reason = None
+                    saw_done = False
+
+                    def parse_line(raw_line):
+                        nonlocal finish_reason, model_id, saw_done
+                        line = raw_line.decode("utf-8", errors="replace").strip()
+                        if not line.startswith("data:"):
+                            return
+                        content = line[len("data:"):].strip()
+                        attempt["event_count"] += 1
+                        if attempt["first_event_seconds"] is None:
+                            attempt["first_event_seconds"] = time.monotonic() - attempt_started
+                        if content == "[DONE]":
+                            saw_done = True
+                            return
+                        try:
+                            chunk = json.loads(content)
+                        except ValueError as exc:
+                            raise AdapterError("invalid_response", "invalid_sse_chunk") from exc
+                        choices = chunk.get("choices")
+                        choice = choices[0] if isinstance(choices, list) and choices else {}
+                        delta = choice.get("delta") if isinstance(choice, Mapping) else None
+                        reasoning = delta.get("reasoning_content") if isinstance(delta, Mapping) else None
+                        piece = delta.get("content") if isinstance(delta, Mapping) else None
+                        if isinstance(reasoning, str) and reasoning:
+                            if attempt["first_reasoning_seconds"] is None:
+                                attempt["first_reasoning_seconds"] = time.monotonic() - attempt_started
+                            attempt["reasoning_chars"] += len(reasoning)
+                        if isinstance(piece, str) and piece:
+                            if attempt["first_content_seconds"] is None:
+                                attempt["first_content_seconds"] = time.monotonic() - attempt_started
+                            parts.append(piece)
+                            attempt["content_bytes"] += len(piece.encode("utf-8"))
+                            yield_piece = {"type": "text_delta", "text": piece}
+                            pending_chunks.append(yield_piece)
+                        if isinstance(choice.get("finish_reason"), str):
+                            finish_reason = choice["finish_reason"]
+                        if isinstance(chunk.get("model"), str):
+                            model_id = chunk["model"]
+                        if isinstance(chunk.get("usage"), Mapping):
+                            usage.update(chunk["usage"])
+
+                    pending_chunks = []
+                    stream_complete = False
+                    for kind, value in response_events(
+                        client.api_base,
+                        headers=headers,
+                        data=body,
+                        deadline=logical_deadline,
+                        timeout=configured or effective_timeout,
+                        on_late_response=settle_late,
+                    ):
+                        if kind == "headers":
+                            response = value
+                            attempt["http_status"] = response.status_code
+                            attempt["response_headers_seconds"] = time.monotonic() - attempt_started
+                            response.raise_for_status()
+                        elif kind == "bytes":
+                            if attempt["first_byte_seconds"] is None:
+                                attempt["first_byte_seconds"] = time.monotonic() - attempt_started
+                            line_buffer.extend(value)
+                            while b"\n" in line_buffer:
+                                line, _, remainder = line_buffer.partition(b"\n")
+                                line_buffer = bytearray(remainder)
+                                parse_line(line)
+                                for delta_chunk in pending_chunks:
+                                    yield delta_chunk
+                                pending_chunks.clear()
+                        elif kind == "complete":
+                            stream_complete = True
+                            attempt["completion_seconds"] = time.monotonic() - attempt_started
+                    if line_buffer:
+                        parse_line(line_buffer)
+                        for delta_chunk in pending_chunks:
+                            yield delta_chunk
+                    if not stream_complete or not saw_done:
+                        raise requests.ConnectionError("incomplete_stream")
                     break
                 except requests.RequestException as failure:
                     delay = product_retry_delay(failure, response, index, call_budget) if call_budget else None
@@ -290,56 +450,33 @@ class InternStreamAdapter(InternModelAdapter):
                     attempt.update(error_category=_request_failure_category(failure),
                                    error_type=type(failure).__name__,
                                    http_status=getattr(response, "status_code", None),
-                                   duration_seconds=round(time.monotonic() - started, 3))
+                                   duration_seconds=round(time.monotonic() - attempt_started, 3))
                     attempts.append(dict(attempt))
                     call_budget.after_attempt(attempt)
-                    if response is not None:
-                        response.close()
                     response = None
+                    if time.monotonic() + delay >= logical_deadline:
+                        raise
                     time.sleep(delay)
                     attempt = {**attempt, "attempt_id": uuid.uuid4().hex,
                                "attempt_index": index + 2, "status": "pending",
                                "started_at_utc": datetime.now(UTC).isoformat()}
+                    for key in (
+                        "response_headers_seconds", "first_byte_seconds", "first_event_seconds",
+                        "first_reasoning_seconds", "first_content_seconds", "completion_seconds",
+                    ):
+                        attempt[key] = None
+                    attempt.update(event_count=0, reasoning_chars=0, content_bytes=0)
                     for key in ("prompt_tokens", "completion_tokens", "total_tokens",
                                 "error_category", "error_type", "http_status"):
                         attempt.pop(key, None)
-                    started = time.monotonic()
-                    effective_timeout = min(effective_timeout, call_budget.before_attempt(attempt, len(body)))
+                    attempt["effective_timeout_seconds"] = min(effective_timeout, logical_deadline - time.monotonic())
             attempt.update(status="success", http_status=getattr(response, "status_code", None))
-            parts: list[str] = []
-            usage: dict[str, Any] = {}
-            finish_reason = None
-            for line in response.iter_lines(decode_unicode=True):
-                if not isinstance(line, str):
-                    continue
-                payload = line.strip()
-                if not payload.startswith("data:"):
-                    continue
-                chunk_text = payload[len("data:"):].strip()
-                if chunk_text == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(chunk_text)
-                except ValueError as exc:
-                    raise AdapterError("invalid_response", "invalid_sse_chunk") from exc
-                choice = chunk.get("choices")[0] if isinstance(chunk.get("choices"), list) and chunk["choices"] else {}
-                delta = choice.get("delta") if isinstance(choice, Mapping) else None
-                piece = delta.get("content") if isinstance(delta, Mapping) else None
-                if isinstance(piece, str) and piece:
-                    parts.append(piece)
-                    yield {"type": "text_delta", "text": piece}
-                if isinstance(choice.get("finish_reason"), str):
-                    finish_reason = choice["finish_reason"]
-                if isinstance(chunk.get("model"), str):
-                    model_id = chunk["model"]
-                if isinstance(chunk.get("usage"), Mapping):
-                    usage = dict(chunk["usage"])
             attempt.update(
                 finish_reason=finish_reason,
                 response_model_id=model_id,
                 **{key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")},
             )
-            attempt["duration_seconds"] = round(time.monotonic() - started, 3)
+            attempt["duration_seconds"] = round(time.monotonic() - attempt_started, 3)
             attempts.append(dict(attempt))
             yield {
                 "type": "result",
@@ -351,7 +488,7 @@ class InternStreamAdapter(InternModelAdapter):
             }
         except AdapterError as exc:
             attempt.update(status="error", error_category=exc.category, error_type=type(exc).__name__)
-            attempt["duration_seconds"] = round(time.monotonic() - started, 3)
+            attempt["duration_seconds"] = round(time.monotonic() - attempt_started, 3)
             attempts.append(dict(attempt))
             exc.request_attempts = record_attempts(attempts, metadata)
             raise
@@ -360,19 +497,17 @@ class InternStreamAdapter(InternModelAdapter):
             from llm_client import _not_submitted
             attempt.update(status="not_submitted" if _not_submitted(exc) else "error",
                            error_category=category, error_type=type(exc).__name__)
-            attempt["duration_seconds"] = round(time.monotonic() - started, 3)
+            attempt["duration_seconds"] = round(time.monotonic() - attempt_started, 3)
             attempts.append(dict(attempt))
             error = AdapterError(category, type(exc).__name__)
             error.request_attempts = record_attempts(attempts, metadata)
             raise error from exc
         finally:
-            attempt["duration_seconds"] = round(time.monotonic() - started, 3)
+            attempt["duration_seconds"] = round(time.monotonic() - attempt_started, 3)
             if not attempts:
                 attempts.append(dict(attempt))
             if call_budget is not None:
                 call_budget.after_attempt(attempt)
-            if response is not None:
-                response.close()
 
 
 def _request_failure_category(exc: BaseException) -> str:
@@ -383,6 +518,8 @@ def _request_failure_category(exc: BaseException) -> str:
     if isinstance(exc, requests.exceptions.SSLError):
         return "tls"
     if isinstance(exc, requests.ConnectionError):
+        return "connectivity"
+    if isinstance(exc, requests.exceptions.ChunkedEncodingError):
         return "connectivity"
     if isinstance(exc, requests.HTTPError):
         return "http_status"
