@@ -1,6 +1,6 @@
 # ALIGN-10 来源复核、真实批次与发布判断记录
 
-状态：ALIGN-10（#80）第 1 轮实际执行记录。完成声明以本文件证据为准；真实非快通道闭环本轮未取得，ALIGN-AC-18 记 not_covered（见 §3），不因其余门禁通过而升级。日期：2026-10-25。固定基点：分支 `fix/star-align-10-source-release`（基 `showcase-star-align` 尖端 `96a1c29`，ALIGN-01..09 全部合入），本票提交 `0abf438`（null 候选协议）、`f9861b3`（探索有界格式修复，含 star_routing 特性门）、`f1512e2`（zod 升级）与文档提交。
+状态：ALIGN-10（#80）第 1+2 轮实际执行记录。完成声明以本文件证据为准；真实非快通道闭环两轮共 29 批仍未取得，ALIGN-AC-18 记 not_covered（见 §3、§3.2），不因其余门禁通过而升级。日期：2026-10-25。固定基点：分支 `fix/star-align-10-source-release`（基 `showcase-star-align` 尖端 `96a1c29`，ALIGN-01..09 全部合入），本票提交：第 1 轮 `0abf438`（null 候选协议）、`f9861b3`（探索有界格式修复，含 star_routing 特性门）、`f1512e2`（zod 升级）、`0d6e9ff`（文档）；第 2 轮 `c73561d`（步骤/审查修复属主）、`20ed31e`（禁回声 schema 指令）、`96d5cec`（枚举与待决计算指令）、`b1624b7`（非法转义救助重析）、`439dd2c`（隔离执行预算校准）、`b3d55e1`（修复指令长度约束）及文档提交。
 
 本记录不宣称数学正确率、论文成绩复现或所有题型可解；LLM 接受不是形式化证明。父 Issue #70 与历史 #56/#69 不由本票关闭或改写。
 
@@ -8,13 +8,13 @@
 
 | 门禁 | 命令 | 结果 |
 | --- | --- | --- |
-| 离线合同与全量套件 | `uv run python scripts/check.py --offline` | PASS（最终复跑，含本票全部提交）：599 tests，570 通过/29 跳过（949.3s），workspace 合同、测试接缝、`demo_server --help`/`showcase_server --help` 与 repository_check 全 PASS |
-| 固定镜像真实 Docker 全量 | `MATHAGENT_TEST_PYTHON_IMAGE=sha256:fc913659…31673a2d uv run python -m unittest discover -s tests -p "test_*.py"` | PASS：596 tests（两笔修复提交前基点），**0 跳过**（1261.6s）；29 项跳过全部为该镜像 env 门控，归因见 §1.1 |
-| 产品发布检查 | `uv run python scripts/check_showcase_release.py` | PASS（`showcase_release=PASS`，含 `SHOWCASE_RELEASE_GATE=1` 全量套件、workspace 干净契约、`check_solver_release`、BASELINE.json 逐文件 sha256、`import user_agent` 导入边界、replay 凭证扫描、发布证据链） |
-| 前端依赖安装 | `npm ci --no-audit --no-fund` | PASS：66 packages（15s） |
+| 离线合同与全量套件 | `uv run python scripts/check.py --offline` | 第 1 轮终跑 PASS：599 tests/29 跳过；第 2 轮全部提交后终跑 PASS：**605 tests，OK（30 跳过，965.9s）**；独立 `uv run python -m unittest discover -s tests -p "test_*.py"` 第 2 轮复跑 PASS：605 tests，OK（30 跳过，968.8s）。跳过全部为镜像 env 门控，归因见 §1.1 |
+| 固定镜像真实 Docker 全量 | `MATHAGENT_TEST_PYTHON_IMAGE=sha256:fc913659…31673a2d uv run python -m unittest discover -s tests -p "test_*.py"` | 第 1 轮 PASS：596 tests **0 跳过**（1261.6s）；第 2 轮全部提交后终态复跑 PASS：**605 tests，0 跳过**（1301.3s），30 项镜像门控用例全部真实执行 |
+| 产品发布检查 | `uv run python scripts/check_showcase_release.py` | 第 1、2 轮各一次 PASS（`showcase_release=PASS`，含 `SHOWCASE_RELEASE_GATE=1` 全量套件、workspace 干净契约、`check_solver_release`、BASELINE.json 逐文件 sha256、`import user_agent` 导入边界、replay 凭证扫描、发布证据链） |
+| 前端依赖安装 | `npm ci --no-audit --no-fund` | 两轮各一次 PASS：66 packages |
 | 前端依赖审计 | `npm audit --audit-level=high` | 初次 FAIL：zod 4.1.5 命中 GHSA-mrhx-c7xc-m3w5（high）。升级 `zod` 至 4.6.7（精确锁版，依赖合同 allowlist 不变，commit `f1512e2`）后 PASS：0 漏洞 |
-| 前端合同 | `npm run check` | PASS：依赖合同/类型检查/14 unit/构建（升级前后各跑一次均过） |
-| 真实公共浏览器回归 | `npx playwright test -c playwright.product.config.ts` | PASS：12/12（40.3s） |
+| 前端合同 | `npm run check` | 两轮多轮 PASS：依赖合同/类型检查/14 unit/构建 |
+| 真实公共浏览器回归 | `npx playwright test -c playwright.product.config.ts` | 两轮各一次 PASS：12/12（第 2 轮 38.8s） |
 
 ### 1.1 跳过逐项归因（修复前离线套件 29 项）
 
@@ -67,6 +67,37 @@
 - **live 未触发的 Challenge、Trace-Back、Replan：not_covered**；其适用行为由 #71/#73/#77/#72/#78 的可控分支公共验收支撑（scripted/故障注入），不强迫模型表演。
 - 后续轮次可循的方向（本轮如实记录，不预支结果）：为整题审查与步骤回复评估同型有界修复属主（与 planner/explore 同一 #70 决策线）、以更小验证范围降低脚本超时方差后重试。
 
+
+
+## 三A、第 2 轮真实批次（ALIGN-AC-18 续）
+
+目标：在第 1 轮修复（null 候选、探索修复属主）之上取得完整非快通道闭环。批次硬预算随证据校准并逐批预登记：26/26/6 调用、1100s、262144 tokens（≤完整预设包络），单响应输出上限 12288，提供方 timeout 300→420s，thinking 模式默认开启（一次关阀实验 `94135a30` 证明关阀使格式纪律显著恶化，两连发 schema 回声）。
+
+| 批次 | 结果 | 调用/tokens/工具 | 判定与保留 |
+| --- | --- | --- | --- |
+| `…T071935Z-6f62aea8` | failed（partial_budget_exhausted） | 11 / 145,651 / 4 | **最接近闭环**：NEED_PLAN→Plan(v1)→步骤 1 报告并审查通过、4 次真实回执；死于本票自设 180k token 批次硬预算（随后提高到 262144） |
+| `…T072935Z-aab5ffb7` | failed（interrupted） | 8 / 64,016 / 3 | 探索修复 live 生效；reasoner 修复 live 生效；一次 reason_noncoding 调用 180s 超时→真 unknown 保留 |
+| `…T073938Z-58d260ae` | failed（interrupted） | 3 / 61,293 / 2 | 工具沙箱超时→unknown（推动 §四-3 预算校准） |
+| `…T074620Z-867a48f9` | **succeeded** | 6 / 32,586 / 1 | **第 2 次 live 快通道工具闭环**：自然计算真实回执→润色→整题审查 ACCEPT→S4 same_artifact |
+| `…T075149Z-86af2e74` 至 `…T090836Z-94135a30`（14 批） | failed | — | 逐批暴露并修复第 2 轮五类缺陷（见 §四A）；失败形态：整题审查 schema 回声×2、修复回复枚举外 `PENDING`、非法转义 invalid_json×2、整题审查 6.8k token 长文破坏 JSON、多次模型调用 420s 超时→真 unknown 保留、快通道整题审查诚实 REJECT（`5f25cd6f` completed_unverified） |
+| `…T0913xxZ`（squaresum21，收尾批） | failed（interrupted） | 2 / 31,842 / 1 | 工具回执成功后，续接模型调用 420s 超时→真 unknown 保留 |
+
+第 2 轮合计：18 批、97 次真实调用、约 1,013,322 charged tokens、22 次真实工具调用（其中校准后多批全部成功执行）、9 次 unknown（全部为模型调用或工具超时，零自动重发、预留保留）。两轮累计 29 批：116 调用 / 1,281,244 tokens / 37 工具 / 11 unknown。
+
+### 3.2 第 2 轮结论与仍存的 not_covered
+
+- **新增取得（live）**：reasoner 修复属主触发并救回步骤报告（`aab5ffb7`、`9b2862f0`）；探索修复属主多次触发救回；非法转义救助重析生效（`f2778974` 之前同类批次全部终止，修复后同类回复继续前进）；隔离执行 20s/15s CPU 预算下模型自然脚本（含 sympy）全部真实完成；`867a48f9` 第二次快通道工具+S4 闭环；`5f25cd6f` 快通道整题审查对可疑候选诚实 REJECT（completed_unverified，非接受）。
+- **仍未取得（ALIGN-AC-18 维持 not_covered）**：非 Explore 快通道完整闭环。两轮最接近批次 `6f62aea8` 已实证 NEED_PLAN→合法 Plan→步骤审查通过→自然计算回执的全前置链路，其后未走完仅因当时批次 token 硬预算与两类残余方差：①提供方 thinking 长尾——单次模型调用偶发超 420s（全部按真 unknown 保留、零重发）；②长文本回复破坏 JSON——整题审查偶发 6.8k token 长文（修复指令已加长度约束，样本尚不足以证明消除）。产品侧已无已知阻断缺陷；不以 29 批中的片段证据或 scripted 验收冒充完整 live 闭环。
+- live 自然 Challenge/Trace-Back/Replan 与分类账本/证明传递的 live 观察维持 not_covered（同第 1 轮口径）。
+
+## 四A、第 2 轮发现并修复的产品缺陷（RED→GREEN）
+
+1. `c73561d` **步骤与整题审查无协议修复属主**：reasoner/step_verifier/final_generator/whole_solution_verifier（终路与快通道两处）的一次 star_routing 门控格式修复（统一 `protocol_repair` 模块、`:repair-1` 独立身份）；CallInterrupted 显式捕获、不可修复原样上抛；S4 配套 `review_record` 解析完成态修复子调用。四条公共用例 RED→GREEN；149 项相关回归 + Docker 门控 31 项通过。
+2. `20ed31e`/`96d5cec` **回复协议指令歧义**：live 证据（schema 回声、枚举外 PENDING）驱动的指令明确化——填值实例而非 schema 定义、待决 tool_request 仍带临时枚举裁决。
+3. `439dd2c` **隔离执行预算系统性过紧**：8s 墙钟/3s CPU 使 sympy 导入级脚本普遍被杀为 unknown；校准 20s/10-15s（上游 600s，仍远低于），SP-09 合同补记校准；80M 求和公共 Docker 用例 RED（tool_error）→GREEN（成功、清理核验）。
+4. `b1624b7` **完整回复内非法转义整体报废**：严格解析恰为 Invalid \escape 时仅对该类别加倍非法反斜杠重析一次；其他畸形仍失败、schema 仍严格。公共用例 RED→GREEN；"not json"等真畸形反例不变。
+5. `b3d55e1` **修复回复长文再失败**：修复指令约束字符串 600 字符纯文本、无反斜杠/LaTeX。
+
 ## 四、本轮发现并修复的产品缺陷（RED→GREEN）
 
 1. `0abf438` **探索/步骤回复协议拒绝显式 null 候选**：真实 NEED_PLAN 回复（`solution_candidate: null`）被 invalid_role_schema 拒绝并在 Planner 前终止。公共用例先失败（`test_need_plan_reply_with_null_candidate_enters_the_plan_path`）后通过；explore/STEP schema 接受 OPTIONAL_TEXT，下游归一化原本就只认字符串，行为不变。
@@ -91,7 +122,7 @@
 | ALIGN-07 #77 | `tests.test_star_product_classified_outcomes` + `classified_outcomes_mutations` | scripted | live 分类裁定未观察到（批次未进入步骤审查） | 计入离线套件 |
 | ALIGN-08 #78 | `tests.test_star_product_final_proof` + `final_proof_mutations` | scripted | live 证明正文传递未观察到（同上） | 同上 |
 | ALIGN-09 #79 | `tests.test_star_product_align_recovery`（五窗口真实退出、镜像 reference 链） | 真实子进程退出 + scripted | live 恢复未触发 | 计入离线套件 |
-| ALIGN-10 #80（本票） | §1 门禁、§2 旁路汇总、§3 live 批次、§4 两笔修复、§5 模式复核、来源映射文档 | live + scripted + 故障注入 + replay | AC-18 live 闭环 not_covered；live Challenge/Trace-Back/Replan not_covered | 11 批 live（31 调用/208,194 tokens/8 工具）+ 门禁机时 |
+| ALIGN-10 #80（本票） | §1 门禁、§2 旁路汇总、§3/§3A live 批次（29 批）、§4/§4A 七笔 RED→GREEN 修复、§5 模式复核、来源映射文档 | live + scripted + 故障注入 + replay | AC-18 live 闭环 not_covered（产品侧阻断已清零，残余为提供方差差）；live Challenge/Trace-Back/Replan not_covered | 两轮 29 批 live（116 调用/1,281,244 tokens/37 工具/11 unknown 全保留）+ 两轮全量门禁机时 |
 
 ## 七、来源映射入口
 
@@ -101,5 +132,5 @@
 
 - 工程合同面（ALIGN-AC-19）：门禁全过（含最终离线复跑 599 项 29 跳过全部归因、镜像全量 0 跳过、发布检查 PASS、前端审计修复后 0 漏洞、浏览器回归 12/12）；官方冻结字节与导入边界不变。
 - 语义修复面（ALIGN-AC-16/17）：旁路敏感性检查全部实际执行且有效；来源映射完成并有逐项证据。
-- 真实能力面（ALIGN-AC-18）：**未完成**。非 Explore 快通道 live 闭环未取得，本票整体保持未完成状态；快通道 live 工具闭环与全部失败路径的真实记录不升级为完整能力结论。
+- 真实能力面（ALIGN-AC-18）：**未完成**。两轮 29 批后非 Explore 快通道 live 闭环仍未取得（最接近批次 `6f62aea8` 已实证前置全链路，残余为提供方 thinking 长尾超时与长文回复破坏 JSON 两类方差，见 §3.2）；产品侧全部已知阻断缺陷已修复并有 live 逐项验证。本票整体保持未完成状态；快通道 live 工具闭环（两例，含一例诚实 REJECT）与全部失败路径的真实记录不升级为完整能力结论。
 - 不自动关闭父 Issue #70；历史 #56/#69 记录不改写。
