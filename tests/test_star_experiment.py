@@ -50,6 +50,75 @@ class ExperimentPublicJobTest(unittest.TestCase):
         self.assertEqual(3, result["preflights"])
         self.assertEqual([], called, "An unknown stops immediately without waiting for mathematical review")
 
+    def test_trusted_source_defects_stop_before_review_and_next_dispatch(self):
+        from unittest.mock import patch
+
+        original = ExperimentServer.provenance
+        for mutation in ("missing_snapshot", "missing_wire", "missing_generator_proofs", "missing_generator_wire"):
+            with self.subTest(mutation=mutation):
+                provider = LoopbackProvider()
+                self.addCleanup(provider.close)
+                respond = provider.respond
+                def reply(context):
+                    if context["role"] == "explore" and mutation.startswith("missing_generator"):
+                        return {"assessment":"NEED_PLAN", "worked":[], "failed":[], "candidates":[]}
+                    return respond(context)
+                provider.respond = reply
+                observed, reviews = [], []
+                def damaged(server, job_id):
+                    snapshot, wire = original(server, job_id)
+                    if mutation == "missing_snapshot":
+                        snapshot = None
+                    elif mutation == "missing_wire":
+                        wire = []
+                    elif mutation == "missing_generator_proofs":
+                        next(c for c in snapshot["state"]["calls"].values()
+                             if c["role"] == "final_generator")["request"].pop("step_proofs")
+                    else:
+                        wire = [c for c in wire if c["role"] != "final_generator"]
+                    observed.append((snapshot, wire))
+                    return snapshot, wire
+                coordinator = ExperimentCoordinator(self.folder / mutation, adapters=provider.adapters(),
+                    qualification=self.qualification, manifest=synthetic_registration(), manifest_sha256=digest(synthetic_registration()))
+                with patch.object(ExperimentServer, "provenance", damaged):
+                    result = coordinator.run(lambda *args: reviews.append(args))
+                self.assertEqual("product_evidence_defect", result["stop_reason"], result)
+                self.assertEqual(1, result["executed_runs"])
+                self.assertEqual(1, len(provider.run_keys), "Zero subsequent Run dispatch")
+                self.assertEqual(1, len(observed))
+                self.assertEqual([], reviews, "Reject source defects before independent review waiting")
+                self.assertEqual(list(range(1,10)), result["unexecuted"])
+                archived = json.loads((self.folder / mutation / "run-00.json").read_text(encoding="utf-8"))
+                self.assertEqual("succeeded", archived["job"]["status"])
+                self.assertFalse((self.folder / mutation / "dispatch-01.json").exists())
+                scored = result["runs"][0]["score"]
+                self.assertTrue(scored["source_defect"], scored)
+                self.assertTrue(scored["state_consistent"], scored)
+                self.assertFalse(scored["flow_complete"], scored)
+                self.assertFalse(scored["evidence_complete"], scored)
+                self.assertFalse(scored["e1_gate"], scored)
+                if mutation == "missing_generator_wire":
+                    self.assertTrue(scored["delivery"]["review_bound"], scored)
+                    self.assertEqual("proof_source_missing", scored["delivery"]["reason"])
+
+    def test_trusted_fastpath_without_step_proofs_dispatches_next_run(self):
+        calls = []
+        def review(key, question, bundle):
+            calls.append(key)
+            if len(calls) == 2:
+                self.coordinator.cancel()
+            return independent_review(key, question, bundle)
+        result = self.execute("all_fast", reviewer=review)
+        self.assertEqual("canceled", result["stop_reason"], result)
+        self.assertEqual(2, result["executed_runs"])
+        first = result["runs"][0]["score"]
+        self.assertTrue(first["delivery"]["review_bound"], first)
+        self.assertFalse(first["delivery"]["proof_delivered"], first)
+        self.assertTrue(first["flow_complete"], first)
+        self.assertTrue(first["evidence_complete"], first)
+        self.assertTrue(first["e1_gate"], first)
+        self.assertFalse(first["source_defect"], first)
+
     def test_closed_coordinator_settles_late_http_usage_without_changing_terminal_archive(self):
         from unittest.mock import patch
 

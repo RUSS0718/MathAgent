@@ -34,9 +34,13 @@ def score(question_id, question, bundle, review, *, expected=None, stage=None, p
                   and answer == (job.get("result") or {}).get("final_response", "")
                   and report.get("request_attempts") == evidence.get("request_attempts")
                   and bundle["run"].get("run_id") == job["job_id"] == evidence["run"]["run_id"])
-    complete = job["status"] == "succeeded" and semantics.get("execution") == "completed" and bound
     snapshot, contexts = provenance if provenance is not None else (None, [])
     delivery = evaluate_delivery(job, snapshot, contexts)
+    trusted_delivery = bool(delivery["review_bound"] and (
+        delivery["reason"] == "fastpath_no_step_proofs"
+        or delivery["reason"] == "proof_bound" and delivery["proof_delivered"]))
+    source_defect = job["status"] == "succeeded" and not trusted_delivery
+    complete = job["status"] == "succeeded" and semantics.get("execution") == "completed" and bound and trusted_delivery
     nonfastpath = bool(complete and consistent and delivery["nonfastpath"])
     budget = report.get("budget") or {}
     usage = budget.get("provider_known") or {}
@@ -50,8 +54,8 @@ def score(question_id, question, bundle, review, *, expected=None, stage=None, p
                  and not budget.get("unknown_attempts", 0) and not budget.get("tool_calls", 0)
                  and latency)
     return dict(mathematics=mathematics, independent_review=review if valid_review else None,
-                flow_complete=complete, latency_met=latency, evidence_complete=consistent and bound,
-                state_consistent=consistent,
+                flow_complete=complete, latency_met=latency, evidence_complete=consistent and bound and trusted_delivery,
+                state_consistent=consistent, source_defect=source_defect,
                 delivery=delivery, nonfastpath=nonfastpath, unknown=bool(unknown), e1_gate=(bool(
                     complete and consistent and efficient and mathematics == "pass") if e1 else None),
                 protocol_defect=bool(recovery.get("protocol_failures")), cost=None)
