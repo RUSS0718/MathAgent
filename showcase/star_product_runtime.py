@@ -50,5 +50,6 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
         full_enabled=full_enabled,
         full_features=config.get("SHOWCASE_STAR_FULL_FEATURES"),
         full_budget=config.get("SHOWCASE_STAR_FULL_BUDGET"),
+        experiment_policy=config.get("SHOWCASE_STAR_EXPERIMENT_POLICY"),
         hint_mode=config.get("SHOWCASE_STAR_HINT_MODE", "none"),
         evidence_kind=config.get("SHOWCASE_STAR_EVIDENCE_KIND", "live"))
