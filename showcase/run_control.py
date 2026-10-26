@@ -63,7 +63,14 @@ def controlled_action(function):
     @wraps(function)
     def call(*args, **kwargs):
         check_control()
-        result = function(*args, **kwargs)
+        try:
+            result = function(*args, **kwargs)
+        except RunStopped:
+            raise
+        except Exception:
+            # Transport failure must still observe a deadline/cancel that won in flight.
+            check_control()
+            raise
         try:
             check_control()
         except RunStopped:

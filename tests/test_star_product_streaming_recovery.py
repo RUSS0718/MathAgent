@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 import uuid
 from pathlib import Path
@@ -72,6 +73,16 @@ class ScriptedSSETransport:
 
             def iter_lines(self, decode_unicode=True):
                 for item in plan:
+                    if seen:
+                        # The byte reader may prefetch; gate the next wire frame on the
+                        # actual SQLite commit, not synchronous iterator scheduling.
+                        deadline = time.monotonic() + 3
+                        persisted = transport.persisted_partial(context["call_id"])
+                        while "".join(seen) not in (persisted or "") and time.monotonic() < deadline:
+                            time.sleep(.005)
+                            persisted = transport.persisted_partial(context["call_id"])
+                        case.assertIn("".join(seen), persisted or "")
+                        transport.order_checks += 1
                     if isinstance(item, BaseException):
                         raise item
                     if callable(item):
@@ -88,12 +99,12 @@ class ScriptedSSETransport:
                         return
                     # The audit must persist previously delivered fragments before
                     # the next provider fragment may be requested over the wire.
-                    if seen:
-                        persisted = transport.persisted_partial(context["call_id"])
-                        case.assertIn("".join(seen), persisted or "")
-                        transport.order_checks += 1
                     seen.append(item)
                     yield "data: " + json.dumps({"choices": [{"delta": {"content": item}}]})
+
+            def iter_content(self, chunk_size=1):
+                for line in self.iter_lines():
+                    yield (line + "\n\n").encode("utf-8")
 
         return Reply()
 
