@@ -12,31 +12,36 @@ from unittest.mock import patch
 
 from llm_client import InternChatClient
 from showcase.adapters import InternModelAdapter, InternStreamAdapter
-from showcase.star_experiment_registration import digest, registration
+from showcase.star_experiment_registration import digest
 from tests.star_product_support import ACCEPT, POLISH, SOLVED, StarJobFixture
 
 ANSWERS = {
-    "multiply": "17×23=17×(20+3)=340+51=391，因此结果是391。",
-    "fractions": "3/4+1/6=9/12+2/12=11/12，通分后相加。",
-    "digit_cancel": "Enumerating all two-digit n<d and nonzero canceled digits gives 16/64, 19/95, 26/65, 49/98. Their reduced product is 1/100; the denominator is 100.",
-    "partitions": "Let c[j,n]=c[j-1,n]+c[j,n-j] with c[j,0]=1. The largest allowed part separates disjoint cases and gives every unordered partition exactly once. Evaluate to c[100,100]=190569292; remove the single part [100], giving 190569291.",
-    "sharp": "Write F=xy+yz+zx-2xyz. Since x,y,z≤1, F≥(xy+yz+zx)/3≥0, with equality at a vertex. On the boundary F≤1/4. At an interior stationary point, subtracting the Lagrange equations gives (x-y)(1-2z)=0 and its cyclic versions. If variables differ, another coordinate must be 1/2; the remaining equations contradict strict positivity. Thus x=y=z=1/3 is the only interior stationary point, giving F=7/27. Compactness proves the upper bound; equality holds at (1/3,1/3,1/3).",
+    "short_a": "Adding two pairs gives 4. Final answer: 4",
+    "short_b": "Common denominators give three quarters. Final answer: 3/4",
+    "finite": "The three listed objects exhaust the domain. Final answer: 3",
+    "bound": "A square is nonnegative, with equality at zero.",
+    "sum": "Separate the two terms and add. Final answer: 5",
 }
+ENUMERATION = "print(3)\n"
 
 
-ENUMERATION = """from fractions import Fraction
-from math import prod
-found=set()
-for n in range(10,100):
-    for d in range(n+1,100):
-        for c in '123456789':
-            if c in str(n) and c in str(d):
-                a=str(n).replace(c,'',1)
-                b=str(d).replace(c,'',1)
-                if int(b) and Fraction(n,d)==Fraction(int(a),int(b)):
-                    found.add(Fraction(n,d))
-print(prod(found).denominator)
-"""
+def synthetic_registration():
+    from showcase.star_experiment_registration import CONDITIONS, E1, E2, ROUND, VERSION
+    questions = {}
+    for key, text in {"short_a": "Add two and two; explain.",
+                      "short_b": "Add one half and one quarter; explain.",
+                      "finite": "Count the objects A, B, C exhaustively.",
+                      "bound": "Prove a real square is nonnegative, including equality.",
+                      "sum": "Add two and three with justification."}.items():
+        questions[key] = dict(source="synthetic-test", original=text, prompt=text,
+            obligations=["result", "explanation"], original_sha256=digest(text), prompt_sha256=digest(text))
+    order = [("E1", q, t) for q in ("short_a", "short_b") for t in ("nonstream", "stream")]
+    order += [("E2", q, "nonstream") for _ in range(2) for q in ("finite", "bound", "sum")]
+    return dict(version=VERSION, questions=questions, conditions=dict(CONDITIONS), round_limits=dict(ROUND),
+        source_checked="synthetic", review_rules={"review": "independent-oracle-secret: independent obligation review required."},
+        independent_oracles=dict(short_a="4", short_b="3/4", finite="3", bound=None, sum="5"),
+        schedule=[dict(index=i, stage=s, question=q, transport=t, limits=dict(E1 if s=="E1" else E2))
+                  for i,(s,q,t) in enumerate(order)])
 
 
 def independent_review(key, question, bundle):
@@ -72,6 +77,7 @@ def saved_batch(folder):
 class LoopbackProvider:
     def __init__(self, scenario="matrix"):
         self.scenario, self.requests, self.run_keys = scenario, [], {}
+        self.release = threading.Event()
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -85,6 +91,8 @@ class LoopbackProvider:
                 if outer.scenario == "unknown" and len(outer.requests) == 1:
                     self.connection.close()
                     return
+                if outer.scenario == "late":
+                    outer.release.wait(20)
                 reply = outer.respond(context)
                 content = json.dumps(reply, ensure_ascii=False)
                 if wire.get("stream"):
@@ -113,14 +121,14 @@ class LoopbackProvider:
         run_id, role = context["run_id"], context["role"]
         if run_id not in self.run_keys:
             text = json.dumps(context, ensure_ascii=False)
-            key = next((k for k, q in registration()["questions"].items() if q["prompt"] in text), None)
+            key = next((k for k, q in synthetic_registration()["questions"].items() if q["prompt"] in text), None)
             if key is None:
                 # JSON escaping can differ; use an original statement fragment.
-                key = next(k for k, q in registration()["questions"].items() if q["original"][:25] in text)
+                key = next(k for k, q in synthetic_registration()["questions"].items() if q["original"][:25] in text)
             self.run_keys[run_id] = key
         key = self.run_keys[run_id]
         answer = ANSWERS[key]
-        nonfast = key == "digit_cancel" and self.scenario != "all_fast"
+        nonfast = key == "finite" and self.scenario != "all_fast"
         if role == "explore":
             return {"assessment": "NEED_PLAN" if nonfast else "SOLVED", "worked": [], "failed": [],
                     "candidates": [], **({} if nonfast else {"solution_candidate": answer})}
@@ -130,16 +138,16 @@ class LoopbackProvider:
             return {"version": 1, "steps": [{"step_id": "proof", "title": "Prove completeness", "objective": "Derive the result"}]}
         if role == "reasoner":
             claim = {"statement": answer, "label": "easy-verify"}
-            if key == "digit_cancel":
+            if key == "finite":
                 claim["tool_request"] = dict(tool="python_math", arguments={"code": ENUMERATION},
-                                             scope="finite_computation", expected_output="100\n")
+                                             scope="finite_computation", expected_output="3\n")
             return {"argument": answer, "claims": [claim], "blocked": False}
         if role == "step_verifier":
             return {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT", "objection": ""}
         if role == "final_generator":
             return {"final_response": answer}
         if role == "whole_solution_verifier":
-            if self.scenario == "math_reject" and key == "digit_cancel":
+            if self.scenario == "math_reject" and key == "finite":
                 return {"verdict": "REJECT", "reason": "Completeness proof has a mathematical gap"}
             return {"verdict": "ACCEPT", "reason": "All registered requirements addressed"}
         raise AssertionError("Unexpected real product request role " + role)
@@ -154,5 +162,6 @@ class LoopbackProvider:
             return adapters
 
     def close(self):
+        self.release.set()
         self.server.shutdown()
         self.server.server_close()

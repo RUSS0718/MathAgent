@@ -1,11 +1,11 @@
 """Independent mathematics and product evidence are separate experiment axes."""
 
-import re
+from .star_acceptance import evaluate_delivery
+from .star_experiment_math import compare_conclusion
+from .star_experiment_registration import digest
 
-from .star_experiment_registration import digest, oracle
 
-
-def score(question_id, question, bundle, review):
+def score(question_id, question, bundle, review, *, expected=None, stage=None, provenance=None):
     job, report, evidence = (bundle[key] for key in ("job", "report", "evidence"))
     answer = report.get("answer", "")
     obligations = question["obligations"]
@@ -21,9 +21,10 @@ def score(question_id, question, bundle, review):
     if valid_review:
         values = review["obligations"].values()
         mathematics = "reject" if "reject" in values else "undecided" if "undecided" in values else "pass"
-    expected = oracle(question_id)
-    if expected is not None and not re.search(r"(?<![\d/])" + re.escape(expected) + r"(?![\d/])", answer):
-        mathematics = "reject"  # A supplied review cannot override the independent finite oracle.
+    if expected is not None:
+        conclusion = compare_conclusion(answer, expected, review.get("conclusion_span") if valid_review else None)
+        if conclusion == "reject" or mathematics != "reject" and conclusion == "undecided":
+            mathematics = conclusion
     semantics = report.get("semantics") or {}
     checks = report.get("checks") or {}
     bound = semantics.get("whole_review") == "accepted" and semantics.get("binding") == "same_artifact"
@@ -34,14 +35,15 @@ def score(question_id, question, bundle, review):
                   and report.get("request_attempts") == evidence.get("request_attempts")
                   and bundle["run"].get("run_id") == job["job_id"] == evidence["run"]["run_id"])
     complete = job["status"] == "succeeded" and semantics.get("execution") == "completed" and bound
-    nonfastpath = bool(complete and checks.get("proof_sources")
-                       and checks.get("source", {}).get("origin") != "explore_polish")
+    snapshot, contexts = provenance if provenance is not None else (None, [])
+    delivery = evaluate_delivery(job, snapshot, contexts)
+    nonfastpath = bool(complete and consistent and delivery["nonfastpath"])
     budget = report.get("budget") or {}
     usage = budget.get("provider_known") or {}
     recovery = ((job.get("result") or {}).get("solver") or {}).get("recovery", {})
     unknown = (semantics.get("transport") == "unknown" or budget.get("unresolved_attempts", 0)
                or budget.get("unknown_tool_calls", 0))
-    e1 = question_id in {"multiply", "fractions"}
+    e1 = stage == "E1"
     latency = bundle.get("delivery_wall_time_seconds", float("inf")) <= (120 if e1 else 600)
     efficient = (budget.get("logical_calls", 999) <= 3
                  and usage.get("total_tokens") is not None and usage["total_tokens"] <= 8192
@@ -50,7 +52,7 @@ def score(question_id, question, bundle, review):
     return dict(mathematics=mathematics, independent_review=review if valid_review else None,
                 flow_complete=complete, latency_met=latency, evidence_complete=consistent and bound,
                 state_consistent=consistent,
-                nonfastpath=nonfastpath, unknown=bool(unknown), e1_gate=(bool(
+                delivery=delivery, nonfastpath=nonfastpath, unknown=bool(unknown), e1_gate=(bool(
                     complete and consistent and efficient and mathematics == "pass") if e1 else None),
                 protocol_defect=bool(recovery.get("protocol_failures")), cost=None)
 

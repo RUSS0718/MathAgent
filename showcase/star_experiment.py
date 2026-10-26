@@ -8,7 +8,7 @@ from pathlib import Path
 from .star_experiment_archive import ExperimentArchive, source_identity
 from .star_experiment_gates import Qualification
 from .star_experiment_policy import ExperimentRunPolicy
-from .star_experiment_registration import digest, oracle, registration
+from .star_experiment_registration import digest, registration
 from .star_experiment_review import await_review
 from .star_experiment_scoring import admit, aggregate, score
 from .star_experiment_server import ExperimentServer
@@ -22,11 +22,13 @@ class ExperimentCoordinator:
     Scripted runs require loopback provider URLs; RB08 alone enables live.
     """
 
-    def __init__(self, path, *, adapters, qualification, evidence_kind="scripted"):
+    def __init__(self, path, *, adapters, qualification, manifest, manifest_sha256, evidence_kind="scripted"):
         if evidence_kind not in {"scripted", "live"}:
             raise ValueError("experiment_evidence_kind_invalid")
         if not isinstance(qualification, Qualification):
             raise ValueError("experiment_prerequisites_unverified")
+        self.frozen = registration(manifest, expected_sha256=manifest_sha256)
+        self.manifest_sha256 = manifest_sha256
         self.path, self.adapters = Path(path), adapters
         self.qualification, self.evidence_kind = qualification, evidence_kind
         self._canceled = threading.Event()
@@ -38,11 +40,11 @@ class ExperimentCoordinator:
         archive = ExperimentArchive(self.path)
         started = time.monotonic()
         policy = ExperimentRunPolicy(time.time() + 4800)
-        frozen = registration()
+        frozen = deepcopy(self.frozen)
         archive.put("registration.json", dict(registration=frozen, sha256=digest(frozen),
                                              source=source_identity(), evidence_kind=self.evidence_kind))
         archive.put("prerequisites.json", self.qualification.report)
-        archive.put("independent-oracles.json", {key: oracle(key) for key in frozen["questions"]})
+        archive.put("independent-oracles.json", frozen["independent_oracles"])
         servers, records, probes, dispatched = {}, [], [], []
         stop = None
 
@@ -56,7 +58,7 @@ class ExperimentCoordinator:
                 raise ValueError("experiment_preflight_evidence_invalid")
 
         try:
-            self.qualification.require(self.evidence_kind)
+            self.qualification.require(self.evidence_kind, self.manifest_sha256)
             for transport in ("nonstream", "stream"):
                 if self._canceled.is_set():
                     break
@@ -88,7 +90,8 @@ class ExperimentCoordinator:
                 bundle["delivery_wall_time_seconds"] = time.monotonic() - dispatched_at
                 # Persist failures before independent review (which may be unavailable).
                 archive.put(f"run-{entry['index']:02d}.json", bundle)
-                scored = score(entry["question"], question, bundle, None)
+                provenance = server.provenance(job_id)
+                scored = score(entry["question"], question, bundle, None, expected=frozen["independent_oracles"][entry["question"]], stage=entry["stage"], provenance=provenance)
                 record = dict(entry=entry, job_id=job_id, bundle=bundle, score=scored)
                 records.append(record)
                 budget = bundle["report"].get("budget") or {}
@@ -96,7 +99,7 @@ class ExperimentCoordinator:
                         or self._hard_limit(budget, entry["limits"])):
                     review = await_review(reviewer, (entry["question"], deepcopy(question), deepcopy(bundle)),
                         remaining=lambda: 4800 - (time.monotonic() - started), canceled=self._canceled.is_set)
-                    scored = score(entry["question"], question, bundle, review)
+                    scored = score(entry["question"], question, bundle, review, expected=frozen["independent_oracles"][entry["question"]], stage=entry["stage"], provenance=provenance)
                     record["score"] = scored
                 archive.put(f"score-{entry['index']:02d}.json", scored)
                 status = bundle["job"]["status"]
@@ -130,7 +133,7 @@ class ExperimentCoordinator:
                 e2 = [r for r in records if r["entry"]["stage"] == "E2"]
                 passed = all(any(r["entry"]["question"] == q and r["score"]["mathematics"] == "pass"
                                  and r["score"]["flow_complete"] for r in e2)
-                             for q in ("digit_cancel", "sharp", "partitions"))
+                             for q in {e["question"] for e in frozen["schedule"] if e["stage"] == "E2"})
                 stop = "completed" if passed else "e2_gate_failed"
         except Exception as exc:  # Stop and preserve evidence on reviewer/configuration failure.
             stop = "experiment_defect:" + type(exc).__name__
@@ -154,7 +157,7 @@ class ExperimentCoordinator:
             tools_including_environment=None if uncollected else aggregate(records)["tool_calls"] + len(probes),
             wall_time_seconds=time.monotonic() - started, cost=None,
             runs=[dict(entry=r["entry"], job_id=r["job_id"], score=r["score"]) for r in records],
-            natural_nonfastpath=any(r["score"]["nonfastpath"] for r in records),
+            natural_nonfastpath=any(r["score"]["nonfastpath"] and r["score"]["mathematics"] == "pass" for r in records),
             mechanisms={name: ("observed" if self.evidence_kind == "live" and any(
                 event.get("solver_event_type") == event_type for r in records
                 for event in r["bundle"]["evidence"].get("timeline", [])) else "not_covered")

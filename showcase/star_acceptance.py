@@ -42,7 +42,8 @@ def _evaluate_delivery(job, run, contexts):
     request = call.get("request", {})
     wire = [item for item in contexts if item.get("call_id") == call_id]
     valid = (
-        job.get("status") == "succeeded"
+        source.get("origin") in {"explore_polish", "final_generator"}
+        and job.get("status") == "succeeded"
         and bool(answer.strip())
         and job.get("job_id") == run.get("run_id") == source.get("run_id")
         and state.get("final_response") == answer
