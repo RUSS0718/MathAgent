@@ -89,14 +89,17 @@ class RunBudgetLedger:
                 self.connection.rollback()
                 raise
 
-    def ensure(self, run_id, limits):
+    def ensure(self, run_id, limits, *, deadline_at=None):
+        if deadline_at is not None and (type(deadline_at) not in {int, float} or not math.isfinite(deadline_at)):
+            raise ValueError("run_budget_deadline_invalid")
         with self._transaction(run_id) as state:
             if state is None:
                 now = time.time()
                 state = {
                     "limits": asdict(limits),
                     "started_at": now,
-                    "deadline_at": now + limits.max_runtime_seconds,
+                    "deadline_at": min(now + limits.max_runtime_seconds, deadline_at)
+                    if deadline_at is not None else now + limits.max_runtime_seconds,
                     "actions": [],
                 }
                 self.connection.execute(

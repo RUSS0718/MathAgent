@@ -25,7 +25,12 @@ class StarProductPipeline:
 
     def __init__(self, database_path, *, adapter=None, evidence_kind="live", budget=None,
                  features=None, registry=None, hint_mode="none", full_enabled=False,
-                 full_features=None, full_budget=None):
+                 full_features=None, full_budget=None, experiment_policy=None):
+        from .star_experiment_policy import ExperimentRunPolicy
+
+        if experiment_policy is not None and not isinstance(experiment_policy, ExperimentRunPolicy):
+            raise ValueError("star_experiment_policy_invalid")
+        self.experiment_policy = experiment_policy
         if evidence_kind not in {"live", "scripted", "fault_injection"}:
             raise ValueError("star_evidence_kind_invalid")
         if adapter is not None and not isinstance(adapter, InternModelAdapter):
@@ -73,7 +78,9 @@ class StarProductPipeline:
         if probe:
             from .star_product_readiness import isolated_readiness
 
-            readiness = isolated_readiness(self.registry)
+            readiness = isolated_readiness(self.registry, max_runtime_seconds=(
+                min(45, self.experiment_policy.remaining()) if self.experiment_policy else 45),
+                deadline_at=self.experiment_policy.deadline_at if self.experiment_policy else None)
             self.readiness = readiness
         if not readiness["available"]:
             return [readiness["reason"]]
@@ -98,6 +105,8 @@ class StarProductPipeline:
         return self.full_config if mode in FULL_MODES else self.config
 
     def budget_for_mode(self, mode):
+        if mode in FULL_MODES and self.experiment_policy is not None:
+            return self.experiment_policy.budget()
         return self.full_budget if mode in FULL_MODES else self.budget
 
     def run(self, run_id, problem, *, verification_mode="auto", emit=None, solver_hint=None,
@@ -121,6 +130,11 @@ class StarProductPipeline:
             features["best_effort"] = True
         config = {**base, **({"hint_mode": "user_hint"} if solver_hint is not None else {}),
                   "features": features}
+        if self.experiment_policy is not None:
+            limits = current_budget().snapshot()["limits"]
+            config.update(max_model_calls=limits["max_model_calls"],
+                          max_tool_calls=limits["max_tool_calls"],
+                          max_total_duration_seconds=max(1, int(limits["max_runtime_seconds"])))
 
         def observe(run, event):
             if event:
