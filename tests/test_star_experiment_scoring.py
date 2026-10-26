@@ -1,6 +1,7 @@
 """Independent conclusion checks use synthetic rational arithmetic only."""
 import unittest
 
+from showcase.final_evidence import artifact_identity
 from showcase.run_budget import RunBudgetLimits
 from showcase.star_experiment_scoring import score
 from tests.star_experiment_support import independent_review, synthetic_registration
@@ -19,6 +20,41 @@ class ExperimentScoringTest(unittest.TestCase):
             report=dict(answer=answer,semantics=semantics,checks=checks,budget=budget),
             evidence=dict(semantics=semantics,verification=checks,budget=budget,run=dict(run_id="r")),
             run=dict(run_id="r"),delivery_wall_time_seconds=1)
+
+    def test_complete_delivery_requires_trusted_source_in_either_stage(self):
+        q=synthetic_registration()["questions"]["short_a"]
+        bundle=self.bundle("4")
+        source=dict(run_id="r",call_id="review",plan_version=1,attempt_index=0,
+                    candidate_version=1,origin="explore_polish")
+        wire=dict(run_id="r",call_id="review",role="whole_solution_verifier",solution_candidate="4")
+        snapshot=dict(run_id="r",state=dict(plan_version=1,attempt_index=0,
+            status="completed_llm_reviewed",final_response="4",whole_solution_reviews=[dict(
+                verdict="ACCEPT",artifact=artifact_identity("4"),source=source)],
+            calls=dict(review=dict(run_id="r",role="whole_solution_verifier",status="completed",
+                request=dict(solution_candidate="4"),response=dict(verdict="ACCEPT")))))
+        review=independent_review("short_a",q,bundle)
+        for stage in ("E1","E2"):
+            valid=score("short_a",q,bundle,review,expected="4",stage=stage,provenance=(snapshot,[wire]))
+            self.assertTrue(valid["delivery"]["review_bound"],valid)
+            self.assertFalse(valid["delivery"]["proof_delivered"],valid)
+            self.assertTrue(valid["flow_complete"],valid)
+            self.assertTrue(valid["evidence_complete"],valid)
+            self.assertFalse(valid["source_defect"],valid)
+            self.assertEqual(True if stage=="E1" else None,valid["e1_gate"])
+            for missing in ((None,[wire]),(snapshot,[])):
+                with self.subTest(stage=stage,missing_snapshot=missing[0] is None):
+                    result=score("short_a",q,bundle,review,expected="4",stage=stage,provenance=missing)
+                    self.assertFalse(result["delivery"]["review_bound"],result)
+                    self.assertFalse(result["flow_complete"],result)
+                    self.assertFalse(result["evidence_complete"],result)
+                    self.assertEqual(False if stage=="E1" else None,result["e1_gate"])
+                    self.assertTrue(result["source_defect"],result)
+        bundle["job"]["status"]="failed"
+        bundle["report"]["semantics"]["whole_review"]="rejected"
+        bundle["report"]["semantics"]["execution"]="needs_review"
+        honest=score("short_a",q,bundle,review,expected="4",stage="E2")
+        self.assertFalse(honest["source_defect"],honest)
+        self.assertFalse(honest["flow_complete"],honest)
 
     def test_rational_conclusions_not_spelling(self):
         q=synthetic_registration()["questions"]["short_b"]
@@ -116,3 +152,9 @@ class ExperimentProvenanceJobTest(StarJobFixture, unittest.TestCase):
                 result=score("bound",q,bundle,review,provenance=(changed,wire))
                 self.assertFalse(result["nonfastpath"],result)
                 self.assertFalse(result["delivery"]["proof_delivered"],result)
+                self.assertFalse(result["flow_complete"],result)
+                self.assertFalse(result["evidence_complete"],result)
+                self.assertTrue(result["source_defect"],result)
+                if mutation == "wrong_wire":
+                    self.assertTrue(result["delivery"]["review_bound"],result)
+                    self.assertEqual("proof_source_missing",result["delivery"]["reason"])

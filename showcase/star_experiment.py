@@ -95,7 +95,7 @@ class ExperimentCoordinator:
                 record = dict(entry=entry, job_id=job_id, bundle=bundle, score=scored)
                 records.append(record)
                 budget = bundle["report"].get("budget") or {}
-                if not (scored["unknown"] or scored["protocol_defect"] or self._canceled.is_set()
+                if not (scored["unknown"] or scored["protocol_defect"] or scored["source_defect"] or self._canceled.is_set()
                         or self._hard_limit(budget, entry["limits"])):
                     review = await_review(reviewer, (entry["question"], deepcopy(question), deepcopy(bundle)),
                         remaining=lambda: 4800 - (time.monotonic() - started), canceled=self._canceled.is_set)
@@ -109,6 +109,8 @@ class ExperimentCoordinator:
                     stop = "unknown_outcome"
                 elif scored["protocol_defect"]:
                     stop = "product_protocol_defect"
+                elif scored["source_defect"]:
+                    stop = "product_evidence_defect"
                 elif time.monotonic() - started >= 4800:
                     stop = "round_deadline_exhausted"
                 elif self._hard_limit(budget, entry["limits"]):

@@ -41,4 +41,6 @@
 
 同 Run 来源资格从服务端只读 snapshot 与实际出站上下文调用 RB01 `evaluate_delivery`，只归档脱敏摘要，HTTP 不开放原始上下文。自然非快通道还须独立数学通过。
 
+成功交付的 flow/evidence/E1 资格还要求可信来源：`review_bound=True`，且合法快通道原因为 `fastpath_no_step_proofs`，或完整证明链为 `proof_bound` 且 `proof_delivered=True`。声称成功却缺可信来源记 `source_defect`，在独立数学复核等待前拒绝，并优先停止为 `product_evidence_defect`；原 Job 公共产物保持原样，具体缺证原因保留在 delivery 摘要。诚实 REJECT/未解不因没有 ACCEPT 来源而成为该产品缺陷。
+
 关闭后迟到用量通过短生命周期连接更新同一 S3 原 attempt；禁止新动作。`supplemental-usage/` 以独占文件追加身份、用量和观察时间，独立于终态 hash 清单；原始结果与 unknown 停止理由保持不变。该补记不代表恢复实验或接受迟到文本。
