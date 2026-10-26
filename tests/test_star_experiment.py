@@ -310,12 +310,12 @@ class ExperimentDeadlineJobTest(unittest.TestCase):
         policy = ExperimentRunPolicy(time.time() + 3600)
         server = ExperimentServer(Path(folder), "nonstream", provider.adapters()["nonstream"], policy, "scripted")
         self.addCleanup(server.close)
-        started = time.time()
         policy.prepare(E1)
+        original_deadline = policy.deadline_at
         job_id = server.dispatch(synthetic_registration()["questions"]["short_a"])
         bundle = server.collect(job_id, policy.deadline_at)
         self.assertEqual("succeeded", bundle["job"]["status"])
-        self.assertLessEqual(bundle["report"]["budget"]["deadline_at"], started + 300,
+        self.assertLessEqual(bundle["report"]["budget"]["deadline_at"], original_deadline,
                              "Per-Run total limit must include its Job preflight")
         self.assertEqual(300, bundle["report"]["budget"]["limits"]["max_runtime_seconds"])
 
