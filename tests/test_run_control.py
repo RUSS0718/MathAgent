@@ -25,6 +25,38 @@ class Reply:
         return {"choices": [{"finish_reason": "stop", "message": {"content": "2"}}]}
 
 
+class RunControlFenceTest(unittest.TestCase):
+    def test_action_deadline_stop_preserves_original_control_exception(self):
+        from types import SimpleNamespace
+
+        from showcase.run_control import (
+            RunControl,
+            RunStopped,
+            bind_control,
+            check_control,
+            controlled_action,
+        )
+
+        row, deadline, original = {"status": "running"}, [time.time()+10], []
+        store = SimpleNamespace(control_status=lambda run_id: row,
+            job_identity=lambda run_id: {"solver_mode": "graph"},
+            fail_job=lambda *args, **kwargs: row.update(status="failed"))
+        budget = SimpleNamespace(snapshot=lambda: {"deadline_at": deadline[0]})
+        @controlled_action
+        def action():
+            deadline[0] = 0
+            try:
+                check_control()
+            except RunStopped as exc:
+                original.append(exc)
+                raise
+        with bind_control(RunControl(store, "r", budget)), self.assertRaises(RunStopped) as caught:
+            action()
+        self.assertEqual("failed", row["status"])
+        self.assertIs(original[0], caught.exception)
+        self.assertEqual("run_deadline_exhausted", caught.exception.category)
+
+
 class RunControlContractTest(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -145,6 +177,16 @@ class RunControlContractTest(unittest.TestCase):
         report = self.client.get(f"/api/agent/jobs/{job_id}/report").get_json()["report"]
         self.assertEqual(1, report["budget"]["http_attempts"])
         self.assertEqual("", report["answer"])
+
+    def test_transport_timeout_before_deadline_keeps_transport_category(self):
+        import requests
+
+        self.post.side_effect = requests.ReadTimeout("provider timeout before Run deadline")
+        job_id = self.create_job()
+        job = self.wait_job(job_id, "failed")
+        self.assertEqual("timeout", job["error"])
+        self.assertEqual(1, self.post.call_count)
+        self.assertEqual(1, self.wait_attempt_audit(job_id)["budget"]["unresolved_attempts"])
 
     def test_restart_unknown_remote_requires_review_and_never_replays(self):
         job_id = self.create_job()

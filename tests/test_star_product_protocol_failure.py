@@ -64,7 +64,8 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
             content = package["choices"][0]["message"]["content"]
             packet = {"choices": [{"delta": {"content": content}, "finish_reason": "stop"}],
                       "model": "intern-s2", "usage": KNOWN_USAGE}
-            reply.iter_lines = lambda **options: iter(["data: " + json.dumps(packet), "data: [DONE]"])
+            reply.iter_content = lambda **options: iter([
+                ("data: " + json.dumps(packet) + "\n\ndata: [DONE]\n\n").encode("utf-8")])
             reply.close = lambda: None
             return reply
 
@@ -508,6 +509,16 @@ class StarProtocolFenceTest(StarJobFixture, unittest.TestCase):
                        SHOWCASE_STAR_BUDGET=RunBudgetLimits(**limits))
         return self.create_job()
 
+    def settled_budget(self, job_id, total_tokens):
+        ledger = self.app.extensions["showcase_workspace_service"].budget_ledger
+        def observed():
+            budget = ledger.snapshot(job_id)
+            return budget if (budget["provider_known"]["total_tokens"] == total_tokens
+                              and budget["unresolved_attempts"] == 0) else None
+        budget = self.wait_for(observed)
+        self.assertEqual(budget["provider_known"], self.report(job_id)["budget"]["provider_known"])
+        return budget
+
     def test_model_budget_exhaustion_stops_protocol_repair_without_dispatch(self):
         # The repair bound is also bounded by the shared ledger: once the model
         # budget is spent, the repair attempt stops before any new dispatch.
@@ -554,7 +565,7 @@ class StarProtocolFenceTest(StarJobFixture, unittest.TestCase):
                                     headers=self.headers())
         self.assertEqual(409, rejected.status_code)
         self.assertEqual(2, len(self.outbound))
-        budget = job["result"]["budget"]
+        budget = self.settled_budget(job_id, 20)
         self.assertAlmostEqual(3, budget["deadline_at"] - budget["started_at"], delta=0.2)
         self.assertIsNotNone(budget["ended_at"])
         self.assertEqual({"prompt_tokens": 14, "completion_tokens": 6, "total_tokens": 20},
@@ -584,7 +595,7 @@ class StarProtocolFenceTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(3, len(self.outbound))
         time.sleep(0.2)
         self.assertEqual(3, len(self.outbound))
-        budget = job["result"]["budget"]
+        budget = self.settled_budget(job_id, 30)
         self.assertIsNotNone(budget["ended_at"])
         self.assertAlmostEqual(1100, budget["deadline_at"] - budget["started_at"], delta=5)
         self.assertEqual(3, budget["http_attempts"])
