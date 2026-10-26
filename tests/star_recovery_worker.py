@@ -14,6 +14,7 @@ from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
 from showcase.tools import ToolRegistry
 from showcase.workspace import WorkspaceStore
+from tests.star_recovery_transport import ByteStreamReply
 
 PLAN = {"version": 1, "steps": [
     {"step_id": "s1", "title": "First", "objective": "first fact"},
@@ -363,7 +364,7 @@ def stream_transport(folder, window):
                                              "usage": {"prompt_tokens": 7, "completion_tokens": 3,
                                                        "total_tokens": 10}, "model": "intern-s2"})
                 yield "data: [DONE]"
-        return StreamReply()
+        return ByteStreamReply(StreamReply(), folder, context, window)
     return post
 
 
