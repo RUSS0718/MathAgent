@@ -18,6 +18,8 @@ RB-03 的增量 `answer_claim.claim_type`、旧声明兼容、短题完整交付
 
 RB-04 的增量执行、传输、整题审查、文本绑定和未形式化验证字段及 legacy 兼容见 [产品结果语义合同](engineering/star-rb04-result-semantics.md)。受控公共测试和前端渲染测试不替代 RB-08 的最终发布门禁。
 
+RB-06 的零付费公共故障、真实隔离、进程恢复及五类旁路入口见 [E3 故障与恢复验收](engineering/star-rb06-e3-acceptance.md)。受控机制不标为 live 自然触发，skip 不计通过。
+
 ## 历史 SP 集成语境
 
 以下 SP-01..SP-11 段落保留各阶段当时状态；其中“尚未完成”“拒绝启动”“未验证”不是当前 ALIGN 状态判断，请先读上方当前入口。
