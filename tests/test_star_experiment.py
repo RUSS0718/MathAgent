@@ -11,10 +11,15 @@ from pathlib import Path
 from showcase.star_experiment import ExperimentCoordinator
 from showcase.star_experiment_gates import qualify
 from showcase.star_experiment_policy import ExperimentRunPolicy
-from showcase.star_experiment_registration import E1, registration
+from showcase.star_experiment_registration import E1, digest
 from showcase.star_experiment_scoring import admit
 from showcase.star_experiment_server import ExperimentServer
-from tests.star_experiment_support import LoopbackProvider, independent_review, saved_batch
+from tests.star_experiment_support import (
+    LoopbackProvider,
+    independent_review,
+    saved_batch,
+    synthetic_registration,
+)
 
 
 class ExperimentPublicJobTest(unittest.TestCase):
@@ -22,14 +27,14 @@ class ExperimentPublicJobTest(unittest.TestCase):
         folder = self.enterContext(tempfile.TemporaryDirectory())
         self.folder = Path(folder)
         saved_batch(self.folder / "e0")
-        self.qualification = qualify(self.folder / "e0", original_runner_version="fixture-v0", evidence_kind="scripted")
+        self.qualification = qualify(self.folder / "e0", original_runner_version="fixture-v0", evidence_kind="scripted", manifest=synthetic_registration(), manifest_sha256=digest(synthetic_registration()))
         self.assertTrue(self.qualification.valid, self.qualification.report)
 
     def execute(self, scenario="matrix", reviewer=independent_review):
         self.provider = LoopbackProvider(scenario)
         self.addCleanup(self.provider.close)
         coordinator = ExperimentCoordinator(self.folder / "round", adapters=self.provider.adapters(),
-                                            qualification=self.qualification)
+                                            qualification=self.qualification, manifest=synthetic_registration(), manifest_sha256=digest(synthetic_registration()))
         self.coordinator = coordinator
         return coordinator.run(reviewer)
 
@@ -45,6 +50,45 @@ class ExperimentPublicJobTest(unittest.TestCase):
         self.assertEqual(3, result["preflights"])
         self.assertEqual([], called, "An unknown stops immediately without waiting for mathematical review")
 
+    def test_closed_coordinator_settles_late_http_usage_without_changing_terminal_archive(self):
+        from unittest.mock import patch
+
+        from showcase.run_budget import RunBudgetLedger
+        class ShortPolicy(ExperimentRunPolicy):
+            def prepare(self, limits):
+                super().prepare(limits)
+                self.run_deadline_at = time.time() + 5
+        collect = ExperimentServer.collect
+        def wait_for_worker(server, job_id, deadline_at, **kwargs):
+            return collect(server, job_id, deadline_at + 1, **kwargs)
+        with patch("showcase.star_experiment.ExperimentRunPolicy", ShortPolicy), patch.object(ExperimentServer, "collect", wait_for_worker):
+            result = self.execute("late")
+        self.assertEqual("unknown_outcome", result["stop_reason"], result)
+        self.assertEqual(1, len(self.provider.requests))
+        root = self.folder / "round"
+        original = {name: (root / name).read_bytes() for name in ("result.json", "hashes.json", "run-00.json", "score-00.json")}
+        ledger = RunBudgetLedger(database_path=root / "nonstream/showcase.sqlite3")
+        self.addCleanup(ledger.close)
+        run_id=result["runs"][0]["job_id"]
+        self.assertEqual(1, ledger.snapshot(run_id)["unresolved_attempts"])
+        self.provider.release.set()
+        deadline=time.monotonic()+3
+        while time.monotonic()<deadline and (ledger.snapshot(run_id)["unresolved_attempts"]
+                or not list((root/"supplemental-usage").glob("*.json"))):
+            time.sleep(.01)
+        self.assertEqual(0, ledger.snapshot(run_id)["unresolved_attempts"])
+        self.assertEqual(10, ledger.snapshot(run_id)["provider_known"]["total_tokens"])
+        self.assertEqual(1, ledger.snapshot(run_id)["http_attempts"])
+        self.assertEqual(original, {name:(root/name).read_bytes() for name in original})
+        supplements=list((root/"supplemental-usage").glob("*.json"))
+        self.assertEqual(1,len(supplements))
+        evidence=json.loads(supplements[0].read_text(encoding="utf-8"))
+        self.assertEqual({"run_id","attempt_id","observed_at","usage"},set(evidence))
+        self.assertEqual(run_id,evidence["run_id"])
+        attempt=ledger.attempts(run_id)[0]
+        self.assertIsNone(attempt["first_content_seconds"])
+        self.assertIsNone(attempt["first_reasoning_seconds"])
+
     def test_matrix_runs_all_ten_in_order_and_has_natural_nonfastpath(self):
         result = self.execute()
         self.assertEqual("completed", result["stop_reason"], result)
@@ -55,8 +99,8 @@ class ExperimentPublicJobTest(unittest.TestCase):
         self.assertEqual(2, result["usage"]["tool_calls"])
         self.assertEqual(14, result["tools_including_environment"])
         self.assertTrue(result["natural_nonfastpath"])
-        self.assertEqual(["multiply", "multiply", "fractions", "fractions",
-                          "digit_cancel", "sharp", "partitions", "digit_cancel", "sharp", "partitions"],
+        self.assertEqual(["short_a", "short_a", "short_b", "short_b",
+                          "finite", "bound", "sum", "finite", "bound", "sum"],
                          list(self.provider.run_keys.values()))
         for index, record in enumerate(result["runs"]):
             bundle = json.loads((self.folder / "round" / f"run-{index:02d}.json").read_text(encoding="utf-8"))
@@ -67,11 +111,11 @@ class ExperimentPublicJobTest(unittest.TestCase):
         self.assertTrue(all(r["score"]["e1_gate"] for r in result["runs"][:4]))
         messages = json.dumps([w["messages"] for w, c in self.provider.requests if c["role"] == "explore"], ensure_ascii=False)
         self.assertNotIn("deterministic-test-reviewer", messages)
-        self.assertNotIn("190569291", messages)
+        self.assertNotIn("independent-oracle-secret", messages)
         before = (self.folder / "round/result.json").read_bytes()
         with self.assertRaises(FileExistsError):
             ExperimentCoordinator(self.folder / "round", adapters=self.provider.adapters(),
-                                  qualification=self.qualification).run(independent_review)
+                                  qualification=self.qualification, manifest=synthetic_registration(), manifest_sha256=digest(synthetic_registration())).run(independent_review)
         self.assertEqual(before, (self.folder / "round/result.json").read_bytes())
         hashes = json.loads((self.folder / "round/hashes.json").read_text(encoding="utf-8"))
         for name, expected in hashes.items():
@@ -93,7 +137,7 @@ class ExperimentPublicJobTest(unittest.TestCase):
         result = self.execute("math_reject")
         self.assertEqual("e2_gate_failed", result["stop_reason"], result)
         self.assertEqual(8, result["executed_runs"], "Stop as soon as a class can no longer meet its gate")
-        rejected = [r for r in result["runs"] if r["entry"]["question"] == "digit_cancel"]
+        rejected = [r for r in result["runs"] if r["entry"]["question"] == "finite"]
         self.assertTrue(all(not r["score"]["flow_complete"] and not r["score"]["unknown"] for r in rejected))
         self.assertTrue(all(not r["score"]["protocol_defect"] for r in rejected))
 
@@ -102,6 +146,30 @@ class ExperimentPublicJobTest(unittest.TestCase):
         self.assertEqual("completed", result["stop_reason"], result)
         self.assertFalse(result["natural_nonfastpath"])
         self.assertEqual("not_covered", result["mechanisms"]["live_replan"])
+
+    def test_nonfastpath_without_independent_math_pass_cannot_qualify(self):
+        def rejected_review(key, question, bundle):
+            review = independent_review(key, question, bundle)
+            if key == "finite":
+                review["obligations"]["explanation"] = "reject"
+            return review
+        result = self.execute(reviewer=rejected_review)
+        self.assertEqual("e2_gate_failed", result["stop_reason"], result)
+        self.assertTrue(any(r["score"]["nonfastpath"] for r in result["runs"]))
+        self.assertFalse(result["natural_nonfastpath"])
+
+    def test_qualification_for_another_manifest_cannot_dispatch(self):
+        manifest = synthetic_registration()
+        manifest["review_rules"]["review"] += " Different frozen registration."
+        self.provider = LoopbackProvider()
+        self.addCleanup(self.provider.close)
+        coordinator = ExperimentCoordinator(self.folder / "round", adapters=self.provider.adapters(),
+            qualification=self.qualification, manifest=manifest, manifest_sha256=digest(manifest))
+        result = coordinator.run(independent_review)
+        self.assertEqual("experiment_defect:ValueError", result["stop_reason"])
+        self.assertEqual(0, result["executed_runs"])
+        self.assertEqual(0, result["preflights"])
+        self.assertEqual([], self.provider.requests)
 
     def test_invalid_independent_review_cannot_pass_e1(self):
         def wrong_binding(key, question, bundle):
@@ -175,7 +243,7 @@ class ExperimentDeadlineJobTest(unittest.TestCase):
         self.addCleanup(server.close)
         started = time.time()
         policy.prepare(E1)
-        job_id = server.dispatch(registration()["questions"]["multiply"])
+        job_id = server.dispatch(synthetic_registration()["questions"]["short_a"])
         bundle = server.collect(job_id, policy.deadline_at)
         self.assertEqual("succeeded", bundle["job"]["status"])
         self.assertLessEqual(bundle["report"]["budget"]["deadline_at"], started + 300,
@@ -191,7 +259,7 @@ class ExperimentDeadlineJobTest(unittest.TestCase):
         policy.prepare(E2)
         server = ExperimentServer(Path(folder), "nonstream", provider.adapters()["nonstream"], policy, "scripted")
         self.addCleanup(server.close)
-        job_id = server.dispatch(registration()["questions"]["digit_cancel"])
+        job_id = server.dispatch(synthetic_registration()["questions"]["finite"])
         bundle = server.collect(job_id, policy.deadline_at)
         self.assertEqual("succeeded", bundle["job"]["status"])
         self.assertEqual(1, bundle["report"]["budget"]["tool_calls"], "Real problem computation belongs to S3")
@@ -212,7 +280,7 @@ class ExperimentDeadlineJobTest(unittest.TestCase):
         policy.prepare(E1)
         server = ExperimentServer(Path(folder), "nonstream", provider.adapters()["nonstream"], policy, "scripted")
         self.addCleanup(server.close)
-        job_id = server.dispatch(registration()["questions"]["multiply"])
+        job_id = server.dispatch(synthetic_registration()["questions"]["short_a"])
         bundle = server.collect(job_id, policy.deadline_at)
         self.assertEqual("succeeded", bundle["job"]["status"])
         self.assertLessEqual(bundle["report"]["budget"]["deadline_at"], policy.deadline_at,

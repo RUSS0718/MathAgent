@@ -109,7 +109,9 @@ class StarTransportPolicyTest(StarJobFixture, unittest.TestCase):
                     self.assertIsNotNone(complete_attempt["response_headers_seconds"])
                     self.assertIsNotNone(complete_attempt["first_byte_seconds"])
                     self.assertIsNotNone(complete_attempt["completion_seconds"])
-                    self.assertIsNotNone(complete_attempt["first_content_seconds"])
+                    self.assertEqual(streaming, complete_attempt["first_content_seconds"] is not None)
+                    if not streaming:
+                        self.assertIsNone(complete_attempt["first_reasoning_seconds"])
                     self.assertEqual(streaming, complete_attempt["first_event_seconds"] is not None)
                 finally:
                     ledger.close()

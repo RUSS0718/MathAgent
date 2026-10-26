@@ -7,19 +7,20 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from .star_experiment_archive import source_identity
-from .star_experiment_registration import digest
+from .star_experiment_registration import digest, registration
 from .star_replay import replay_saved_batch
 
 _EXECUTED = object()
 
 
-def qualify(saved_batch, *, original_runner_version, evidence_kind="live"):
+def qualify(saved_batch, *, original_runner_version, manifest, manifest_sha256, evidence_kind="live"):
     """RB08 calls this before constructing a paid-provider coordinator.
 
     Scripted qualification runs a focused real public regression; live requires
     the complete RB06 matrix including real Docker/process and mutation checks.
     Both actually replay the supplied hash-checked archive with zero dispatch.
     """
+    registration(manifest, expected_sha256=manifest_sha256)
     if evidence_kind not in {"live", "scripted"}:
         raise ValueError("experiment_evidence_kind_invalid")
     replay = replay_saved_batch(saved_batch, original_runner_version=original_runner_version)
@@ -38,7 +39,7 @@ def qualify(saved_batch, *, original_runner_version, evidence_kind="live"):
         with redirect_stdout(mutation_log):
             main()  # Crashes and wrong failures raise; never converted into PASS.
         mutations = 5
-    report = dict(evidence_kind=evidence_kind, source=source_identity(), replay=replay,
+    report = dict(registration_sha256=manifest_sha256, evidence_kind=evidence_kind, source=source_identity(), replay=replay,
                   tests=result.testsRun, failures=len(result.failures), errors=len(result.errors),
                   skips=len(result.skipped), expected_failures=len(result.expectedFailures),
                   unexpected_successes=len(result.unexpectedSuccesses), mutations=mutations,
@@ -62,8 +63,8 @@ class Qualification:
         self.report, self.valid = report, valid
         self.identity = digest(report)
 
-    def require(self, evidence_kind):
-        if (not self.valid or digest(self.report) != self.identity
+    def require(self, evidence_kind, manifest_sha256):
+        if (self.report.get("registration_sha256") != manifest_sha256 or not self.valid or digest(self.report) != self.identity
                 or self.report["source"] != source_identity()
                 or self.report["evidence_kind"] != evidence_kind):
             raise ValueError("experiment_prerequisites_unverified")

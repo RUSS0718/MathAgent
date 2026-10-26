@@ -126,8 +126,10 @@ class InternModelAdapter:
         client_timeout: int | None = None,
         client_retry: int | None = None,
         thinking_mode: bool | None = None,
+        outbound_observer=None,
     ) -> None:
         self._client = client
+        self.outbound_observer = outbound_observer
         self.model_id = model_id or os.environ.get("INTERN_MODEL", "intern-s2")
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -174,6 +176,8 @@ class InternModelAdapter:
                 call_budget = budget.model_call((metadata or {}).get("role"),
                                                 solver_call_id=(metadata or {}).get("call_id"))
                 kwargs["_attempt_budget"] = call_budget
+            if self.outbound_observer is not None:
+                self.outbound_observer(normalized)
             raw = transport(normalized, **kwargs)
         except Exception as exc:  # noqa: BLE001 - provider details stay out of events
             attempts = record_attempts(getattr(exc, "attempts", ()), metadata)
@@ -357,6 +361,8 @@ class InternStreamAdapter(InternModelAdapter):
                         if call_budget is not None:
                             call_budget.after_attempt(late_attempt)
 
+                    if self.outbound_observer is not None:
+                        self.outbound_observer(normalized)
                     line_buffer = bytearray()
                     parts: list[str] = []
                     usage: dict[str, Any] = {}

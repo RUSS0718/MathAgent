@@ -59,6 +59,9 @@ class RunBudgetLedger:
         self.owns_connection = connection is None
         self.connection = connection or sqlite3.connect(str(database_path), check_same_thread=False)
         self.lock = lock or threading.RLock()
+        self._closed = False
+        self.database_path = self.connection.execute("PRAGMA database_list").fetchone()[2]
+        self.late_usage_evidence_dir = None
         with self.lock:
             self.connection.execute(
                 "CREATE TABLE IF NOT EXISTS run_budgets (run_id TEXT PRIMARY KEY, ledger_json TEXT NOT NULL)"
@@ -66,8 +69,10 @@ class RunBudgetLedger:
             self.connection.commit()
 
     def close(self):
-        if self.owns_connection:
-            self.connection.close()
+        with self.lock:
+            if not self._closed and self.owns_connection:
+                self.connection.close()
+            self._closed = True
 
     @contextmanager
     def _transaction(self, run_id):
@@ -164,6 +169,13 @@ class RunBudgetLedger:
             return action_id, max(0.001, state["deadline_at"] - time.time())
 
     def settle(self, run_id, action_id, event):
+        with self.lock:
+            if self._closed:
+                from .run_budget_late import settle_closed
+                return settle_closed(self, run_id, action_id, event)
+            return self._settle_open(run_id, action_id, event)
+
+    def _settle_open(self, run_id, action_id, event):
         with self._transaction(run_id) as state:
             for action in state["actions"]:
                 if action["id"] == action_id:

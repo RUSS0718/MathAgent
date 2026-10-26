@@ -271,8 +271,8 @@ class InternChatClient:
                                 finish_reason=safe_identifier(late_choice.get("finish_reason")),
                                 response_headers_seconds=headers_seconds,
                                 completion_seconds=completion_seconds,
-                                first_reasoning_seconds=(completion_seconds if late_reasoning else None),
-                                first_content_seconds=(completion_seconds if late_content else None),
+                                first_reasoning_seconds=None,
+                                first_content_seconds=None,
                                 reasoning_chars=(len(late_reasoning) if isinstance(late_reasoning, str) else 0),
                                 content_bytes=(len(late_content.encode("utf-8")) if isinstance(late_content, str) else 0),
                                 **late_usage,
@@ -344,11 +344,6 @@ class InternChatClient:
                     message.get("reasoning_content") if isinstance(message, Mapping) else None
                 )
                 if _attempt_budget is not None:
-                    parsed_at = time.perf_counter() - attempt_started
-                    if isinstance(reasoning_content, str) and reasoning_content:
-                        request_event["first_reasoning_seconds"] = parsed_at
-                    if isinstance(content, str) and content:
-                        request_event["first_content_seconds"] = parsed_at
                     request_event["reasoning_chars"] = (
                         len(reasoning_content) if isinstance(reasoning_content, str) else 0
                     )

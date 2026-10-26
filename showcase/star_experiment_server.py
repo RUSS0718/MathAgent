@@ -1,12 +1,16 @@
 """Two trusted local product instances, authenticated public Job/Run requests."""
 
 import json
+import sqlite3
 import time
 import uuid
+from contextlib import closing
+from pathlib import Path
 from urllib.parse import urlparse
 
 from .adapters import InternModelAdapter, InternStreamAdapter
 from .flask_app import create_app
+from .solver_harness.storage import SolverStateStore
 from .star_experiment_registration import CONDITIONS
 from .star_product_runtime import CONTRACT_PYTHON_IMAGE_ID
 
@@ -14,13 +18,34 @@ from .star_product_runtime import CONTRACT_PYTHON_IMAGE_ID
 class ExperimentServer:
     def __init__(self, path, transport, adapter, policy, evidence_kind):
         self.adapter, self.transport, self.evidence_kind = adapter, transport, evidence_kind
+        self.contexts = {}
+        self._previous_observer = adapter.outbound_observer
+        adapter.outbound_observer = self._capture_outbound
         self.check_conditions()
         self.app = create_app({"SHOWCASE_DATA_DIR": str(path), "SHOWCASE_JOB_DELAY_SECONDS": 0,
             "SHOWCASE_STAR_FULL_ENABLED": True, "SHOWCASE_STAR_ADAPTER": adapter,
             "SHOWCASE_STAR_PYTHON_IMAGE_ID": CONTRACT_PYTHON_IMAGE_ID,
             "SHOWCASE_STAR_EXPERIMENT_POLICY": policy, "SHOWCASE_STAR_EVIDENCE_KIND": evidence_kind})
+        self.app.extensions["showcase_workspace_service"].budget_ledger.late_usage_evidence_dir = Path(path).parent / "supplemental-usage"
         self.client = self.app.test_client()
         self.csrf = self.get("/api/check_auth")["csrf_token"]
+
+    def _capture_outbound(self, messages):
+        context = json.loads(messages[-1]["content"])
+        if isinstance(context, dict) and context.get("call_id"):
+            # Multiple HTTP attempts retain one logical context, never a role-order guess.
+            self.contexts[context["call_id"]] = context
+        if self._previous_observer is not None:
+            self._previous_observer(messages)
+
+    def provenance(self, job_id):
+        """Trusted server-side read; raw snapshots/contexts never enter public HTTP."""
+        pipeline = self.app.extensions["showcase_workspace_service"].star_pipeline
+        database = Path(pipeline.database_path)
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as connection:
+            connection.row_factory = sqlite3.Row
+            snapshot = SolverStateStore(connection).get_run(job_id)
+        return snapshot, [c for c in self.contexts.values() if c.get("run_id") == job_id]
 
     def check_conditions(self):
         adapter, transport, evidence_kind = self.adapter, self.transport, self.evidence_kind
@@ -94,5 +119,6 @@ class ExperimentServer:
                     run=self.get(f"/api/runs/{job_id}"))
 
     def close(self):
+        self.adapter.outbound_observer = self._previous_observer
         for name in ("showcase_workspace_service", "showcase_run_service", "loopback_store"):
             self.app.extensions[name].close()
