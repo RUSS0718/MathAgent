@@ -87,7 +87,29 @@ def public_attempt(
         "thinking_mode": event.get("thinking_mode")
         if type(event.get("thinking_mode")) is bool
         else None,
+        "temperature": event.get("temperature")
+        if type(event.get("temperature")) in {int, float} and math.isfinite(event.get("temperature"))
+        else None,
         "max_tokens": _count(event.get("max_tokens")),
+        "request_purpose": safe_identifier(event.get("request_purpose")),
+        "effective_timeout_seconds": _duration(event.get("effective_timeout_seconds")),
+        "requests_timeout_seconds": _duration(event.get("requests_timeout_seconds")),
+        "retry_limit": _count(event.get("retry_limit")),
+        "response_headers_seconds": _duration(event.get("response_headers_seconds")),
+        "first_byte_seconds": _duration(event.get("first_byte_seconds")),
+        "first_event_seconds": _duration(event.get("first_event_seconds")),
+        "first_reasoning_seconds": _duration(event.get("first_reasoning_seconds")),
+        "first_content_seconds": _duration(event.get("first_content_seconds")),
+        "completion_seconds": _duration(event.get("completion_seconds")),
+        "reasoning_chars": _count(event.get("reasoning_chars")),
+        "content_bytes": _count(event.get("content_bytes")),
+        "event_count": _count(event.get("event_count")),
+        "provider_stream": event.get("provider_stream")
+        if type(event.get("provider_stream")) is bool
+        else None,
+        "requests_stream": event.get("requests_stream")
+        if type(event.get("requests_stream")) is bool
+        else None,
         "cost": None,
     }
 
