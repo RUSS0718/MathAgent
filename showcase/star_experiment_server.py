@@ -109,7 +109,14 @@ class ExperimentServer:
             if job["status"] in {"succeeded", "failed", "canceled"}:
                 break
             if time.time() >= deadline_at or canceled():
-                self.post(f"/api/agent/jobs/{job_id}/cancel", {})
+                try:
+                    self.post(f"/api/agent/jobs/{job_id}/cancel", {})
+                except ValueError:
+                    # The worker may commit its terminal state between GET and cancel.
+                    if self.get(f"/api/agent/jobs/{job_id}")["status"] not in {
+                        "succeeded", "failed", "canceled"
+                    }:
+                        raise
                 # Snapshot preserves unknown reservations even if a worker is still unwinding.
                 break
             time.sleep(.01)

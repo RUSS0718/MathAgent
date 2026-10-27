@@ -635,10 +635,9 @@ def create_app(
                 if event.get("event") in {"tool_completed", "tool_call_result"}
                 and isinstance(event.get("data"), Mapping)
             ]
-        verification = result.get("verification") if isinstance(result.get("verification"), Mapping) else {
-            "status": "unknown",
-            "findings": ["verification_not_run"],
-        }
+        verification = _stored_verification(
+            snapshot, tool_results, app.extensions["showcase_verifier"]
+        )
         if job.get("verification_mode") == "required" and not tool_results:
             verification["findings"] = ["needs_review", "tool_evidence_missing"]
         report = app.extensions["showcase_evidence_exporter"].report(snapshot, tool_results=tool_results, verification=verification)
