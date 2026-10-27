@@ -20,6 +20,8 @@ class SourceIdentityTest(unittest.TestCase):
             (showcase / "star_experiment_archive.py").write_text("# fixture\n", encoding="utf-8")
             source_files = (
                 "scripts/check_showcase_release.py",
+                "scripts/check_workspace.py",
+                "scripts/check_solver_release.py",
                 "scripts/run_unittest_report.py",
             )
             for name in source_files:

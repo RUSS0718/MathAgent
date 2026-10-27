@@ -15,6 +15,7 @@ def source_identity():
     names = subprocess.check_output(["git", "ls-files", "-co", "--exclude-standard", "--",
         "showcase", "tests", "scripts/run_star_readiness_97.py", "llm_client.py",
         "scripts/check_showcase_release.py", "scripts/run_unittest_report.py",
+        "scripts/check_workspace.py", "scripts/check_solver_release.py",
         "llm_response.py", "pyproject.toml", "uv.lock"],
         cwd=root).decode("utf-8").splitlines()
     files = sorted({
