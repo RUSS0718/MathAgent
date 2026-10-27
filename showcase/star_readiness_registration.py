@@ -11,7 +11,8 @@ from .request_transport import INTERN_S2_LIVE_ENDPOINT
 ADAPTER_VERSION = "issue-97-registration-adapter-v3"
 V2_DRAFT_VERSION = "issue-97-nonstream-draft-v2"
 V3_DRAFT_VERSION = "issue-97-nonstream-draft-v3"
-DRAFT_VERSION = V3_DRAFT_VERSION
+V4_DRAFT_VERSION = "issue-97-nonstream-draft-v4"
+DRAFT_VERSION = V4_DRAFT_VERSION
 V2_QUESTION_SPECS = (
     (
         "simple-01",
@@ -40,9 +41,24 @@ V3_QUESTION_SPECS = (
         "f62ac6626ffa36647845b0e9d338191a9171899eed8615c033657c1ddc57e5b5",
     ),
 )
-QUESTION_SPECS = V3_QUESTION_SPECS
+V4_QUESTION_SPECS = (
+    (
+        "simple-03",
+        "https://projecteuler.net/problem=6",
+        "simple_fastpath",
+        "1a85541f75ac9b29a651a77f6bc3793048f652870a9da54f879ccfed7ecb1035",
+    ),
+    (
+        "multi-03",
+        "https://www.imo-official.org/assets/documents/problems/2026/2026_eng.pdf#page=2",
+        "public_multistep",
+        "c8956a092a8c6b6004beed40bb1a6646e2a792299db5400dedd11bbd6912a086",
+    ),
+)
+QUESTION_SPECS = V4_QUESTION_SPECS
 V2_AUTHORIZATION_SCOPE = "issue-97-two-question-nonstream-batch"
 V3_AUTHORIZATION_SCOPE = "issue-97-two-question-nonstream-batch-v3"
+V4_AUTHORIZATION_SCOPE = "issue-97-two-question-nonstream-batch-v4"
 V2_LIVE_MANIFEST_SHA256 = "0077b2884129f860169962cb31f9aa6e9da0a23e6440af1a5954b2c8c8c81bb0"
 MODEL = {
     "max_output_tokens": 8192,
@@ -156,7 +172,7 @@ def digest(value):
 
 
 def adapt_draft(draft, *, current_source):
-    """Adapt a compatible v2 or v3 draft into a non-dispatchable manifest."""
+    """Adapt a compatible v2, v3, or v4 draft into a non-dispatchable manifest."""
     record = _json_copy(draft)
     _validate_draft(record)
     source = _validate_source(current_source)
@@ -200,7 +216,7 @@ def authorize_live_registration(
     explicit_authorization,
     authorization_date,
 ):
-    """Authorize only an unapproved v3 loopback manifest; keep v2 read-only."""
+    """Authorize an unapproved v3 or v4 loopback manifest; keep v2 read-only."""
     if explicit_authorization is not True:
         raise ValueError("star_readiness_live_authorization_required")
     if not isinstance(authorization_date, str):
@@ -215,7 +231,7 @@ def authorize_live_registration(
         expected_sha256=expected_sha256,
         current_source=current_source,
     )
-    if record["draft_version"] != V3_DRAFT_VERSION:
+    if record["draft_version"] not in (V3_DRAFT_VERSION, V4_DRAFT_VERSION):
         raise ValueError("star_readiness_live_draft_version_invalid")
     if record["execution_authorized"] is not False or record["provider_mode"] != "loopback_only":
         raise ValueError("star_readiness_live_authorization_invalid")
@@ -422,7 +438,9 @@ def _question_specs_for_draft_version(version):
     if version == V2_DRAFT_VERSION:
         return V2_QUESTION_SPECS
     if version == V3_DRAFT_VERSION:
-        return QUESTION_SPECS
+        return V3_QUESTION_SPECS
+    if version == V4_DRAFT_VERSION:
+        return V4_QUESTION_SPECS
     raise ValueError("star_readiness_registration_invalid")
 
 
@@ -431,6 +449,8 @@ def _authorization_scope_for_draft_version(version):
         return V2_AUTHORIZATION_SCOPE
     if version == V3_DRAFT_VERSION:
         return V3_AUTHORIZATION_SCOPE
+    if version == V4_DRAFT_VERSION:
+        return V4_AUTHORIZATION_SCOPE
     raise ValueError("star_readiness_registration_invalid")
 
 

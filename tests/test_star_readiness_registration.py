@@ -10,6 +10,8 @@ from showcase.star_readiness_registration import (
     ADAPTER_VERSION,
     DRAFT_VERSION,
     V2_DRAFT_VERSION,
+    V3_DRAFT_VERSION,
+    V4_DRAFT_VERSION,
     adapt_draft,
     authorize_live_registration,
     digest,
@@ -24,12 +26,29 @@ SIMPLE_02_TEXT = "Synthetic fixture C: compute 8 * 9."
 MULTI_02_TEXT = "Synthetic fixture D: sum the squares of the first four positive integers."
 SIMPLE_02_HASH = hashlib.sha256(SIMPLE_02_TEXT.encode("utf-8")).hexdigest()
 MULTI_02_HASH = hashlib.sha256(MULTI_02_TEXT.encode("utf-8")).hexdigest()
+V4_SIMPLE_TEXT = """The sum of the squares of the first ten natural numbers is,
+1^2 + 2^2 + ... + 10^2 = 385.
+
+The square of the sum of the first ten natural numbers is,
+(1 + 2 + ... + 10)^2 = 55^2 = 3025.
+
+Hence the difference between the sum of the squares of the first ten natural numbers and the square of the sum is 3025 - 385 = 2640.
+
+Find the difference between the sum of the squares of the first one hundred natural numbers and the square of the sum."""
+V4_MULTI_TEXT = """Shan-Yu and Mulan are playing a game. Let θ be an angle with 0° < θ < 180° known to both players. Initially, Shan-Yu makes a paper triangle T with measurements of his choice. Then, they repeatedly perform the following steps:
+• If T has at least one angle measuring exactly θ, then the game stops and Mulan wins.
+• Otherwise, Mulan chooses a point P on the perimeter of T, different from its three vertices. She then makes a straight cut from P to the opposite vertex of T, splitting it into two triangles.
+• Shan-Yu discards one of the two triangles. The remaining triangle becomes the new T.
+For which real values of θ can Mulan guarantee her victory in finitely many steps, no matter how Shan-Yu plays?"""
+V4_SIMPLE_HASH = "1a85541f75ac9b29a651a77f6bc3793048f652870a9da54f879ccfed7ecb1035"
+V4_MULTI_HASH = "c8956a092a8c6b6004beed40bb1a6646e2a792299db5400dedd11bbd6912a086"
 TEST_QUESTION_SPECS = (
     ("simple-01", "https://example.invalid/simple", "simple_fastpath", SIMPLE_HASH),
     ("multi-01", "https://example.invalid/multi", "public_multistep", MULTI_HASH),
 )
 PRODUCTION_QUESTION_SPECS = star_readiness_registration.V2_QUESTION_SPECS
-PRODUCTION_V3_QUESTION_SPECS = star_readiness_registration.QUESTION_SPECS
+PRODUCTION_V3_QUESTION_SPECS = star_readiness_registration.V3_QUESTION_SPECS
+PRODUCTION_V4_QUESTION_SPECS = star_readiness_registration.V4_QUESTION_SPECS
 QUESTIONS = [
     {
         "id": "simple-01",
@@ -65,6 +84,26 @@ V3_QUESTIONS = [
 TEST_V3_QUESTION_SPECS = tuple(
     (question["id"], question["source"], question["type"], question["prompt_sha256"])
     for question in V3_QUESTIONS
+)
+V4_QUESTIONS = [
+    {
+        "id": "simple-03",
+        "prompt_sha256": hashlib.sha256(V4_SIMPLE_TEXT.encode("utf-8")).hexdigest(),
+        "source": "https://projecteuler.net/problem=6",
+        "text": V4_SIMPLE_TEXT,
+        "type": "simple_fastpath",
+    },
+    {
+        "id": "multi-03",
+        "prompt_sha256": hashlib.sha256(V4_MULTI_TEXT.encode("utf-8")).hexdigest(),
+        "source": "https://www.imo-official.org/assets/documents/problems/2026/2026_eng.pdf#page=2",
+        "text": V4_MULTI_TEXT,
+        "type": "public_multistep",
+    },
+]
+TEST_V4_QUESTION_SPECS = tuple(
+    (question["id"], question["source"], question["type"], question["prompt_sha256"])
+    for question in V4_QUESTIONS
 )
 MODEL = {
     "max_output_tokens": 8192,
@@ -178,10 +217,19 @@ def synthetic_draft():
 
 def synthetic_v3_draft():
     draft = synthetic_draft()
-    draft["version"] = DRAFT_VERSION
+    draft["version"] = V3_DRAFT_VERSION
     draft["questions"] = copy.deepcopy(V3_QUESTIONS)
     draft["schedule"][0]["question"] = "simple-02"
     draft["schedule"][1]["question"] = "multi-02"
+    return draft
+
+
+def synthetic_v4_draft():
+    draft = synthetic_draft()
+    draft["version"] = V4_DRAFT_VERSION
+    draft["questions"] = copy.deepcopy(V4_QUESTIONS)
+    draft["schedule"][0]["question"] = "simple-03"
+    draft["schedule"][1]["question"] = "multi-03"
     return draft
 
 
@@ -222,10 +270,15 @@ class StarReadinessRegistrationTest(unittest.TestCase):
         question_specs.start()
         self.addCleanup(question_specs.stop)
         v3_question_specs = patch(
-            "showcase.star_readiness_registration.QUESTION_SPECS", TEST_V3_QUESTION_SPECS
+            "showcase.star_readiness_registration.V3_QUESTION_SPECS", TEST_V3_QUESTION_SPECS
         )
         v3_question_specs.start()
         self.addCleanup(v3_question_specs.stop)
+        v4_question_specs = patch(
+            "showcase.star_readiness_registration.V4_QUESTION_SPECS", TEST_V4_QUESTION_SPECS
+        )
+        v4_question_specs.start()
+        self.addCleanup(v4_question_specs.stop)
 
     def make_manifest(self, *, current_source=None):
         draft = synthetic_draft()
@@ -271,6 +324,99 @@ class StarReadinessRegistrationTest(unittest.TestCase):
             ),
             PRODUCTION_V3_QUESTION_SPECS,
         )
+
+    def test_v4_is_the_default_and_pins_exact_sources_and_prompt_hashes(self):
+        self.assertEqual(V4_DRAFT_VERSION, DRAFT_VERSION)
+        self.assertEqual(PRODUCTION_V4_QUESTION_SPECS, star_readiness_registration.QUESTION_SPECS)
+        self.assertEqual(
+            (
+                (
+                    "simple-03",
+                    "https://projecteuler.net/problem=6",
+                    "simple_fastpath",
+                    V4_SIMPLE_HASH,
+                ),
+                (
+                    "multi-03",
+                    "https://www.imo-official.org/assets/documents/problems/2026/2026_eng.pdf#page=2",
+                    "public_multistep",
+                    V4_MULTI_HASH,
+                ),
+            ),
+            PRODUCTION_V4_QUESTION_SPECS,
+        )
+        self.assertEqual(V4_SIMPLE_HASH, hashlib.sha256(V4_SIMPLE_TEXT.encode("utf-8")).hexdigest())
+        self.assertEqual(V4_MULTI_HASH, hashlib.sha256(V4_MULTI_TEXT.encode("utf-8")).hexdigest())
+
+    def test_v4_adapter_freezes_exact_questions_schedule_and_existing_hard_budgets(self):
+        manifest = adapt_draft(synthetic_v4_draft(), current_source=SOURCE)
+
+        self.assertEqual(V4_DRAFT_VERSION, manifest["draft_version"])
+        self.assertEqual(
+            [(q["id"], q["source"], q["text"], q["prompt_sha256"]) for q in V4_QUESTIONS],
+            [(q["id"], q["source"], q["text"], q["text_sha256"]) for q in manifest["questions"]],
+        )
+        self.assertEqual(["simple-03", "multi-03"], [s["question"] for s in manifest["schedule"]])
+        self.assertEqual([1, 1], [s["attempts"] for s in manifest["schedule"]])
+        self.assertEqual(["nonstream", "nonstream"], [s["transport"] for s in manifest["schedule"]])
+        self.assertEqual(
+            [
+                {
+                    "charged_tokens": 32768,
+                    "http_attempts": 8,
+                    "logical_calls": 6,
+                    "problem_tool_calls": 1,
+                    "wall_seconds": 300,
+                },
+                {
+                    "charged_tokens": 65536,
+                    "http_attempts": 16,
+                    "logical_calls": 12,
+                    "problem_tool_calls": 3,
+                    "wall_seconds": 600,
+                },
+            ],
+            [s["limits"] for s in manifest["schedule"]],
+        )
+        self.assertEqual(ROUND_LIMITS, manifest["round_limits"])
+
+    def test_v4_authorization_has_its_own_scope_and_can_be_consumed_once(self):
+        loopback = adapt_draft(synthetic_v4_draft(), current_source=SOURCE)
+
+        with self.assertRaisesRegex(ValueError, "live_authorization_required"):
+            authorize_live_registration(
+                loopback,
+                expected_sha256=digest(loopback),
+                current_source=SOURCE,
+                explicit_authorization=False,
+                authorization_date="2026-10-28",
+            )
+
+        authorized = authorize_live_registration(
+            loopback,
+            expected_sha256=digest(loopback),
+            current_source=SOURCE,
+            explicit_authorization=True,
+            authorization_date="2026-10-28",
+        )
+        self.assertEqual("issue-97-two-question-nonstream-batch-v4", authorized["authorization_scope"])
+        self.assertEqual(
+            authorized,
+            registration(authorized, expected_sha256=digest(authorized), current_source=SOURCE),
+        )
+        with self.assertRaisesRegex(ValueError, "live_authorization_invalid"):
+            authorize_live_registration(
+                authorized,
+                expected_sha256=digest(authorized),
+                current_source=SOURCE,
+                explicit_authorization=True,
+                authorization_date="2026-10-29",
+            )
+
+        wrong_scope = copy.deepcopy(authorized)
+        wrong_scope["authorization_scope"] = "issue-97-two-question-nonstream-batch-v3"
+        with self.assertRaises(ValueError):
+            registration(wrong_scope, expected_sha256=digest(wrong_scope), current_source=SOURCE)
 
     def test_v3_adapter_freezes_new_questions_with_existing_nonstream_budgets(self):
         manifest = adapt_draft(synthetic_v3_draft(), current_source=SOURCE)
