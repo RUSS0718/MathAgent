@@ -26,6 +26,7 @@ from .star_readiness_registration import (
     V2_DRAFT_VERSION,
     V2_LIVE_MANIFEST_SHA256,
     V3_DRAFT_VERSION,
+    V4_DRAFT_VERSION,
     digest,
     registration,
 )
@@ -38,7 +39,9 @@ def _claim_live_registration(manifest_sha256, draft_version):
     """Consume the enabled batch version once, retaining the historical v2 hash key."""
     if not isinstance(manifest_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", manifest_sha256):
         raise ValueError("star_readiness_registration_identity_mismatch")
-    if draft_version == V3_DRAFT_VERSION:
+    if draft_version == V4_DRAFT_VERSION:
+        batch_key = V4_DRAFT_VERSION
+    elif draft_version == V3_DRAFT_VERSION:
         batch_key = V3_DRAFT_VERSION
     elif draft_version == V2_DRAFT_VERSION and manifest_sha256 == V2_LIVE_MANIFEST_SHA256:
         batch_key = V2_LIVE_MANIFEST_SHA256
@@ -244,7 +247,6 @@ class StarReadinessCoordinator:
         attempted = []
         dispatched = []
         unresolved_dispatches = []
-        dispatch_identity_unresolved = False
         records = []
         preflight_ids = set()
         preflight_count = 0
@@ -377,7 +379,6 @@ class StarReadinessCoordinator:
                         job_id = server.resolve_dispatch(idempotency_key)
                     except Exception:
                         job_id = None  # Never resend when the local read is inconclusive.
-                    dispatch_identity_unresolved = job_id is None
                     unresolved_dispatches.append({
                         "index": index,
                         "question_id": entry["question"],
@@ -403,7 +404,14 @@ class StarReadinessCoordinator:
 
                 bundle = server.collect(job_id, policy.deadline_at,
                                         canceled=lambda: time.monotonic() >= run_deadline)
+                if not self._bundle_consistent(bundle, job_id):
+                    stop = "evidence_mismatch"
+                    break
                 archive.put(f"run-{index:02d}.json", run_record(bundle, job_id=job_id))
+                if response_recovered:
+                    snapshot, contexts = server.provenance(job_id)
+                    delivery = evaluate_delivery(bundle["job"], snapshot, contexts)
+                    archive.put(f"delivery-{index:02d}.json", delivery_record(delivery))
                 record = {"index": index, "question": entry["question"], "job_id": job_id}
                 records.append(record)
 
@@ -419,14 +427,8 @@ class StarReadinessCoordinator:
                     if self._usage_unknown(budget, observed_usage):
                         usage["usage_complete"] = False
                     else:
-                        unresolved_dispatches.pop()  # The existing Job's S3 usage is settled.
-                if not self._bundle_consistent(bundle, job_id):
-                    stop = "evidence_mismatch"
-                    break
-                if response_recovered:
-                    snapshot, contexts = server.provenance(job_id)
-                    delivery = evaluate_delivery(bundle["job"], snapshot, contexts)
-                    archive.put(f"delivery-{index:02d}.json", delivery_record(delivery))
+                        # Release the reservation only after identity and both archives commit.
+                        unresolved_dispatches.pop()
                 semantics = report.get("semantics") or {}
                 if semantics.get("transport") == "unknown":
                     stop = "unknown_transport"
@@ -480,7 +482,7 @@ class StarReadinessCoordinator:
                             runtime_storage,
                             [item["job_id"] for item in dispatched],
                             grace_seconds=self.manifest["model"]["request_timeout_seconds"] + 1,
-                            preserve=dispatch_identity_unresolved,
+                            preserve=bool(unresolved_dispatches) or len(records) < len(dispatched),
                         )
                     except Exception as exc:
                         runtime_cleanup = "failed"
@@ -488,7 +490,7 @@ class StarReadinessCoordinator:
                             stop = "failure"
                             failure_type = type(exc).__name__
 
-        if len(records) < len(dispatched):
+        if unresolved_dispatches or len(records) < len(dispatched):
             usage["usage_complete"] = False
         result = {
             "stop_reason": stop,

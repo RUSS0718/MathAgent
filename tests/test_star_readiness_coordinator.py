@@ -6,6 +6,7 @@ import os
 import tempfile
 import time
 import unittest
+from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -219,6 +220,8 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         )
         self.question_specs.start()
         self.addCleanup(self.question_specs.stop)
+        self.enterContext(patch("showcase.star_readiness_registration.V4_QUESTION_SPECS",
+                                QUESTION_SPECS))
         self.manifest = frozen_manifest()
         self.coordinator = StarReadinessCoordinator(
             self.folder / "round",
@@ -320,6 +323,83 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         self.assertTrue((self.folder / "round" / "delivery-00.json").is_file())
         self.assertFalse((self.folder / "round" / "intent-01.json").exists())
         self.assertEqual("complete", result["runtime_storage_cleanup"])
+
+    def _assert_recovered_dispatch_retained(self, result):
+        """Require the original dispatch identity and reservation to survive failed recovery."""
+        self.assertEqual("retained", result["runtime_storage_cleanup"], result)
+        runtime = self.folder / "artifacts" / result["runtime_storage_path"]
+        self.assertTrue(runtime.is_dir())
+        retention = json.loads((runtime / "retention.json").read_text(encoding="utf-8"))
+        self.assertEqual(["job-1"], retention["run_ids"])
+        pending, = result["unresolved_dispatches"]
+        self.assertEqual("job-1", pending["job_id"])
+        self.assertEqual("pending_settlement", pending["status"])
+        self.assertEqual({**self.manifest["schedule"][0]["limits"], "deadline_at": 1300.0},
+                         pending["reserved_budget"])
+        intent = json.loads((self.coordinator.path / "intent-00.json").read_text(encoding="utf-8"))
+        self.assertEqual(intent["idempotency_key"], pending["idempotency_key"])
+        self.assertFalse(result["usage"]["usage_complete"])
+        self.assertEqual(0, result["usage"]["charged_tokens"])
+        self.assertEqual([{"index": 0, "job_id": "job-1"}], result["uncollected"])
+        self.assertEqual(1, len(ScriptedServer.instances[-1].dispatched))
+        self.assertFalse((self.coordinator.path / "intent-01.json").exists())
+        archived = json.loads((self.coordinator.path / "result.json").read_text(encoding="utf-8"))
+        self.assertEqual(result["unresolved_dispatches"], archived["unresolved_dispatches"])
+        self.assertFalse(archived["usage"]["usage_complete"])
+
+    def test_recovered_dispatch_retains_runtime_and_reservation_when_collection_or_archive_fails(self):
+        from showcase.star_experiment_archive import ExperimentArchive
+
+        original_put = ExperimentArchive.put
+        faults = {
+            "collect": (ScriptedServer, "collect"),
+            "run_record": ("showcase.star_readiness_coordinator.run_record",),
+            "provenance": (ScriptedServer, "provenance"),
+            "delivery": ("showcase.star_readiness_coordinator.evaluate_delivery",),
+            "delivery_record": ("showcase.star_readiness_coordinator.delivery_record",),
+        }
+        for fault in (*faults, "dispatch-00.json", "run-00.json", "delivery-00.json"):
+            with self.subTest(fault=fault), ExitStack() as resources:
+                self.coordinator.path = self.folder / fault
+                ScriptedServer.scenario = "dispatch_response_lost"
+                resources.enter_context(patch("showcase.star_readiness_coordinator.time.time",
+                                              return_value=1000.0))
+                if fault in faults:
+                    target = faults[fault]
+                    inject = patch if len(target) == 1 else patch.object
+                    resources.enter_context(inject(*target, side_effect=OSError("fixture_recovery_failed")))
+                else:
+                    def fail_archive(archive, name, value):
+                        if name == fault:
+                            raise OSError("fixture_archive_failed")
+                        return original_put(archive, name, value)
+                    resources.enter_context(patch.object(ExperimentArchive, "put", fail_archive))
+                result = self.coordinator.run()
+
+                self.assertEqual("failure", result["stop_reason"])
+                self.assertEqual("OSError", result["failure_type"])
+                self._assert_recovered_dispatch_retained(result)
+
+    def test_recovered_dispatch_rejects_wrong_job_identity_without_settling_or_cleaning(self):
+        for component in ("job", "run", "evidence"):
+            with self.subTest(component=component):
+                self.coordinator.path = self.folder / component
+                ScriptedServer.scenario = "dispatch_response_lost"
+                bundle = make_bundle("job-1")
+                if component == "job":
+                    bundle[component]["job_id"] = "wrong-job"
+                elif component == "run":
+                    bundle[component]["run_id"] = "wrong-job"
+                else:
+                    bundle[component]["run"]["run_id"] = "wrong-job"
+                with (
+                    patch("showcase.star_readiness_coordinator.time.time", return_value=1000.0),
+                    patch.object(ScriptedServer, "collect", return_value=bundle),
+                ):
+                    result = self.coordinator.run()
+
+                self.assertEqual("evidence_mismatch", result["stop_reason"])
+                self._assert_recovered_dispatch_retained(result)
 
     def test_recovered_dispatch_keeps_unknown_and_hard_limit_stop_contracts(self):
         for scenario in ("unknown", "hard_limit"):
@@ -601,6 +681,43 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         self.assertEqual([{"index": 0, "job_id": "job-1"}], result["uncollected"])
         self.assertFalse(result["usage"]["usage_complete"])
         self.assertFalse((self.folder / "round" / "intent-01.json").exists())
+        self.assertEqual([], result["unresolved_dispatches"])
+        self.assertEqual("retained", result["runtime_storage_cleanup"])
+        runtime = self.folder / "artifacts" / result["runtime_storage_path"]
+        self.assertTrue(runtime.is_dir())
+        self.assertEqual(["job-1"], json.loads(
+            (runtime / "retention.json").read_text(encoding="utf-8"))["run_ids"])
+
+    def test_normal_dispatch_retains_runtime_when_run_record_or_archive_fails(self):
+        from showcase.star_experiment_archive import ExperimentArchive
+
+        original_put = ExperimentArchive.put
+        for fault in ("run_record", "archive"):
+            with self.subTest(fault=fault), ExitStack() as resources:
+                self.coordinator.path = self.folder / fault
+                if fault == "run_record":
+                    resources.enter_context(patch("showcase.star_readiness_coordinator.run_record",
+                                                  side_effect=OSError("fixture_record_failed")))
+                else:
+                    def fail_archive(archive, name, value):
+                        if name == "run-00.json":
+                            raise OSError("fixture_archive_failed")
+                        return original_put(archive, name, value)
+                    resources.enter_context(patch.object(ExperimentArchive, "put", fail_archive))
+                result = self.coordinator.run()
+
+                self.assertEqual("failure", result["stop_reason"])
+                self.assertEqual("OSError", result["failure_type"])
+                self.assertEqual([], result["unresolved_dispatches"])
+                self.assertEqual([{"index": 0, "job_id": "job-1"}], result["uncollected"])
+                self.assertFalse(result["usage"]["usage_complete"])
+                self.assertEqual("retained", result["runtime_storage_cleanup"])
+                runtime = self.folder / "artifacts" / result["runtime_storage_path"]
+                self.assertTrue(runtime.is_dir())
+                self.assertEqual(["job-1"], json.loads(
+                    (runtime / "retention.json").read_text(encoding="utf-8"))["run_ids"])
+                self.assertEqual(1, len(ScriptedServer.instances[-1].dispatched))
+                self.assertFalse((self.coordinator.path / "intent-01.json").exists())
 
     def test_inconsistent_evidence_stops_before_second_dispatch(self):
         ScriptedServer.scenario = "evidence_mismatch"
@@ -609,8 +726,23 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
 
         self.assertEqual("evidence_mismatch", result["stop_reason"])
         self.assertEqual([QUESTION_TEXTS[0][3]], ScriptedServer.instances[0].dispatched)
-        self.assertTrue((self.folder / "round" / "run-00.json").is_file())
+        self.assertFalse((self.folder / "round" / "run-00.json").exists())
         self.assertFalse((self.folder / "round" / "intent-01.json").exists())
+
+    def test_normal_dispatch_rejects_wrong_job_before_archiving_or_counting_usage(self):
+        with patch.object(ScriptedServer, "collect", return_value=make_bundle("wrong-job")):
+            result = self.coordinator.run()
+
+        self.assertEqual("evidence_mismatch", result["stop_reason"])
+        self.assertEqual(0, result["usage"]["charged_tokens"])
+        self.assertEqual(0, result["usage"]["http_attempts"])
+        self.assertFalse(result["usage"]["usage_complete"])
+        self.assertEqual([{"index": 0, "job_id": "job-1"}], result["uncollected"])
+        self.assertEqual("retained", result["runtime_storage_cleanup"])
+        self.assertTrue((self.folder / "artifacts" / result["runtime_storage_path"]).is_dir())
+        self.assertFalse((self.folder / "round" / "run-00.json").exists())
+        self.assertFalse((self.folder / "round" / "intent-01.json").exists())
+        self.assertEqual(1, len(ScriptedServer.instances[-1].dispatched))
 
     def test_protocol_failure_has_a_distinct_stop_reason(self):
         ScriptedServer.scenario = "protocol_failed"
@@ -811,8 +943,23 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
 
     def test_future_draft_version_requires_separate_live_enablement(self):
         with self.assertRaisesRegex(ValueError, "live_draft_version_invalid"):
-            _claim_live_registration("a" * 64, "issue-97-nonstream-draft-v4")
+            _claim_live_registration("a" * 64, "issue-97-nonstream-draft-v5")
         self.assertFalse((self.folder / "artifacts" / "issue-97-prereg").exists())
+
+    def test_v4_consumption_is_independent_of_v3_and_cannot_be_reset_by_changing_hash(self):
+        _claim_live_registration("a" * 64, readiness_registration.V3_DRAFT_VERSION)
+        _claim_live_registration("b" * 64, readiness_registration.V4_DRAFT_VERSION)
+
+        markers = self.folder / "artifacts" / "issue-97-prereg"
+        self.assertEqual("a" * 64 + "\n", (markers / (
+            readiness_registration.V3_DRAFT_VERSION + ".consumed")).read_text(encoding="utf-8"))
+        self.assertEqual("b" * 64 + "\n", (markers / (
+            readiness_registration.V4_DRAFT_VERSION + ".consumed")).read_text(encoding="utf-8"))
+        for manifest_hash in ("b" * 64, "c" * 64):
+            with self.subTest(manifest_hash=manifest_hash):
+                with self.assertRaisesRegex(ValueError, "already_consumed"):
+                    _claim_live_registration(manifest_hash, readiness_registration.V4_DRAFT_VERSION)
+        self.assertEqual(2, len(list(markers.glob("*.consumed"))))
 
     @unittest.skipUnless(
         os.environ.get("RUN_STAR_READINESS_DOCKER_INTEGRATION") == "1",
