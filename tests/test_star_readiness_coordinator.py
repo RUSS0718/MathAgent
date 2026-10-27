@@ -688,19 +688,31 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         self.assertEqual(["job-1"], json.loads(
             (runtime / "retention.json").read_text(encoding="utf-8"))["run_ids"])
 
-    def test_normal_dispatch_retains_runtime_when_run_record_or_archive_fails(self):
+    def test_normal_dispatch_retains_runtime_when_run_or_delivery_archive_fails(self):
         from showcase.star_experiment_archive import ExperimentArchive
 
         original_put = ExperimentArchive.put
-        for fault in ("run_record", "archive"):
+        faults = {
+            "provenance": (ScriptedServer, "provenance"),
+            "evaluate_delivery": ("showcase.star_readiness_coordinator.evaluate_delivery",),
+            "delivery_record": ("showcase.star_readiness_coordinator.delivery_record",),
+        }
+        for fault in ("run_record", "run_archive", *faults, "delivery_archive"):
             with self.subTest(fault=fault), ExitStack() as resources:
                 self.coordinator.path = self.folder / fault
                 if fault == "run_record":
                     resources.enter_context(patch("showcase.star_readiness_coordinator.run_record",
                                                   side_effect=OSError("fixture_record_failed")))
+                elif fault in faults:
+                    target = faults[fault]
+                    inject = patch if len(target) == 1 else patch.object
+                    resources.enter_context(inject(
+                        *target, side_effect=OSError("fixture_delivery_failed"),
+                    ))
                 else:
+                    archive_name = "run-00.json" if fault == "run_archive" else "delivery-00.json"
                     def fail_archive(archive, name, value):
-                        if name == "run-00.json":
+                        if name == archive_name:
                             raise OSError("fixture_archive_failed")
                         return original_put(archive, name, value)
                     resources.enter_context(patch.object(ExperimentArchive, "put", fail_archive))
@@ -709,13 +721,15 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
                 self.assertEqual("failure", result["stop_reason"])
                 self.assertEqual("OSError", result["failure_type"])
                 self.assertEqual([], result["unresolved_dispatches"])
+                self.assertEqual([], result["runs"])
                 self.assertEqual([{"index": 0, "job_id": "job-1"}], result["uncollected"])
                 self.assertFalse(result["usage"]["usage_complete"])
                 self.assertEqual("retained", result["runtime_storage_cleanup"])
                 runtime = self.folder / "artifacts" / result["runtime_storage_path"]
                 self.assertTrue(runtime.is_dir())
-                self.assertEqual(["job-1"], json.loads(
-                    (runtime / "retention.json").read_text(encoding="utf-8"))["run_ids"])
+                retention = json.loads((runtime / "retention.json").read_text(encoding="utf-8"))
+                self.assertEqual("job_archive_incomplete", retention["reason"])
+                self.assertEqual(["job-1"], retention["run_ids"])
                 self.assertEqual(1, len(ScriptedServer.instances[-1].dispatched))
                 self.assertFalse((self.coordinator.path / "intent-01.json").exists())
 

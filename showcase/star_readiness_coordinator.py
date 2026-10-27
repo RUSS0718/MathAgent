@@ -248,6 +248,7 @@ class StarReadinessCoordinator:
         dispatched = []
         unresolved_dispatches = []
         records = []
+        retention_reason = None
         preflight_ids = set()
         preflight_count = 0
         usage = {
@@ -396,6 +397,7 @@ class StarReadinessCoordinator:
                     # Collect the accepted Job only; never dispatch this or the next question.
                     response_recovered = True
                 dispatched.append({"index": index, "job_id": job_id})
+                retention_reason = "job_archive_incomplete"
                 archive.put(f"dispatch-{index:02d}.json", {
                     "job_id": job_id,
                     **({"recovered_from_store": True, "status": "response_recovered"}
@@ -412,8 +414,9 @@ class StarReadinessCoordinator:
                     snapshot, contexts = server.provenance(job_id)
                     delivery = evaluate_delivery(bundle["job"], snapshot, contexts)
                     archive.put(f"delivery-{index:02d}.json", delivery_record(delivery))
-                record = {"index": index, "question": entry["question"], "job_id": job_id}
-                records.append(record)
+                    record = {"index": index, "question": entry["question"], "job_id": job_id}
+                    records.append(record)
+                    retention_reason = None
 
                 report = bundle.get("report") if isinstance(bundle, dict) else None
                 budget = report.get("budget") if isinstance(report, dict) else None
@@ -451,6 +454,9 @@ class StarReadinessCoordinator:
                     snapshot, contexts = server.provenance(job_id)
                     delivery = evaluate_delivery(bundle["job"], snapshot, contexts)
                     archive.put(f"delivery-{index:02d}.json", delivery_record(delivery))
+                    record = {"index": index, "question": entry["question"], "job_id": job_id}
+                    records.append(record)
+                    retention_reason = None
                 if not self._delivery_bound(delivery):
                     stop = "evidence_mismatch"
                     break
@@ -483,6 +489,8 @@ class StarReadinessCoordinator:
                             [item["job_id"] for item in dispatched],
                             grace_seconds=self.manifest["model"]["request_timeout_seconds"] + 1,
                             preserve=bool(unresolved_dispatches) or len(records) < len(dispatched),
+                            retention_reason=(retention_reason or
+                                              ("pending_settlement" if unresolved_dispatches else None)),
                         )
                     except Exception as exc:
                         runtime_cleanup = "failed"

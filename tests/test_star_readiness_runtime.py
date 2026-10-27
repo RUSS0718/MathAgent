@@ -49,6 +49,18 @@ class StarReadinessRuntimeCleanupTest(unittest.TestCase):
                 json.loads((path / "retention.json").read_text(encoding="utf-8")),
             )
 
+    def test_known_job_retention_reason_does_not_claim_dispatch_identity_is_unknown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            storage = tempfile.TemporaryDirectory(dir=directory)
+            path = Path(storage.name)
+            self.assertEqual("retained", cleanup_runtime_storage(
+                storage, ["job-1"], grace_seconds=1, preserve=True,
+            ))
+            self.assertEqual(
+                {"reason": "job_archive_incomplete", "run_ids": ["job-1"]},
+                json.loads((path / "retention.json").read_text(encoding="utf-8")),
+            )
+
     def test_lost_response_recovers_accepted_job_without_post_and_retains_original_ledger(self):
         provider = LoopbackProvider()
         self.addCleanup(provider.close)

@@ -10,14 +10,20 @@ from pathlib import Path
 _UNRESOLVED_STATUSES = {"reserved", "pending", "error", "unknown"}
 
 
-def cleanup_runtime_storage(storage, run_ids, *, grace_seconds, preserve=False):
+def cleanup_runtime_storage(storage, run_ids, *, grace_seconds, preserve=False,
+                            retention_reason=None):
     """Release settled Jobs; retain uncertain dispatches or attempts for reconciliation."""
     runtime_path = Path(storage.name)
     database_path = runtime_path / "nonstream" / "showcase.sqlite3"
     # TemporaryDirectory's finalizer must not erase a pending ledger on GC/exit.
     storage._finalizer.detach()
-    _record_retention(runtime_path, run_ids, "dispatch_identity_unresolved" if preserve
-                      else "pending_settlement")
+    if preserve and not run_ids:
+        reason = "dispatch_identity_unresolved"
+    elif preserve:
+        reason = retention_reason or "job_archive_incomplete"
+    else:
+        reason = "pending_settlement"
+    _record_retention(runtime_path, run_ids, reason)
     if preserve:
         return "retained"
     deadline = time.monotonic() + max(1.0, float(grace_seconds))
