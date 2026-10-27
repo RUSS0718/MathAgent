@@ -347,6 +347,29 @@ class StarReadinessRegistrationTest(unittest.TestCase):
             ),
         )
 
+    def test_v3_live_manifest_cannot_be_reauthorized_even_with_a_new_date(self):
+        loopback = adapt_draft(synthetic_v3_draft(), current_source=SOURCE)
+        authorized = authorize_live_registration(
+            loopback,
+            expected_sha256=digest(loopback),
+            current_source=SOURCE,
+            explicit_authorization=True,
+            authorization_date="2026-10-28",
+        )
+        original = copy.deepcopy(authorized)
+
+        for authorization_date in ("2026-10-28", "2026-10-29"):
+            with self.subTest(authorization_date=authorization_date):
+                with self.assertRaisesRegex(ValueError, "live_authorization_invalid"):
+                    authorize_live_registration(
+                        authorized,
+                        expected_sha256=digest(authorized),
+                        current_source=SOURCE,
+                        explicit_authorization=True,
+                        authorization_date=authorization_date,
+                    )
+                self.assertEqual(original, authorized)
+
     def test_v2_consumed_loopback_manifest_cannot_be_authorized_for_live(self):
         manifest = consumed_v2_manifest()
 
@@ -358,6 +381,58 @@ class StarReadinessRegistrationTest(unittest.TestCase):
                 explicit_authorization=True,
                 authorization_date="2026-10-28",
             )
+
+    def test_historical_v2_live_manifest_is_readable_but_cannot_be_reauthorized(self):
+        manifest = self.make_manifest()
+        manifest.update(
+            authorization_date="2026-10-28",
+            authorization_scope="issue-97-two-question-nonstream-batch",
+            execution_authorized=True,
+            provider_endpoint="https://chat.intern-ai.org.cn/api/v1/chat/completions",
+            provider_mode="intern_s2_live",
+            status="authorized_live",
+        )
+        # Pin a synthetic historical envelope without loading real experiment data.
+        with patch.object(
+            star_readiness_registration, "V2_LIVE_MANIFEST_SHA256", digest(manifest)
+        ):
+            self.assertEqual(
+                manifest,
+                registration(manifest, expected_sha256=digest(manifest), current_source=SOURCE),
+            )
+            with self.assertRaisesRegex(ValueError, "live_draft_version_invalid"):
+                authorize_live_registration(
+                    manifest,
+                    expected_sha256=digest(manifest),
+                    current_source=SOURCE,
+                    explicit_authorization=True,
+                    authorization_date="2026-10-29",
+                )
+            manifest["authorization_date"] = "2026-10-29"
+            with self.assertRaisesRegex(ValueError, "live_draft_version_invalid"):
+                registration(manifest, expected_sha256=digest(manifest), current_source=SOURCE)
+
+    def test_live_authorization_rejects_malformed_loopback_envelopes(self):
+        mutations = {
+            "execution_authorized": True,
+            "provider_mode": "intern_s2_live",
+            "status": "authorized_live",
+            "authorization_date": "2026-10-28",
+            "authorization_scope": "issue-97-two-question-nonstream-batch-v3",
+            "provider_endpoint": "https://chat.intern-ai.org.cn/api/v1/chat/completions",
+        }
+        for key, value in mutations.items():
+            with self.subTest(field=key):
+                manifest = adapt_draft(synthetic_v3_draft(), current_source=SOURCE)
+                manifest[key] = value
+                with self.assertRaisesRegex(ValueError, "registration_invalid"):
+                    authorize_live_registration(
+                        manifest,
+                        expected_sha256=digest(manifest),
+                        current_source=SOURCE,
+                        explicit_authorization=True,
+                        authorization_date="2026-10-28",
+                    )
 
     def test_v3_adapter_rejects_question_and_schedule_drift(self):
         changed_hash = synthetic_v3_draft()

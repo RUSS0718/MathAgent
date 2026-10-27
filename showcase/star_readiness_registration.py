@@ -200,7 +200,7 @@ def authorize_live_registration(
     explicit_authorization,
     authorization_date,
 ):
-    """Authorize only a current v3 draft; v2 remains available for registration."""
+    """Authorize only an unapproved v3 loopback manifest; keep v2 read-only."""
     if explicit_authorization is not True:
         raise ValueError("star_readiness_live_authorization_required")
     if not isinstance(authorization_date, str):
@@ -217,6 +217,8 @@ def authorize_live_registration(
     )
     if record["draft_version"] != V3_DRAFT_VERSION:
         raise ValueError("star_readiness_live_draft_version_invalid")
+    if record["execution_authorized"] is not False or record["provider_mode"] != "loopback_only":
+        raise ValueError("star_readiness_live_authorization_invalid")
     record.update(
         authorization_date=authorization_date,
         authorization_scope=_authorization_scope_for_draft_version(record["draft_version"]),

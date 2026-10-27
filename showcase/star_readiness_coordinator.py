@@ -4,6 +4,7 @@ import re
 import subprocess
 import tempfile
 import time
+import uuid
 from copy import deepcopy
 from pathlib import Path
 
@@ -20,18 +21,33 @@ from .star_readiness_archive import (
 )
 from .star_readiness_configuration import validate_server_configuration
 from .star_readiness_profile import validate_execution_profile
-from .star_readiness_registration import ROUND_LIMITS, digest, registration
+from .star_readiness_registration import (
+    ROUND_LIMITS,
+    V2_DRAFT_VERSION,
+    V2_LIVE_MANIFEST_SHA256,
+    V3_DRAFT_VERSION,
+    digest,
+    registration,
+)
 from .star_readiness_runtime import cleanup_runtime_storage
 
 ARTIFACTS = Path(__file__).resolve().parents[1] / "artifacts"
 
 
-def _claim_live_registration(manifest_sha256):
-    """Atomically consume a live manifest independently of its archive location."""
+def _claim_live_registration(manifest_sha256, draft_version):
+    """Consume the enabled batch version once, retaining the historical v2 hash key."""
     if not isinstance(manifest_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", manifest_sha256):
         raise ValueError("star_readiness_registration_identity_mismatch")
-    marker = ARTIFACTS / "issue-97-prereg" / f"{manifest_sha256}.consumed"
+    if draft_version == V3_DRAFT_VERSION:
+        batch_key = V3_DRAFT_VERSION
+    elif draft_version == V2_DRAFT_VERSION and manifest_sha256 == V2_LIVE_MANIFEST_SHA256:
+        batch_key = V2_LIVE_MANIFEST_SHA256
+    else:
+        raise ValueError("star_readiness_live_draft_version_invalid")
+    marker = ARTIFACTS / "issue-97-prereg" / f"{batch_key}.consumed"
     marker.parent.mkdir(parents=True, exist_ok=True)
+    if (marker.parent / f"{manifest_sha256}.consumed").exists():
+        raise ValueError("star_readiness_live_registration_already_consumed")
     try:
         with marker.open("x", encoding="utf-8", newline="\n") as stream:
             stream.write(manifest_sha256 + "\n")
@@ -228,6 +244,7 @@ class StarReadinessCoordinator:
         attempted = []
         dispatched = []
         unresolved_dispatches = []
+        dispatch_identity_unresolved = False
         records = []
         preflight_ids = set()
         preflight_count = 0
@@ -253,9 +270,11 @@ class StarReadinessCoordinator:
                 "evidence_kind": self.evidence_kind,
             })
             if self.evidence_kind == "live":
-                _claim_live_registration(self.manifest_sha256)
+                _claim_live_registration(self.manifest_sha256, frozen["draft_version"])
             self._check_execution_profile()
-            runtime_storage = tempfile.TemporaryDirectory(prefix="star-readiness-97-")
+            runtime_root = ARTIFACTS / "issue-97-runtime"
+            runtime_root.mkdir(parents=True, exist_ok=True)
+            runtime_storage = tempfile.TemporaryDirectory(prefix="star-readiness-97-", dir=runtime_root)
             server = ExperimentServer(
                 Path(runtime_storage.name) / "nonstream",
                 "nonstream",
@@ -339,8 +358,10 @@ class StarReadinessCoordinator:
 
                 question = {"prompt": questions[entry["question"]]["text"]}
                 registered_question = questions[entry["question"]]
+                idempotency_key = str(uuid.uuid4())
                 archive.put(f"intent-{index:02d}.json", {
                     "entry": entry,
+                    "idempotency_key": idempotency_key,
                     "question": {
                         "id": registered_question["id"],
                         "source": registered_question["source"],
@@ -349,18 +370,30 @@ class StarReadinessCoordinator:
                 })
                 attempted.append(index)
                 try:
-                    job_id = server.dispatch(question)
+                    job_id = server.dispatch(question, idempotency_key=idempotency_key)
                 except Exception as exc:
                     usage["usage_complete"] = False
+                    try:
+                        job_id = server.resolve_dispatch(idempotency_key)
+                    except Exception:
+                        job_id = None  # Never resend when the local read is inconclusive.
+                    dispatch_identity_unresolved = job_id is None
                     unresolved_dispatches.append({
                         "index": index,
                         "question_id": entry["question"],
+                        "idempotency_key": idempotency_key,
+                        "job_id": job_id,
                         "status": "pending_settlement",
                         # Hold the whole Run envelope separately from observed S3 usage.
                         "reserved_budget": {**entry["limits"], "deadline_at": policy.deadline_at},
                     })
                     stop = "unknown_dispatch_outcome"
                     failure_type = type(exc).__name__
+                    if job_id is not None:
+                        dispatched.append({"index": index, "job_id": job_id})
+                        archive.put(f"dispatch-{index:02d}.json", {
+                            "job_id": job_id, "recovered_from_store": True,
+                        })
                     break
                 dispatched.append({"index": index, "job_id": job_id})
                 archive.put(f"dispatch-{index:02d}.json", {"job_id": job_id})
@@ -431,6 +464,7 @@ class StarReadinessCoordinator:
                             runtime_storage,
                             [item["job_id"] for item in dispatched],
                             grace_seconds=self.manifest["model"]["request_timeout_seconds"] + 1,
+                            preserve=dispatch_identity_unresolved,
                         )
                     except Exception as exc:
                         runtime_cleanup = "failed"
@@ -455,6 +489,10 @@ class StarReadinessCoordinator:
             "usage": usage,
             "wall_time_seconds": time.monotonic() - started,
             "runtime_storage_cleanup": runtime_cleanup,
+            "runtime_storage_path": (
+                Path(runtime_storage.name).relative_to(ARTIFACTS).as_posix()
+                if runtime_storage is not None and runtime_cleanup != "complete" else None
+            ),
             "cost": None,
             "runs": records,
         }

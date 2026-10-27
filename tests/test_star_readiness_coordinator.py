@@ -14,7 +14,8 @@ from showcase import star_readiness_registration as readiness_registration
 from showcase.star_acceptance import evaluate_delivery
 from showcase.star_experiment_server import ExperimentServer
 from showcase.star_readiness_configuration import validate_server_configuration
-from showcase.star_readiness_coordinator import StarReadinessCoordinator
+from showcase.star_readiness_coordinator import StarReadinessCoordinator, _claim_live_registration
+from showcase.star_readiness_runtime import cleanup_runtime_storage
 from tests.star_experiment_support import LoopbackProvider
 
 SOURCE = {"revision": "a" * 40, "source_sha256": "b" * 64, "dirty_status": True}
@@ -98,7 +99,7 @@ class ScriptedServer:
             "budget": {"tool_calls": 1, "http_attempts": 0},
         }
 
-    def dispatch(self, question):
+    def dispatch(self, question, *, idempotency_key=None):
         type(self).events.append("dispatch")
         self.dispatched.append(question["prompt"])
         job_id = f"job-{len(self.dispatched)}"
@@ -106,6 +107,9 @@ class ScriptedServer:
         if self.scenario == "dispatch_response_lost":
             raise TimeoutError("fixture_dispatch_response_lost")
         return job_id
+
+    def resolve_dispatch(self, idempotency_key):
+        return self.accepted_job_ids[-1] if self.accepted_job_ids else None
 
     def collect(self, job_id, deadline_at, *, canceled=lambda: False):
         self.collected_deadlines.append((deadline_at, self.policy.round_deadline_at))
@@ -180,6 +184,8 @@ def make_bundle(job_id, *, unknown=False, missing_usage=False, failed=False,
 class StarReadinessCoordinatorTest(unittest.TestCase):
     def setUp(self):
         self.folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.enterContext(patch("showcase.star_readiness_coordinator.ARTIFACTS",
+                                self.folder / "artifacts"))
         ScriptedServer.instances = []
         ScriptedServer.events = []
         ScriptedServer.scenario = "success"
@@ -255,21 +261,26 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         ScriptedServer.scenario = "dispatch_response_lost"
 
         with patch("showcase.star_readiness_coordinator.time.time", return_value=1_000.0):
-            result = self.coordinator.run()
+            with patch("showcase.star_readiness_coordinator.cleanup_runtime_storage",
+                       wraps=cleanup_runtime_storage) as cleanup:
+                result = self.coordinator.run()
 
         self.assertEqual("unknown_dispatch_outcome", result["stop_reason"])
         self.assertEqual("TimeoutError", result["failure_type"])
         self.assertEqual(1, result["attempted_runs"])
-        self.assertEqual(0, result["executed_runs"])
+        self.assertEqual(1, result["executed_runs"])
         self.assertFalse(result["usage"]["usage_complete"])
+        intent = json.loads((self.folder / "round" / "intent-00.json").read_text(encoding="utf-8"))
         self.assertEqual(
             [{"index": 0, "question_id": "simple-01", "status": "pending_settlement",
+              "job_id": "job-1", "idempotency_key": intent["idempotency_key"],
               "reserved_budget": {"charged_tokens": 32768, "logical_calls": 6,
                                   "http_attempts": 8, "problem_tool_calls": 1,
                                   "wall_seconds": 300, "deadline_at": 1_300.0}}],
             result["unresolved_dispatches"],
         )
         self.assertEqual(["job-1"], ScriptedServer.instances[0].accepted_job_ids)
+        self.assertEqual(["job-1"], cleanup.call_args.args[1])
         self.assertEqual([QUESTION_TEXTS[0][3]], ScriptedServer.instances[0].dispatched)
         self.assertFalse((self.folder / "round" / "intent-01.json").exists())
         self.assertFalse((self.folder / "round" / "run-00.json").exists())
@@ -280,18 +291,35 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
             for path in (self.folder / "round").glob("*.json")
         )
         self.assertNotIn(QUESTION_TEXTS[0][3], archive_text)
-        self.assertNotIn("job-1", archive_text)
+        self.assertIn("job-1", archive_text)
+
+    def test_unrecoverable_dispatch_retains_runtime_and_key_for_manual_reconciliation(self):
+        ScriptedServer.scenario = "dispatch_response_lost"
+        for outcome in (None, OSError("fixture_store_unavailable")):
+            with self.subTest(outcome=outcome):
+                self.coordinator.path = self.folder / ("not-found" if outcome is None else "error")
+                with patch.object(ScriptedServer, "resolve_dispatch", side_effect=[outcome]):
+                    result = self.coordinator.run()
+                unresolved = result["unresolved_dispatches"][0]
+                self.assertIsNone(unresolved["job_id"])
+                self.assertTrue(unresolved["idempotency_key"])
+                self.assertEqual("pending_settlement", unresolved["status"])
+                self.assertEqual("retained", result["runtime_storage_cleanup"])
+                runtime = self.folder / "artifacts" / result["runtime_storage_path"]
+                self.assertTrue(runtime.is_dir())
+                self.assertTrue((runtime / "retention.json").is_file())
+                self.assertEqual(1, len(ScriptedServer.instances[-1].dispatched))
 
     def test_later_lost_dispatch_retains_full_reservation_and_prior_observed_usage(self):
         now = [1_000.0]
         original_dispatch = ScriptedServer.dispatch
         original_collect = ScriptedServer.collect
 
-        def dispatch_with_second_response_lost(server, question):
+        def dispatch_with_second_response_lost(server, question, **kwargs):
             if server.dispatched:
                 server.scenario = "dispatch_response_lost"
                 now[0] += 50  # Waiting for a response must not extend the original deadline.
-            return original_dispatch(server, question)
+            return original_dispatch(server, question, **kwargs)
 
         def collect_with_elapsed_time(server, *args, **kwargs):
             bundle = original_collect(server, *args, **kwargs)
@@ -307,15 +335,17 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
 
         self.assertEqual("unknown_dispatch_outcome", result["stop_reason"])
         self.assertEqual(2, result["attempted_runs"])
-        self.assertEqual(1, result["executed_runs"])
+        self.assertEqual(2, result["executed_runs"])
         self.assertEqual([item[3] for item in QUESTION_TEXTS], ScriptedServer.instances[0].dispatched)
         self.assertFalse(result["usage"]["usage_complete"])
         self.assertEqual(17, result["usage"]["charged_tokens"])
         self.assertEqual(1, result["usage"]["logical_calls"])
         self.assertEqual(1, result["usage"]["http_attempts"])
         self.assertEqual(0, result["usage"]["problem_tool_calls"])
+        intent = json.loads((self.folder / "round" / "intent-01.json").read_text(encoding="utf-8"))
         self.assertEqual(
             [{"index": 1, "question_id": "multi-01", "status": "pending_settlement",
+              "job_id": "job-2", "idempotency_key": intent["idempotency_key"],
               "reserved_budget": {"charged_tokens": 65536, "logical_calls": 12,
                                   "http_attempts": 16, "problem_tool_calls": 3,
                                   "wall_seconds": 600, "deadline_at": 1_900.0}}],
@@ -600,6 +630,56 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         self.assertEqual("ValueError", second_result["failure_type"])
         self.assertEqual(dispatches_after_first, ScriptedServer.events.count("dispatch"))
         self.assertTrue((self.folder / "live-round-2" / "result.json").is_file())
+
+    def test_live_draft_cannot_be_consumed_again_with_new_source_or_authorization_date(self):
+        live_manifest = readiness_registration.authorize_live_registration(
+            self.manifest,
+            expected_sha256=readiness_registration.digest(self.manifest),
+            current_source=SOURCE,
+            explicit_authorization=True,
+            authorization_date="2026-10-27",
+        )
+        client = SimpleNamespace(
+            loopback_only=False, provider_endpoint_only=True,
+            api_base="https://chat.intern-ai.org.cn/api/v1/chat/completions",
+            authorization="Bearer fixture",
+        )
+        adapters = {"nonstream": SimpleNamespace(_get_client=lambda: client)}
+        with patch("showcase.star_readiness_coordinator.ARTIFACTS", self.folder / "claims"):
+            first = StarReadinessCoordinator(
+                self.folder / "first", adapters=adapters, manifest=live_manifest,
+                manifest_sha256=readiness_registration.digest(live_manifest), evidence_kind="live",
+            )
+            self.assertEqual("completed", first.run()["stop_reason"])
+            for field, value in (
+                ("authorization_date", "2026-10-28"),
+                ("source_identity", {**SOURCE, "revision": "e" * 40, "source_sha256": "f" * 64}),
+            ):
+                with self.subTest(field=field):
+                    changed = {**live_manifest, field: value}
+                    self.source_mock.return_value = changed["source_identity"]
+                    second = StarReadinessCoordinator(
+                        self.folder / field, adapters=adapters, manifest=changed,
+                        manifest_sha256=readiness_registration.digest(changed), evidence_kind="live",
+                    )
+                    self.assertEqual("failure", second.run()["stop_reason"])
+                    self.assertEqual(2, ScriptedServer.events.count("dispatch"))
+
+    def test_historical_v2_hash_consumption_marker_is_still_honored(self):
+        marker = self.folder / "artifacts" / "issue-97-prereg" / (
+            readiness_registration.V2_LIVE_MANIFEST_SHA256 + ".consumed"
+        )
+        marker.parent.mkdir(parents=True)
+        marker.write_text("historical consumption\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "already_consumed"):
+            _claim_live_registration(readiness_registration.V2_LIVE_MANIFEST_SHA256,
+                                     readiness_registration.V2_DRAFT_VERSION)
+        self.assertEqual("historical consumption\n", marker.read_text(encoding="utf-8"))
+
+    def test_future_draft_version_requires_separate_live_enablement(self):
+        with self.assertRaisesRegex(ValueError, "live_draft_version_invalid"):
+            _claim_live_registration("a" * 64, "issue-97-nonstream-draft-v4")
+        self.assertFalse((self.folder / "artifacts" / "issue-97-prereg").exists())
 
     @unittest.skipUnless(
         os.environ.get("RUN_STAR_READINESS_DOCKER_INTEGRATION") == "1",

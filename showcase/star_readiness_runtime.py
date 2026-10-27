@@ -4,15 +4,22 @@ import json
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from pathlib import Path
 
 _UNRESOLVED_STATUSES = {"reserved", "pending", "error", "unknown"}
 
 
-def cleanup_runtime_storage(storage, run_ids, *, grace_seconds):
-    """Clean an idle runtime immediately or defer cleanup while attempts remain unresolved."""
+def cleanup_runtime_storage(storage, run_ids, *, grace_seconds, preserve=False):
+    """Release settled Jobs; retain uncertain dispatches or attempts for reconciliation."""
     runtime_path = Path(storage.name)
     database_path = runtime_path / "nonstream" / "showcase.sqlite3"
+    # TemporaryDirectory's finalizer must not erase a pending ledger on GC/exit.
+    storage._finalizer.detach()
+    _record_retention(runtime_path, run_ids, "dispatch_identity_unresolved" if preserve
+                      else "pending_settlement")
+    if preserve:
+        return "retained"
     deadline = time.monotonic() + max(1.0, float(grace_seconds))
     if not _has_unresolved_attempts(database_path, run_ids):
         try:
@@ -37,10 +44,7 @@ def _start_deferred_cleanup(storage, database_path, run_ids, deadline):
             except OSError:
                 pass
             if time.monotonic() >= deadline:
-                try:
-                    storage.cleanup()
-                except OSError:
-                    pass
+                _record_retention(Path(storage.name), run_ids, "settlement_grace_expired")
                 return
             time.sleep(0.05)
 
@@ -52,12 +56,28 @@ def _start_deferred_cleanup(storage, database_path, run_ids, deadline):
     return "deferred"
 
 
+def _record_retention(path, run_ids, reason):
+    """Leave a prompt-free receipt beside the private database for manual review."""
+    (path / "retention.json").write_text(
+        json.dumps({"reason": reason, "run_ids": list(run_ids)}, sort_keys=True), encoding="utf-8"
+    )
+
+
 def _has_unresolved_attempts(database_path, run_ids):
-    """Read only the persisted HTTP action states needed to guard late callbacks."""
+    """Read persisted Job and HTTP states to guard workers and late callbacks."""
     if not run_ids or not database_path.is_file():
         return False
     try:
-        with sqlite3.connect(database_path, timeout=0.2) as connection:
+        with closing(sqlite3.connect(database_path.as_uri() + "?mode=ro", uri=True,
+                                    timeout=0.2)) as connection:
+            active = connection.execute(
+                "SELECT 1 FROM workspace_jobs WHERE job_id IN ({}) "
+                "AND status IN ('queued','running','waiting_input')".format(
+                    ",".join("?" for _ in run_ids)
+                ), tuple(run_ids),
+            ).fetchone()
+            if active:
+                return True
             rows = connection.execute(
                 "SELECT ledger_json FROM run_budgets WHERE run_id IN ({})".format(
                     ",".join("?" for _ in run_ids)
@@ -65,6 +85,8 @@ def _has_unresolved_attempts(database_path, run_ids):
                 tuple(run_ids),
             ).fetchall()
     except (OSError, sqlite3.Error):
+        return True
+    if len(rows) != len(set(run_ids)):
         return True
     for (serialized,) in rows:
         try:

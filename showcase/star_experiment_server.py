@@ -85,8 +85,11 @@ class ExperimentServer:
             raise ValueError("experiment_public_read_failed")
         return response.get_json()
 
-    def post(self, path, payload):
-        response = self.client.post(path, json=payload, headers=self.headers())
+    def post(self, path, payload, *, idempotency_key=None):
+        headers = self.headers()
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
+        response = self.client.post(path, json=payload, headers=headers)
         if response.status_code not in {200, 202}:
             raise ValueError("experiment_public_admission_failed")
         return response.get_json()
@@ -115,11 +118,25 @@ class ExperimentServer:
             observed["reason"] = "experiment_preflight_evidence_invalid"
         return observed
 
-    def dispatch(self, question):
+    def dispatch(self, question, *, idempotency_key=None):
+        """Create one public Job, optionally using the caller's retained dispatch key."""
         self.check_conditions()
         session = self.post("/api/new_chat", {})["new_session_id"]
-        return self.post("/api/agent/jobs", dict(message=question["prompt"], session_id=session,
-            solver_mode="star_reference", verification_mode="auto"))["job_id"]
+        payload = dict(message=question["prompt"], session_id=session,
+                       solver_mode="star_reference", verification_mode="auto")
+        if idempotency_key is None:
+            return self.post("/api/agent/jobs", payload)["job_id"]
+        return self.post("/api/agent/jobs", payload, idempotency_key=idempotency_key)["job_id"]
+
+    def resolve_dispatch(self, idempotency_key):
+        """Read a durably accepted Job by its retained key without repeating POST."""
+        database = Path(self.app.extensions["showcase_workspace_service"].store.database_path)
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as connection:
+            rows = connection.execute(
+                "SELECT job_id FROM workspace_jobs WHERE idempotency_key=?", (idempotency_key,)
+            ).fetchall()
+        # The local dispatch key is a fresh UUID. Ambiguous identity fails closed.
+        return rows[0][0] if len(rows) == 1 else None
 
     def collect(self, job_id, deadline_at, *, canceled=lambda: False):
         while True:
