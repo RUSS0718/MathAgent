@@ -67,6 +67,30 @@ STOP_ON = [
     "source_or_config_change",
     "ledger_or_binding_defect",
 ]
+REFERENCE_CONFIGURATION = {
+    "isolation_image_id": "sha256:fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d",
+    "preset": {
+        "allowed_tools": ["polynomial_check", "python_math"],
+        "features": {
+            "final_generation": True,
+            "final_solution_review": True,
+            "local_code_tool": True,
+            "meta_guidance": True,
+            "persistent_sessions": True,
+            "reexplore_after_replan": True,
+            "skills": True,
+            "star_routing": True,
+            "stream_recovery": True,
+        },
+        "hint_mode": "none",
+        "max_challenge_rounds": 5,
+        "max_explore_rounds": 2,
+        "max_final_solution_retries": 2,
+        "max_replans": 3,
+        "tool_timeout_seconds": 20,
+    },
+    "registered_tools": ["polynomial_check", "python_math"],
+}
 SOURCE = {
     "revision": "a" * 40,
     "source_sha256": "b" * 64,
@@ -179,6 +203,17 @@ class StarReadinessRegistrationTest(unittest.TestCase):
         self.assertEqual(SOURCE, manifest["source_identity"])
         self.assertEqual(ROUND_LIMITS, manifest["round_limits"])
         self.assertEqual(STOP_ON, manifest["stop_on"])
+        self.assertEqual(REFERENCE_CONFIGURATION, manifest["reference_configuration"])
+
+    def test_isolation_image_matches_the_runtime_contract(self):
+        from showcase.star_product_runtime import CONTRACT_PYTHON_IMAGE_ID
+
+        manifest = self.make_manifest()
+
+        self.assertEqual(
+            CONTRACT_PYTHON_IMAGE_ID,
+            manifest["reference_configuration"]["isolation_image_id"],
+        )
 
     def test_registration_accepts_frozen_hash_and_matching_current_identity(self):
         manifest = self.make_manifest()
@@ -198,6 +233,15 @@ class StarReadinessRegistrationTest(unittest.TestCase):
         manifest["questions"][0]["text_sha256"] = hashlib.sha256(
             manifest["questions"][0]["text"].encode("utf-8")
         ).hexdigest()
+
+        with self.assertRaises(ValueError):
+            registration(manifest, expected_sha256=digest(manifest), current_source=SOURCE)
+
+    def test_registration_rejects_reference_configuration_drift_after_rehash(self):
+        manifest = self.make_manifest()
+        manifest["reference_configuration"]["preset"]["features"][
+            "final_solution_review"
+        ] = False
 
         with self.assertRaises(ValueError):
             registration(manifest, expected_sha256=digest(manifest), current_source=SOURCE)

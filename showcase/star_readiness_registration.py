@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 
-ADAPTER_VERSION = "issue-97-registration-adapter-v1"
+ADAPTER_VERSION = "issue-97-registration-adapter-v2"
 DRAFT_VERSION = "issue-97-nonstream-draft-v2"
 QUESTION_SPECS = (
     (
@@ -30,6 +30,21 @@ MODEL = {
     "temperature": 0.2,
     "thinking_mode": True,
     "verification_mode": "auto",
+}
+STAR_REFERENCE_CONFIGURATION = {
+    "isolation_image_id": "sha256:fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d",
+    "preset": {
+        "allowed_tools": ["polynomial_check", "python_math"],
+        "features": {
+            "final_generation": True, "final_solution_review": True,
+            "local_code_tool": True, "meta_guidance": True, "persistent_sessions": True,
+            "reexplore_after_replan": True, "skills": True, "star_routing": True,
+            "stream_recovery": True,
+        },
+        "hint_mode": "none", "max_challenge_rounds": 5, "max_explore_rounds": 2,
+        "max_final_solution_retries": 2, "max_replans": 3, "tool_timeout_seconds": 20,
+    },
+    "registered_tools": ["polynomial_check", "python_math"],
 }
 RUN_LIMITS = (
     {
@@ -87,6 +102,7 @@ _DRAFT_KEYS = {
     "version",
 }
 _MANIFEST_KEYS = {
+    "reference_configuration",
     "adapter_version",
     "draft_sha256",
     "draft_version",
@@ -125,6 +141,7 @@ def adapt_draft(draft, *, current_source):
         "execution_authorized": False,
         "model": copy.deepcopy(MODEL),
         "provider_mode": "loopback_only",
+        "reference_configuration": copy.deepcopy(STAR_REFERENCE_CONFIGURATION),
         "questions": [
             {
                 "id": item["id"],
@@ -213,6 +230,11 @@ def _validate_manifest(record):
         raise ValueError("star_readiness_registration_invalid")
     _validate_model(record["model"])
     _validate_source(record["source_identity"])
+    if record["reference_configuration"] != STAR_REFERENCE_CONFIGURATION:
+        raise ValueError("star_readiness_configuration_invalid")
+    if any(value is not True for value in
+           record["reference_configuration"]["preset"]["features"].values()):
+        raise ValueError("star_readiness_configuration_invalid")
     _validate_questions(record["questions"], draft=False)
     _validate_schedule(record["schedule"])
     _validate_round_limits(record["round_limits"])
@@ -309,4 +331,3 @@ def _validate_historical_source(value):
         or not _HASH_RE.fullmatch(value["source_sha256"])
     ):
         raise ValueError("star_readiness_registration_invalid")
-
