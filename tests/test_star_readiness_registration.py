@@ -26,22 +26,10 @@ SIMPLE_02_TEXT = "Synthetic fixture C: compute 8 * 9."
 MULTI_02_TEXT = "Synthetic fixture D: sum the squares of the first four positive integers."
 SIMPLE_02_HASH = hashlib.sha256(SIMPLE_02_TEXT.encode("utf-8")).hexdigest()
 MULTI_02_HASH = hashlib.sha256(MULTI_02_TEXT.encode("utf-8")).hexdigest()
-V4_SIMPLE_TEXT = """The sum of the squares of the first ten natural numbers is,
-1^2 + 2^2 + ... + 10^2 = 385.
-
-The square of the sum of the first ten natural numbers is,
-(1 + 2 + ... + 10)^2 = 55^2 = 3025.
-
-Hence the difference between the sum of the squares of the first ten natural numbers and the square of the sum is 3025 - 385 = 2640.
-
-Find the difference between the sum of the squares of the first one hundred natural numbers and the square of the sum."""
-V4_MULTI_TEXT = """Shan-Yu and Mulan are playing a game. Let θ be an angle with 0° < θ < 180° known to both players. Initially, Shan-Yu makes a paper triangle T with measurements of his choice. Then, they repeatedly perform the following steps:
-• If T has at least one angle measuring exactly θ, then the game stops and Mulan wins.
-• Otherwise, Mulan chooses a point P on the perimeter of T, different from its three vertices. She then makes a straight cut from P to the opposite vertex of T, splitting it into two triangles.
-• Shan-Yu discards one of the two triangles. The remaining triangle becomes the new T.
-For which real values of θ can Mulan guarantee her victory in finitely many steps, no matter how Shan-Yu plays?"""
-V4_SIMPLE_HASH = "1a85541f75ac9b29a651a77f6bc3793048f652870a9da54f879ccfed7ecb1035"
-V4_MULTI_HASH = "c8956a092a8c6b6004beed40bb1a6646e2a792299db5400dedd11bbd6912a086"
+V4_SIMPLE_TEXT = "Synthetic V4 fixture A: compute 12 + 30."
+V4_MULTI_TEXT = "Synthetic V4 fixture B: sum the first six positive integers."
+V4_SIMPLE_HASH = hashlib.sha256(V4_SIMPLE_TEXT.encode("utf-8")).hexdigest()
+V4_MULTI_HASH = hashlib.sha256(V4_MULTI_TEXT.encode("utf-8")).hexdigest()
 TEST_QUESTION_SPECS = (
     ("simple-01", "https://example.invalid/simple", "simple_fastpath", SIMPLE_HASH),
     ("multi-01", "https://example.invalid/multi", "public_multistep", MULTI_HASH),
@@ -334,13 +322,13 @@ class StarReadinessRegistrationTest(unittest.TestCase):
                     "simple-03",
                     "https://projecteuler.net/problem=6",
                     "simple_fastpath",
-                    V4_SIMPLE_HASH,
+                    "1a85541f75ac9b29a651a77f6bc3793048f652870a9da54f879ccfed7ecb1035",
                 ),
                 (
                     "multi-03",
                     "https://www.imo-official.org/assets/documents/problems/2026/2026_eng.pdf#page=2",
                     "public_multistep",
-                    V4_MULTI_HASH,
+                    "c8956a092a8c6b6004beed40bb1a6646e2a792299db5400dedd11bbd6912a086",
                 ),
             ),
             PRODUCTION_V4_QUESTION_SPECS,
