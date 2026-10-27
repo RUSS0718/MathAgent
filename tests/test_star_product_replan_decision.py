@@ -19,8 +19,9 @@ from unittest.mock import patch
 
 from showcase.run_budget import RunBudgetLimits
 from showcase.tools import ToolRegistry
-from tests.star_product_support import ACCEPT, StarJobFixture
-from tests.star_recovery_worker import config as worker_config, provider as worker_provider
+from tests.star_product_support import StarJobFixture
+from tests.star_recovery_worker import config as worker_config
+from tests.star_recovery_worker import provider as worker_provider
 from tests.test_star_product_tools import FEATURES, NEED_PLAN
 
 GUIDANCE_REPLAN = {
@@ -356,6 +357,7 @@ class StarReplanDecisionTest(StarJobFixture, unittest.TestCase):
             self.assertEqual([], job["result"]["missing_capabilities"])
             self.assertEqual(1, job["result"]["solver"]["progress"]["plan_version"])
             self.assertEqual([], self.public_events(events, "plan_archived"))
+            self.assertEqual("same_artifact", self.report(job_id)["checks"]["binding"])
         with self.subTest(branch="abort"):
             replier = star_replier({1: RULING_ABORT}, {("a1", 0)})
             job_id, job, events = self.run_public(replier, full=True)
@@ -374,6 +376,7 @@ class StarReplanDecisionTest(StarJobFixture, unittest.TestCase):
             self.assertEqual(2, len(archived), archived)
             self.assertEqual([approvals[0]["solver_revision"], approvals[1]["solver_revision"]],
                              [event.get("decision_revision") for event in archived], archived)
+            self.assertEqual("same_artifact", self.report(job_id)["checks"]["binding"])
             final_planner = self.planner_requests()[-1]
             self.assertIn("NEW_DIRECTION", final_planner["forbidden_directions"])
             self.assertEqual({"A1_FACT", "B1_FACT"},

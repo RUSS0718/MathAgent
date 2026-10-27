@@ -24,6 +24,13 @@ SOLUTION = "17*23=17*(20+3)=340+51=391."
 class RobustRecoveryTest(StarJobFixture, unittest.TestCase):
     def test_real_receipt_exit_resumes_numeric_review_once_with_original_ledger(self):
         """New comparison/obligation/transport/state semantics survive one crash."""
+        self._run_receipt_recovery("star_limited")
+
+    def test_reference_receipt_exit_resumes_same_job_through_final_review_and_binding(self):
+        """The complete Reference preset preserves the same recovery contract."""
+        self._run_receipt_recovery("star_reference")
+
+    def _run_receipt_recovery(self, solver_mode):
         sent = []
         replies = {
             "explore": NEED_PLAN,
@@ -65,11 +72,11 @@ class RobustRecoveryTest(StarJobFixture, unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
             child = subprocess.run([sys.executable, "-m", "tests.rb06_recovery_worker",
-                directory, endpoint], capture_output=True, timeout=60)
+                directory, endpoint, solver_mode], capture_output=True, timeout=60)
             self.assertEqual(71, child.returncode, child.stderr.decode(errors="replace"))
             job_id = (folder / "job_id").read_text()
             self.assertEqual(["explore", "planner", "reasoner"], [r["role"] for r in sent])
-            self.app = create_app(config(folder, endpoint))
+            self.app = create_app(config(folder, endpoint, solver_mode))
             try:
                 self.client = self.app.test_client()
                 self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
@@ -83,6 +90,7 @@ class RobustRecoveryTest(StarJobFixture, unittest.TestCase):
                 final = self.terminal(job_id)
                 self.assertEqual("succeeded", final["status"], final)
                 self.assertEqual("fault_injection", final["result"]["evidence_kind"])
+                self.assertEqual(solver_mode, final["result"]["execution_mode"])
                 self.assertEqual(SOLUTION, final["result"]["final_response"])
                 self.assertEqual(["explore", "planner", "reasoner", "step_verifier",
                     "final_generator", "whole_solution_verifier"], [r["role"] for r in sent])

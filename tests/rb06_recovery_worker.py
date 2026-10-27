@@ -14,8 +14,10 @@ from showcase.run_budget import RunBudgetLimits
 from showcase.workspace import WorkspaceStore
 
 
-def config(folder, endpoint):
+def config(folder, endpoint, solver_mode="star_limited"):
     """Use only the explicit loopback provider; no provider credentials are loaded."""
+    if solver_mode not in {"star_limited", "star_reference"}:
+        raise ValueError("unsupported_solver_mode")
     with patch.dict(os.environ, {"INTERN_API_KEY": "loopback-only"}):
         client = InternChatClient(retry=1, timeout=3)
     client.api_base = endpoint
@@ -26,11 +28,13 @@ def config(folder, endpoint):
             "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection",
             "SHOWCASE_STAR_FEATURES": {"skills": True, "local_code_tool": True,
                                        "final_generation": True, "final_solution_review": True},
+            "SHOWCASE_STAR_FULL_ENABLED": solver_mode == "star_reference",
             "SHOWCASE_STAR_BUDGET": RunBudgetLimits(max_model_calls=8, max_http_attempts=8)}
 
 
 def main():
     folder, endpoint = Path(sys.argv[1]), sys.argv[2]
+    solver_mode = sys.argv[3] if len(sys.argv) > 3 else "star_limited"
     original = WorkspaceStore.append_event
 
     def crash(store, job_id, event):
@@ -41,14 +45,14 @@ def main():
         return result
 
     with patch.object(WorkspaceStore, "append_event", crash):
-        app = create_app(config(folder, endpoint))
+        app = create_app(config(folder, endpoint, solver_mode))
         client = app.test_client()
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
         headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
         session = client.post("/api/new_chat", headers=headers).get_json()["new_session_id"]
         response = client.post("/api/agent/jobs", headers=headers, json={
             "message": "Compute 17*23 and briefly explain.", "session_id": session,
-            "solver_mode": "star_limited"})
+            "solver_mode": solver_mode})
         if response.status_code != 202:
             raise AssertionError(response.get_json())
         time.sleep(40)

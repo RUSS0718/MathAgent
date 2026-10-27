@@ -33,6 +33,36 @@ class StarFullModeTest(StarJobFixture, unittest.TestCase):
             "message": "Factor x^2-1.", "session_id": self.session, "solver_mode": mode, **body,
         }, headers=self.headers())
 
+    def test_reference_easy_problem_completes_fastpath_review_and_binding(self):
+        """A simple Reference Job can finish without entering the plan/tool path."""
+        answer = "Adding one to one gives 2."
+        self.open_full([
+            {**SOLVED, "solution_candidate": answer},
+            {"solution_candidate": answer},
+            ACCEPT,
+        ])
+        response = self.submit(message="What is 1+1?")
+        self.assertEqual(202, response.status_code, response.get_json())
+
+        job_id = response.get_json()["job_id"]
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        result = job["result"]
+        self.assertEqual("star_reference", result["execution_mode"])
+        self.assertEqual([], result["missing_capabilities"])
+        self.assertEqual("completed_llm_reviewed", result["solver"]["status"])
+        self.assertEqual(answer, result["final_response"])
+        self.assertEqual(["explore", "explore_polish", "whole_solution_verifier"],
+                         [item["role"] for item in self.outbound])
+        report = self.report(job_id)
+        self.assertEqual(3, report["budget"]["logical_calls"])
+        self.assertEqual(0, report["budget"]["tool_calls"])
+        self.assertEqual("accepted", report["semantics"]["whole_review"])
+        self.assertEqual("same_artifact", report["checks"]["binding"])
+        evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
+        self.assertEqual(answer, evidence["run"]["final_response"])
+        self.assertEqual(report["semantics"], evidence["semantics"])
+
     def test_reference_runs_same_public_job_with_real_tool_and_whole_review(self):
         self.open_full([NEED_PLAN, PLAN, STEP, VERDICT,
                         {"final_response": "x^2-1=(x-1)(x+1)."}, ACCEPT])
