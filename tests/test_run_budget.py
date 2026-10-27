@@ -165,6 +165,32 @@ class RunBudgetContractTest(unittest.TestCase):
         self.assertGreater(report["budget"]["reserved_tokens"], 256)
         self.assertIsNone(report["budget"]["provider_known"]["prompt_tokens"])
 
+    def test_malformed_response_settles_usage_before_rejecting_choices(self):
+        class MalformedWithUsage(Response):
+            def json(self):
+                return {
+                    "choices": [],
+                    "usage": {
+                        "prompt_tokens": 7,
+                        "completion_tokens": 3,
+                        "total_tokens": 10,
+                    },
+                }
+
+        job, report, _evidence, post = self.run_job(
+            responses=[MalformedWithUsage()]
+        )
+
+        self.assertEqual("failed", job["status"])
+        self.assertEqual(1, post.call_count)
+        self.assertEqual(1, report["budget"]["http_attempts"])
+        self.assertEqual(
+            {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+            report["budget"]["provider_known"],
+        )
+        self.assertEqual(0, report["budget"]["reserved_tokens"])
+        self.assertEqual(0, report["budget"]["unknown_attempts"])
+
     def test_same_run_workers_and_reopened_ledger_share_attempt_limit(self):
         import sqlite3
         import threading

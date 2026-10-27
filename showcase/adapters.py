@@ -19,6 +19,7 @@ from typing import Any, Protocol
 
 import requests
 
+from .attempt_projection import bind_attempt_projection
 from .graph import AgentDecision
 from .request_attempts import record_attempts
 from .run_budget import current_budget
@@ -180,7 +181,11 @@ class InternModelAdapter:
                 self.outbound_observer(normalized)
             raw = transport(normalized, **kwargs)
         except Exception as exc:  # noqa: BLE001 - provider details stay out of events
-            attempts = record_attempts(getattr(exc, "attempts", ()), metadata)
+            source_attempts = tuple(getattr(exc, "attempts", ()))
+            attempts = record_attempts(source_attempts, metadata)
+            for source, projection in zip(source_attempts, attempts):
+                if isinstance(source, dict):
+                    bind_attempt_projection(source, projection)
             category = getattr(exc, "category", None) or (
                 "configuration" if type(exc).__name__ == "ChatClientError" else "adapter_error"
             )
@@ -311,7 +316,7 @@ class InternStreamAdapter(InternModelAdapter):
                     attempt["effective_timeout_seconds"] = attempt_timeout
 
                     def settle_late(response, raw_body, headers_seconds, completion_seconds,
-                                    late_attempt=attempt):
+                                    body_complete=True, late_attempt=attempt):
                         late_usage = {}
                         late_finish = None
                         late_model = None
@@ -346,7 +351,7 @@ class InternStreamAdapter(InternModelAdapter):
                         if not late_usage:
                             return
                         late_attempt.update(
-                            status="success",
+                            status="success" if body_complete else "unknown",
                             http_status=response.status_code,
                             response_headers_seconds=headers_seconds,
                             completion_seconds=completion_seconds,
