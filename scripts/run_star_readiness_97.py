@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / "artifacts"
 sys.path.insert(0, str(ROOT))
-DEFAULT_DRAFT = ARTIFACTS / "issue-97-prereg" / "draft-v2.json"
+DEFAULT_DRAFT = ARTIFACTS / "issue-97-prereg" / "draft-v3.json"
 DEFAULT_MANIFEST = ARTIFACTS / "issue-97-prereg" / "live-manifest.json"
 
 
@@ -45,17 +44,6 @@ def _write_once(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("x", encoding="utf-8", newline="\n") as stream:
         stream.write(content)
-
-
-def _claim_live_registration(manifest_sha256):
-    """Atomically consume one manifest hash so another archive cannot replay it."""
-    if not isinstance(manifest_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", manifest_sha256):
-        raise ValueError("star_readiness_registration_identity_mismatch")
-    marker = ARTIFACTS / "issue-97-prereg" / f"{manifest_sha256}.consumed"
-    try:
-        _write_once(marker, manifest_sha256 + "\n")
-    except FileExistsError:
-        raise ValueError("star_readiness_live_registration_already_consumed") from None
 
 
 def _freeze(args):
@@ -139,7 +127,6 @@ def _run(args):
         manifest_sha256=args.manifest_sha256,
         evidence_kind="live",
     )
-    _claim_live_registration(args.manifest_sha256)
     result = coordinator.run()
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0 if result["stop_reason"] == "completed" else 1

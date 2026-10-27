@@ -4,6 +4,7 @@ from collections.abc import Mapping
 
 from llm_response import public_attempt, safe_identifier
 
+from .final_evidence import artifact_identity
 from .star_readiness_registration import digest
 
 _BUDGET_FIELDS = (
@@ -59,6 +60,10 @@ def run_record(bundle, *, job_id):
     report_attempts = report.get("request_attempts", []) if isinstance(report, Mapping) else []
     evidence_attempts = evidence.get("request_attempts", []) if isinstance(evidence, Mapping) else []
     report_answer = report.get("answer") if isinstance(report, Mapping) else None
+    answer_identity = {
+        "present": bool(answer.strip()) if isinstance(answer, str) else False,
+        "sha256": artifact_identity(answer)["sha256"] if isinstance(answer, str) else None,
+    }
     return {
         "bundle_invariants": {
             "job_run_identity": job_id == (run.get("run_id") if isinstance(run, Mapping) else None)
@@ -83,9 +88,9 @@ def run_record(bundle, *, job_id):
             "status": safe_identifier(job.get("status")) if isinstance(job, Mapping) else None,
         },
         "run": _pick(run, ("run_id", "status", "stage")),
-        "answer_identity": {
-            "present": bool(answer.strip()) if isinstance(answer, str) else False,
-        },
+        "answer_identity": answer_identity,
+        # Scoped bundle checks and LLM review do not independently establish correctness.
+        "math_verdict": "unknown",
         "semantics": _semantic_record(report.get("semantics") if isinstance(report, Mapping) else None),
         "budget": budget_record(report.get("budget") if isinstance(report, Mapping) else None),
         "request_attempts": [

@@ -47,7 +47,7 @@ def _start_deferred_cleanup(storage, database_path, run_ids, deadline):
     threading.Thread(
         target=wait_and_cleanup,
         name="star-readiness-97-runtime-cleanup",
-        daemon=True,
+        daemon=False,
     ).start()
     return "deferred"
 

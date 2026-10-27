@@ -9,8 +9,10 @@ from datetime import date
 from .request_transport import INTERN_S2_LIVE_ENDPOINT
 
 ADAPTER_VERSION = "issue-97-registration-adapter-v3"
-DRAFT_VERSION = "issue-97-nonstream-draft-v2"
-QUESTION_SPECS = (
+V2_DRAFT_VERSION = "issue-97-nonstream-draft-v2"
+V3_DRAFT_VERSION = "issue-97-nonstream-draft-v3"
+DRAFT_VERSION = V3_DRAFT_VERSION
+V2_QUESTION_SPECS = (
     (
         "simple-01",
         "https://projecteuler.net/problem=1",
@@ -24,6 +26,23 @@ QUESTION_SPECS = (
         "874c20406723e261e1f2dde0c5ab7f9ccb9e76957c48cb84718383151ccce5d6",
     ),
 )
+V3_QUESTION_SPECS = (
+    (
+        "simple-02",
+        "https://projecteuler.net/problem=2",
+        "simple_fastpath",
+        "764d9d6e78508d59d2c66ea1d4358c25f6d01c559fe7e1090bd29c929330d042",
+    ),
+    (
+        "multi-02",
+        "https://www.imo-official.org/assets/documents/problems/2026/2026_eng.pdf#page=2",
+        "public_multistep",
+        "f62ac6626ffa36647845b0e9d338191a9171899eed8615c033657c1ddc57e5b5",
+    ),
+)
+QUESTION_SPECS = V3_QUESTION_SPECS
+V2_AUTHORIZATION_SCOPE = "issue-97-two-question-nonstream-batch"
+V3_AUTHORIZATION_SCOPE = "issue-97-two-question-nonstream-batch-v3"
 MODEL = {
     "max_output_tokens": 8192,
     "name": "intern-s2",
@@ -136,7 +155,7 @@ def digest(value):
 
 
 def adapt_draft(draft, *, current_source):
-    """Adapt a compatible v2 draft into a non-dispatchable frozen manifest."""
+    """Adapt a compatible v2 or v3 draft into a non-dispatchable manifest."""
     record = _json_copy(draft)
     _validate_draft(record)
     source = _validate_source(current_source)
@@ -145,7 +164,7 @@ def adapt_draft(draft, *, current_source):
         "authorization_date": None,
         "authorization_scope": None,
         "draft_sha256": digest(record),
-        "draft_version": DRAFT_VERSION,
+        "draft_version": record["version"],
         "execution_authorized": False,
         "model": copy.deepcopy(MODEL),
         "provider_mode": "loopback_only",
@@ -180,7 +199,7 @@ def authorize_live_registration(
     explicit_authorization,
     authorization_date,
 ):
-    """Freeze an exact validated draft for the caller-authorized live batch."""
+    """Authorize only a current v3 draft; v2 remains available for registration."""
     if explicit_authorization is not True:
         raise ValueError("star_readiness_live_authorization_required")
     if not isinstance(authorization_date, str):
@@ -195,9 +214,11 @@ def authorize_live_registration(
         expected_sha256=expected_sha256,
         current_source=current_source,
     )
+    if record["draft_version"] != V3_DRAFT_VERSION:
+        raise ValueError("star_readiness_live_draft_version_invalid")
     record.update(
         authorization_date=authorization_date,
-        authorization_scope="issue-97-two-question-nonstream-batch",
+        authorization_scope=_authorization_scope_for_draft_version(record["draft_version"]),
         execution_authorized=True,
         provider_endpoint=INTERN_S2_LIVE_ENDPOINT,
         provider_mode="intern_s2_live",
@@ -230,9 +251,9 @@ def _json_copy(value):
 def _validate_draft(record):
     if not isinstance(record, dict) or set(record) != _DRAFT_KEYS:
         raise ValueError("star_readiness_registration_invalid")
+    question_specs = _question_specs_for_draft_version(record["version"])
     if (
-        record["version"] != DRAFT_VERSION
-        or record["status"] != "draft_not_dispatchable"
+        record["status"] != "draft_not_dispatchable"
         or record["budget_status"] != "proposed_unapproved"
         or record["enforcement"] != "not_implemented"
         or record["runner_qualification"] != "not_implemented"
@@ -248,8 +269,8 @@ def _validate_draft(record):
         raise ValueError("star_readiness_registration_invalid")
     _validate_historical_source(record["source_identity"])
     _validate_model(record["model"])
-    _validate_questions(record["questions"], draft=True)
-    _validate_schedule(record["schedule"])
+    _validate_questions(record["questions"], draft=True, question_specs=question_specs)
+    _validate_schedule(record["schedule"], question_specs=question_specs)
     _validate_round_limits(record["round_limits"])
     if record["stop_on"] != STOP_ON:
         raise ValueError("star_readiness_registration_invalid")
@@ -262,12 +283,12 @@ def _validate_manifest(record):
         or type(record["schema_version"]) is not int
         or record["schema_version"] != 2
         or record["adapter_version"] != ADAPTER_VERSION
-        or record["draft_version"] != DRAFT_VERSION
         or not isinstance(record["draft_sha256"], str)
         or not _HASH_RE.fullmatch(record["draft_sha256"])
         or record["stop_on"] != STOP_ON
     ):
         raise ValueError("star_readiness_registration_invalid")
+    question_specs = _question_specs_for_draft_version(record["draft_version"])
     loopback = (
         record["status"] == "draft_not_dispatchable"
         and record["execution_authorized"] is False
@@ -281,7 +302,8 @@ def _validate_manifest(record):
         and record["execution_authorized"] is True
         and record["provider_mode"] == "intern_s2_live"
         and record["provider_endpoint"] == INTERN_S2_LIVE_ENDPOINT
-        and record["authorization_scope"] == "issue-97-two-question-nonstream-batch"
+        and record["authorization_scope"]
+        == _authorization_scope_for_draft_version(record["draft_version"])
         and isinstance(record["authorization_date"], str)
     )
     if not loopback and not live:
@@ -299,8 +321,8 @@ def _validate_manifest(record):
     if any(value is not True for value in
            record["reference_configuration"]["preset"]["features"].values()):
         raise ValueError("star_readiness_configuration_invalid")
-    _validate_questions(record["questions"], draft=False)
-    _validate_schedule(record["schedule"])
+    _validate_questions(record["questions"], draft=False, question_specs=question_specs)
+    _validate_schedule(record["schedule"], question_specs=question_specs)
     _validate_round_limits(record["round_limits"])
 
 
@@ -317,14 +339,15 @@ def _validate_model(value):
         raise ValueError("star_readiness_registration_invalid")
 
 
-def _validate_questions(value, *, draft):
-    if not isinstance(value, list) or len(value) != len(QUESTION_SPECS):
+def _validate_questions(value, *, draft, question_specs=None):
+    question_specs = QUESTION_SPECS if question_specs is None else question_specs
+    if not isinstance(value, list) or len(value) != len(question_specs):
         raise ValueError("star_readiness_registration_invalid")
     expected_keys = {"id", "prompt_sha256", "source", "text", "type"} if draft else {
         "id", "source", "text", "text_sha256", "type"
     }
     hash_key = "prompt_sha256" if draft else "text_sha256"
-    for item, (question_id, source, question_type, expected_hash) in zip(value, QUESTION_SPECS):
+    for item, (question_id, source, question_type, expected_hash) in zip(value, question_specs):
         if (
             not isinstance(item, dict)
             or set(item) != expected_keys
@@ -341,10 +364,11 @@ def _validate_questions(value, *, draft):
             raise ValueError("star_readiness_registration_invalid")
 
 
-def _validate_schedule(value):
-    if not isinstance(value, list) or len(value) != len(QUESTION_SPECS):
+def _validate_schedule(value, *, question_specs=None):
+    question_specs = QUESTION_SPECS if question_specs is None else question_specs
+    if not isinstance(value, list) or len(value) != len(question_specs):
         raise ValueError("star_readiness_registration_invalid")
-    for item, (question_id, _, _, _), limits in zip(value, QUESTION_SPECS, RUN_LIMITS):
+    for item, (question_id, _, _, _), limits in zip(value, question_specs, RUN_LIMITS):
         if (
             not isinstance(item, dict)
             or set(item) != {"attempts", "limits", "question", "transport"}
@@ -369,6 +393,22 @@ def _exact_int_mapping(value, expected):
         and all(type(item) is int for item in value.values())
         and value == expected
     )
+
+
+def _question_specs_for_draft_version(version):
+    if version == V2_DRAFT_VERSION:
+        return V2_QUESTION_SPECS
+    if version == V3_DRAFT_VERSION:
+        return QUESTION_SPECS
+    raise ValueError("star_readiness_registration_invalid")
+
+
+def _authorization_scope_for_draft_version(version):
+    if version == V2_DRAFT_VERSION:
+        return V2_AUTHORIZATION_SCOPE
+    if version == V3_DRAFT_VERSION:
+        return V3_AUTHORIZATION_SCOPE
+    raise ValueError("star_readiness_registration_invalid")
 
 
 def _validate_source(value):

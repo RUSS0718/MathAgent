@@ -1,5 +1,6 @@
 """#97 archive DTOs exclude raw prompts, reasoning and response bodies."""
 
+import hashlib
 import json
 import unittest
 
@@ -83,7 +84,12 @@ class StarReadinessArchiveTest(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, serialized)
         self.assertTrue(record["answer_identity"]["present"])
-        self.assertEqual({"present": True}, record["answer_identity"])
+        self.assertEqual({
+            "present": True,
+            "sha256": hashlib.sha256(b"DO-NOT-ARCHIVE-ANSWER").hexdigest(),
+        }, record["answer_identity"])
+        self.assertEqual("unknown", record["math_verdict"])
+        self.assertNotIn("DO-NOT-ARCHIVE-ANSWER", serialized)
         self.assertEqual("artifact-1", record["tools"][0]["receipt"]["receipt_ref"])
         self.assertEqual(120, record["budget"]["charged_tokens"])
 
@@ -98,6 +104,17 @@ class StarReadinessArchiveTest(unittest.TestCase):
         self.assertEqual("receipt-1", record["identity"]["receipt_ref"])
         self.assertEqual("success", record["receipt"]["status"])
         self.assertNotIn("private", json.dumps(record))
+
+    def test_run_archive_does_not_infer_math_verdict_from_check_status(self):
+        for status in ("pass", "conflict"):
+            with self.subTest(status=status):
+                record = run_record({
+                    "job": {"result": {"final_response": "private answer"}},
+                    "run": {"run_id": "job-1"},
+                    "report": {"checks": {"status": status}},
+                }, job_id="job-1")
+
+                self.assertEqual("unknown", record["math_verdict"])
 
 
 if __name__ == "__main__":

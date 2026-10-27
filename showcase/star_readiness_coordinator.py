@@ -1,5 +1,6 @@
 """Run the frozen two-question #97 batch through bounded STAR public Jobs."""
 
+import re
 import subprocess
 import tempfile
 import time
@@ -21,6 +22,21 @@ from .star_readiness_configuration import validate_server_configuration
 from .star_readiness_profile import validate_execution_profile
 from .star_readiness_registration import ROUND_LIMITS, digest, registration
 from .star_readiness_runtime import cleanup_runtime_storage
+
+ARTIFACTS = Path(__file__).resolve().parents[1] / "artifacts"
+
+
+def _claim_live_registration(manifest_sha256):
+    """Atomically consume a live manifest independently of its archive location."""
+    if not isinstance(manifest_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", manifest_sha256):
+        raise ValueError("star_readiness_registration_identity_mismatch")
+    marker = ARTIFACTS / "issue-97-prereg" / f"{manifest_sha256}.consumed"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with marker.open("x", encoding="utf-8", newline="\n") as stream:
+            stream.write(manifest_sha256 + "\n")
+    except FileExistsError:
+        raise ValueError("star_readiness_live_registration_already_consumed") from None
 
 
 def current_source_identity():
@@ -211,6 +227,7 @@ class StarReadinessCoordinator:
         stop = "completed"
         attempted = []
         dispatched = []
+        unresolved_dispatches = []
         records = []
         preflight_ids = set()
         preflight_count = 0
@@ -235,6 +252,8 @@ class StarReadinessCoordinator:
                 "source": frozen["source_identity"],
                 "evidence_kind": self.evidence_kind,
             })
+            if self.evidence_kind == "live":
+                _claim_live_registration(self.manifest_sha256)
             self._check_execution_profile()
             runtime_storage = tempfile.TemporaryDirectory(prefix="star-readiness-97-")
             server = ExperimentServer(
@@ -329,7 +348,17 @@ class StarReadinessCoordinator:
                     },
                 })
                 attempted.append(index)
-                job_id = server.dispatch(question)
+                try:
+                    job_id = server.dispatch(question)
+                except Exception as exc:
+                    usage["usage_complete"] = False
+                    unresolved_dispatches.append({
+                        "index": index,
+                        "question_id": entry["question"],
+                    })
+                    stop = "unknown_dispatch_outcome"
+                    failure_type = type(exc).__name__
+                    break
                 dispatched.append({"index": index, "job_id": job_id})
                 archive.put(f"dispatch-{index:02d}.json", {"job_id": job_id})
 
@@ -418,6 +447,7 @@ class StarReadinessCoordinator:
                            frozen["schedule"][len(attempted):]] if frozen else [],
             "uncollected": [item for item in dispatched
                             if not any(record["job_id"] == item["job_id"] for record in records)],
+            "unresolved_dispatches": unresolved_dispatches,
             "preflights": preflight_count,
             "usage": usage,
             "wall_time_seconds": time.monotonic() - started,

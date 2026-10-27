@@ -8,6 +8,8 @@ from unittest.mock import patch
 from showcase import star_readiness_registration
 from showcase.star_readiness_registration import (
     ADAPTER_VERSION,
+    DRAFT_VERSION,
+    V2_DRAFT_VERSION,
     adapt_draft,
     authorize_live_registration,
     digest,
@@ -18,11 +20,16 @@ SIMPLE_TEXT = "Synthetic fixture A: compute 17 + 25."
 MULTI_TEXT = "Synthetic fixture B: sum the first five positive integers."
 SIMPLE_HASH = hashlib.sha256(SIMPLE_TEXT.encode("utf-8")).hexdigest()
 MULTI_HASH = hashlib.sha256(MULTI_TEXT.encode("utf-8")).hexdigest()
+SIMPLE_02_TEXT = "Synthetic fixture C: compute 8 * 9."
+MULTI_02_TEXT = "Synthetic fixture D: sum the squares of the first four positive integers."
+SIMPLE_02_HASH = hashlib.sha256(SIMPLE_02_TEXT.encode("utf-8")).hexdigest()
+MULTI_02_HASH = hashlib.sha256(MULTI_02_TEXT.encode("utf-8")).hexdigest()
 TEST_QUESTION_SPECS = (
     ("simple-01", "https://example.invalid/simple", "simple_fastpath", SIMPLE_HASH),
     ("multi-01", "https://example.invalid/multi", "public_multistep", MULTI_HASH),
 )
-PRODUCTION_QUESTION_SPECS = star_readiness_registration.QUESTION_SPECS
+PRODUCTION_QUESTION_SPECS = star_readiness_registration.V2_QUESTION_SPECS
+PRODUCTION_V3_QUESTION_SPECS = star_readiness_registration.QUESTION_SPECS
 QUESTIONS = [
     {
         "id": "simple-01",
@@ -39,6 +46,26 @@ QUESTIONS = [
         "type": "public_multistep",
     },
 ]
+V3_QUESTIONS = [
+    {
+        "id": "simple-02",
+        "prompt_sha256": SIMPLE_02_HASH,
+        "source": "https://example.invalid/simple-v3",
+        "text": SIMPLE_02_TEXT,
+        "type": "simple_fastpath",
+    },
+    {
+        "id": "multi-02",
+        "prompt_sha256": MULTI_02_HASH,
+        "source": "https://example.invalid/multi-v3",
+        "text": MULTI_02_TEXT,
+        "type": "public_multistep",
+    },
+]
+TEST_V3_QUESTION_SPECS = tuple(
+    (question["id"], question["source"], question["type"], question["prompt_sha256"])
+    for question in V3_QUESTIONS
+)
 MODEL = {
     "max_output_tokens": 8192,
     "name": "intern-s2",
@@ -149,13 +176,59 @@ def synthetic_draft():
     }
 
 
+def synthetic_v3_draft():
+    draft = synthetic_draft()
+    draft["version"] = DRAFT_VERSION
+    draft["questions"] = copy.deepcopy(V3_QUESTIONS)
+    draft["schedule"][0]["question"] = "simple-02"
+    draft["schedule"][1]["question"] = "multi-02"
+    return draft
+
+
+def consumed_v2_manifest():
+    draft = synthetic_draft()
+    return {
+        "authorization_date": None,
+        "authorization_scope": None,
+        "reference_configuration": copy.deepcopy(REFERENCE_CONFIGURATION),
+        "adapter_version": ADAPTER_VERSION,
+        "draft_sha256": digest(draft),
+        "draft_version": V2_DRAFT_VERSION,
+        "execution_authorized": False,
+        "model": copy.deepcopy(MODEL),
+        "provider_mode": "loopback_only",
+        "provider_endpoint": None,
+        "questions": [
+            {
+                "id": question["id"],
+                "source": question["source"],
+                "text": question["text"],
+                "text_sha256": question["prompt_sha256"],
+                "type": question["type"],
+            }
+            for question in draft["questions"]
+        ],
+        "round_limits": copy.deepcopy(ROUND_LIMITS),
+        "schedule": copy.deepcopy(draft["schedule"]),
+        "schema_version": 2,
+        "source_identity": copy.deepcopy(SOURCE),
+        "status": "draft_not_dispatchable",
+        "stop_on": copy.deepcopy(STOP_ON),
+    }
+
+
 class StarReadinessRegistrationTest(unittest.TestCase):
     def setUp(self):
         question_specs = patch(
-            "showcase.star_readiness_registration.QUESTION_SPECS", TEST_QUESTION_SPECS
+            "showcase.star_readiness_registration.V2_QUESTION_SPECS", TEST_QUESTION_SPECS
         )
         question_specs.start()
         self.addCleanup(question_specs.stop)
+        v3_question_specs = patch(
+            "showcase.star_readiness_registration.QUESTION_SPECS", TEST_V3_QUESTION_SPECS
+        )
+        v3_question_specs.start()
+        self.addCleanup(v3_question_specs.stop)
 
     def make_manifest(self, *, current_source=None):
         draft = synthetic_draft()
@@ -182,6 +255,133 @@ class StarReadinessRegistrationTest(unittest.TestCase):
             ),
             PRODUCTION_QUESTION_SPECS,
         )
+
+    def test_v3_specs_pin_the_two_supplied_prompt_hashes(self):
+        self.assertEqual(
+            (
+                (
+                    "simple-02",
+                    "https://projecteuler.net/problem=2",
+                    "simple_fastpath",
+                    "764d9d6e78508d59d2c66ea1d4358c25f6d01c559fe7e1090bd29c929330d042",
+                ),
+                (
+                    "multi-02",
+                    "https://www.imo-official.org/assets/documents/problems/2026/2026_eng.pdf#page=2",
+                    "public_multistep",
+                    "f62ac6626ffa36647845b0e9d338191a9171899eed8615c033657c1ddc57e5b5",
+                ),
+            ),
+            PRODUCTION_V3_QUESTION_SPECS,
+        )
+
+    def test_v3_adapter_freezes_new_questions_with_existing_nonstream_budgets(self):
+        manifest = adapt_draft(synthetic_v3_draft(), current_source=SOURCE)
+
+        self.assertEqual("issue-97-nonstream-draft-v3", manifest["draft_version"])
+        self.assertEqual(
+            [(q["id"], q["source"], q["text"], q["prompt_sha256"]) for q in V3_QUESTIONS],
+            [(q["id"], q["source"], q["text"], q["text_sha256"]) for q in manifest["questions"]],
+        )
+        self.assertEqual(["simple-02", "multi-02"], [s["question"] for s in manifest["schedule"]])
+        self.assertEqual([1, 1], [s["attempts"] for s in manifest["schedule"]])
+        self.assertEqual(["nonstream", "nonstream"], [s["transport"] for s in manifest["schedule"]])
+        self.assertEqual(
+            [
+                {
+                    "charged_tokens": 32768,
+                    "http_attempts": 8,
+                    "logical_calls": 6,
+                    "problem_tool_calls": 1,
+                    "wall_seconds": 300,
+                },
+                {
+                    "charged_tokens": 65536,
+                    "http_attempts": 16,
+                    "logical_calls": 12,
+                    "problem_tool_calls": 3,
+                    "wall_seconds": 600,
+                },
+            ],
+            [s["limits"] for s in manifest["schedule"]],
+        )
+        self.assertEqual(ROUND_LIMITS, manifest["round_limits"])
+        self.assertEqual(2, manifest["schema_version"])
+
+    def test_v3_registration_and_authorization_scope_are_versioned(self):
+        loopback = adapt_draft(synthetic_v3_draft(), current_source=SOURCE)
+        loaded = registration(
+            loopback,
+            expected_sha256=digest(loopback),
+            current_source=SOURCE,
+        )
+        self.assertEqual(loopback, loaded)
+
+        authorized = authorize_live_registration(
+            loopback,
+            expected_sha256=digest(loopback),
+            current_source=SOURCE,
+            explicit_authorization=True,
+            authorization_date="2026-10-28",
+        )
+        self.assertEqual(
+            "issue-97-two-question-nonstream-batch-v3",
+            authorized["authorization_scope"],
+        )
+        self.assertEqual(
+            authorized,
+            registration(
+                authorized,
+                expected_sha256=digest(authorized),
+                current_source=SOURCE,
+            ),
+        )
+
+    def test_v2_consumed_loopback_manifest_remains_valid_for_registration(self):
+        manifest = consumed_v2_manifest()
+
+        self.assertEqual("issue-97-nonstream-draft-v2", manifest["draft_version"])
+        self.assertEqual(
+            manifest,
+            registration(
+                manifest,
+                expected_sha256=digest(manifest),
+                current_source=SOURCE,
+            ),
+        )
+
+    def test_v2_consumed_loopback_manifest_cannot_be_authorized_for_live(self):
+        manifest = consumed_v2_manifest()
+
+        with self.assertRaisesRegex(ValueError, "live_draft_version_invalid"):
+            authorize_live_registration(
+                manifest,
+                expected_sha256=digest(manifest),
+                current_source=SOURCE,
+                explicit_authorization=True,
+                authorization_date="2026-10-28",
+            )
+
+    def test_v3_adapter_rejects_question_and_schedule_drift(self):
+        changed_hash = synthetic_v3_draft()
+        changed_hash["questions"][0]["prompt_sha256"] = "0" * 64
+        with self.assertRaises(ValueError):
+            adapt_draft(changed_hash, current_source=SOURCE)
+
+        changed_budget = synthetic_v3_draft()
+        changed_budget["schedule"][1]["limits"]["charged_tokens"] += 1
+        with self.assertRaises(ValueError):
+            adapt_draft(changed_budget, current_source=SOURCE)
+
+        changed_attempt = synthetic_v3_draft()
+        changed_attempt["schedule"][0]["attempts"] = 2
+        with self.assertRaises(ValueError):
+            adapt_draft(changed_attempt, current_source=SOURCE)
+
+        changed_transport = synthetic_v3_draft()
+        changed_transport["schedule"][1]["transport"] = "stream"
+        with self.assertRaises(ValueError):
+            adapt_draft(changed_transport, current_source=SOURCE)
 
     def test_adapter_freezes_questions_model_source_budget_and_stop_conditions(self):
         manifest = self.make_manifest()
@@ -291,7 +491,7 @@ class StarReadinessRegistrationTest(unittest.TestCase):
             registration(manifest, expected_sha256=digest(manifest), current_source=malformed_source)
 
     def test_live_manifest_requires_explicit_authorization_and_pins_provider(self):
-        loopback = adapt_draft(synthetic_draft(), current_source=SOURCE)
+        loopback = adapt_draft(synthetic_v3_draft(), current_source=SOURCE)
         manifest = authorize_live_registration(
             loopback,
             expected_sha256=digest(loopback),
@@ -313,7 +513,7 @@ class StarReadinessRegistrationTest(unittest.TestCase):
         )
 
     def test_live_manifest_rejects_endpoint_drift_even_after_rehash(self):
-        loopback = adapt_draft(synthetic_draft(), current_source=SOURCE)
+        loopback = adapt_draft(synthetic_v3_draft(), current_source=SOURCE)
         manifest = authorize_live_registration(
             loopback,
             expected_sha256=digest(loopback),
@@ -327,7 +527,7 @@ class StarReadinessRegistrationTest(unittest.TestCase):
             registration(manifest, expected_sha256=digest(manifest), current_source=SOURCE)
 
     def test_live_registration_requires_explicit_true_authorization(self):
-        loopback = adapt_draft(synthetic_draft(), current_source=SOURCE)
+        loopback = adapt_draft(synthetic_v3_draft(), current_source=SOURCE)
 
         with self.assertRaisesRegex(ValueError, "live_authorization_required"):
             authorize_live_registration(

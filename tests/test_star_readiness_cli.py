@@ -9,17 +9,22 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from scripts.run_star_readiness_97 import (
     ARTIFACTS,
     _build_adapter,
-    _claim_live_registration,
     _inside_artifacts,
     build_parser,
     main,
 )
-from tests.test_star_readiness_registration import SOURCE, TEST_QUESTION_SPECS, synthetic_draft
+from showcase.star_readiness_registration import digest
+from tests.test_star_readiness_registration import (
+    SOURCE,
+    TEST_V3_QUESTION_SPECS,
+    synthetic_v3_draft,
+)
 
 
 class StarReadinessCliTest(unittest.TestCase):
@@ -27,11 +32,11 @@ class StarReadinessCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=ARTIFACTS) as directory:
             draft = Path(directory) / "draft.json"
             manifest = Path(directory) / "manifest.json"
-            draft.write_text(json.dumps(synthetic_draft()), encoding="utf-8")
+            draft.write_text(json.dumps(synthetic_v3_draft()), encoding="utf-8")
             with (
                 patch(
                     "showcase.star_readiness_registration.QUESTION_SPECS",
-                    TEST_QUESTION_SPECS,
+                    TEST_V3_QUESTION_SPECS,
                 ),
                 patch(
                     "showcase.star_readiness_coordinator.current_source_identity",
@@ -106,14 +111,38 @@ class StarReadinessCliTest(unittest.TestCase):
         self.assertTrue(client.provider_endpoint_only)
         self.assertFalse(client.loopback_only)
 
-    def test_live_registration_can_only_be_claimed_once_by_content_hash(self):
+    def test_run_live_delegates_consumption_to_coordinator(self):
         with tempfile.TemporaryDirectory() as directory:
-            with patch("scripts.run_star_readiness_97.ARTIFACTS", Path(directory)):
-                _claim_live_registration("a" * 64)
-                with self.assertRaisesRegex(ValueError, "already_consumed"):
-                    _claim_live_registration("a" * 64)
+            root = Path(directory)
+            manifest = {"fixture": "live-manifest"}
+            manifest_sha256 = digest(manifest)
+            manifest_path = root / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            archive_path = root / "archive"
+            runner = Mock(return_value={"stop_reason": "completed"})
+            coordinator = SimpleNamespace(run=runner)
 
-                _claim_live_registration("b" * 64)
+            with (
+                patch("scripts.run_star_readiness_97.ARTIFACTS", root),
+                patch("scripts.run_star_readiness_97._build_adapter", return_value=object()),
+                patch(
+                    "showcase.star_readiness_coordinator.StarReadinessCoordinator",
+                    return_value=coordinator,
+                ) as factory,
+                patch("showcase.star_readiness_coordinator.ARTIFACTS", root / "claims"),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                result = main([
+                    "run-live", "--manifest", str(manifest_path),
+                    "--manifest-sha256", manifest_sha256,
+                    "--archive", str(archive_path), "--execute-live",
+                ])
+
+            self.assertEqual(0, result)
+            factory.assert_called_once()
+            runner.assert_called_once_with()
+            self.assertFalse((root / "claims" / "issue-97-prereg" /
+                              f"{manifest_sha256}.consumed").exists())
 
 
 if __name__ == "__main__":
