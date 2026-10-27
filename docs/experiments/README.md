@@ -11,6 +11,8 @@
 7. [审查与交接](review-and-handoff.md)：两条审查轴的发现、修复和下一切片。
 8. [setup PR 正文草案](setup-pr-draft.md)：面向 develop 的可审查说明，尚未创建远端 PR。
 9. [S5 同题配对 Runner](s5-paired-runner.md)：显式运行、公共 API、未知 / 失败保留和归档合同；不代表 live 或数学提升验收。
+10. [STAR 架构健壮性与组件作用实验方案](star-architecture-robustness-plan.md)：历史提案，未采纳为当前执行合同；保留组件测试映射。
+11. [#97 非流式两题登记草案](star-readiness-97-preregistration-draft.md)：独立样本、预算及停止条件；当前仍无真实调用授权。工程结果见[就绪核对记录](../evals/star-readiness-97-status.md)。
 
 ## 离线预检入口
 

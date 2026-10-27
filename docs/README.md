@@ -8,7 +8,13 @@
 
 ## 当前 ALIGN 状态
 
-最新 RB08 工程门禁、真实实验失败及逐项 ROB-AC 边界见 [RB08 发布与真实实验记录](evals/star-rb08-release.md)。冻结源码 a10481d 的发布检查、前端、54项通用及12项产品浏览器检查通过；真实原E1执行2/4后停止，E2未执行。用户授权的一次独立流式复测仍未完成整题审查，新缺陷为 [#96](https://github.com/RUSS0718/MathAgent/issues/96)。#95/#87/#80保持开放，整体为engineering-preview。下方维护版本的测试数字属于历史记录。
+最新 RB08 工程门禁、真实实验失败及逐项 ROB-AC 边界见 [RB08 发布与真实实验记录](evals/star-rb08-release.md)。冻结源码 a10481d 的发布检查、前端、54项通用及12项产品浏览器检查通过；真实原E1执行2/4后停止，E2未执行。本轮目标为建立离线简单题、多步 Reference、工具、整题审查、文本绑定与进程恢复闭环；相关聚焦用例、全仓离线合同（757 项测试）及 Showcase 发布门禁均已通过。流式保持可选，本轮未发真实提供方请求，未验证 provider-live 兼容或数学正确率。完整测试命令、接口事实及证据边界见 [#96 非流式主路径验收记录](evals/star-stream-usage-96.md)。修复切片仍在本地、尚未合并；#96 保持开放。只读 Issue 核验（2026-10-27）：#96 是 #95 的直接 blocking issue；#95 正文中 `Blocked by #94` 已过期，因为 #94 于 2026-10-26 关闭。#87 保持开放，8 个子票中 7 个完成，#95 尚未完成；#80 保持开放，ALIGN-AC-18 真实自然非快通道闭环未通过，且无 #95/#96 对 #80 的直接阻塞关系。#95/#87/#80 均不在真实验收达标前关闭，整体为 engineering-preview。下方维护版本的测试数字属于历史记录。
+
+当前 #97 是独立的非流式验收，不以前述旧 E1/E2 通过为前置，也不重算或覆盖原批次结果；#95 仍正式受 #96 阻塞，付费执行暂停。
+
+#97 的当前结果见[非流式就绪核对记录](evals/star-readiness-97-status.md)，执行边界见[批次执行合同](engineering/star-readiness-97-execution-contract.md)，样本及预算见[两题登记草案](experiments/star-readiness-97-preregistration-draft.md)。离线通过与真实 provider 验收分别记录。
+
+早期未采纳的组件合同、Reference readiness 与架构效果方案见 [STAR 架构健壮性与组件作用实验方案](experiments/star-architecture-robustness-plan.md)，仅作历史参考，不是当前验收目标。
 
 spec #70（ALIGN-01..ALIGN-10，#71..#80）承接 #56 的语义偏移修复与重新验收：裁决消费与新动作身份、独立 ReplanDecision、Verifier/Explore 受控计算、分类账本与证明传递、协议失败与 unknown 分离、跨流程恢复，最终来源复核与发布判断见 [ALIGN-10 来源映射](evals/star-product-align10-source-mapping.md) 与 [ALIGN-10 发布记录](evals/star-product-align10-release.md)。记录区分 scripted/故障注入/live/replay 证据；真实非 Explore 快通道闭环尚未取得，历史工单关闭不升级为完整能力结论。
 
