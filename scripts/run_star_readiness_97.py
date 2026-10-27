@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / "artifacts"
 sys.path.insert(0, str(ROOT))
-DEFAULT_DRAFT = ARTIFACTS / "issue-97-prereg" / "draft-v3.json"
+DEFAULT_DRAFT = ARTIFACTS / "issue-97-prereg" / "draft-v4.json"
 DEFAULT_MANIFEST = ARTIFACTS / "issue-97-prereg" / "live-manifest.json"
 
 
@@ -17,7 +17,9 @@ def build_parser():
     """Build a CLI that requires a frozen hash and explicit live confirmation."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    freeze = commands.add_parser("freeze-live", help="create a dispatchable v3 live registration")
+    freeze = commands.add_parser(
+        "freeze-live", help="create a dispatchable live registration from a supported draft"
+    )
     freeze.add_argument("--draft", type=Path, default=DEFAULT_DRAFT)
     freeze.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     freeze.add_argument("--confirm-live", action="store_true", required=True)

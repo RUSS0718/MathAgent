@@ -14,6 +14,8 @@ from unittest.mock import Mock, patch
 
 from scripts.run_star_readiness_97 import (
     ARTIFACTS,
+    DEFAULT_DRAFT,
+    ROOT,
     _build_adapter,
     _inside_artifacts,
     build_parser,
@@ -23,19 +25,61 @@ from showcase.star_readiness_registration import digest
 from tests.test_star_readiness_registration import (
     SOURCE,
     TEST_V3_QUESTION_SPECS,
+    TEST_V4_QUESTION_SPECS,
     synthetic_v3_draft,
+    synthetic_v4_draft,
 )
 
 
 class StarReadinessCliTest(unittest.TestCase):
-    def test_freeze_command_succeeds_without_an_iana_timezone_database(self):
-        with tempfile.TemporaryDirectory(dir=ARTIFACTS) as directory:
-            draft = Path(directory) / "draft.json"
-            manifest = Path(directory) / "manifest.json"
+    def test_default_freeze_uses_v4_draft_without_an_iana_timezone_database(self):
+        self.assertEqual(
+            ROOT / "artifacts" / "issue-97-prereg" / "draft-v4.json",
+            DEFAULT_DRAFT,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            artifacts = Path(directory) / "artifacts"
+            preregistration = artifacts / "issue-97-prereg"
+            preregistration.mkdir(parents=True)
+            draft = preregistration / "draft-v4.json"
+            manifest = preregistration / "live-manifest.json"
+            draft.write_text(json.dumps(synthetic_v4_draft()), encoding="utf-8")
+            with (
+                patch("scripts.run_star_readiness_97.ROOT", Path(directory)),
+                patch("scripts.run_star_readiness_97.ARTIFACTS", artifacts),
+                patch("scripts.run_star_readiness_97.DEFAULT_DRAFT", draft),
+                patch("scripts.run_star_readiness_97.DEFAULT_MANIFEST", manifest),
+                patch(
+                    "showcase.star_readiness_registration.V4_QUESTION_SPECS",
+                    TEST_V4_QUESTION_SPECS,
+                ),
+                patch(
+                    "showcase.star_readiness_coordinator.current_source_identity",
+                    return_value=SOURCE,
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                result = main(["freeze-live", "--confirm-live"])
+
+            self.assertEqual(0, result)
+            frozen = json.loads(manifest.read_text(encoding="utf-8"))
+            self.assertTrue(frozen["execution_authorized"])
+            self.assertEqual("authorized_live", frozen["status"])
+            self.assertEqual("issue-97-nonstream-draft-v4", frozen["draft_version"])
+
+    def test_explicit_v3_draft_remains_freezable_for_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifacts = Path(directory) / "artifacts"
+            preregistration = artifacts / "issue-97-prereg"
+            preregistration.mkdir(parents=True)
+            draft = preregistration / "legacy-v3-draft.json"
+            manifest = preregistration / "legacy-v3-manifest.json"
             draft.write_text(json.dumps(synthetic_v3_draft()), encoding="utf-8")
             with (
+                patch("scripts.run_star_readiness_97.ROOT", Path(directory)),
+                patch("scripts.run_star_readiness_97.ARTIFACTS", artifacts),
                 patch(
-                    "showcase.star_readiness_registration.QUESTION_SPECS",
+                    "showcase.star_readiness_registration.V3_QUESTION_SPECS",
                     TEST_V3_QUESTION_SPECS,
                 ),
                 patch(
@@ -51,8 +95,17 @@ class StarReadinessCliTest(unittest.TestCase):
 
             self.assertEqual(0, result)
             frozen = json.loads(manifest.read_text(encoding="utf-8"))
-            self.assertTrue(frozen["execution_authorized"])
-            self.assertEqual("authorized_live", frozen["status"])
+            self.assertEqual("issue-97-nonstream-draft-v3", frozen["draft_version"])
+
+    def test_freeze_help_describes_supported_drafts_without_claiming_v3(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            with self.assertRaises(SystemExit) as raised:
+                build_parser().parse_args(["--help"])
+
+        self.assertEqual(0, raised.exception.code)
+        self.assertIn("supported draft", output.getvalue())
+        self.assertNotIn("v3", output.getvalue())
 
     def test_direct_freeze_command_resolves_repository_modules_before_reading_draft(self):
         with tempfile.TemporaryDirectory(dir=ARTIFACTS) as directory:
