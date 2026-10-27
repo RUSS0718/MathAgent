@@ -4,9 +4,8 @@ import argparse
 import json
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / "artifacts"
@@ -80,7 +79,7 @@ def _freeze(args):
         expected_sha256=digest(base),
         current_source=source,
         explicit_authorization=args.confirm_live,
-        authorization_date=datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat(),
+        authorization_date=datetime.now(timezone(timedelta(hours=8))).date().isoformat(),
     )
     manifest_hash = digest(manifest)
     _write_once(manifest_path, json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n")

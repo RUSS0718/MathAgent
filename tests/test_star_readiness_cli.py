@@ -17,10 +17,38 @@ from scripts.run_star_readiness_97 import (
     _claim_live_registration,
     _inside_artifacts,
     build_parser,
+    main,
 )
+from tests.test_star_readiness_registration import SOURCE, TEST_QUESTION_SPECS, synthetic_draft
 
 
 class StarReadinessCliTest(unittest.TestCase):
+    def test_freeze_command_succeeds_without_an_iana_timezone_database(self):
+        with tempfile.TemporaryDirectory(dir=ARTIFACTS) as directory:
+            draft = Path(directory) / "draft.json"
+            manifest = Path(directory) / "manifest.json"
+            draft.write_text(json.dumps(synthetic_draft()), encoding="utf-8")
+            with (
+                patch(
+                    "showcase.star_readiness_registration.QUESTION_SPECS",
+                    TEST_QUESTION_SPECS,
+                ),
+                patch(
+                    "showcase.star_readiness_coordinator.current_source_identity",
+                    return_value=SOURCE,
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                result = main([
+                    "freeze-live", "--confirm-live", "--draft", str(draft),
+                    "--manifest", str(manifest),
+                ])
+
+            self.assertEqual(0, result)
+            frozen = json.loads(manifest.read_text(encoding="utf-8"))
+            self.assertTrue(frozen["execution_authorized"])
+            self.assertEqual("authorized_live", frozen["status"])
+
     def test_direct_freeze_command_resolves_repository_modules_before_reading_draft(self):
         with tempfile.TemporaryDirectory(dir=ARTIFACTS) as directory:
             missing_draft = Path(directory) / "missing-draft.json"
