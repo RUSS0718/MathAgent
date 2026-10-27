@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 import unittest
 from copy import deepcopy
 from pathlib import Path
@@ -257,7 +258,7 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         self.assertNotIn(QUESTION_TEXTS[0][3], archive_text)
         self.assertNotIn("fixture answer", archive_text)
 
-    def test_accepted_dispatch_with_lost_response_is_unresolved_and_never_retried(self):
+    def test_settled_success_with_lost_dispatch_response_is_archived_without_redispatch(self):
         ScriptedServer.scenario = "dispatch_response_lost"
 
         with patch("showcase.star_readiness_coordinator.time.time", return_value=1_000.0):
@@ -265,25 +266,32 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
                        wraps=cleanup_runtime_storage) as cleanup:
                 result = self.coordinator.run()
 
-        self.assertEqual("unknown_dispatch_outcome", result["stop_reason"])
+        self.assertEqual("dispatch_response_recovered", result["stop_reason"])
         self.assertEqual("TimeoutError", result["failure_type"])
         self.assertEqual(1, result["attempted_runs"])
         self.assertEqual(1, result["executed_runs"])
-        self.assertFalse(result["usage"]["usage_complete"])
-        intent = json.loads((self.folder / "round" / "intent-00.json").read_text(encoding="utf-8"))
-        self.assertEqual(
-            [{"index": 0, "question_id": "simple-01", "status": "pending_settlement",
-              "job_id": "job-1", "idempotency_key": intent["idempotency_key"],
-              "reserved_budget": {"charged_tokens": 32768, "logical_calls": 6,
-                                  "http_attempts": 8, "problem_tool_calls": 1,
-                                  "wall_seconds": 300, "deadline_at": 1_300.0}}],
-            result["unresolved_dispatches"],
-        )
+        self.assertTrue(result["usage"]["usage_complete"])
+        self.assertEqual(17, result["usage"]["charged_tokens"])
+        self.assertEqual(0, result["usage"]["reserved_tokens"])
+        self.assertEqual([], result["unresolved_dispatches"])
+        self.assertEqual([], result["uncollected"])
+        self.assertEqual(["multi-01"], result["unexecuted"])
         self.assertEqual(["job-1"], ScriptedServer.instances[0].accepted_job_ids)
         self.assertEqual(["job-1"], cleanup.call_args.args[1])
         self.assertEqual([QUESTION_TEXTS[0][3]], ScriptedServer.instances[0].dispatched)
         self.assertFalse((self.folder / "round" / "intent-01.json").exists())
-        self.assertFalse((self.folder / "round" / "run-00.json").exists())
+        self.assertEqual("complete", result["runtime_storage_cleanup"])
+        self.assertFalse(Path(ScriptedServer.instances[0].path).exists())
+        run = json.loads((self.folder / "round" / "run-00.json").read_text(encoding="utf-8"))
+        self.assertEqual({"job_id": "job-1", "status": "succeeded"}, run["job"])
+        self.assertEqual("job-1", run["run"]["run_id"])
+        self.assertEqual("job-1", run["evidence_identity"]["run_id"])
+        self.assertTrue(all(run["bundle_invariants"].values()))
+        self.assertEqual(17, run["budget"]["provider_known"]["total_tokens"])
+        self.assertTrue((self.folder / "round" / "delivery-00.json").is_file())
+        dispatch = json.loads((self.folder / "round" / "dispatch-00.json").read_text(encoding="utf-8"))
+        self.assertEqual({"job_id": "job-1", "recovered_from_store": True,
+                          "status": "response_recovered"}, dispatch)
         archived = json.loads((self.folder / "round" / "result.json").read_text(encoding="utf-8"))
         self.assertEqual(result["unresolved_dispatches"], archived["unresolved_dispatches"])
         archive_text = "\n".join(
@@ -292,6 +300,130 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         )
         self.assertNotIn(QUESTION_TEXTS[0][3], archive_text)
         self.assertIn("job-1", archive_text)
+
+    def test_failed_job_with_lost_dispatch_response_is_archived_without_redispatch(self):
+        ScriptedServer.scenario = "dispatch_response_lost"
+        with patch.object(ScriptedServer, "collect", return_value=make_bundle("job-1", failed=True)) as collect:
+            result = self.coordinator.run()
+
+        self.assertEqual("failure", result["stop_reason"])
+        self.assertEqual(1, len(ScriptedServer.instances[0].dispatched))
+        self.assertEqual("job-1", collect.call_args.args[0])
+        self.assertEqual(1, collect.call_count)
+        self.assertEqual([], result["uncollected"])
+        self.assertEqual([], result["unresolved_dispatches"])
+        self.assertTrue(result["usage"]["usage_complete"])
+        run = json.loads((self.folder / "round" / "run-00.json").read_text(encoding="utf-8"))
+        self.assertEqual({"job_id": "job-1", "status": "failed"}, run["job"])
+        self.assertEqual("job-1", run["evidence_identity"]["run_id"])
+        self.assertEqual(17, run["budget"]["charged_tokens"])
+        self.assertTrue((self.folder / "round" / "delivery-00.json").is_file())
+        self.assertFalse((self.folder / "round" / "intent-01.json").exists())
+        self.assertEqual("complete", result["runtime_storage_cleanup"])
+
+    def test_recovered_dispatch_keeps_unknown_and_hard_limit_stop_contracts(self):
+        for scenario in ("unknown", "hard_limit"):
+            with self.subTest(scenario=scenario):
+                self.coordinator.path = self.folder / scenario
+                ScriptedServer.scenario = "dispatch_response_lost"
+                bundle = make_bundle("job-1", unknown=scenario == "unknown")
+                if scenario == "hard_limit":
+                    for key in ("report", "evidence"):
+                        bundle[key]["budget"]["logical_calls"] = 6
+                with patch.object(ScriptedServer, "collect", return_value=bundle) as collect:
+                    result = self.coordinator.run()
+
+                self.assertEqual("unknown_transport" if scenario == "unknown" else "hard_limit",
+                                 result["stop_reason"])
+                self.assertEqual(1, len(ScriptedServer.instances[-1].dispatched))
+                self.assertEqual(1, collect.call_count)
+                self.assertTrue((self.coordinator.path / "run-00.json").is_file())
+                self.assertFalse((self.coordinator.path / "intent-01.json").exists())
+                self.assertEqual(scenario != "unknown", result["usage"]["usage_complete"])
+                if scenario == "unknown":
+                    self.assertEqual("pending_settlement", result["unresolved_dispatches"][0]["status"])
+                    self.assertEqual("job-1", result["unresolved_dispatches"][0]["job_id"])
+                    self.assertEqual(8192, result["usage"]["reserved_tokens"])
+                else:
+                    self.assertEqual([], result["unresolved_dispatches"])
+
+    def test_persisted_terminal_job_is_archived_before_settled_runtime_is_cleaned(self):
+        """Lose the public POST receipt after the real local Job and S3 ledger settle."""
+        provider = LoopbackProvider()
+        self.addCleanup(provider.close)
+        original_dispatch = ExperimentServer.dispatch
+
+        def preflight(server):
+            server.preflight_count += 1
+            return {"available": True, "identity": {"run_id": f"probe-{server.preflight_count}"},
+                    "budget": {"tool_calls": 1, "http_attempts": 0}}
+
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                accepted = []
+                posts = []
+                original_post = ExperimentServer.post
+
+                def post(server, path, payload, **kwargs):
+                    posts.append(path)
+                    return original_post(server, path, payload, **kwargs)
+
+                def respond(context):
+                    if failed:
+                        return {"assessment": "INVALID"}
+                    return {
+                        "explore": {"assessment": "SOLVED", "worked": [], "failed": [],
+                                    "candidates": [], "solution_candidate": "4"},
+                        "explore_polish": {"solution_candidate": "4"},
+                        "whole_solution_verifier": {"verdict": "ACCEPT", "reason": "Addition"},
+                    }[context["role"]]
+
+                def lose_response(server, question, **kwargs):
+                    job_id = original_dispatch(server, question, **kwargs)
+                    bundle = server.collect(job_id, time.time() + 10)
+                    accepted.append(bundle)
+                    raise TimeoutError("fixture_response_lost_after_settlement")
+
+                provider.respond = respond
+                adapter = provider.adapters()["nonstream"]
+                adapter._get_client().loopback_only = True
+                coordinator = StarReadinessCoordinator(
+                    self.folder / ("persisted-failure" if failed else "persisted-success"),
+                    adapters={"nonstream": adapter}, manifest=self.manifest,
+                    manifest_sha256=readiness_registration.digest(self.manifest),
+                )
+                with (
+                    patch("showcase.star_readiness_coordinator.ExperimentServer", ExperimentServer),
+                    patch("showcase.star_product_readiness.isolated_readiness",
+                          return_value={"available": True}),
+                    patch.object(ExperimentServer, "preflight", preflight),
+                    patch.object(ExperimentServer, "post", post),
+                    patch.object(ExperimentServer, "dispatch", lose_response),
+                    patch("showcase.star_readiness_coordinator.evaluate_delivery", evaluate_delivery),
+                ):
+                    result = coordinator.run()
+
+                self.assertEqual("protocol_failure" if failed else "dispatch_response_recovered",
+                                 result["stop_reason"], result)
+                self.assertEqual("TimeoutError", result["failure_type"], result)
+                self.assertEqual(1, len(accepted), result)
+                self.assertEqual("failed" if failed else "succeeded", accepted[0]["job"]["status"])
+                self.assertEqual(0, accepted[0]["report"]["budget"]["unresolved_attempts"])
+                self.assertEqual(0, accepted[0]["report"]["budget"]["reserved_tokens"])
+                self.assertEqual(1, posts.count("/api/agent/jobs"))
+                self.assertEqual(1, result["attempted_runs"])
+                self.assertEqual([], result["uncollected"])
+                self.assertEqual([], result["unresolved_dispatches"])
+                self.assertTrue(result["usage"]["usage_complete"])
+                self.assertEqual("complete", result["runtime_storage_cleanup"])
+                archived = json.loads((coordinator.path / "run-00.json").read_text(encoding="utf-8"))
+                self.assertEqual(accepted[0]["job"]["job_id"], archived["job"]["job_id"])
+                self.assertEqual(accepted[0]["report"]["budget"]["charged_tokens"],
+                                 archived["budget"]["charged_tokens"])
+                self.assertTrue(archived["request_attempts"])
+                self.assertTrue(all(archived["bundle_invariants"].values()))
+                self.assertTrue((coordinator.path / "delivery-00.json").is_file())
+                self.assertFalse((coordinator.path / "intent-01.json").exists())
 
     def test_unrecoverable_dispatch_retains_runtime_and_key_for_manual_reconciliation(self):
         ScriptedServer.scenario = "dispatch_response_lost"
@@ -330,12 +462,13 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
               patch("showcase.star_readiness_coordinator.time.monotonic",
                     side_effect=lambda: now[0]),
               patch.object(ScriptedServer, "dispatch", dispatch_with_second_response_lost),
-              patch.object(ScriptedServer, "collect", collect_with_elapsed_time)):
+              patch.object(ScriptedServer, "collect", collect_with_elapsed_time),
+              patch.object(ScriptedServer, "resolve_dispatch", return_value=None)):
             result = self.coordinator.run()
 
         self.assertEqual("unknown_dispatch_outcome", result["stop_reason"])
         self.assertEqual(2, result["attempted_runs"])
-        self.assertEqual(2, result["executed_runs"])
+        self.assertEqual(1, result["executed_runs"])
         self.assertEqual([item[3] for item in QUESTION_TEXTS], ScriptedServer.instances[0].dispatched)
         self.assertFalse(result["usage"]["usage_complete"])
         self.assertEqual(17, result["usage"]["charged_tokens"])
@@ -345,7 +478,7 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         intent = json.loads((self.folder / "round" / "intent-01.json").read_text(encoding="utf-8"))
         self.assertEqual(
             [{"index": 1, "question_id": "multi-01", "status": "pending_settlement",
-              "job_id": "job-2", "idempotency_key": intent["idempotency_key"],
+              "job_id": None, "idempotency_key": intent["idempotency_key"],
               "reserved_budget": {"charged_tokens": 65536, "logical_calls": 12,
                                   "http_attempts": 16, "problem_tool_calls": 3,
                                   "wall_seconds": 600, "deadline_at": 1_900.0}}],

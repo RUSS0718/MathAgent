@@ -369,10 +369,10 @@ class StarReadinessCoordinator:
                     },
                 })
                 attempted.append(index)
+                response_recovered = False
                 try:
                     job_id = server.dispatch(question, idempotency_key=idempotency_key)
                 except Exception as exc:
-                    usage["usage_complete"] = False
                     try:
                         job_id = server.resolve_dispatch(idempotency_key)
                     except Exception:
@@ -389,14 +389,17 @@ class StarReadinessCoordinator:
                     })
                     stop = "unknown_dispatch_outcome"
                     failure_type = type(exc).__name__
-                    if job_id is not None:
-                        dispatched.append({"index": index, "job_id": job_id})
-                        archive.put(f"dispatch-{index:02d}.json", {
-                            "job_id": job_id, "recovered_from_store": True,
-                        })
-                    break
+                    if job_id is None:
+                        usage["usage_complete"] = False
+                        break
+                    # Collect the accepted Job only; never dispatch this or the next question.
+                    response_recovered = True
                 dispatched.append({"index": index, "job_id": job_id})
-                archive.put(f"dispatch-{index:02d}.json", {"job_id": job_id})
+                archive.put(f"dispatch-{index:02d}.json", {
+                    "job_id": job_id,
+                    **({"recovered_from_store": True, "status": "response_recovered"}
+                       if response_recovered else {}),
+                })
 
                 bundle = server.collect(job_id, policy.deadline_at,
                                         canceled=lambda: time.monotonic() >= run_deadline)
@@ -412,9 +415,18 @@ class StarReadinessCoordinator:
                     stop = "usage_incomplete"
                     break
                 self._add_usage(usage, observed_usage)
+                if response_recovered:
+                    if self._usage_unknown(budget, observed_usage):
+                        usage["usage_complete"] = False
+                    else:
+                        unresolved_dispatches.pop()  # The existing Job's S3 usage is settled.
                 if not self._bundle_consistent(bundle, job_id):
                     stop = "evidence_mismatch"
                     break
+                if response_recovered:
+                    snapshot, contexts = server.provenance(job_id)
+                    delivery = evaluate_delivery(bundle["job"], snapshot, contexts)
+                    archive.put(f"delivery-{index:02d}.json", delivery_record(delivery))
                 semantics = report.get("semantics") or {}
                 if semantics.get("transport") == "unknown":
                     stop = "unknown_transport"
@@ -433,14 +445,18 @@ class StarReadinessCoordinator:
                     stop = "evidence_mismatch"
                     break
 
-                snapshot, contexts = server.provenance(job_id)
-                delivery = evaluate_delivery(bundle["job"], snapshot, contexts)
-                archive.put(f"delivery-{index:02d}.json", delivery_record(delivery))
+                if not response_recovered:
+                    snapshot, contexts = server.provenance(job_id)
+                    delivery = evaluate_delivery(bundle["job"], snapshot, contexts)
+                    archive.put(f"delivery-{index:02d}.json", delivery_record(delivery))
                 if not self._delivery_bound(delivery):
                     stop = "evidence_mismatch"
                     break
                 if self._hard_limit(budget, entry["limits"]):
                     stop = "hard_limit"
+                    break
+                if response_recovered:
+                    stop = "dispatch_response_recovered"
                     break
 
         except _StopBatch as exc:
