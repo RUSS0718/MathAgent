@@ -10,14 +10,18 @@ from urllib.parse import urlparse
 
 from .adapters import InternModelAdapter, InternStreamAdapter
 from .flask_app import create_app
+from .request_transport import INTERN_S2_LIVE_ENDPOINT
 from .solver_harness.storage import SolverStateStore
 from .star_experiment_registration import CONDITIONS
 from .star_product_runtime import CONTRACT_PYTHON_IMAGE_ID
 
 
 class ExperimentServer:
-    def __init__(self, path, transport, adapter, policy, evidence_kind):
+    def __init__(self, path, transport, adapter, policy, evidence_kind,
+                 *, refresh_preflight_each_call=False, late_usage_evidence_dir=None):
         self.adapter, self.transport, self.evidence_kind = adapter, transport, evidence_kind
+        self.refresh_preflight_each_call = refresh_preflight_each_call
+        self.preflight_count = 0
         self.contexts = {}
         self._previous_observer = adapter.outbound_observer
         adapter.outbound_observer = self._capture_outbound
@@ -26,7 +30,11 @@ class ExperimentServer:
             "SHOWCASE_STAR_FULL_ENABLED": True, "SHOWCASE_STAR_ADAPTER": adapter,
             "SHOWCASE_STAR_PYTHON_IMAGE_ID": CONTRACT_PYTHON_IMAGE_ID,
             "SHOWCASE_STAR_EXPERIMENT_POLICY": policy, "SHOWCASE_STAR_EVIDENCE_KIND": evidence_kind})
-        self.app.extensions["showcase_workspace_service"].budget_ledger.late_usage_evidence_dir = Path(path).parent / "supplemental-usage"
+        self.app.extensions["showcase_workspace_service"].budget_ledger.late_usage_evidence_dir = (
+            Path(late_usage_evidence_dir)
+            if late_usage_evidence_dir is not None
+            else Path(path).parent / "supplemental-usage"
+        )
         self.client = self.app.test_client()
         self.csrf = self.get("/api/check_auth")["csrf_token"]
 
@@ -53,6 +61,12 @@ class ExperimentServer:
         if not isinstance(adapter, expected) or (transport == "nonstream" and isinstance(adapter, InternStreamAdapter)):
             raise ValueError("experiment_transport_mismatch")
         client = adapter._get_client()
+        if evidence_kind == "live" and (
+            client.api_base != INTERN_S2_LIVE_ENDPOINT
+            or client.provider_endpoint_only is not True
+            or client.loopback_only is not False
+        ):
+            raise ValueError("experiment_live_provider_mismatch")
         if evidence_kind != "live" and urlparse(client.api_base).hostname not in {"localhost", "127.0.0.1", "::1"}:
             raise ValueError("scripted_provider_must_be_loopback")
         if (adapter.model_id != CONDITIONS["model"] or client.model != CONDITIONS["model"]
@@ -78,6 +92,10 @@ class ExperimentServer:
         return response.get_json()
 
     def preflight(self):
+        if self.refresh_preflight_each_call and self.preflight_count:
+            pipeline = self.app.extensions["showcase_workspace_service"].star_pipeline
+            pipeline.full_gaps(probe=True)
+        self.preflight_count += 1
         record = next(item for item in self.get("/api/capabilities")["solver_modes"]
                       if item["solver_mode"] == "star_reference")
         # Verify actual immutable receipt and the probe's own S3 ledger, not enabled alone.

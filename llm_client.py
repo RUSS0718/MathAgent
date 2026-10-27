@@ -104,6 +104,7 @@ class InternChatClient:
         retry: int | None = None,
         thinking_mode: bool | None = None,
         loopback_only: bool = False,
+        provider_endpoint_only: bool = False,
     ) -> None:
         raw_api_key = os.environ.get("INTERN_API_KEY")
         if not raw_api_key:
@@ -113,6 +114,9 @@ class InternChatClient:
         )
         self.api_base = os.environ.get("INTERN_API_BASE", DEFAULT_API_BASE)
         self.loopback_only = loopback_only
+        self.provider_endpoint_only = provider_endpoint_only
+        if loopback_only and provider_endpoint_only:
+            raise ValueError("conflicting_transport_policy")
         self.model = os.environ.get("INTERN_MODEL", DEFAULT_MODEL)
         # Explicit kwarg wins over the env switch so experiments can pin the
         # thinking switch per arm without touching process env.
@@ -367,6 +371,7 @@ class InternChatClient:
                         deadline=logical_deadline,
                         timeout=self.timeout,
                         loopback_only=self.loopback_only,
+                        provider_endpoint_only=self.provider_endpoint_only,
                         on_late_response=settle_late,
                     ):
                         if kind == "headers":
@@ -382,10 +387,13 @@ class InternChatClient:
                             request_event["completion_seconds"] = time.perf_counter() - attempt_started
                     data = json.loads(response_body)
                 else:
-                    if self.loopback_only:
-                        from showcase.request_transport import strict_loopback_post
+                    if self.loopback_only or self.provider_endpoint_only:
+                        from showcase.request_transport import (
+                            strict_loopback_post,
+                            strict_provider_post,
+                        )
 
-                        post = strict_loopback_post
+                        post = strict_loopback_post if self.loopback_only else strict_provider_post
                     else:
                         post = requests.post
                     response = post(

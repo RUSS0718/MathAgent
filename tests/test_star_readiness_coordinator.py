@@ -71,7 +71,8 @@ class ScriptedServer:
     events = []
     clock_jump = None
 
-    def __init__(self, path, transport, adapter, policy, evidence_kind):
+    def __init__(self, path, transport, adapter, policy, evidence_kind,
+                 *, refresh_preflight_each_call=False, late_usage_evidence_dir=None):
         self.path, self.transport, self.adapter = path, transport, adapter
         self.policy, self.evidence_kind = policy, evidence_kind
         self.dispatched = []
@@ -222,17 +223,27 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         self.assertEqual(2, result["executed_runs"])
         self.assertEqual([item[3] for item in QUESTION_TEXTS], ScriptedServer.instances[0].dispatched)
         self.assertEqual(3, self.source_mock.call_count, "startup plus a source check per dispatch")
-        self.assertEqual(["preflight", "dispatch", "preflight", "dispatch", "preflight"],
+        self.assertEqual(["preflight", "preflight", "dispatch", "preflight", "dispatch"],
                          ScriptedServer.events)
         self.assertEqual(2, len(ScriptedServer.instances[0].provenance_calls))
+        runtime_path = Path(ScriptedServer.instances[0].path)
+        self.assertFalse(runtime_path.is_relative_to(self.folder / "round"))
+        self.assertFalse(runtime_path.exists(), "raw Job storage must be removed after the run")
         self.assertEqual(2, self.delivery_mock.call_count)
         self.assertEqual(34, result["usage"]["charged_tokens"])
         self.assertEqual(0, result["usage"]["reserved_tokens"])
+        self.assertEqual("complete", result["runtime_storage_cleanup"])
         for name in ("intent-00.json", "run-00.json", "intent-01.json", "run-01.json",
                      "result.json", "hashes.json"):
             self.assertTrue((self.folder / "round" / name).is_file(), name)
         archived = json.loads((self.folder / "round" / "result.json").read_text(encoding="utf-8"))
         self.assertEqual("completed", archived["stop_reason"])
+        archive_text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (self.folder / "round").glob("*.json")
+        )
+        self.assertNotIn(QUESTION_TEXTS[0][3], archive_text)
+        self.assertNotIn("fixture answer", archive_text)
 
     def test_startup_preflight_only_consumes_batch_deadline(self):
         now = [1_000.0]
@@ -376,16 +387,16 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         self.assertEqual([], ScriptedServer.instances[0].dispatched)
         self.assertTrue((self.folder / "round" / "preflight-00.json").is_file())
 
-    def test_failed_post_dispatch_preflight_is_counted_and_current_job_is_collected(self):
+    def test_failed_run_preflight_prevents_current_and_later_dispatch(self):
         ScriptedServer.scenario = "post_dispatch_preflight_failure"
 
         result = self.coordinator.run()
 
         self.assertEqual("preflight_evidence_mismatch", result["stop_reason"])
         self.assertEqual(2, result["preflights"])
-        self.assertEqual([QUESTION_TEXTS[0][3]], ScriptedServer.instances[0].dispatched)
-        self.assertTrue((self.folder / "round" / "run-00.json").is_file())
-        self.assertFalse((self.folder / "round" / "intent-01.json").exists())
+        self.assertEqual([], ScriptedServer.instances[0].dispatched)
+        self.assertTrue((self.folder / "round" / "preflight-01.json").is_file())
+        self.assertFalse((self.folder / "round" / "intent-00.json").exists())
 
     def test_source_drift_at_dispatch_stops_without_dispatch(self):
         self.source_mock.side_effect = [SOURCE, {**SOURCE, "revision": "d" * 40}]
@@ -421,6 +432,48 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
                         manifest=self.manifest,
                         manifest_sha256=readiness_registration.digest(self.manifest),
                     )
+
+    def test_live_mode_requires_live_manifest_and_strict_registered_endpoint(self):
+        client = SimpleNamespace(
+            loopback_only=False,
+            provider_endpoint_only=True,
+            api_base="https://chat.intern-ai.org.cn/api/v1/chat/completions",
+            authorization="Bearer configured",
+        )
+        with self.assertRaisesRegex(ValueError, "live_authorization_required"):
+            StarReadinessCoordinator(
+                self.folder / "unauthorized-live",
+                adapters={"nonstream": SimpleNamespace(_get_client=lambda: client)},
+                manifest=self.manifest,
+                manifest_sha256=readiness_registration.digest(self.manifest),
+                evidence_kind="live",
+            )
+
+        live_manifest = readiness_registration.authorize_live_registration(
+            self.manifest,
+            expected_sha256=readiness_registration.digest(self.manifest),
+            current_source=SOURCE,
+            explicit_authorization=True,
+            authorization_date="2026-10-27",
+        )
+        coordinator = StarReadinessCoordinator(
+            self.folder / "authorized-live",
+            adapters={"nonstream": SimpleNamespace(_get_client=lambda: client)},
+            manifest=live_manifest,
+            manifest_sha256=readiness_registration.digest(live_manifest),
+            evidence_kind="live",
+        )
+        self.assertEqual("live", coordinator.evidence_kind)
+
+        client.api_base = "https://attacker.example/v1/chat/completions"
+        with self.assertRaisesRegex(ValueError, "live_provider_invalid"):
+            StarReadinessCoordinator(
+                self.folder / "endpoint-drift",
+                adapters={"nonstream": SimpleNamespace(_get_client=lambda: client)},
+                manifest=live_manifest,
+                manifest_sha256=readiness_registration.digest(live_manifest),
+                evidence_kind="live",
+            )
 
     @unittest.skipUnless(
         os.environ.get("RUN_STAR_READINESS_DOCKER_INTEGRATION") == "1",
@@ -486,11 +539,16 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         self.assertEqual(2, len(provider.run_keys))
         self.assertGreater(len(provider.requests), 0)
         self.assertEqual(3, result["preflights"])
+        self.assertEqual(3, len({
+            json.loads(path.read_text(encoding="utf-8"))["identity"]["run_id"]
+            for path in (self.folder / "integrated-round").glob("preflight-*.json")
+        }))
         self.assertGreater(result["usage"]["logical_calls"], 0)
         self.assertGreater(result["usage"]["charged_tokens"], 0)
         self.assertEqual(1, result["usage"]["problem_tool_calls"])
         self.assertTrue((self.folder / "integrated-round" / "run-00.json").is_file())
         self.assertTrue((self.folder / "integrated-round" / "run-01.json").is_file())
+        self.assertFalse(any(path.is_dir() for path in (self.folder / "integrated-round").iterdir()))
 
     def test_existing_archive_directory_is_rejected_without_overwriting(self):
         self.coordinator.path.mkdir()

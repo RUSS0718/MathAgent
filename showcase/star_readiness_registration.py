@@ -4,8 +4,11 @@ import copy
 import hashlib
 import json
 import re
+from datetime import date
 
-ADAPTER_VERSION = "issue-97-registration-adapter-v2"
+from .request_transport import INTERN_S2_LIVE_ENDPOINT
+
+ADAPTER_VERSION = "issue-97-registration-adapter-v3"
 DRAFT_VERSION = "issue-97-nonstream-draft-v2"
 QUESTION_SPECS = (
     (
@@ -102,6 +105,8 @@ _DRAFT_KEYS = {
     "version",
 }
 _MANIFEST_KEYS = {
+    "authorization_date",
+    "authorization_scope",
     "reference_configuration",
     "adapter_version",
     "draft_sha256",
@@ -109,6 +114,7 @@ _MANIFEST_KEYS = {
     "execution_authorized",
     "model",
     "provider_mode",
+    "provider_endpoint",
     "questions",
     "round_limits",
     "schedule",
@@ -136,11 +142,14 @@ def adapt_draft(draft, *, current_source):
     source = _validate_source(current_source)
     manifest = {
         "adapter_version": ADAPTER_VERSION,
+        "authorization_date": None,
+        "authorization_scope": None,
         "draft_sha256": digest(record),
         "draft_version": DRAFT_VERSION,
         "execution_authorized": False,
         "model": copy.deepcopy(MODEL),
         "provider_mode": "loopback_only",
+        "provider_endpoint": None,
         "reference_configuration": copy.deepcopy(STAR_REFERENCE_CONFIGURATION),
         "questions": [
             {
@@ -154,13 +163,48 @@ def adapt_draft(draft, *, current_source):
         ],
         "round_limits": copy.deepcopy(ROUND_LIMITS),
         "schedule": copy.deepcopy(record["schedule"]),
-        "schema_version": 1,
+        "schema_version": 2,
         "source_identity": source,
         "status": "draft_not_dispatchable",
         "stop_on": copy.deepcopy(STOP_ON),
     }
     _validate_manifest(manifest)
     return manifest
+
+
+def authorize_live_registration(
+    manifest,
+    *,
+    expected_sha256,
+    current_source,
+    explicit_authorization,
+    authorization_date,
+):
+    """Freeze an exact validated draft for the caller-authorized live batch."""
+    if explicit_authorization is not True:
+        raise ValueError("star_readiness_live_authorization_required")
+    if not isinstance(authorization_date, str):
+        raise ValueError("star_readiness_live_authorization_invalid")
+    try:
+        if date.fromisoformat(authorization_date).isoformat() != authorization_date:
+            raise ValueError
+    except ValueError:
+        raise ValueError("star_readiness_live_authorization_invalid") from None
+    record = registration(
+        manifest,
+        expected_sha256=expected_sha256,
+        current_source=current_source,
+    )
+    record.update(
+        authorization_date=authorization_date,
+        authorization_scope="issue-97-two-question-nonstream-batch",
+        execution_authorized=True,
+        provider_endpoint=INTERN_S2_LIVE_ENDPOINT,
+        provider_mode="intern_s2_live",
+        status="authorized_live",
+    )
+    _validate_manifest(record)
+    return record
 
 
 def registration(manifest, *, expected_sha256, current_source):
@@ -216,18 +260,38 @@ def _validate_manifest(record):
         not isinstance(record, dict)
         or set(record) != _MANIFEST_KEYS
         or type(record["schema_version"]) is not int
-        or record["schema_version"] != 1
+        or record["schema_version"] != 2
         or record["adapter_version"] != ADAPTER_VERSION
         or record["draft_version"] != DRAFT_VERSION
         or not isinstance(record["draft_sha256"], str)
         or not _HASH_RE.fullmatch(record["draft_sha256"])
-        or record["status"] != "draft_not_dispatchable"
-        or type(record["execution_authorized"]) is not bool
-        or record["execution_authorized"] is not False
-        or record["provider_mode"] != "loopback_only"
         or record["stop_on"] != STOP_ON
     ):
         raise ValueError("star_readiness_registration_invalid")
+    loopback = (
+        record["status"] == "draft_not_dispatchable"
+        and record["execution_authorized"] is False
+        and record["provider_mode"] == "loopback_only"
+        and record["provider_endpoint"] is None
+        and record["authorization_date"] is None
+        and record["authorization_scope"] is None
+    )
+    live = (
+        record["status"] == "authorized_live"
+        and record["execution_authorized"] is True
+        and record["provider_mode"] == "intern_s2_live"
+        and record["provider_endpoint"] == INTERN_S2_LIVE_ENDPOINT
+        and record["authorization_scope"] == "issue-97-two-question-nonstream-batch"
+        and isinstance(record["authorization_date"], str)
+    )
+    if not loopback and not live:
+        raise ValueError("star_readiness_registration_invalid")
+    if live:
+        try:
+            if date.fromisoformat(record["authorization_date"]).isoformat() != record["authorization_date"]:
+                raise ValueError
+        except ValueError:
+            raise ValueError("star_readiness_registration_invalid") from None
     _validate_model(record["model"])
     _validate_source(record["source_identity"])
     if record["reference_configuration"] != STAR_REFERENCE_CONFIGURATION:

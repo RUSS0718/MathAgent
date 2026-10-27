@@ -9,6 +9,7 @@ from showcase import star_readiness_registration
 from showcase.star_readiness_registration import (
     ADAPTER_VERSION,
     adapt_draft,
+    authorize_live_registration,
     digest,
     registration,
 )
@@ -288,6 +289,54 @@ class StarReadinessRegistrationTest(unittest.TestCase):
         malformed_source = {**SOURCE, "source_sha256": "invalid"}
         with self.assertRaises(ValueError):
             registration(manifest, expected_sha256=digest(manifest), current_source=malformed_source)
+
+    def test_live_manifest_requires_explicit_authorization_and_pins_provider(self):
+        loopback = adapt_draft(synthetic_draft(), current_source=SOURCE)
+        manifest = authorize_live_registration(
+            loopback,
+            expected_sha256=digest(loopback),
+            current_source=SOURCE,
+            explicit_authorization=True,
+            authorization_date="2026-10-27",
+        )
+
+        self.assertTrue(manifest["execution_authorized"])
+        self.assertEqual("intern_s2_live", manifest["provider_mode"])
+        self.assertEqual("authorized_live", manifest["status"])
+        self.assertEqual(
+            "https://chat.intern-ai.org.cn/api/v1/chat/completions",
+            manifest["provider_endpoint"],
+        )
+        self.assertEqual(
+            manifest,
+            registration(manifest, expected_sha256=digest(manifest), current_source=SOURCE),
+        )
+
+    def test_live_manifest_rejects_endpoint_drift_even_after_rehash(self):
+        loopback = adapt_draft(synthetic_draft(), current_source=SOURCE)
+        manifest = authorize_live_registration(
+            loopback,
+            expected_sha256=digest(loopback),
+            current_source=SOURCE,
+            explicit_authorization=True,
+            authorization_date="2026-10-27",
+        )
+        manifest["provider_endpoint"] = "https://attacker.example/v1/chat/completions"
+
+        with self.assertRaises(ValueError):
+            registration(manifest, expected_sha256=digest(manifest), current_source=SOURCE)
+
+    def test_live_registration_requires_explicit_true_authorization(self):
+        loopback = adapt_draft(synthetic_draft(), current_source=SOURCE)
+
+        with self.assertRaisesRegex(ValueError, "live_authorization_required"):
+            authorize_live_registration(
+                loopback,
+                expected_sha256=digest(loopback),
+                current_source=SOURCE,
+                explicit_authorization=False,
+                authorization_date="2026-10-27",
+            )
 
     def test_adapter_rejects_draft_escalation_and_bad_question_hash(self):
         authorized = synthetic_draft()

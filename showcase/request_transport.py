@@ -13,6 +13,8 @@ from urllib.parse import urlsplit
 
 import requests
 
+INTERN_S2_LIVE_ENDPOINT = "https://chat.intern-ai.org.cn/api/v1/chat/completions"
+
 _LateResponseCallback = (
     Callable[[requests.Response, bytes, float | None, float], None]
     | Callable[[requests.Response, bytes, float | None, float, bool], None]
@@ -31,6 +33,21 @@ def strict_loopback_post(url: str, **kwargs: Any) -> requests.Response:
         if 300 <= response.status_code < 400:
             response.close()
             raise requests.HTTPError("strict_loopback_redirect_rejected")
+        return response
+
+
+def strict_provider_post(url: str, **kwargs: Any) -> requests.Response:
+    """Post only to the registered Intern S2 endpoint without proxies or redirects."""
+    if (url != INTERN_S2_LIVE_ENDPOINT
+            or not set(kwargs).issubset({"data", "headers", "stream", "timeout", "verify"})
+            or kwargs.get("verify", True) is not True):
+        raise ValueError("strict_provider_endpoint_required")
+    with requests.Session() as session:
+        session.trust_env = False
+        response = session.post(url, allow_redirects=False, **kwargs)
+        if 300 <= response.status_code < 400:
+            response.close()
+            raise requests.HTTPError("strict_provider_redirect_rejected", response=response)
         return response
 
 
@@ -64,6 +81,7 @@ def response_events(
     deadline: float,
     timeout: float,
     loopback_only: bool = False,
+    provider_endpoint_only: bool = False,
     on_late_response: _LateResponseCallback | None = None,
     **request_kwargs: Any,
 ) -> Iterator[tuple[str, Any]]:
@@ -115,7 +133,12 @@ def response_events(
                 pass
 
         try:
-            post = strict_loopback_post if loopback_only else requests.post
+            if loopback_only and provider_endpoint_only:
+                raise ValueError("conflicting_transport_policy")
+            post = (
+                strict_loopback_post if loopback_only else
+                strict_provider_post if provider_endpoint_only else requests.post
+            )
             response = post(url, timeout=timeout, stream=True, **request_kwargs)
             response_headers_at = time.monotonic()
             response_headers_seconds = response_headers_at - started

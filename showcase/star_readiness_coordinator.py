@@ -1,18 +1,26 @@
-"""Run the frozen two-question #97 batch through scripted loopback STAR Jobs."""
+"""Run the frozen two-question #97 batch through bounded STAR public Jobs."""
 
 import subprocess
+import tempfile
 import time
 from copy import deepcopy
 from pathlib import Path
-from urllib.parse import urlparse
 
 from .star_acceptance import evaluate_delivery
 from .star_experiment_archive import ExperimentArchive, source_identity
 from .star_experiment_policy import ExperimentRunPolicy
 from .star_experiment_server import ExperimentServer
 from .star_readiness_admission import admit_next_run
+from .star_readiness_archive import (
+    delivery_record,
+    preflight_record,
+    registration_record,
+    run_record,
+)
 from .star_readiness_configuration import validate_server_configuration
+from .star_readiness_profile import validate_execution_profile
 from .star_readiness_registration import ROUND_LIMITS, digest, registration
+from .star_readiness_runtime import cleanup_runtime_storage
 
 
 def current_source_identity():
@@ -36,7 +44,7 @@ class StarReadinessCoordinator:
     """Execute each registered question at most once in an immutable archive."""
 
     def __init__(self, path, *, adapters, manifest, manifest_sha256, evidence_kind="scripted"):
-        if evidence_kind != "scripted":
+        if evidence_kind not in {"scripted", "live"}:
             raise ValueError("star_readiness_evidence_kind_invalid")
         if not isinstance(adapters, dict) or "nonstream" not in adapters:
             raise ValueError("star_readiness_adapter_invalid")
@@ -45,17 +53,15 @@ class StarReadinessCoordinator:
         self.manifest = deepcopy(manifest)
         self.manifest_sha256 = manifest_sha256
         self.evidence_kind = evidence_kind
-        self._check_loopback()
+        self._check_execution_profile()
 
-    def _check_loopback(self):
-        """Require the exact local endpoint and the client's loopback guard."""
+    def _check_execution_profile(self):
+        """Keep the default loopback profile and the authorized live profile disjoint."""
         try:
             client = self.adapters["nonstream"]._get_client()
-            hostname = urlparse(client.api_base).hostname
         except (AttributeError, KeyError, TypeError, ValueError):
-            raise ValueError("star_readiness_loopback_client_invalid") from None
-        if client.loopback_only is not True or hostname != "127.0.0.1":
-            raise ValueError("star_readiness_loopback_client_invalid")
+            raise ValueError("star_readiness_provider_client_invalid") from None
+        validate_execution_profile(self.evidence_kind, self.manifest, client)
 
     def _verified_registration(self):
         """Verify the frozen registration against the current repository source."""
@@ -199,6 +205,8 @@ class StarReadinessCoordinator:
         archive = ExperimentArchive(self.path)
         policy = ExperimentRunPolicy(deadline_at)
         server = None
+        runtime_storage = None
+        runtime_cleanup = "not_started"
         frozen = None
         stop = "completed"
         attempted = []
@@ -222,18 +230,21 @@ class StarReadinessCoordinator:
         try:
             frozen = self._verified_registration()
             archive.put("registration.json", {
-                "registration": frozen,
+                "registration": registration_record(frozen),
                 "sha256": digest(frozen),
                 "source": frozen["source_identity"],
                 "evidence_kind": self.evidence_kind,
             })
-            self._check_loopback()
+            self._check_execution_profile()
+            runtime_storage = tempfile.TemporaryDirectory(prefix="star-readiness-97-")
             server = ExperimentServer(
-                self.path / "nonstream",
+                Path(runtime_storage.name) / "nonstream",
                 "nonstream",
                 self.adapters["nonstream"],
                 policy,
                 self.evidence_kind,
+                refresh_preflight_each_call=True,
+                late_usage_evidence_dir=self.path / "supplemental-usage",
             )
             server.check_conditions()
             archive.put("configuration-startup.json", self._verified_configuration(server))
@@ -256,7 +267,7 @@ class StarReadinessCoordinator:
             except Exception as exc:
                 observed = {"available": False, "reason": "preflight_failed",
                             "failure_type": type(exc).__name__}
-            archive.put("preflight-00.json", observed)
+            archive.put("preflight-00.json", preflight_record(observed))
             if not self._valid_preflight(observed):
                 stop = "preflight_evidence_mismatch"
                 raise _StopBatch(stop)
@@ -285,32 +296,46 @@ class StarReadinessCoordinator:
                                    time.monotonic() + entry["limits"]["wall_seconds"])
 
                 self._verified_registration()
-                self._check_loopback()
+                self._check_execution_profile()
                 server.check_conditions()
                 archive.put(f"configuration-{index:02d}.json", self._verified_configuration(server))
-                question = {"prompt": questions[entry["question"]]["text"]}
-                archive.put(f"intent-{index:02d}.json", {"entry": entry})
-                attempted.append(index)
-                job_id = server.dispatch(question)
-                dispatched.append({"index": index, "job_id": job_id})
-                archive.put(f"dispatch-{index:02d}.json", {"job_id": job_id})
-
                 preflight_count += 1
                 try:
                     observed = server.preflight()
                 except Exception as exc:
                     observed = {"available": False, "reason": "preflight_failed",
                                 "failure_type": type(exc).__name__}
-                archive.put(f"preflight-{preflight_count - 1:02d}.json", observed)
-                post_dispatch_preflight_valid = self._valid_preflight(observed)
-                if post_dispatch_preflight_valid:
-                    preflight_id = observed["identity"]["run_id"]
-                    post_dispatch_preflight_valid = preflight_id not in preflight_ids
-                    preflight_ids.add(preflight_id)
+                archive.put(f"preflight-{preflight_count - 1:02d}.json", preflight_record(observed))
+                if not self._valid_preflight(observed):
+                    stop = "preflight_evidence_mismatch"
+                    break
+                preflight_id = observed["identity"]["run_id"]
+                if preflight_id in preflight_ids:
+                    stop = "preflight_evidence_mismatch"
+                    break
+                preflight_ids.add(preflight_id)
+                if time.monotonic() >= run_deadline:
+                    stop = "run_deadline_exceeded"
+                    break
+
+                question = {"prompt": questions[entry["question"]]["text"]}
+                registered_question = questions[entry["question"]]
+                archive.put(f"intent-{index:02d}.json", {
+                    "entry": entry,
+                    "question": {
+                        "id": registered_question["id"],
+                        "source": registered_question["source"],
+                        "text_sha256": registered_question["text_sha256"],
+                    },
+                })
+                attempted.append(index)
+                job_id = server.dispatch(question)
+                dispatched.append({"index": index, "job_id": job_id})
+                archive.put(f"dispatch-{index:02d}.json", {"job_id": job_id})
 
                 bundle = server.collect(job_id, policy.deadline_at,
                                         canceled=lambda: time.monotonic() >= run_deadline)
-                archive.put(f"run-{index:02d}.json", bundle)
+                archive.put(f"run-{index:02d}.json", run_record(bundle, job_id=job_id))
                 record = {"index": index, "question": entry["question"], "job_id": job_id}
                 records.append(record)
 
@@ -339,16 +364,13 @@ class StarReadinessCoordinator:
                     usage["usage_complete"] = False
                     stop = "usage_unknown"
                     break
-                if not post_dispatch_preflight_valid:
-                    stop = "preflight_evidence_mismatch"
-                    break
                 if not self._semantics_complete(semantics):
                     stop = "evidence_mismatch"
                     break
 
                 snapshot, contexts = server.provenance(job_id)
                 delivery = evaluate_delivery(bundle["job"], snapshot, contexts)
-                archive.put(f"delivery-{index:02d}.json", delivery)
+                archive.put(f"delivery-{index:02d}.json", delivery_record(delivery))
                 if not self._delivery_bound(delivery):
                     stop = "evidence_mismatch"
                     break
@@ -362,13 +384,27 @@ class StarReadinessCoordinator:
             stop = "failure"
             failure_type = type(exc).__name__
         finally:
-            if server is not None:
-                try:
-                    server.close()
-                except Exception as exc:
-                    if stop == "completed":
-                        stop = "failure"
-                        failure_type = type(exc).__name__
+            try:
+                if server is not None:
+                    try:
+                        server.close()
+                    except Exception as exc:
+                        if stop == "completed":
+                            stop = "failure"
+                            failure_type = type(exc).__name__
+            finally:
+                if runtime_storage is not None:
+                    try:
+                        runtime_cleanup = cleanup_runtime_storage(
+                            runtime_storage,
+                            [item["job_id"] for item in dispatched],
+                            grace_seconds=self.manifest["model"]["request_timeout_seconds"] + 1,
+                        )
+                    except Exception as exc:
+                        runtime_cleanup = "failed"
+                        if stop == "completed":
+                            stop = "failure"
+                            failure_type = type(exc).__name__
 
         if len(records) < len(dispatched):
             usage["usage_complete"] = False
@@ -385,6 +421,7 @@ class StarReadinessCoordinator:
             "preflights": preflight_count,
             "usage": usage,
             "wall_time_seconds": time.monotonic() - started,
+            "runtime_storage_cleanup": runtime_cleanup,
             "cost": None,
             "runs": records,
         }

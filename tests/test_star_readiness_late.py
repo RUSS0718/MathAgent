@@ -35,6 +35,14 @@ class StarReadinessLateUsageTest(unittest.TestCase):
                 self.run_deadline_at = time.time() + 2
 
         preflight_ids = iter(("probe-0", "probe-1", "probe-2"))
+        runtime_paths = []
+        make_temporary_directory = tempfile.TemporaryDirectory
+
+        def capture_runtime_directory(*args, **kwargs):
+            directory = make_temporary_directory(*args, **kwargs)
+            if kwargs.get("prefix") == "star-readiness-97-":
+                runtime_paths.append(Path(directory.name))
+            return directory
 
         def scripted_preflight(_server):
             return {
@@ -59,11 +67,19 @@ class StarReadinessLateUsageTest(unittest.TestCase):
                     manifest=manifest,
                     manifest_sha256=digest(manifest),
                 )
-                result = coordinator.run()
+                with patch(
+                    "showcase.star_readiness_coordinator.tempfile.TemporaryDirectory",
+                    side_effect=capture_runtime_directory,
+                ):
+                    result = coordinator.run()
 
                 self.assertEqual("unknown_transport", result["stop_reason"], result)
                 self.assertEqual(1, result["executed_runs"])
                 self.assertEqual(1, len(provider.requests))
+                self.assertEqual("deferred", result["runtime_storage_cleanup"])
+                runtime_path, = runtime_paths
+                self.assertFalse(runtime_path.is_relative_to(root))
+                self.assertTrue(runtime_path.exists(), "pending response must retain its ledger")
                 terminal_at = time.time()
 
                 hashes_before = json.loads((root / "hashes.json").read_text(encoding="utf-8"))
@@ -72,15 +88,17 @@ class StarReadinessLateUsageTest(unittest.TestCase):
                     name: (root / name).read_bytes() for name in archive_names
                 }
                 bundle = json.loads((root / "run-00.json").read_text(encoding="utf-8"))
-                self.assertEqual(bundle["report"]["checks"], bundle["evidence"]["verification"])
-                self.assertEqual(1, bundle["report"]["budget"]["unresolved_attempts"])
-                self.assertIsNone(bundle["report"]["budget"]["provider_known"]["total_tokens"])
-                attempts = bundle["report"]["request_attempts"]
+                self.assertTrue(bundle["bundle_invariants"]["verification_match"])
+                self.assertEqual(1, bundle["budget"]["unresolved_attempts"])
+                self.assertIsNone(bundle["budget"]["provider_known"]["total_tokens"])
+                attempts = bundle["request_attempts"]
                 self.assertEqual(1, len(attempts))
                 attempt_id = attempts[0]["attempt_id"]
                 run_id = result["runs"][0]["job_id"]
 
-                ledger = RunBudgetLedger(database_path=root / "nonstream/showcase.sqlite3")
+                ledger = RunBudgetLedger(
+                    database_path=runtime_path / "nonstream/showcase.sqlite3"
+                )
                 resources.callback(ledger.close)
                 self.assertEqual(1, ledger.snapshot(run_id)["unresolved_attempts"])
 
@@ -106,6 +124,7 @@ class StarReadinessLateUsageTest(unittest.TestCase):
                 self.assertEqual(attempt_id, evidence["attempt_id"])
                 self.assertEqual(10, evidence["usage"]["total_tokens"])
                 self.assertGreaterEqual(evidence["observed_at"], terminal_at)
+                ledger.close()
 
                 for name, data in archive_before.items():
                     self.assertEqual(data, (root / name).read_bytes(), name)
