@@ -2,7 +2,10 @@
 
 import contextlib
 import io
+import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,6 +21,26 @@ from scripts.run_star_readiness_97 import (
 
 
 class StarReadinessCliTest(unittest.TestCase):
+    def test_direct_freeze_command_resolves_repository_modules_before_reading_draft(self):
+        with tempfile.TemporaryDirectory(dir=ARTIFACTS) as directory:
+            missing_draft = Path(directory) / "missing-draft.json"
+            manifest = Path(directory) / "manifest.json"
+            environment = os.environ.copy()
+            for name in ("INTERN_API_KEY", "INTERN_API_BASE", "INTERN_MODEL"):
+                environment.pop(name, None)
+            result = subprocess.run(
+                [sys.executable, "-B", "scripts/run_star_readiness_97.py", "freeze-live",
+                 "--confirm-live", "--draft", str(missing_draft), "--manifest", str(manifest)],
+                cwd=Path(__file__).resolve().parents[1],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertEqual({"error": "FileNotFoundError"}, json.loads(result.stderr))
+        self.assertFalse(manifest.exists())
+
     def test_freeze_and_run_commands_require_explicit_confirmation(self):
         cases = (
             ["freeze-live"],

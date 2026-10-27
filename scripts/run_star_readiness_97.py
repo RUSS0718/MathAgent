@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / "artifacts"
+sys.path.insert(0, str(ROOT))
 DEFAULT_DRAFT = ARTIFACTS / "issue-97-prereg" / "draft-v2.json"
 DEFAULT_MANIFEST = ARTIFACTS / "issue-97-prereg" / "live-manifest.json"
 
