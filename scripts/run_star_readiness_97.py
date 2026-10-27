@@ -17,7 +17,7 @@ def build_parser():
     """Build a CLI that requires a frozen hash and explicit live confirmation."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    freeze = commands.add_parser("freeze-live", help="create a dispatchable live registration")
+    freeze = commands.add_parser("freeze-live", help="create a dispatchable v3 live registration")
     freeze.add_argument("--draft", type=Path, default=DEFAULT_DRAFT)
     freeze.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     freeze.add_argument("--confirm-live", action="store_true", required=True)

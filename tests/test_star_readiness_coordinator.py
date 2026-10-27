@@ -254,7 +254,8 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
     def test_accepted_dispatch_with_lost_response_is_unresolved_and_never_retried(self):
         ScriptedServer.scenario = "dispatch_response_lost"
 
-        result = self.coordinator.run()
+        with patch("showcase.star_readiness_coordinator.time.time", return_value=1_000.0):
+            result = self.coordinator.run()
 
         self.assertEqual("unknown_dispatch_outcome", result["stop_reason"])
         self.assertEqual("TimeoutError", result["failure_type"])
@@ -262,7 +263,10 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         self.assertEqual(0, result["executed_runs"])
         self.assertFalse(result["usage"]["usage_complete"])
         self.assertEqual(
-            [{"index": 0, "question_id": "simple-01"}],
+            [{"index": 0, "question_id": "simple-01", "status": "pending_settlement",
+              "reserved_budget": {"charged_tokens": 32768, "logical_calls": 6,
+                                  "http_attempts": 8, "problem_tool_calls": 1,
+                                  "wall_seconds": 300, "deadline_at": 1_300.0}}],
             result["unresolved_dispatches"],
         )
         self.assertEqual(["job-1"], ScriptedServer.instances[0].accepted_job_ids)
@@ -277,6 +281,50 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
         )
         self.assertNotIn(QUESTION_TEXTS[0][3], archive_text)
         self.assertNotIn("job-1", archive_text)
+
+    def test_later_lost_dispatch_retains_full_reservation_and_prior_observed_usage(self):
+        now = [1_000.0]
+        original_dispatch = ScriptedServer.dispatch
+        original_collect = ScriptedServer.collect
+
+        def dispatch_with_second_response_lost(server, question):
+            if server.dispatched:
+                server.scenario = "dispatch_response_lost"
+                now[0] += 50  # Waiting for a response must not extend the original deadline.
+            return original_dispatch(server, question)
+
+        def collect_with_elapsed_time(server, *args, **kwargs):
+            bundle = original_collect(server, *args, **kwargs)
+            now[0] += 300
+            return bundle
+
+        with (patch("showcase.star_readiness_coordinator.time.time", side_effect=lambda: now[0]),
+              patch("showcase.star_readiness_coordinator.time.monotonic",
+                    side_effect=lambda: now[0]),
+              patch.object(ScriptedServer, "dispatch", dispatch_with_second_response_lost),
+              patch.object(ScriptedServer, "collect", collect_with_elapsed_time)):
+            result = self.coordinator.run()
+
+        self.assertEqual("unknown_dispatch_outcome", result["stop_reason"])
+        self.assertEqual(2, result["attempted_runs"])
+        self.assertEqual(1, result["executed_runs"])
+        self.assertEqual([item[3] for item in QUESTION_TEXTS], ScriptedServer.instances[0].dispatched)
+        self.assertFalse(result["usage"]["usage_complete"])
+        self.assertEqual(17, result["usage"]["charged_tokens"])
+        self.assertEqual(1, result["usage"]["logical_calls"])
+        self.assertEqual(1, result["usage"]["http_attempts"])
+        self.assertEqual(0, result["usage"]["problem_tool_calls"])
+        self.assertEqual(
+            [{"index": 1, "question_id": "multi-01", "status": "pending_settlement",
+              "reserved_budget": {"charged_tokens": 65536, "logical_calls": 12,
+                                  "http_attempts": 16, "problem_tool_calls": 3,
+                                  "wall_seconds": 600, "deadline_at": 1_900.0}}],
+            result["unresolved_dispatches"],
+        )
+        archived = json.loads((self.folder / "round" / "result.json").read_text(encoding="utf-8"))
+        self.assertEqual(result["usage"], archived["usage"])
+        self.assertEqual(result["unresolved_dispatches"], archived["unresolved_dispatches"])
+        self.assertFalse((self.folder / "round" / "run-01.json").exists())
 
     def test_startup_preflight_only_consumes_batch_deadline(self):
         now = [1_000.0]

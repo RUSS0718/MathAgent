@@ -43,6 +43,7 @@ V3_QUESTION_SPECS = (
 QUESTION_SPECS = V3_QUESTION_SPECS
 V2_AUTHORIZATION_SCOPE = "issue-97-two-question-nonstream-batch"
 V3_AUTHORIZATION_SCOPE = "issue-97-two-question-nonstream-batch-v3"
+V2_LIVE_MANIFEST_SHA256 = "0077b2884129f860169962cb31f9aa6e9da0a23e6440af1a5954b2c8c8c81bb0"
 MODEL = {
     "max_output_tokens": 8192,
     "name": "intern-s2",
@@ -277,6 +278,22 @@ def _validate_draft(record):
 
 
 def _validate_manifest(record):
+    # Validate the original loopback envelope without changing its frozen hash.
+    if (
+        isinstance(record, dict)
+        and set(record) == _MANIFEST_KEYS - {
+            "authorization_date", "authorization_scope", "provider_endpoint",
+        }
+        and type(record["schema_version"]) is int
+        and record["schema_version"] == 1
+        and record["adapter_version"] == "issue-97-registration-adapter-v2"
+        and record["draft_version"] == V2_DRAFT_VERSION
+        and record["provider_mode"] == "loopback_only"
+    ):
+        record = {
+            **record, "schema_version": 2, "adapter_version": ADAPTER_VERSION,
+            "authorization_date": None, "authorization_scope": None, "provider_endpoint": None,
+        }
     if (
         not isinstance(record, dict)
         or set(record) != _MANIFEST_KEYS
@@ -309,6 +326,10 @@ def _validate_manifest(record):
     if not loopback and not live:
         raise ValueError("star_readiness_registration_invalid")
     if live:
+        # Only the consumed historical v2 envelope may retain its live identity.
+        # Rebinding its source or date must not create a fresh consumption key.
+        if record["draft_version"] == V2_DRAFT_VERSION and digest(record) != V2_LIVE_MANIFEST_SHA256:
+            raise ValueError("star_readiness_live_draft_version_invalid")
         try:
             if date.fromisoformat(record["authorization_date"]).isoformat() != record["authorization_date"]:
                 raise ValueError

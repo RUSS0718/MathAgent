@@ -355,6 +355,9 @@ class StarReadinessCoordinator:
                     unresolved_dispatches.append({
                         "index": index,
                         "question_id": entry["question"],
+                        "status": "pending_settlement",
+                        # Hold the whole Run envelope separately from observed S3 usage.
+                        "reserved_budget": {**entry["limits"], "deadline_at": policy.deadline_at},
                     })
                     stop = "unknown_dispatch_outcome"
                     failure_type = type(exc).__name__

@@ -188,16 +188,13 @@ def synthetic_v3_draft():
 def consumed_v2_manifest():
     draft = synthetic_draft()
     return {
-        "authorization_date": None,
-        "authorization_scope": None,
         "reference_configuration": copy.deepcopy(REFERENCE_CONFIGURATION),
-        "adapter_version": ADAPTER_VERSION,
+        "adapter_version": "issue-97-registration-adapter-v2",
         "draft_sha256": digest(draft),
         "draft_version": V2_DRAFT_VERSION,
         "execution_authorized": False,
         "model": copy.deepcopy(MODEL),
         "provider_mode": "loopback_only",
-        "provider_endpoint": None,
         "questions": [
             {
                 "id": question["id"],
@@ -210,7 +207,7 @@ def consumed_v2_manifest():
         ],
         "round_limits": copy.deepcopy(ROUND_LIMITS),
         "schedule": copy.deepcopy(draft["schedule"]),
-        "schema_version": 2,
+        "schema_version": 1,
         "source_identity": copy.deepcopy(SOURCE),
         "status": "draft_not_dispatchable",
         "stop_on": copy.deepcopy(STOP_ON),
