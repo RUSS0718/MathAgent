@@ -189,13 +189,26 @@ def response_events(
                     pass
 
     def detach_reader():
-        with dispatch_lock:
-            detached.set()
-            not_submitted = not dispatch_started
-        with late_lock:
-            should_settle = reader_finished
-        if not not_submitted and should_settle:
-            threading.Thread(target=settle_late, args=(body_complete,),
+        # A preempted reader must not hold the deadline caller at either gate.
+        # Contention leaves dispatch unconfirmed, never definitely unsubmitted.
+        detached.set()
+        acquired = dispatch_lock.acquire(blocking=False)
+        if acquired:
+            try:
+                not_submitted = not dispatch_started
+            finally:
+                dispatch_lock.release()
+        else:
+            not_submitted = False
+
+        def settle_if_finished():
+            with late_lock:
+                should_settle = reader_finished
+            if should_settle:
+                settle_late(body_complete)
+
+        if not not_submitted:
+            threading.Thread(target=settle_if_finished,
                              name="showcase-late-settlement", daemon=True).start()
         return not_submitted
 
