@@ -918,22 +918,9 @@ class WorkspaceService:
                 self.checkpointer.stop(job_id, "FAILED", "job_execution_failed")
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
-        payload = self.store.get_job(job_id, user_id)
-        star = (payload.get("result") or {}).get("solver_mode") in STAR_MODES
-        if star:
-            from .star_product_projection import current_solver
+        from .job_read_snapshot import read_job
 
-            with self.store._lock:
-                payload["result"]["solver"] = current_solver(self.store._connection, job_id)
-        attempts = [event["data"]["attempt"] for event in self.store.events(job_id, user_id) if event["event"] == "request_attempt"]
-        budget, ledger_attempts = self.budget_ledger.view(job_id) if self.budget_ledger is not None else (None, [])
-        if self.budget_ledger is not None:
-            if budget is not None and (star or not (payload.get("result") or {}).get("budget")):
-                payload["result"] = {**(payload.get("result") or {}), "budget": budget}
-        attempts = list({item["attempt_id"]: item for item in [*attempts, *ledger_attempts]}.values())
-        if attempts:
-            payload["result"] = {**(payload.get("result") or {}), "request_attempts": attempts}
-        return payload
+        return read_job(self, job_id, user_id)
 
     def _problem(self, job_id: str) -> str:
         return self.store.problem(job_id)
