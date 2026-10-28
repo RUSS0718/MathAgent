@@ -168,7 +168,7 @@ class InternChatClient:
         _attempt_budget: Any = None,
     ) -> str:
         """Send a request; explicit reasoning_mode wins over thinking_mode and defaults."""
-        effective_timeout = self.timeout if timeout_seconds is None else int(timeout_seconds)
+        effective_timeout = self.timeout if timeout_seconds is None else (float(timeout_seconds) if _attempt_budget is not None else int(timeout_seconds))
         if effective_timeout <= 0:
             raise ValueError("timeout_seconds_must_be_positive")
         payload = {
@@ -232,6 +232,7 @@ class InternChatClient:
                 "started_at_utc": datetime.now(UTC).isoformat(),
                 "request_purpose": request_purpose,
                 "effective_timeout_seconds": effective_timeout,
+                "deadline_at": time.time() + max(0, logical_deadline - time.monotonic()) if _attempt_budget is not None else None,
                 "requests_timeout_seconds": self.timeout,
                 "provider_stream": False,
                 "requests_stream": _attempt_budget is not None,
@@ -339,6 +340,11 @@ class InternChatClient:
                                     error_category="invalid_response",
                                     error_type="ValueError",
                                 )
+                            elif (getattr(_attempt_budget, "strict_completion", False)
+                                  and response_fields["finish_reason"] is None):
+                                request_event.update(response_fields, status="error",
+                                                     error_category="missing_finish_reason",
+                                                     error_type="ChatClientError")
                             else:
                                 late_reasoning = late_message.get("reasoning_content")
                                 request_event.update(
@@ -357,11 +363,14 @@ class InternChatClient:
                                 )
                                 request_event.pop("error_category", None)
                                 request_event.pop("error_type", None)
-                            _attempt_budget.after_attempt(request_event)
-                            from showcase.attempt_projection import refresh_attempt_projection
-
-                            refresh_attempt_projection(request_event)
+                            late_event = dict(request_event)
                             late_response_settled = True
+                        from showcase.run_budget_late import settle_late_with_retry
+
+                        settle_late_with_retry(_attempt_budget, late_event)
+                        from showcase.attempt_projection import refresh_attempt_projection
+
+                        refresh_attempt_projection(request_event)
 
                     response_body = bytearray()
                     for kind, value in response_events(
@@ -408,6 +417,8 @@ class InternChatClient:
                 request_event.update(usage)
                 choice = data["choices"][0]
                 finish_reason = safe_identifier(choice.get("finish_reason"))
+                if _attempt_budget is not None and getattr(_attempt_budget, "strict_completion", False) and finish_reason is None:
+                    raise ChatClientError("missing_finish_reason")
                 request_event.update(
                     status="success",
                     http_status=getattr(response, "status_code", None),
@@ -503,7 +514,7 @@ class InternChatClient:
                 self._record_failure(last_category, exc)
             except Exception as exc:
                 failure = exc
-                last_category = "client_exception"
+                last_category = (getattr(exc, "category", None) or "client_exception") if _attempt_budget is not None else "client_exception"
                 self._record_failure(last_category, exc)
                 raise
             finally:

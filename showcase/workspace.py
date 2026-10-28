@@ -925,12 +925,12 @@ class WorkspaceService:
 
             with self.store._lock:
                 payload["result"]["solver"] = current_solver(self.store._connection, job_id)
+        attempts = [event["data"]["attempt"] for event in self.store.events(job_id, user_id) if event["event"] == "request_attempt"]
+        budget, ledger_attempts = self.budget_ledger.view(job_id) if self.budget_ledger is not None else (None, [])
         if self.budget_ledger is not None:
-            budget = self.budget_ledger.snapshot(job_id)
             if budget is not None and (star or not (payload.get("result") or {}).get("budget")):
                 payload["result"] = {**(payload.get("result") or {}), "budget": budget}
-        attempts = [event["data"]["attempt"] for event in self.store.events(job_id, user_id) if event["event"] == "request_attempt"]
-        attempts = list({item["attempt_id"]: item for item in [*attempts, *self.budget_ledger.attempts(job_id)]}.values())
+        attempts = list({item["attempt_id"]: item for item in [*attempts, *ledger_attempts]}.values())
         if attempts:
             payload["result"] = {**(payload.get("result") or {}), "request_attempts": attempts}
         return payload

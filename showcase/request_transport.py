@@ -107,31 +107,30 @@ def response_events(
                 continue
         return False
 
-    def read_response() -> None:
-        response = None
-        response_headers_seconds = None
-        response_body = bytearray()
-        body_complete = False
-        late_callback_invoked = False
+    response = None
+    response_headers_seconds = None
+    response_body = bytearray()
+    body_complete = False
+    reader_finished = False
+    late_callback_invoked = False
+    late_lock = threading.Lock()
 
-        def settle_late(body_complete):
-            nonlocal late_callback_invoked
+    def settle_late(complete):
+        nonlocal late_callback_invoked
+        with late_lock:
             if (on_late_response is None or response is None or late_callback_invoked
                     or len(response_body) >= 8 * 1024 * 1024):
                 return
             late_callback_invoked = True
-            try:
-                _invoke_late_response(
-                    on_late_response,
-                    response,
-                    bytes(response_body),
-                    response_headers_seconds,
-                    time.monotonic() - started,
-                    body_complete,
-                )
-            except Exception:
-                pass
+            body = bytes(response_body)
+        try:
+            _invoke_late_response(on_late_response, response, body, response_headers_seconds,
+                                  time.monotonic() - started, complete)
+        except Exception:
+            pass
 
+    def read_response() -> None:
+        nonlocal response, response_headers_seconds, body_complete, reader_finished
         try:
             if loopback_only and provider_endpoint_only:
                 raise ValueError("conflicting_transport_policy")
@@ -168,6 +167,11 @@ def response_events(
                 settle_late(body_complete)
             publish(("error", exc))
         finally:
+            with late_lock:
+                reader_finished = True
+                should_settle = detached.is_set()
+            if should_settle:
+                settle_late(body_complete)
             if response is not None and callable(getattr(response, "close", None)):
                 try:
                     response.close()
@@ -185,7 +189,12 @@ def response_events(
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 deadline_hit = True
-                detached.set()
+                with late_lock:
+                    detached.set()
+                    should_settle = reader_finished
+                if should_settle:
+                    threading.Thread(target=settle_late, args=(body_complete,),
+                                     name="showcase-late-settlement", daemon=True).start()
                 raise requests.ReadTimeout("logical_deadline_exceeded")
             try:
                 kind, value = events.get(timeout=min(remaining, 0.05))

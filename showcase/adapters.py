@@ -22,7 +22,7 @@ import requests
 from .attempt_projection import bind_attempt_projection
 from .graph import AgentDecision
 from .request_attempts import record_attempts
-from .run_budget import current_budget
+from .run_budget import current_budget, request_timeout, scoped_deadline
 from .run_control import controlled_action
 from .run_service import AgentResult, RunRequest
 from .tool_protocol import ToolProtocol, ToolRequest, parse_tool_requests
@@ -164,7 +164,7 @@ class InternModelAdapter:
             kwargs["request_purpose"] = (metadata or {}).get("purpose") or (metadata or {}).get("role", "model_response")
         try:
             transport = getattr(client, "chat_response", client.chat)
-            requested_timeout = (metadata or {}).get("timeout_seconds")
+            requested_timeout = request_timeout(metadata)
             if requested_timeout is not None:
                 if not _accepts_keyword(transport, "timeout_seconds"):
                     raise AdapterError("unsupported_timeout_transport")
@@ -175,7 +175,7 @@ class InternModelAdapter:
                 if not _accepts_keyword(client.chat, "_attempt_budget") or not _accepts_keyword(transport, "_attempt_budget"):
                     raise AdapterError("unsupported_budget_transport", "transport lacks attempt reservation")
                 call_budget = budget.model_call((metadata or {}).get("role"),
-                                                solver_call_id=(metadata or {}).get("call_id"))
+                                                solver_call_id=(metadata or {}).get("call_id"), deadline_at=scoped_deadline(metadata), strict_completion=(metadata or {}).get("strict_completion") is True)
                 kwargs["_attempt_budget"] = call_budget
             if self.outbound_observer is not None:
                 self.outbound_observer(normalized)
@@ -284,9 +284,9 @@ class InternStreamAdapter(InternModelAdapter):
             "status": "pending",
         }
         budget = current_budget()
-        call_budget = budget.model_call(role, solver_call_id=attempt["solver_call_id"]) if budget else None
+        call_budget = budget.model_call(role, solver_call_id=attempt["solver_call_id"], deadline_at=scoped_deadline(metadata), strict_completion=(metadata or {}).get("strict_completion") is True) if budget else None
         configured = getattr(client, "timeout", self.client_timeout)
-        requested = (metadata or {}).get("timeout_seconds")
+        requested = request_timeout(metadata)
         effective_timeout = configured or requested or 30
         if requested is not None:
             effective_timeout = min(configured or requested, requested)
@@ -297,7 +297,7 @@ class InternStreamAdapter(InternModelAdapter):
         if call_budget is not None:
             logical_deadline = min(logical_deadline, started + call_budget.remaining_seconds())
         limit = min(getattr(client, "retry", 1), 3) if call_budget else 1
-        attempt["effective_timeout_seconds"] = effective_timeout
+        attempt.update(effective_timeout_seconds=effective_timeout, deadline_at=time.time() + max(0, logical_deadline - time.monotonic()))
         attempt["requests_timeout_seconds"] = configured or effective_timeout
         attempt["retry_limit"] = limit
         try:
@@ -316,21 +316,28 @@ class InternStreamAdapter(InternModelAdapter):
                     attempt["effective_timeout_seconds"] = attempt_timeout
 
                     def settle_late(response, raw_body, headers_seconds, completion_seconds,
-                                    body_complete=True, late_attempt=attempt):
+                                    body_complete=True, late_snapshot=dict(attempt)):
+                        late_attempt = dict(late_snapshot)
                         late_usage = {}
                         late_finish = None
                         late_model = None
                         late_reasoning_chars = 0
                         late_content_bytes = 0
                         late_event_count = 0
+                        late_done = False
+                        late_invalid = False
                         for raw_line in raw_body.splitlines():
                             line = raw_line.decode("utf-8", errors="replace").strip()
                             if not line.startswith("data:"):
                                 continue
                             late_event_count += 1
+                            if line[len("data:"):].strip() == "[DONE]":
+                                late_done = True
+                                continue
                             try:
                                 late_chunk = json.loads(line[len("data:"):].strip())
                             except ValueError:
+                                late_invalid = True
                                 continue
                             choices = late_chunk.get("choices")
                             choice = choices[0] if isinstance(choices, list) and choices else {}
@@ -348,10 +355,23 @@ class InternStreamAdapter(InternModelAdapter):
                                 late_model = late_chunk["model"]
                             if isinstance(late_chunk.get("usage"), Mapping):
                                 late_usage.update(late_chunk["usage"])
-                        if not late_usage:
+                        http_success = type(response.status_code) is int and 200 <= response.status_code < 300
+                        strict = (metadata or {}).get("strict_completion") is True
+                        if not late_usage and not (body_complete or not http_success or late_invalid):
                             return
+                        if not http_success:
+                            missing = "http_status"
+                        elif late_invalid:
+                            missing = "invalid_response"
+                        elif body_complete and not late_done:
+                            missing = "missing_stream_terminal" if strict else "connectivity"
+                        elif body_complete and strict and late_finish is None:
+                            missing = "missing_finish_reason"
+                        else:
+                            missing = None
                         late_attempt.update(
-                            status="success" if body_complete else "unknown",
+                            status="unknown" if not body_complete and http_success else "error" if missing else "success",
+                            error_category=missing if missing else None,
                             http_status=response.status_code,
                             response_headers_seconds=headers_seconds,
                             completion_seconds=completion_seconds,
@@ -364,7 +384,9 @@ class InternStreamAdapter(InternModelAdapter):
                                ("prompt_tokens", "completion_tokens", "total_tokens")},
                         )
                         if call_budget is not None:
-                            call_budget.after_attempt(late_attempt)
+                            from .run_budget_late import settle_late_with_retry
+
+                            settle_late_with_retry(call_budget, late_attempt)
 
                     if self.outbound_observer is not None:
                         self.outbound_observer(normalized)
@@ -446,6 +468,9 @@ class InternStreamAdapter(InternModelAdapter):
                         parse_line(line_buffer)
                         for delta_chunk in pending_chunks:
                             yield delta_chunk
+                    if (metadata or {}).get("strict_completion") is True and stream_complete and (not saw_done or finish_reason is None):
+                        attempt.update({key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")})
+                        raise AdapterError("missing_stream_terminal" if not saw_done else "missing_finish_reason")
                     if not stream_complete or not saw_done:
                         raise requests.ConnectionError("incomplete_stream")
                     break

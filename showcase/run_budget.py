@@ -52,6 +52,27 @@ class BudgetExhausted(RuntimeError):
     category = "run_budget_exhausted"
 
 
+def scoped_deadline(metadata):
+    """Return the earliest explicitly supplied phase or batch Unix deadline."""
+    values = [(metadata or {}).get(name) for name in ("phase_deadline_at", "batch_deadline_at")]
+    values = [value for value in values if value is not None]
+    if any(type(value) not in {int, float} or not math.isfinite(value) for value in values):
+        raise BudgetExhausted("invalid_scoped_deadline")
+    return min(values) if values else None
+
+
+def request_timeout(metadata):
+    """Reject unmetered scoped deadlines; return the ordinary request timeout."""
+    if (metadata or {}).get("strict_completion") is True and current_budget() is None:
+        raise BudgetExhausted("strict_completion_requires_budget")
+    deadline = scoped_deadline(metadata)
+    if deadline is not None:
+        if current_budget() is None:
+            raise BudgetExhausted("scoped_deadline_requires_budget")
+        if deadline <= time.time():
+            raise BudgetExhausted("scoped_deadline_exhausted")
+    return (metadata or {}).get("timeout_seconds")
+
 class RunBudgetLedger:
     """One SQLite row per Run, updated under BEGIN IMMEDIATE across workers."""
 
@@ -179,15 +200,47 @@ class RunBudgetLedger:
         with self._transaction(run_id) as state:
             for action in state["actions"]:
                 if action["id"] == action_id:
+                    if (action["kind"] == "http" and action["status"] == "success"
+                            and all(action["usage"][key] is not None for key in ("prompt_tokens", "completion_tokens", "total_tokens"))):
+                        break
+                    usage = provider_usage(event)
                     if action["kind"] == "http":
-                        action["public_attempt"] = {**public_attempt(event, run_id=run_id, role=action["role"]), "started_at_utc": event.get("started_at_utc"), "dispatch_status": "transport_observed", "solver_call_id": public_solver_call_id(run_id, action.get("solver_call_id"))}
+                        if any(previous is not None and usage[key] is not None and previous != usage[key]
+                               for key, previous in action["usage"].items()):
+                            break  # Conflicting evidence cannot release an unknown reservation.
+                        usage = {key: previous if previous is not None else usage[key]
+                                 for key, previous in action["usage"].items()}
+                        if action["status"] == "success" and usage == action["usage"]:
+                            break
+                        previous_attempt = action.get("public_attempt") or {}
+                        if (action["status"] == "unknown" and event.get("status") == "error"
+                                and event.get("error_category") == "timeout"):
+                            # A later local timeout cannot make an unfinished remote reply known.
+                            event = {**event, **previous_attempt, "status": "unknown"}
+                        if action["status"] == "success" and event.get("status") != "success":
+                            break  # A later failed observation cannot undo a confirmed result.
+                        projection = public_attempt({**event, "usage": usage}, run_id=run_id, role=action["role"])
+                        projection["deadline_at"] = previous_attempt.get("deadline_at") or projection["deadline_at"]
+                        action["public_attempt"] = {**projection, "started_at_utc": previous_attempt.get("started_at_utc") or event.get("started_at_utc"), "dispatch_status": "transport_observed", "solver_call_id": public_solver_call_id(run_id, action.get("solver_call_id"))}
                     action.update(
                         status=event.get("status", "unknown"),
-                        usage=provider_usage(event),
+                        usage=usage,
                         duration_seconds=event.get("duration_seconds"),
                     )
-                    break
+                    return True
+            return False
 
+    def view(self, run_id):
+        """Read budget and attempts from the same persisted ledger version."""
+        with self.lock:
+            row = self.connection.execute(
+                "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
+            ).fetchone()
+        if row is None:
+            return None, []
+        state = json.loads(row[0])
+        return _summary(state), [a["public_attempt"] for a in state["actions"]
+                                 if a.get("public_attempt")]
     def attempts(self, run_id):
         with self.lock:
             row = self.connection.execute('SELECT ledger_json FROM run_budgets WHERE run_id=?', (run_id,)).fetchone()
@@ -206,9 +259,11 @@ class RunBudget:
     def __init__(self, ledger, run_id):
         self.ledger, self.run_id = ledger, run_id
 
-    def model_call(self, role=None, *, solver_call_id=None):
+    def model_call(self, role=None, *, solver_call_id=None, deadline_at=None, strict_completion=False):
+        if deadline_at is not None and deadline_at <= time.time():
+            raise BudgetExhausted("scoped_deadline_exhausted")
         action_id, _remaining = self.ledger.reserve(self.run_id, "logical", role=role, solver_call_id=solver_call_id)
-        return ModelCallBudget(self.ledger, self.run_id, action_id, role, solver_call_id)
+        return ModelCallBudget(self.ledger, self.run_id, action_id, role, solver_call_id, deadline_at, strict_completion)
 
     def before_attempt(self, event, input_estimate):
         check_control()
@@ -235,12 +290,20 @@ class RunBudget:
 
 
 class ModelCallBudget(RunBudget):
-    def __init__(self, ledger, run_id, logical_call_id, role, solver_call_id=None):
+    def __init__(self, ledger, run_id, logical_call_id, role, solver_call_id=None, deadline_at=None, strict_completion=False):
         super().__init__(ledger, run_id)
         self.logical_call_id, self.role = logical_call_id, role
         self.solver_call_id = solver_call_id
+        self.deadline_at = deadline_at
+        self.strict_completion = strict_completion
+
+    def remaining_seconds(self):
+        remaining = super().remaining_seconds()
+        return min(remaining, max(0, self.deadline_at - time.time())) if self.deadline_at is not None else remaining
 
     def before_attempt(self, event, input_estimate):
+        if self.deadline_at is not None and self.deadline_at <= time.time():
+            raise BudgetExhausted("scoped_deadline_exhausted")
         event["logical_call_id"] = self.logical_call_id
         event["role"] = self.role
         event["solver_call_id"] = self.solver_call_id
@@ -260,11 +323,19 @@ def _summary(state):
         held = (action["input_estimate"] if usage["prompt_tokens"] is None else 0) + (
             action["output_cap"] if usage["completion_tokens"] is None else 0
         )
+        attempt = action.get("public_attempt") or {}
+        if (action["status"] == "unknown" or (action["status"] == "error"
+                and (attempt.get("error_category") in {"timeout", "connectivity", "missing_finish_reason", "missing_stream_terminal"}
+                     or (attempt.get("error_category") == "http_status"
+                         and 500 <= (attempt.get("http_status") or 0) < 600)))):
+            held = action["input_estimate"] + action["output_cap"]
+            # The known counts are already inside the full original reservation.
+            accounted = max(action["input_estimate"], usage["prompt_tokens"] or 0) + max(
+                action["output_cap"], usage["completion_tokens"] or 0)
+        else:
+            accounted = held + (usage["prompt_tokens"] or 0) + (usage["completion_tokens"] or 0)
         reserved += held
-        charged += max(
-            usage["total_tokens"] or 0,
-            held + (usage["prompt_tokens"] or 0) + (usage["completion_tokens"] or 0),
-        )
+        charged += max(usage["total_tokens"] or 0, accounted)
     return {
         "limits": state["limits"],
         "logical_calls": sum(a["kind"] == "logical" for a in state["actions"]),

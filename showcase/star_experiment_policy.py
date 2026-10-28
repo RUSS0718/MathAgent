@@ -6,8 +6,9 @@ from .run_budget import RunBudgetLimits
 
 
 class ExperimentRunPolicy:
-    def __init__(self, deadline_at):
+    def __init__(self, deadline_at, *, phase_deadline_at=None):
         self.round_deadline_at = deadline_at
+        self.phase_deadline_at = phase_deadline_at
         self.run_deadline_at = None
         self.limits = RunBudgetLimits(max_model_calls=0, max_http_attempts=0,
                                      max_tool_calls=0, max_tokens=0, max_runtime_seconds=0)

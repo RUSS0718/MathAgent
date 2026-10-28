@@ -316,12 +316,12 @@ class RunService:
 
             result.pop("retry_call", None)
             result["solver"] = current_solver(self._store._connection, run_id)
-        budget = self._budget_ledger.snapshot(run_id)
+        attempts = [event["attempt"] for event in self._store.get_events(run_id) if event.get("type") == "request_attempt"]
+        budget, ledger_attempts = self._budget_ledger.view(run_id)
         if budget is not None and (result.get("solver_mode") in STAR_MODES
                                    or not result.get("budget")):
             snapshot["result"] = {**result, "budget": budget}
-        attempts = [event["attempt"] for event in self._store.get_events(run_id) if event.get("type") == "request_attempt"]
-        attempts = list({item["attempt_id"]: item for item in [*attempts, *self._budget_ledger.attempts(run_id)]}.values())
+        attempts = list({item["attempt_id"]: item for item in [*attempts, *ledger_attempts]}.values())
         if attempts:
             snapshot["result"] = {**(snapshot.get("result") or {}), "request_attempts": attempts}
         return self._copy_snapshot(snapshot)

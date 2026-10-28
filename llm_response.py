@@ -93,6 +93,7 @@ def public_attempt(
         "max_tokens": _count(event.get("max_tokens")),
         "request_purpose": safe_identifier(event.get("request_purpose")),
         "effective_timeout_seconds": _duration(event.get("effective_timeout_seconds")),
+        "deadline_at": _duration(event.get("deadline_at")),
         "requests_timeout_seconds": _duration(event.get("requests_timeout_seconds")),
         "retry_limit": _count(event.get("retry_limit")),
         "response_headers_seconds": _duration(event.get("response_headers_seconds")),
