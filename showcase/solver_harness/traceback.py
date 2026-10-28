@@ -8,10 +8,10 @@ def transition_decision(run, state, decision):
 
     A decision only grants execution authority while its Run, plan version, Plan
     Attempt and step match. Its revision must identify the committed ruling and
-    intervention, not necessarily the latest revision: audit events can follow
-    a ruling before recovery consumes it. History never re-executes.
+    latest intervention for that action, not necessarily the latest revision:
+    audit events can follow a ruling before recovery consumes it.
     """
-    return (
+    if not (
         isinstance(decision, dict)
         and decision.get("consumed") is None
         and decision.get("run_id") == run["run_id"]
@@ -26,11 +26,15 @@ def transition_decision(run, state, decision):
             )
             for event in run.get("events", [])
         )
-        and any(
-            all(record.get(key) == value for key, value in decision.items())
-            for record in state.get("meta_interventions", [])
-        )
+    ):
+        return False
+    identity = ("run_id", "plan_version", "attempt_index", "step_id")
+    current = next(
+        (record for record in reversed(state.get("meta_interventions", []))
+         if all(record.get(key) == decision.get(key) for key in identity)),
+        None,
     )
+    return current is not None and all(current.get(key) == value for key, value in decision.items())
 
 
 def apply_traceback(harness, run):

@@ -17,14 +17,29 @@ from tests.test_star_product_tools import FEATURES, VERDICT
 
 
 class RecoveryDecision101Test(StarJobFixture, unittest.TestCase):
-    def run_ruling(self, change, *, audit=False, replan=False, change_history=False):
+    def run_ruling(self, change, *, audit=False, replan=False, change_history=False,
+                   stale_approval=False):
         """Inject a damaged checkpoint at the public event boundary, then observe Job."""
         original = SolverHarness.commit_event
         injected = []
+        approvals = []
 
         def commit(harness, run_id, *, expected_revision, event, state_updates=None):
             kind = "meta_decided" if replan else "meta_guidance_decided"
             key = "meta_decision" if replan else "meta_guidance_decision"
+            if stale_approval and event["type"] == "meta_decided":
+                updates = deepcopy(state_updates)
+                if not approvals:
+                    approvals.append(deepcopy(updates[key]))
+                    # Fault window: a second ruling supersedes the saved first
+                    # transition before its archive is applied.
+                    updates["phase"] = "META_DECIDE"
+                elif len(approvals) == 1:
+                    approvals.append(deepcopy(updates[key]))
+                    updates[key] = approvals[0]
+                    injected.append(expected_revision + 1)
+                return original(harness, run_id, expected_revision=expected_revision,
+                                event=event, state_updates=updates)
             if event["type"] == kind and not injected:
                 updates = deepcopy(state_updates)
                 change(updates[key], expected_revision)
@@ -49,7 +64,8 @@ class RecoveryDecision101Test(StarJobFixture, unittest.TestCase):
         def answer(context):
             value = replier(context)
             if context["role"] == "meta" and context.get("guidance_request") is None:
-                rulings[1] = RULING_ABORT
+                rulings[1] = ({**RULING_FIRST, "reason_summary": "current replacement ruling"}
+                              if stale_approval and len(approvals) == 0 else RULING_ABORT)
             return value
 
         replies = [answer] * 64 if replan else list(REPLIES)
@@ -78,6 +94,12 @@ class RecoveryDecision101Test(StarJobFixture, unittest.TestCase):
         self.assertEqual([], [event for event in events if event.get("solver_event_type")
                               in {"trace_back_applied", "plan_archived", "plan_replaced"}])
         self.assertEqual("failed", final["status"])
+        budget = final["result"]["budget"]
+        calls = 8 if options.get("replan") else 6
+        self.assertEqual((calls, calls, 0, 0, 0), tuple(budget[key] for key in
+                         ("logical_calls", "http_attempts", "tool_calls", "unknown_attempts",
+                          "reserved_tokens")))
+        self.assertEqual(calls * 10, budget["provider_known"]["total_tokens"])
 
     def test_future_revision_cannot_authorize_traceback(self):
         self.assert_rejected(lambda decision, rev: decision.update(decided_at_revision=rev + 2),
@@ -95,6 +117,13 @@ class RecoveryDecision101Test(StarJobFixture, unittest.TestCase):
 
     def test_forged_approval_cannot_archive_or_dispatch_replacement_plan(self):
         self.assert_rejected(lambda decision, _: decision.pop("decided_at_revision"), replan=True)
+        self.assertEqual(1, sum(item["role"] == "planner" for item in self.outbound))
+
+    def test_superseded_genuine_approval_cannot_replace_the_current_ruling(self):
+        _, final, events = self.run_ruling(lambda *_: None, replan=True, stale_approval=True)
+        self.assertEqual([], [event for event in events
+                              if event.get("solver_event_type") == "plan_archived"])
+        self.assertEqual("failed", final["status"])
         self.assertEqual(1, sum(item["role"] == "planner" for item in self.outbound))
 
     def test_audit_after_current_ruling_still_allows_single_consumption(self):
@@ -124,6 +153,8 @@ class RecoveryDecision101Test(StarJobFixture, unittest.TestCase):
         recovery = before["result"]["solver"]["recovery"]
         self.assertEqual("needs_review", recovery["status"])
         self.assertEqual("meta", recovery["unknown_calls"][0]["role"])
+        self.assertEqual(1, before["result"]["budget"]["unknown_attempts"])
+        self.assertGreater(before["result"]["budget"]["reserved_tokens"], 0)
         response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={},
                                     headers=self.headers())
         self.assertEqual(409, response.status_code)

@@ -26,7 +26,9 @@
 
 公共 Job 的 `meta_guidance_decided` 持久化边界注入缺少 `decided_at_revision` 的裁决时，原代码仍执行两次回退。新增 `tests.test_star_recovery_decisions_101` 先以该反例失败，增加来源校验后 8 项通过。校验要求整数版本、对应的已提交 Meta 事件、匹配的干预记录及原有 Run/计划/attempt/步骤/未消费身份；中间 `call_audit` 事件仍允许当前裁决消费一次。
 
-修改后的 Guidance、ReplanDecision、Trace-Back、CONTINUE identity 和 Harness Meta 五个完整模块共 27 项通过，零跳过；官方 baseline 和导入边界通过。完整组合结果见本票验收记录。
+随后增加“当前新裁决被同一动作较早的真实 approval 覆盖”的反例：只核对事件存在及任意历史记录仍会错误归档。将历史匹配收紧为同一动作最近一次干预后，专属模块 9 项通过；没有使用最新 State Revision 严格相等规则。
+
+第一层修改后的 Guidance、ReplanDecision、Trace-Back、CONTINUE identity 和 Harness Meta 五个完整模块共 27 项通过，零跳过；108 项组合回归通过，零跳过，官方 baseline 和导入边界通过。第二层修改重跑受影响完整模块，最终结果见本票验收记录。
 
 ## 证据边界
 
