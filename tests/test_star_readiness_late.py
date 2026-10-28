@@ -53,6 +53,7 @@ class StarReadinessLateUsageTest(unittest.TestCase):
 
         with (
             patch("showcase.star_readiness_registration.QUESTION_SPECS", QUESTION_SPECS),
+            patch("showcase.star_readiness_registration.V4_QUESTION_SPECS", QUESTION_SPECS),
             patch("showcase.star_readiness_coordinator.current_source_identity", return_value=SOURCE),
             patch("showcase.star_readiness_coordinator.ExperimentRunPolicy", ShortPolicy),
             patch("showcase.star_product_readiness.isolated_readiness", return_value={"available": True}),
@@ -76,7 +77,7 @@ class StarReadinessLateUsageTest(unittest.TestCase):
                 self.assertEqual("unknown_transport", result["stop_reason"], result)
                 self.assertEqual(1, result["executed_runs"])
                 self.assertEqual(1, len(provider.requests))
-                self.assertEqual("deferred", result["runtime_storage_cleanup"])
+                self.assertEqual("retained", result["runtime_storage_cleanup"])
                 runtime_path, = runtime_paths
                 self.assertFalse(runtime_path.is_relative_to(root))
                 self.assertTrue(runtime_path.exists(), "pending response must retain its ledger")
@@ -94,7 +95,7 @@ class StarReadinessLateUsageTest(unittest.TestCase):
                 attempts = bundle["request_attempts"]
                 self.assertEqual(1, len(attempts))
                 attempt_id = attempts[0]["attempt_id"]
-                run_id = result["runs"][0]["job_id"]
+                run_id = bundle["job"]["job_id"]
 
                 ledger = RunBudgetLedger(
                     database_path=runtime_path / "nonstream/showcase.sqlite3"
