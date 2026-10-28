@@ -319,7 +319,9 @@ class InternStreamAdapter(InternModelAdapter):
         logical_deadline = started + effective_timeout
         if call_budget is not None:
             logical_deadline = min(logical_deadline, started + call_budget.remaining_seconds())
-        limit = min(getattr(client, "retry", 1), 3) if call_budget else 1
+        from llm_client import product_attempt_limit
+
+        limit = product_attempt_limit(client) if call_budget else 1
         attempt.update(effective_timeout_seconds=effective_timeout, deadline_at=time.time() + max(0, logical_deadline - time.monotonic()))
         attempt["requests_timeout_seconds"] = configured or effective_timeout
         attempt["retry_limit"] = limit

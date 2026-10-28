@@ -68,12 +68,18 @@ def _not_submitted(error: BaseException | None) -> bool:
     return False
 
 
+def product_attempt_limit(client):
+    """Opt in to up to six metered attempts; preserve the legacy three-attempt cap."""
+    explicit = getattr(client, "safe_retry_attempts", None)
+    return explicit if explicit is not None else min(client.retry, 3)
+
+
 def product_retry_delay(failure, response, attempt_index, budget):
     """Shared metered transport retry policy; None means unknown/terminal."""
     import math
     from email.utils import parsedate_to_datetime
 
-    delay = 2**attempt_index
+    delay = min(2**attempt_index, 15)
     safe = _not_submitted(failure)
     if response is not None and response.status_code == 429:
         value = response.headers.get("Retry-After", "")
@@ -109,7 +115,13 @@ class InternChatClient:
         thinking_mode: bool | None = None,
         loopback_only: bool = False,
         provider_endpoint_only: bool = False,
+        safe_retry_attempts: int | None = None,
     ) -> None:
+        if safe_retry_attempts is not None and (
+            type(safe_retry_attempts) is not int or not 1 <= safe_retry_attempts <= 6
+        ):
+            raise ValueError("safe_retry_attempts_invalid")
+        self.safe_retry_attempts = safe_retry_attempts
         raw_api_key = os.environ.get("INTERN_API_KEY")
         if not raw_api_key:
             raise ChatClientError("configuration")
@@ -219,7 +231,7 @@ class InternChatClient:
         started = time.perf_counter()
         self.last_response_metadata = None
         # Only the explicit metered product path opts into conservative retries.
-        attempts_limit = min(self.retry, 3) if _attempt_budget is not None else self.retry
+        attempts_limit = product_attempt_limit(self) if _attempt_budget is not None else self.retry
         logical_deadline = time.monotonic() + effective_timeout
         if _attempt_budget is not None:
             logical_deadline = min(
