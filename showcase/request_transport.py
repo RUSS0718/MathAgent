@@ -150,6 +150,10 @@ def response_events(
                 dispatch_started = True
             if not loopback_only and not provider_endpoint_only:
                 request_kwargs["allow_redirects"] = False
+            # This narrows, but cannot eliminate, the post-check scheduling window.
+            # Once dispatch is committed the caller must retain an unconfirmed reservation.
+            if canceled.is_set() or detached.is_set() or time.monotonic() >= deadline:
+                return
             response = post(url, timeout=timeout, stream=True, **request_kwargs)
             status_code = getattr(response, "status_code", None)
             if type(status_code) is int and 300 <= status_code < 400:
