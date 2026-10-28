@@ -106,9 +106,8 @@ class DockerExecutorTest(unittest.TestCase):
         # 3s CPU hard cap (a sympy import alone can cost ~2s): every explore
         # script became an unknown timeout. The product default must run
         # multi-second mathematical scripts and still be hard-bounded above.
-        from pathlib import Path
-
         import shutil
+        from pathlib import Path
 
         folder = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
