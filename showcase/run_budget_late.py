@@ -10,6 +10,12 @@ from uuid import uuid4
 from llm_response import provider_usage
 
 
+def _sqlite_busy(exc):
+    code = getattr(exc, "sqlite_errorcode", None)
+    return (isinstance(code, int) and code & 0xff in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}) or any(
+        text in str(exc).lower() for text in ("database is locked", "database table is locked"))
+
+
 def settle_late_with_retry(budget, event):
     """Bound transient SQLite retries; never redispatch the provider request."""
     logger = logging.getLogger(__name__)
@@ -20,10 +26,7 @@ def settle_late_with_retry(budget, event):
                 budget.after_attempt(event)
                 return
             except sqlite3.OperationalError as exc:
-                code = getattr(exc, "sqlite_errorcode", None)
-                locked = (isinstance(code, int) and code & 0xff in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}) or any(
-                    text in str(exc).lower() for text in ("database is locked", "database table is locked"))
-                if not locked:
+                if not _sqlite_busy(exc):
                     break
             except Exception:
                 break
@@ -38,13 +41,24 @@ def settle_late_with_retry(budget, event):
 
 
 def settle_timeout_nonblocking(budget, event):
-    """Defer timeout settlement if the ledger gate is currently occupied."""
-    if budget.ledger.lock.acquire(blocking=False):
+    """Do not wait for the ledger gate or SQLite's busy handler at timeout."""
+    ledger = budget.ledger
+    if ledger.lock.acquire(blocking=False):
         try:
-            budget.after_attempt(event)
+            if not ledger._closed:
+                # This connection is exclusively protected by ledger.lock.
+                busy_timeout = ledger.connection.execute("PRAGMA busy_timeout").fetchone()[0]
+                try:
+                    ledger.connection.execute("PRAGMA busy_timeout = 0")
+                    budget.after_attempt(event)
+                    return
+                except sqlite3.OperationalError as exc:
+                    if not _sqlite_busy(exc):
+                        raise
+                finally:
+                    ledger.connection.execute(f"PRAGMA busy_timeout = {busy_timeout}")
         finally:
-            budget.ledger.lock.release()
-        return
+            ledger.lock.release()
     threading.Thread(target=settle_late_with_retry, args=(budget, dict(event)),
                      name="showcase-timeout-settlement", daemon=True).start()
 
