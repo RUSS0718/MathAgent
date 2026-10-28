@@ -194,18 +194,18 @@ class StreamLateRaceTest(StarJobFixture, unittest.TestCase):
         with patch("showcase.request_transport.response_events", side_effect=transport):
             job_id = self.create_job()
             self.terminal(job_id)
-            service = self.app.extensions["showcase_workspace_service"]
-            original_events = service.store.events
+            from showcase.job_read_snapshot import read_job_snapshot
+
             invoked = []
 
-            def events_and_late(*args, **kwargs):
-                events = original_events(*args, **kwargs)
+            def snapshot_and_late(*args, **kwargs):
+                snapshot = read_job_snapshot(*args, **kwargs)
                 if not invoked:
                     invoked.append(True)
                     callbacks[0](Reply(), completed_sse(), .01, .2, True)
-                return events
+                return snapshot
 
-            with patch.object(service.store, "events", side_effect=events_and_late):
+            with patch("showcase.job_read_snapshot.read_job_snapshot", side_effect=snapshot_and_late):
                 observed = self.job(job_id)["result"]
             final = self.job(job_id)["result"]
         self.assertEqual([True], invoked)
@@ -220,6 +220,8 @@ class StreamLateRaceTest(StarJobFixture, unittest.TestCase):
         first_post, release, second_event = (threading.Event() for _ in range(3))
         self.addCleanup(release.set)
         service = self.app.extensions["showcase_workspace_service"]
+        from showcase.job_read_snapshot import read_job_snapshot
+
         original_post = self.post.side_effect
         original_view = service.budget_ledger.view
         job_ids = []
@@ -241,14 +243,14 @@ class StreamLateRaceTest(StarJobFixture, unittest.TestCase):
         job_ids.append(job_id)
         self.assertTrue(first_post.wait(2))
 
-        def view_then_advance(run_id):
-            snapshot = original_view(run_id)
+        def snapshot_then_advance(*args, **kwargs):
+            snapshot = read_job_snapshot(*args, **kwargs)
             release.set()
             if not second_event.wait(5):
                 raise AssertionError("second attempt event not published")
             return snapshot
 
-        with patch.object(service.budget_ledger, "view", side_effect=view_then_advance):
+        with patch("showcase.job_read_snapshot.read_job_snapshot", side_effect=snapshot_then_advance):
             observed = self.job(job_id)["result"]
         final = self.terminal(job_id)
         self.assertEqual("succeeded", final["status"])
