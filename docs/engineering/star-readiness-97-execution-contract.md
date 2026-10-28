@@ -1,8 +1,8 @@
-# #97 v5 非流式批次执行合同（拟议）
+# #97 v5 非流式批次执行合同（已消费）
 
-状态：v5 执行合同草案，`draft_not_dispatchable`。用户最新指示拟议将原 Issue #97 合同中的“不得提高现有预算”调整为仅扩大 wall-clock 和单请求等待时间；这里记录的是本地提议，不修改远程 GitHub issue。2026-10-28 的两份已消费 manifest 和真实批次结果维持不变；不得对其续跑或重试。v5 未获 live API 授权，也未执行。源码绑定的待审阅预览为 `artifacts/issue-97-prereg/manifest-v5-reviewed-20261028.json`，交付身份及 hash 记录在 `artifacts/issue-97-v5-offline-20261028-r2/delivery.json`。
+状态：用户授权后已执行并消费 v5。简单题在一次成功隔离计算后耗尽登记的工具预算，控制器停止，多步题未派发；具体结果见[核对状态](../evals/star-readiness-97-status.md)。本合同只扩大 wall-clock 和单请求等待时间，其他限额保留冻结值；没有修改远程 GitHub issue。此前两份已消费 manifest 与结果也维持不变，三批均不得续跑或重试。原待审阅预览为 `artifacts/issue-97-prereg/manifest-v5-reviewed-20261028.json`；独立已授权 manifest 为 `artifacts/issue-97-prereg/live-manifest-v5.json`，SHA-256 为 `c664754f9fdaa57fcd3b9a01d2cb35fef76df19d633ab54585e33b97cc376e64`。
 
-本轮已加入 v5 登记校验、provider adapter timeout、协调器全批 wall-clock 读取和独立一次性消费键，并新增独立 v5 回归文件。最终完整发布门禁 873 项通过、零失败、零跳过；测试接缝及六个旁路探针通过。具体源码身份、报告 hash 和覆盖限制见[核对状态](../evals/star-readiness-97-status.md)。冻结预览仍不可派发，必须针对该份具体登记取得授权。
+本轮已加入 v5 登记校验、provider adapter timeout、协调器全批 wall-clock 读取和独立一次性消费键，并新增独立 v5 回归文件。调用前完整发布门禁 873 项通过、零失败、零跳过；测试接缝及六个旁路探针通过。门禁通过不代表真实批次通过。下文保留本次冻结时的规则，不允许借冻结或授权流程重新生成、复用已消费的 v5。
 
 ## 登记与身份
 

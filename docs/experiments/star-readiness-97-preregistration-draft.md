@@ -1,6 +1,6 @@
-# #97 v5 非流式两题登记草案
+# #97 v5 非流式两题登记记录（已消费）
 
-状态：`draft_not_dispatchable`。这是按用户最新指示提出的 v5 登记草案，未授权或执行 live API。源码绑定的待审阅预览为 `artifacts/issue-97-prereg/manifest-v5-reviewed-20261028.json`，对应 hash 见同名 `.sha256` 文件及 `artifacts/issue-97-v5-offline-20261028-r2/delivery.json`。原 Issue #97 合同规定不得提高现有预算；本草案拟议调整该合同的墙钟预算，但不修改远程 GitHub issue。此前 v2/v4 登记与 2026-10-28 两次真实批次均已消费，保持原样，不续跑、不重试，也不由本草案替换。
+状态：用户已授权，v5 已执行并消费。原不可派发预览与 hash 保留在 `artifacts/issue-97-prereg/manifest-v5-reviewed-20261028.json` 及同名 `.sha256`；授权后另存 `artifacts/issue-97-prereg/live-manifest-v5.json`，SHA-256 为 `c664754f9fdaa57fcd3b9a01d2cb35fef76df19d633ab54585e33b97cc376e64`。简单题一次成功计算后达到工具硬限，批次停止，多步题未派发，详见[真实批次结果](../evals/star-readiness-97-status.md)。本记录保留冻结时题目与预算，不修改远程 GitHub issue，也不回写或续跑三份已消费登记。
 
 ## 样本与规范化输入
 
@@ -39,4 +39,4 @@
 
 传输未知、用量不完整或未决、任何失败或取消、硬限、源码或配置漂移、账本或交付绑定缺陷发生后，停止新增派发。保留已有 attempt、预留、失败和截止；不自动重发、换题、续跑或突破上限。迟到用量只结算原 attempt，迟到文本不得覆盖终态。数学正确性、错误或未知单独记录；LLM 接受不是数学证明。
 
-当前代码已加入 v5 登记、适配器 timeout、协调器批次墙钟与独立一次性消费键；完整发布门禁 873 项通过、零失败、零跳过，测试接缝及六个旁路探针通过。源码身份与报告 hash 见[核对状态](../evals/star-readiness-97-status.md)。交付脚本在本记录提交后，验证相对验收提交仅有文档变化且源码 hash 不变，再生成包含精确题面、hash、模型配置、源码 revision/hash、dirty 状态、硬限及停止条件的不可派发预览。`delivery.json` 分别记录验收和交付的 Git revision，不把两者称为同一身份。冻结后仍须针对该份具体登记再次取得授权，方可执行 live API。此草案不改变旧批次、旧合同或远程 Issue #97。
+调用前的 v5 登记、适配器 timeout、批次墙钟与独立消费合同通过了 873 项零失败、零跳过门禁，测试接缝及六个旁路探针也通过。源码身份与报告 hash 见[核对状态](../evals/star-readiness-97-status.md)。`delivery.json` 记录验收与交付的 Git revision，并验证仅文档变化、源码 hash 不变；它保留冻结前未授权的历史状态。本次授权和执行不回写该交付文件。已消费的 v5 不续跑；任何后续真实复验须使用新的样本与预算登记，并在冻结具体身份后单独授权。

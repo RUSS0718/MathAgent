@@ -1,10 +1,27 @@
 # #97 非流式就绪：离线与真实批次核对状态
 
-更新日期：2026-10-28。状态：离线工程门禁通过，已执行两次独立冻结的真实批次。首批完整结束，但多步题没有进入登记要求的非快通道。r8 批次完成简单题后，多步 Job 的第二次 Explore 请求超时，协调器以 `unknown_transport` 停止并保留一个未决 attempt。自然非快通道、步骤证明和数学核验条件仍未满足，#97 保持开放。真实运行证据与数学判定分开记录。
+更新日期：2026-10-28。状态：离线工程门禁通过，已执行三次独立冻结的真实批次。最新 v5 在简单题的一次成功计算后耗尽工具预算，停止新增调用，多步题未派发。首批与 r8 的历史结果保留不变。自然非快通道、步骤证明和数学核验条件仍未满足，#97 保持开放。真实运行证据与数学判定分开记录。
 
-## v5 拟议登记状态
+## 2026-10-28 v5 真实批次结果
 
-当前状态：`draft_not_dispatchable`。按用户最新指示形成 v5 草案，最终待审阅预览为 `artifacts/issue-97-prereg/manifest-v5-reviewed-20261028.json`；冻结不代表 live API 授权，本轮没有 v5 API 执行。本地文档拟议将[远程 Issue #97](https://github.com/RUSS0718/MathAgent/issues/97)原合同中的“不得提高现有预算”调整为更长的等待预算；本轮不修改该 GitHub issue。已消费的 v2/v4 登记和 2026-10-28 两次真实批次不变。
+用户针对待审阅预览明确授权后，按精确预览 hash `f4fb062c68b87c4b2314dfa1078b100d5f0d78684ec6c0a4b93ad25ec470d76d` 生成独立 live manifest：`artifacts/issue-97-prereg/live-manifest-v5.json`，canonical SHA-256 为 `c664754f9fdaa57fcd3b9a01d2cb35fef76df19d633ab54585e33b97cc376e64`。授权、调用前核对和真实执行使用 revision `cf6d94458e4bccb0600ee005a87b2e4a169026a4`、源码 SHA-256 `37a9f1994019c582593cb807247ade9d59d72e3f28a2fd7c550ffc562e629b64`、dirty 状态 true。固定隔离镜像和 600 秒请求 timeout 均与登记一致。
+
+| 样本 | 公共 Job | 实际结果 | 用量与验收 |
+| --- | --- | --- | --- |
+| `simple-05` | `run_c5c5399defc6edcf48a8240f7a333a28` | Explore 非流式请求在 30.577 秒完成，HTTP 200、`finish_reason=stop`、用量已知；随后一次 `python_math` 隔离计算成功，exit 0 且清理已核验。工具计数达到登记上限 1 后，下一次模型续接被全局预算检查拒绝，状态为 `partial_budget_exhausted`，原因 `tool_call_budget_exhausted`。 | 1 logical call、1 HTTP attempt、1 题目工具调用；2483 已知且计费 tokens，0 reserved、unknown 或 unresolved HTTP attempts。Job `failed`，整题审查 `not_reviewed`、绑定 `unbound`，数学判定 `unknown`。 |
+| `multi-04` | 未创建 | 第一题硬停后没有派发。 | 不计运行或模型调用；目标路径为 `not_covered`。 |
+
+协调器按合同停止，汇总为 `stop_reason=failure`、1 个派发 Job、2 次环境预检、墙钟 45.266 秒、费用 `null`。`run-00.json` 已归档，六项 bundle 一致性检查全部成立；汇总的 `runs=[]`、`uncollected` 和 `usage_complete=false` 保留其原值，不能据此把已结算的唯一 HTTP attempt 说成传输未知。运行库保留在 `artifacts/issue-97-runtime/star-readiness-97-cph_g_gr/`，不续跑或修改。
+
+本次不是等待超时、工具执行失败或 provider 用量缺失。控制器遵循 [STAR Core 硬预算合同](../prd/STAR_CORE/STAR_Core_v1_2/STAR_CORE_SPEC_AGENT_v1_2.md)第 15.2 节中“在硬预算到达后拒绝一切新的模型调用和工具请求”的规则；既有 `StarVerifierComputeTest.test_tool_budget_exhaustion_stops_further_verifier_dispatch` 验证同类行为。v5 只提高等待预算、却保留简单题 1 次工具上限的规划不足已暴露；不得通过关闭整题审查、忽略硬停止或修改旧限额来把本批次改成通过。
+
+9 份脱敏归档的 SHA-256 已核验，归档位于 `artifacts/issue-97-v5-live-20261028/`，hash 索引 SHA-256 为 `c6e8322f3711cbb13d241a5cc70a544bff4dd49e0018c5392b783f2d822c4b32`。独立审计在 `artifacts/issue-97-v5-live-review-20261028/audit.json`；它只读取已终止 Job、账本和归档，未追加模型或工具调用。v5 一次性标记已消费，多步样本即使未派发，也不能据此续跑本批次。后续真实复验必须另行冻结样本与更充分的预算，并取得针对新登记的授权。
+
+停止后离线复核的既有公共 Job 用例 `test_tool_budget_exhaustion_stops_further_verifier_dispatch` 和 `test_whole_solution_verifier_request_executes_and_continues_review` 均通过，分别验证工具达到硬限后不再派发、额度充足时消费回执并继续整题审查。未修改运行时代码、测试或全局硬停语义。后续预算建议在 `artifacts/issue-97-v5-live-review-20261028/next-budget-proposal.json`，状态为 `draft_not_dispatchable`；它尚未实现、冻结样本或授权，不构成额外调用许可。
+
+## v5 冻结前准备记录（历史）
+
+冻结前状态为 `draft_not_dispatchable`。待审阅预览为 `artifacts/issue-97-prereg/manifest-v5-reviewed-20261028.json`；当时尚未授权或执行 v5。下文记录冻结前的工程准备，真实执行结果见上节。本地文档拟议将[远程 Issue #97](https://github.com/RUSS0718/MathAgent/issues/97)原合同中的“不得提高现有预算”调整为更长的等待预算，未修改该 GitHub issue。此前已消费的 v2/v4 登记和真实结果不变。
 
 v5 候选为 Project Euler Problem 5 与 IMO 2025 Problem 4。此前把 IMO 多步候选称为 Problem 1 是错误的；IMO 官方[题目页](https://www.imo-official.org/problems/2025/)确认其为 Day 2 Problem 4（亦见[官方 PDF](https://www.imo-official.org/assets/documents/problems/2025/2025_eng.pdf)）。按用户允许提高预算的最新指示，拟议单请求 timeout 为 600 秒；简单题 Run 900 秒、多步题 Run 3600 秒、全批 4800 秒。token、logical calls、HTTP attempts、题目工具调用、Run 数和预检次数保持既有上限。候选输入、SHA-256 及估算依据见[v5 登记草案](../experiments/star-readiness-97-preregistration-draft.md)，执行边界见[v5 执行合同](../engineering/star-readiness-97-execution-contract.md)。
 
@@ -20,7 +37,7 @@ v5 实现提交为 `16885e7476ad67cb13bc8d1a63453297118b0d04`。聚焦组运行 
 
 报告位于 `artifacts/issue-97-v5-offline-20261028-r2/gate-report.json`，SHA-256 为 `e17c5fb0da10bec8fdf3b15871b128d94b470d352f5581f4b0d42998ce255650`。运行前后及隔离副本的身份一致：revision `16885e7476ad67cb13bc8d1a63453297118b0d04`、源码 SHA-256 `37a9f1994019c582593cb807247ade9d59d72e3f28a2fd7c550ffc562e629b64`、dirty 状态为 true。组件映射从同一完整套件的发现列表与零失败、零跳过结果中核对得到 58 个测试，无单独重跑；结果为 `component-matrix-from-suite.json`，SHA-256 为 `75e3a3d4e2ca6bd30e79d09688ab0de373d9ac6494a012e172ec125bf6f84fc6`。这些证据仅为 scripted、fault-injection 或 replay，不是 provider-live 或数学能力证据。
 
-文档交付提交后的 `delivery.json` 分别记录验收身份、交付身份及仅文档差异，并验证源码 hash 不变；不把两个 Git revision 称为同一身份。待审阅预览使用交付时的实际身份，仍为 `execution_authorized=false`；对应 hash 见同名 `.sha256` 文件。没有创建已授权的 v5 live manifest，也未消费 v5 批次。
+文档交付提交后的 `delivery.json` 分别记录验收身份、交付身份及仅文档差异，并验证源码 hash 不变；不把两个 Git revision 称为同一身份。待审阅预览保留冻结时的 `execution_authorized=false` 和同名 `.sha256`。后续授权生成的是独立 live manifest，没有回写该预览或交付报告。
 
 ## 2026-10-28 r8 真实批次结果
 
