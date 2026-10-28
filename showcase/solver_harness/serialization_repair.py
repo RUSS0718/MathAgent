@@ -1,5 +1,7 @@
 """Consume one durable request-root credit before a capability-free fresh call."""
 
+import uuid
+
 from .budget import budget_reason
 from .calls import CallInterrupted
 
@@ -31,7 +33,8 @@ def repair_failure(harness, run, failed, operation, request):
         reserved = harness.commit_event(
             run["run_id"], expected_revision=latest["state_revision"],
             event={"event_id": f"serialization-credit-{root}",
-                   "type": "serialization_repair_reserved", "call_id": call_id},
+                   "type": "serialization_repair_reserved", "call_id": call_id,
+                   "claim_id": uuid.uuid4().hex},
             state_updates={
                 "serialization_repairs": {**state.get("serialization_repairs", {}), root: call_id},
                 "counters": {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1}})
