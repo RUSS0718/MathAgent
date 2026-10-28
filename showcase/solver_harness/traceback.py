@@ -7,8 +7,9 @@ def transition_decision(run, state, decision):
     """Whether a persisted decision is the ruling this transition committed.
 
     A decision only grants execution authority while its Run, plan version, Plan
-    Attempt, step and committing State Revision all match the transition being
-    applied and it has not been consumed before. History never re-executes.
+    Attempt and step match. Its revision must identify the committed ruling and
+    intervention, not necessarily the latest revision: audit events can follow
+    a ruling before recovery consumes it. History never re-executes.
     """
     return (
         isinstance(decision, dict)
@@ -17,6 +18,18 @@ def transition_decision(run, state, decision):
         and decision.get("plan_version") == state["plan_version"]
         and decision.get("attempt_index") == state["attempt_index"]
         and decision.get("step_id") == state["current_step"]
+        and type(decision.get("decided_at_revision")) is int
+        and any(
+            event["state_revision"] == decision["decided_at_revision"]
+            and event["type"] == (
+                "meta_guidance_decided" if "action_type" in decision else "meta_decided"
+            )
+            for event in run.get("events", [])
+        )
+        and any(
+            all(record.get(key) == value for key, value in decision.items())
+            for record in state.get("meta_interventions", [])
+        )
     )
 
 
