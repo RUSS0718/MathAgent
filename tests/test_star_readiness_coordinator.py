@@ -75,7 +75,8 @@ class ScriptedServer:
     clock_jump = None
 
     def __init__(self, path, transport, adapter, policy, evidence_kind,
-                 *, refresh_preflight_each_call=False, late_usage_evidence_dir=None):
+                 *, refresh_preflight_each_call=False, late_usage_evidence_dir=None,
+                 request_timeout_seconds=180):
         self.path, self.transport, self.adapter = path, transport, adapter
         self.policy, self.evidence_kind = policy, evidence_kind
         self.dispatched = []
@@ -955,10 +956,12 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
                                      readiness_registration.V2_DRAFT_VERSION)
         self.assertEqual("historical consumption\n", marker.read_text(encoding="utf-8"))
 
-    def test_future_draft_version_requires_separate_live_enablement(self):
-        with self.assertRaisesRegex(ValueError, "live_draft_version_invalid"):
-            _claim_live_registration("a" * 64, "issue-97-nonstream-draft-v5")
-        self.assertFalse((self.folder / "artifacts" / "issue-97-prereg").exists())
+    def test_v5_draft_version_has_an_independent_consumption_marker(self):
+        _claim_live_registration("a" * 64, readiness_registration.V5_DRAFT_VERSION)
+        marker = self.folder / "artifacts" / "issue-97-prereg" / (
+            readiness_registration.V5_DRAFT_VERSION + ".consumed"
+        )
+        self.assertEqual("a" * 64 + "\n", marker.read_text(encoding="utf-8"))
 
     def test_v4_consumption_is_independent_of_v3_and_cannot_be_reset_by_changing_hash(self):
         _claim_live_registration("a" * 64, readiness_registration.V3_DRAFT_VERSION)

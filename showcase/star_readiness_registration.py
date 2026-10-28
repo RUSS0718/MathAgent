@@ -7,6 +7,14 @@ import re
 from datetime import date
 
 from .request_transport import INTERN_S2_LIVE_ENDPOINT
+from .star_readiness_v5 import (
+    V5_AUTHORIZATION_SCOPE,
+    V5_DRAFT_VERSION,
+    V5_MODEL,
+    V5_QUESTION_SPECS,
+    V5_ROUND_LIMITS,
+    V5_RUN_LIMITS,
+)
 
 ADAPTER_VERSION = "issue-97-registration-adapter-v3"
 V2_DRAFT_VERSION = "issue-97-nonstream-draft-v2"
@@ -172,7 +180,7 @@ def digest(value):
 
 
 def adapt_draft(draft, *, current_source):
-    """Adapt a compatible v2, v3, or v4 draft into a non-dispatchable manifest."""
+    """Adapt a compatible v2, v3, v4, or v5 draft into a non-dispatchable manifest."""
     record = _json_copy(draft)
     _validate_draft(record)
     source = _validate_source(current_source)
@@ -183,7 +191,7 @@ def adapt_draft(draft, *, current_source):
         "draft_sha256": digest(record),
         "draft_version": record["version"],
         "execution_authorized": False,
-        "model": copy.deepcopy(MODEL),
+        "model": copy.deepcopy(_model_for_draft_version(record["version"])),
         "provider_mode": "loopback_only",
         "provider_endpoint": None,
         "reference_configuration": copy.deepcopy(STAR_REFERENCE_CONFIGURATION),
@@ -197,7 +205,7 @@ def adapt_draft(draft, *, current_source):
             }
             for item in record["questions"]
         ],
-        "round_limits": copy.deepcopy(ROUND_LIMITS),
+        "round_limits": copy.deepcopy(_round_limits_for_draft_version(record["version"])),
         "schedule": copy.deepcopy(record["schedule"]),
         "schema_version": 2,
         "source_identity": source,
@@ -216,7 +224,7 @@ def authorize_live_registration(
     explicit_authorization,
     authorization_date,
 ):
-    """Authorize an unapproved v3 or v4 loopback manifest; keep v2 read-only."""
+    """Authorize an unapproved v3, v4, or v5 loopback manifest; keep v2 read-only."""
     if explicit_authorization is not True:
         raise ValueError("star_readiness_live_authorization_required")
     if not isinstance(authorization_date, str):
@@ -231,7 +239,7 @@ def authorize_live_registration(
         expected_sha256=expected_sha256,
         current_source=current_source,
     )
-    if record["draft_version"] not in (V3_DRAFT_VERSION, V4_DRAFT_VERSION):
+    if record["draft_version"] not in (V3_DRAFT_VERSION, V4_DRAFT_VERSION, V5_DRAFT_VERSION):
         raise ValueError("star_readiness_live_draft_version_invalid")
     if record["execution_authorized"] is not False or record["provider_mode"] != "loopback_only":
         raise ValueError("star_readiness_live_authorization_invalid")
@@ -287,10 +295,12 @@ def _validate_draft(record):
     ):
         raise ValueError("star_readiness_registration_invalid")
     _validate_historical_source(record["source_identity"])
-    _validate_model(record["model"])
+    _validate_model(record["model"], version=record["version"])
     _validate_questions(record["questions"], draft=True, question_specs=question_specs)
-    _validate_schedule(record["schedule"], question_specs=question_specs)
-    _validate_round_limits(record["round_limits"])
+    _validate_schedule(
+        record["schedule"], question_specs=question_specs, version=record["version"]
+    )
+    _validate_round_limits(record["round_limits"], version=record["version"])
     if record["stop_on"] != STOP_ON:
         raise ValueError("star_readiness_registration_invalid")
 
@@ -353,7 +363,7 @@ def _validate_manifest(record):
                 raise ValueError
         except ValueError:
             raise ValueError("star_readiness_registration_invalid") from None
-    _validate_model(record["model"])
+    _validate_model(record["model"], version=record["draft_version"])
     _validate_source(record["source_identity"])
     if record["reference_configuration"] != STAR_REFERENCE_CONFIGURATION:
         raise ValueError("star_readiness_configuration_invalid")
@@ -361,19 +371,22 @@ def _validate_manifest(record):
            record["reference_configuration"]["preset"]["features"].values()):
         raise ValueError("star_readiness_configuration_invalid")
     _validate_questions(record["questions"], draft=False, question_specs=question_specs)
-    _validate_schedule(record["schedule"], question_specs=question_specs)
-    _validate_round_limits(record["round_limits"])
+    _validate_schedule(
+        record["schedule"], question_specs=question_specs, version=record["draft_version"]
+    )
+    _validate_round_limits(record["round_limits"], version=record["draft_version"])
 
 
-def _validate_model(value):
-    if not isinstance(value, dict) or set(value) != set(MODEL):
+def _validate_model(value, *, version):
+    expected = _model_for_draft_version(version)
+    if not isinstance(value, dict) or set(value) != set(expected):
         raise ValueError("star_readiness_registration_invalid")
     if (
         any(type(value[key]) is not int for key in
             ("max_output_tokens", "request_timeout_seconds", "retry"))
         or type(value["temperature"]) is not float
         or type(value["thinking_mode"]) is not bool
-        or value != MODEL
+        or value != expected
     ):
         raise ValueError("star_readiness_registration_invalid")
 
@@ -403,11 +416,12 @@ def _validate_questions(value, *, draft, question_specs=None):
             raise ValueError("star_readiness_registration_invalid")
 
 
-def _validate_schedule(value, *, question_specs=None):
+def _validate_schedule(value, *, question_specs=None, version=V2_DRAFT_VERSION):
     question_specs = QUESTION_SPECS if question_specs is None else question_specs
+    run_limits = _run_limits_for_draft_version(version)
     if not isinstance(value, list) or len(value) != len(question_specs):
         raise ValueError("star_readiness_registration_invalid")
-    for item, (question_id, _, _, _), limits in zip(value, question_specs, RUN_LIMITS):
+    for item, (question_id, _, _, _), limits in zip(value, question_specs, run_limits):
         if (
             not isinstance(item, dict)
             or set(item) != {"attempts", "limits", "question", "transport"}
@@ -420,8 +434,8 @@ def _validate_schedule(value, *, question_specs=None):
             raise ValueError("star_readiness_registration_invalid")
 
 
-def _validate_round_limits(value):
-    if not _exact_int_mapping(value, ROUND_LIMITS):
+def _validate_round_limits(value, *, version=V2_DRAFT_VERSION):
+    if not _exact_int_mapping(value, _round_limits_for_draft_version(version)):
         raise ValueError("star_readiness_registration_invalid")
 
 
@@ -441,6 +455,8 @@ def _question_specs_for_draft_version(version):
         return V3_QUESTION_SPECS
     if version == V4_DRAFT_VERSION:
         return V4_QUESTION_SPECS
+    if version == V5_DRAFT_VERSION:
+        return V5_QUESTION_SPECS
     raise ValueError("star_readiness_registration_invalid")
 
 
@@ -451,7 +467,21 @@ def _authorization_scope_for_draft_version(version):
         return V3_AUTHORIZATION_SCOPE
     if version == V4_DRAFT_VERSION:
         return V4_AUTHORIZATION_SCOPE
+    if version == V5_DRAFT_VERSION:
+        return V5_AUTHORIZATION_SCOPE
     raise ValueError("star_readiness_registration_invalid")
+
+
+def _model_for_draft_version(version):
+    return V5_MODEL if version == V5_DRAFT_VERSION else MODEL
+
+
+def _run_limits_for_draft_version(version):
+    return V5_RUN_LIMITS if version == V5_DRAFT_VERSION else RUN_LIMITS
+
+
+def _round_limits_for_draft_version(version):
+    return V5_ROUND_LIMITS if version == V5_DRAFT_VERSION else ROUND_LIMITS
 
 
 def _validate_source(value):

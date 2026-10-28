@@ -22,11 +22,11 @@ from .star_readiness_archive import (
 from .star_readiness_configuration import validate_server_configuration
 from .star_readiness_profile import validate_execution_profile
 from .star_readiness_registration import (
-    ROUND_LIMITS,
     V2_DRAFT_VERSION,
     V2_LIVE_MANIFEST_SHA256,
     V3_DRAFT_VERSION,
     V4_DRAFT_VERSION,
+    V5_DRAFT_VERSION,
     digest,
     registration,
 )
@@ -41,6 +41,8 @@ def _claim_live_registration(manifest_sha256, draft_version):
         raise ValueError("star_readiness_registration_identity_mismatch")
     if draft_version == V4_DRAFT_VERSION:
         batch_key = V4_DRAFT_VERSION
+    elif draft_version == V5_DRAFT_VERSION:
+        batch_key = V5_DRAFT_VERSION
     elif draft_version == V3_DRAFT_VERSION:
         batch_key = V3_DRAFT_VERSION
     elif draft_version == V2_DRAFT_VERSION and manifest_sha256 == V2_LIVE_MANIFEST_SHA256:
@@ -236,9 +238,9 @@ class StarReadinessCoordinator:
     def run(self):
         """Run the registered batch once, archiving intent, every bundle and result."""
         started = time.monotonic()
-        deadline_at = time.time() + ROUND_LIMITS["wall_seconds"]
+        wall_started = time.time()
         archive = ExperimentArchive(self.path)
-        policy = ExperimentRunPolicy(deadline_at)
+        policy = None
         server = None
         runtime_storage = None
         runtime_cleanup = "not_started"
@@ -266,6 +268,8 @@ class StarReadinessCoordinator:
 
         try:
             frozen = self._verified_registration()
+            round_wall_seconds = frozen["round_limits"]["wall_seconds"]
+            policy = ExperimentRunPolicy(wall_started + round_wall_seconds)
             archive.put("registration.json", {
                 "registration": registration_record(frozen),
                 "sha256": digest(frozen),
@@ -286,6 +290,7 @@ class StarReadinessCoordinator:
                 self.evidence_kind,
                 refresh_preflight_each_call=True,
                 late_usage_evidence_dir=self.path / "supplemental-usage",
+                request_timeout_seconds=frozen["model"]["request_timeout_seconds"],
             )
             server.check_conditions()
             archive.put("configuration-startup.json", self._verified_configuration(server))
@@ -295,7 +300,7 @@ class StarReadinessCoordinator:
                 {"logical_calls": 0, "http_attempts": 0, "problem_tool_calls": 0,
                  "charged_tokens": 0},
                 first_entry["limits"],
-                remaining_seconds=max(0, ROUND_LIMITS["wall_seconds"] - (time.monotonic() - started)),
+                remaining_seconds=max(0, round_wall_seconds - (time.monotonic() - started)),
                 preflights=0,
             )
             if first_admission:
@@ -315,7 +320,7 @@ class StarReadinessCoordinator:
             preflight_ids.add(observed["identity"]["run_id"])
 
             for index, entry in enumerate(frozen["schedule"]):
-                remaining = max(0, ROUND_LIMITS["wall_seconds"] - (time.monotonic() - started))
+                remaining = max(0, round_wall_seconds - (time.monotonic() - started))
                 used = {
                     "logical_calls": usage["logical_calls"],
                     "http_attempts": usage["http_attempts"],
@@ -333,7 +338,7 @@ class StarReadinessCoordinator:
                     break
 
                 policy.prepare(self._run_limits(entry["limits"]))
-                run_deadline = min(started + ROUND_LIMITS["wall_seconds"],
+                run_deadline = min(started + round_wall_seconds,
                                    time.monotonic() + entry["limits"]["wall_seconds"])
 
                 self._verified_registration()

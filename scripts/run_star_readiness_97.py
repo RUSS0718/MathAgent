@@ -1,4 +1,4 @@
-"""Freeze and run the caller-authorized #97 Intern S2 batch once."""
+"""Freeze, authorize and run one #97 Intern S2 batch in separate steps."""
 
 import argparse
 import json
@@ -9,8 +9,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / "artifacts"
 sys.path.insert(0, str(ROOT))
-DEFAULT_DRAFT = ARTIFACTS / "issue-97-prereg" / "draft-v4.json"
-DEFAULT_MANIFEST = ARTIFACTS / "issue-97-prereg" / "live-manifest.json"
+DEFAULT_DRAFT = ARTIFACTS / "issue-97-prereg" / "draft-v5.json"
+DEFAULT_MANIFEST = ARTIFACTS / "issue-97-prereg" / "manifest-v5-preview.json"
+DEFAULT_LIVE_MANIFEST = ARTIFACTS / "issue-97-prereg" / "live-manifest-v5.json"
 
 
 def build_parser():
@@ -18,11 +19,15 @@ def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     freeze = commands.add_parser(
-        "freeze-live", help="create a dispatchable live registration from a supported draft"
+        "freeze-live", help="freeze a non-dispatchable registration from a supported draft"
     )
     freeze.add_argument("--draft", type=Path, default=DEFAULT_DRAFT)
     freeze.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    freeze.add_argument("--confirm-live", action="store_true", required=True)
+    authorize = commands.add_parser("authorize-live", help="authorize an exact reviewed preview hash")
+    authorize.add_argument("--manifest", type=Path, required=True)
+    authorize.add_argument("--manifest-sha256", required=True)
+    authorize.add_argument("--authorized-manifest", type=Path, default=DEFAULT_LIVE_MANIFEST)
+    authorize.add_argument("--confirm-live", action="store_true", required=True)
     run = commands.add_parser("run-live", help="run one frozen batch through live Intern S2")
     run.add_argument("--manifest", type=Path, required=True)
     run.add_argument("--manifest-sha256", required=True)
@@ -49,13 +54,9 @@ def _write_once(path, content):
 
 
 def _freeze(args):
-    """Write the confirmed source-bound registration and its independent hash file."""
+    """Write an unapproved source-bound preview for review before live authorization."""
     from showcase.star_readiness_coordinator import current_source_identity
-    from showcase.star_readiness_registration import (
-        adapt_draft,
-        authorize_live_registration,
-        digest,
-    )
+    from showcase.star_readiness_registration import adapt_draft, digest
 
     manifest_path = _inside_artifacts(args.manifest)
     if manifest_path.exists():
@@ -63,11 +64,31 @@ def _freeze(args):
     draft_path = _inside_artifacts(args.draft)
     draft = json.loads(draft_path.read_text(encoding="utf-8"))
     source = current_source_identity()
-    base = adapt_draft(draft, current_source=source)
+    manifest = adapt_draft(draft, current_source=source)
+    manifest_hash = digest(manifest)
+    _write_once(manifest_path, json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
+    print(json.dumps({
+        "manifest": str(manifest_path.relative_to(ROOT)),
+        "sha256": manifest_hash,
+        "dispatchable": False,
+    }, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def _authorize(args):
+    """Authorize the reviewed preview hash without overwriting either registration."""
+    from showcase.star_readiness_coordinator import current_source_identity
+    from showcase.star_readiness_registration import authorize_live_registration, digest
+
+    preview_path = _inside_artifacts(args.manifest)
+    manifest_path = _inside_artifacts(args.authorized_manifest)
+    if manifest_path.exists():
+        raise ValueError("star_readiness_manifest_already_exists")
+    preview = json.loads(preview_path.read_text(encoding="utf-8"))
     manifest = authorize_live_registration(
-        base,
-        expected_sha256=digest(base),
-        current_source=source,
+        preview,
+        expected_sha256=args.manifest_sha256,
+        current_source=current_source_identity(),
         explicit_authorization=args.confirm_live,
         authorization_date=datetime.now(timezone(timedelta(hours=8))).date().isoformat(),
     )
@@ -86,26 +107,26 @@ def _build_adapter(manifest):
     from llm_client import InternChatClient
     from showcase.adapters import InternModelAdapter
     from showcase.request_transport import INTERN_S2_LIVE_ENDPOINT
-    from showcase.star_readiness_registration import MODEL
+    model = manifest["model"]
 
     client = InternChatClient(
-        timeout=MODEL["request_timeout_seconds"],
-        retry=MODEL["retry"],
-        thinking_mode=MODEL["thinking_mode"],
+        timeout=model["request_timeout_seconds"],
+        retry=model["retry"],
+        thinking_mode=model["thinking_mode"],
         provider_endpoint_only=True,
     )
     if client.api_base != manifest["provider_endpoint"] or client.api_base != INTERN_S2_LIVE_ENDPOINT:
         raise ValueError("star_readiness_live_provider_mismatch")
-    if client.model != MODEL["name"]:
+    if client.model != model["name"]:
         raise ValueError("star_readiness_live_model_mismatch")
     return InternModelAdapter(
         client=client,
-        model_id=MODEL["name"],
-        temperature=MODEL["temperature"],
-        max_tokens=MODEL["max_output_tokens"],
-        client_timeout=MODEL["request_timeout_seconds"],
-        client_retry=MODEL["retry"],
-        thinking_mode=MODEL["thinking_mode"],
+        model_id=model["name"],
+        temperature=model["temperature"],
+        max_tokens=model["max_output_tokens"],
+        client_timeout=model["request_timeout_seconds"],
+        client_retry=model["retry"],
+        thinking_mode=model["thinking_mode"],
     )
 
 
@@ -138,7 +159,11 @@ def main(argv=None):
     """Dispatch only the explicitly selected registration or live-run operation."""
     args = build_parser().parse_args(argv)
     try:
-        return _freeze(args) if args.command == "freeze-live" else _run(args)
+        if args.command == "freeze-live":
+            return _freeze(args)
+        if args.command == "authorize-live":
+            return _authorize(args)
+        return _run(args)
     except Exception as exc:
         print(json.dumps({"error": str(exc) if isinstance(exc, ValueError) else type(exc).__name__}),
               file=sys.stderr)
