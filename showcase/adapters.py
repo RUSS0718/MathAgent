@@ -663,7 +663,13 @@ class InternStreamAdapter(InternModelAdapter):
                 elif late_state["lock"].acquire(blocking=False):
                     try:
                         if late_state["event"] is None:
-                            call_budget.after_attempt(attempt)
+                            if (attempt.get("error_category") == "timeout"
+                                    and attempt.get("status") != "not_submitted") or local_processing_timeout:
+                                from .run_budget_late import settle_timeout_nonblocking
+
+                                settle_timeout_nonblocking(call_budget, attempt)
+                            else:
+                                call_budget.after_attempt(attempt)
                     finally:
                         late_state["lock"].release()
 

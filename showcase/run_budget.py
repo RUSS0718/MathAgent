@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from functools import wraps
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -238,28 +239,41 @@ class RunBudgetLedger:
                     return True
             return False
 
-    def view(self, run_id):
-        """Read budget and attempts from the same persisted ledger version."""
+    def _read_row(self, run_id):
+        if self.lock.acquire(blocking=False):
+            try:
+                return self.connection.execute(
+                    "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
+                ).fetchone()
+            finally:
+                self.lock.release()
+        if self.database_path:
+            uri = Path(self.database_path).resolve().as_uri() + "?mode=ro"
+            reader = sqlite3.connect(uri, uri=True, timeout=1)
+            try:
+                return reader.execute(
+                    "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
+                ).fetchone()
+            finally:
+                reader.close()
         with self.lock:
-            row = self.connection.execute(
+            return self.connection.execute(
                 "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
             ).fetchone()
+
+    def view(self, run_id):
+        """Read budget and attempts from the same persisted ledger version."""
+        row = self._read_row(run_id)
         if row is None:
             return None, []
         state = json.loads(row[0])
         return _summary(state), [a["public_attempt"] for a in state["actions"]
                                  if a.get("public_attempt")]
     def attempts(self, run_id):
-        with self.lock:
-            row = self.connection.execute('SELECT ledger_json FROM run_budgets WHERE run_id=?', (run_id,)).fetchone()
-        state = json.loads(row[0]) if row else {"actions": []}
-        return [action['public_attempt'] for action in state['actions'] if action.get('public_attempt')]
+        return self.view(run_id)[1]
 
     def snapshot(self, run_id):
-        with self.lock:
-            row = self.connection.execute(
-                "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
-            ).fetchone()
+        row = self._read_row(run_id)
         return _summary(json.loads(row[0])) if row is not None else None
 
 

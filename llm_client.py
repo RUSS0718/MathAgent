@@ -584,7 +584,12 @@ class InternChatClient:
                                 completion_tokens=0,
                                 total_tokens=0,
                             )
-                        _attempt_budget.after_attempt(request_event)
+                        if isinstance(failure, requests.ReadTimeout) and not _not_submitted(failure):
+                            from showcase.run_budget_late import settle_timeout_nonblocking
+
+                            settle_timeout_nonblocking(_attempt_budget, request_event)
+                        else:
+                            _attempt_budget.after_attempt(request_event)
                     self.request_diagnostics.append(request_event)
                     if _attempt_records is not None:
                         _attempt_records.append(request_event)
