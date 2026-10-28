@@ -456,6 +456,8 @@ class InternStreamAdapter(InternModelAdapter):
                         data=body,
                         deadline=logical_deadline,
                         timeout=configured or effective_timeout,
+                        loopback_only=getattr(client, "loopback_only", False),
+                        provider_endpoint_only=getattr(client, "provider_endpoint_only", False),
                         on_late_response=settle_late,
                     ):
                         if kind == "headers":
@@ -493,6 +495,9 @@ class InternStreamAdapter(InternModelAdapter):
                         raise requests.ConnectionError("incomplete_stream")
                     break
                 except requests.RequestException as failure:
+                    if response is None and getattr(failure, "response", None) is not None:
+                        response = failure.response
+                        attempt["http_status"] = getattr(response, "status_code", None)
                     delay = product_retry_delay(failure, response, index, call_budget) if call_budget else None
                     if call_budget and _not_submitted(failure):
                         attempt.update(status="not_submitted", prompt_tokens=0,

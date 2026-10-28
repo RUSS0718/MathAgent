@@ -32,7 +32,7 @@ def strict_loopback_post(url: str, **kwargs: Any) -> requests.Response:
         response = session.post(url, allow_redirects=False, **kwargs)
         if 300 <= response.status_code < 400:
             response.close()
-            raise requests.HTTPError("strict_loopback_redirect_rejected")
+            raise requests.HTTPError("strict_loopback_redirect_rejected", response=response)
         return response
 
 
@@ -148,7 +148,12 @@ def response_events(
                 if detached.is_set() or time.monotonic() >= deadline:
                     raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
                 dispatch_started = True
+            if not loopback_only and not provider_endpoint_only:
+                request_kwargs["allow_redirects"] = False
             response = post(url, timeout=timeout, stream=True, **request_kwargs)
+            status_code = getattr(response, "status_code", None)
+            if type(status_code) is int and 300 <= status_code < 400:
+                raise requests.HTTPError("metered_redirect_rejected", response=response)
             response_headers_at = time.monotonic()
             response_headers_seconds = response_headers_at - started
             publish(("headers", response))
