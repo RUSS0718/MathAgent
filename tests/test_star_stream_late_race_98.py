@@ -28,8 +28,9 @@ class StreamLateRaceTest(StarJobFixture, unittest.TestCase):
     def open_stream(self, strict=True, **config):
         with patch.dict(os.environ, {"INTERN_API_KEY": "offline-placeholder"}):
             adapter = InternStreamAdapter(InternChatClient(timeout=2, retry=3), max_tokens=256)
+        features = {"strict_completion": strict, **config.pop("SHOWCASE_STAR_FEATURES", {})}
         self.open_star([], SHOWCASE_STAR_ADAPTER=adapter,
-                       SHOWCASE_STAR_FEATURES={"strict_completion": strict}, **config)
+                       SHOWCASE_STAR_FEATURES=features, **config)
 
     def test_timeout_does_not_overwrite_inflight_late_success(self):
         self.open_stream()
@@ -498,6 +499,52 @@ class StreamLateRaceTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(new_before["result"], new_after["result"])
         self.assertEqual(4, len(sends))
         self.assertEqual(3, self.post.call_count)
+    def test_old_late_tool_step_never_executes_or_changes_new_run(self):
+        from showcase.request_transport import response_events as real_events
+        from showcase.tools import ToolRegistry
+        from tests.test_star_product_tools import FEATURES, NEED_PLAN, PLAN, STEP
+
+        executed = []
+        registry = ToolRegistry()
+        registry.register("polynomial_check", lambda arguments: executed.append(arguments) or 2)
+        self.open_stream(SHOWCASE_STAR_REGISTRY=registry, SHOWCASE_STAR_FEATURES=FEATURES)
+        self.replies.extend([NEED_PLAN, PLAN, SOLVED, POLISH, ACCEPT])
+        callbacks, sends, timed_out_roles = [], [], []
+
+        class Reply:
+            status_code = 200
+
+        def transport(url, *, on_late_response, **kwargs):
+            sends.append(True)
+            if len(sends) == 3:
+                payload = json.loads(kwargs["data"])
+                timed_out_roles.append(json.loads(payload["messages"][-1]["content"])["role"])
+                callbacks.append(on_late_response)
+                raise requests.ReadTimeout("old reasoner deadline")
+            yield from real_events(url, on_late_response=on_late_response, **kwargs)
+
+        packet = {"choices": [{"delta": {"content": json.dumps(STEP)}, "finish_reason": "stop"}],
+                  "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}}
+        late = ("data: " + json.dumps(packet) + "\n\ndata: [DONE]\n\n").encode()
+        with patch("showcase.request_transport.response_events", side_effect=transport):
+            old_id = self.create_job()
+            old_before = self.terminal(old_id)
+            new_id = self.create_job()
+            new_before = self.terminal(new_id)
+            self.assertEqual("failed", old_before["status"])
+            self.assertEqual("succeeded", new_before["status"])
+            self.assertEqual(0, old_before["result"]["budget"]["tool_calls"])
+            self.assertEqual(["reasoner"], timed_out_roles)
+            self.assertEqual([], executed)
+            callbacks[0](Reply(), late, .01, .2, True)
+            old_after, new_after = self.job(old_id), self.job(new_id)
+        self.assertEqual([], executed)
+        self.assertEqual(0, old_after["result"]["budget"]["tool_calls"])
+        self.assertEqual(old_before["result"]["solver"], old_after["result"]["solver"])
+        self.assertEqual(new_before["status"], new_after["status"])
+        self.assertEqual(new_before["result"], new_after["result"])
+        self.assertEqual(6, len(sends))
+        self.assertEqual(5, self.post.call_count)
     def test_late_503_with_valid_sse_is_not_success(self):
         self.open_stream()
         callbacks, sends = [], []
