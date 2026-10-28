@@ -2,13 +2,11 @@
 import json
 import sqlite3
 import subprocess
+import time
 from contextlib import closing
 from pathlib import Path
 
 from .star_diagnostic_registration import ROOT
-
-BLOCKING = {"running", "unknown", "interrupted", "archive_failed"}
-
 
 def default_registry():
     common = subprocess.check_output(["git", "rev-parse", "--git-common-dir"],
@@ -48,14 +46,15 @@ def mark(registry, manifest, status):
 def initialize(db, manifest):
     db.execute("PRAGMA journal_mode=WAL")
     db.executescript("""
-        CREATE TABLE diagnostic_batch (manifest TEXT, status TEXT, last_event TEXT);
+        CREATE TABLE diagnostic_batch (manifest TEXT, status TEXT, last_event TEXT, last_event_at REAL);
         CREATE TABLE diagnostic_dispatch (position INTEGER PRIMARY KEY, run_id TEXT UNIQUE,
             attempt_id TEXT UNIQUE, deadline REAL, status TEXT, result_sha256 TEXT);
     """)
-    db.execute("INSERT INTO diagnostic_batch VALUES (?, 'running', 'started')", (json.dumps(manifest),))
+    db.execute("INSERT INTO diagnostic_batch VALUES (?, 'running', 'started', ?)",
+               (json.dumps(manifest), time.time()))
     db.commit()
 
 
 def status(db, value):
-    db.execute("UPDATE diagnostic_batch SET status=?,last_event=?", (value, value))
+    db.execute("UPDATE diagnostic_batch SET status=?,last_event=?,last_event_at=?", (value, value, time.time()))
     db.commit()

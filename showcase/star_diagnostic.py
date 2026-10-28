@@ -3,6 +3,7 @@ import json
 import os
 import socket
 import sqlite3
+import threading
 import time
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -10,6 +11,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from .run_budget import RunBudgetLedger, RunBudgetLimits, freeze_budget
+from .star_diagnostic_process import process_identity
 from .star_diagnostic_registration import (
     _request,
     digest,
@@ -18,33 +20,16 @@ from .star_diagnostic_registration import (
 )
 from .star_diagnostic_store import claim, default_registry, initialize, mark, status
 
+_SOCKET_GATE = threading.RLock()
+
 
 @contextmanager
 def socket_free():
     # A fake-only command owns its process; neither localhost nor DNS is allowed.
-    with ExitStack() as stack:
+    with _SOCKET_GATE, ExitStack() as stack:
         for name in ("socket", "create_connection", "getaddrinfo", "socketpair"):
             stack.enter_context(patch.object(socket, name, side_effect=RuntimeError("diagnostic_socket_forbidden")))
         yield
-
-
-def process_identity():
-    if os.name == "nt":
-        import ctypes
-        from ctypes import wintypes
-        created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-        kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
-        handle = kernel32.GetCurrentProcess()
-        if not kernel32.GetProcessTimes(handle, ctypes.byref(created),
-                ctypes.byref(exited), ctypes.byref(kernel), ctypes.byref(user)):
-            raise OSError("diagnostic_process_identity_unavailable")
-        creation = ((created.dwHighDateTime << 32) + created.dwLowDateTime) / 1e7 - 11644473600
-    else:
-        import subprocess
-        creation = subprocess.check_output(["ps", "-p", str(os.getpid()), "-o", "lstart="], text=True).strip()
-    return dict(pid=os.getpid(), process_created_at=creation)
 
 
 class DiagnosticJob:
@@ -70,14 +55,18 @@ class DiagnosticJob:
 
     def _run(self, *, outcomes, limit, cancel_after, continuation):
         validate(self.manifest, check_source=True)
-        inputs = json.loads((self.registration / "private" / "inputs.json").read_text(encoding="utf-8"))
+        private_plan = json.loads((self.registration / "private" / "plan.json").read_text(encoding="utf-8"))
+        if (digest(private_plan["endpoint"]) != self.manifest["endpoint_sha256"]
+                or any(private_plan[k] != self.manifest[k] for k in ("registration_id", "phase", "seed", "window", "conditions_met"))):
+            raise ValueError("diagnostic_inputs_changed")
+        inputs = private_plan["requests"]
         requests = self.manifest["requests"]
         if len(inputs) != len(requests):
             raise ValueError("diagnostic_inputs_changed")
         for raw, frozen in zip(inputs, requests, strict=True):
             if (_request(raw, self.manifest["phase"]) != frozen["input_estimate"]
                     or any(digest(raw[k]) != frozen[k + "_sha256"] for k in ("question", "prompt", "schema"))
-                    or any(raw[k] != frozen[k] for k in ("arm", "question_id", "timeout_seconds"))):
+                    or any(raw[k] != frozen[k] for k in ("arm", "question_id", "timeout_seconds", "stream"))):
                 raise ValueError("diagnostic_inputs_changed")
         allowed = {"success", "unknown", "missing_usage", "protocol_failed", "crash", "intent_crash", "archive_failure", "disconnect"}
         outcomes = outcomes or ["success"] * len(requests)
@@ -89,6 +78,19 @@ class DiagnosticJob:
             return dict(status="not_started", dispatched=0)
         if not self.manifest["window"]["start"] <= time.time() < self.manifest["window"]["end"]:
             raise ValueError("diagnostic_outside_window")
+        if continuation:
+            previous = self.snapshot()
+            if (previous["status"] != "control_complete" or previous["dispatched"] != 3
+                    or previous["manifest_sha256"] != self.manifest["sha256"] or previous["unknown"]):
+                raise ValueError("diagnostic_control_result_unavailable")
+            for request, result in zip(requests[:3], previous["results"], strict=True):
+                file = self.archive / "private" / request["workspace_id"] / "visible.json"
+                try:
+                    observed = digest(json.loads(file.read_text(encoding="utf-8")))
+                except (OSError, ValueError):
+                    raise ValueError("diagnostic_control_result_unavailable") from None
+                if result["result_sha256"] != observed:
+                    raise ValueError("diagnostic_control_result_changed")
         claim(self.registry, self.manifest, self.archive, continuation=continuation)
         db = None
         ledger = None
@@ -98,18 +100,21 @@ class DiagnosticJob:
                 self.archive.mkdir(parents=True, exist_ok=False)
                 (self.archive / "private").mkdir()
                 write_new(self.archive / "manifest.json", self.manifest)
-                write_new(self.archive / "process.json", dict(**process_identity(),
+                for name in ("stdout.log", "stderr.log"):
+                    (self.archive / name).touch(exist_ok=False)
+            record = self.archive / ("process-" + uuid4().hex + ".json")
+            write_new(record, dict(**process_identity(),
                           stdout=str(self.archive / "stdout.log"), stderr=str(self.archive / "stderr.log"),
                           monitor_argv=["uv", "run", "--offline", "python", "scripts/run_star_diagnostic_102.py",
                                         "monitor", "--archive", str(self.archive)]))
-                for name in ("stdout.log", "stderr.log"):
-                    (self.archive / name).touch(exist_ok=False)
+            temporary = self.archive / ("process-pointer-" + uuid4().hex + ".json")
+            write_new(temporary, json.loads(record.read_text(encoding="utf-8")))
+            os.replace(temporary, self.archive / "process.json")
             db = sqlite3.connect(self.archive / "batch.sqlite3")
             if not continuation:
                 initialize(db, self.manifest)
             ledger = RunBudgetLedger(connection=db)
             done = db.execute("SELECT count(*) FROM diagnostic_dispatch").fetchone()[0]
-            terminal = "completed"
             for position in range(done, len(requests)):
                 if (self.archive / "cancel.json").exists() or (cancel_after is not None and position >= cancel_after):
                     terminal = "cancelled"
@@ -125,6 +130,7 @@ class DiagnosticJob:
                 deadline = min(time.time() + request["timeout_seconds"], self.manifest["window"]["end"])
                 db.execute("INSERT INTO diagnostic_dispatch VALUES (?,?,?,?,?,NULL)",
                            (position, run_id, attempt_id, deadline, "intent"))
+                db.execute("UPDATE diagnostic_batch SET last_event='dispatch_intent',last_event_at=?", (time.time(),))
                 db.commit()
                 outcome = outcomes[position]
                 if outcome == "intent_crash":
@@ -139,6 +145,8 @@ class DiagnosticJob:
                 event = dict(attempt_id=attempt_id, logical_call_id=call.logical_call_id,
                              max_tokens=16384, deadline_at=deadline, status="unknown")
                 call.before_attempt(event, request["input_estimate"])
+                db.execute("UPDATE diagnostic_batch SET last_event='reserved',last_event_at=?", (time.time(),))
+                db.commit()
                 if outcome == "crash":
                     raise InterruptedError("diagnostic_simulated_exit")
                 unknown = outcome in {"unknown", "disconnect", "missing_usage"}
@@ -163,9 +171,11 @@ class DiagnosticJob:
                 if unknown:
                     terminal = "unknown"
                     break
+            else:
+                terminal = "completed"
         except InterruptedError:
             terminal = "interrupted"
-        except OSError:
+        except (OSError, sqlite3.Error):
             terminal = "archive_failed"
         finally:
             if db is not None:
@@ -179,15 +189,18 @@ class DiagnosticJob:
     def reconcile(self, run_id, attempt_id, *, prompt_tokens, completion_tokens, total_tokens):
         """Trusted offline late usage only; no result recovery or batch resume."""
         with socket_free():
-            db = sqlite3.connect(self.archive / "batch.sqlite3")
+            database = (self.archive / "batch.sqlite3").as_uri() + "?mode=rw"
+            db = sqlite3.connect(database, uri=True)
             try:
                 row = db.execute("SELECT 1 FROM diagnostic_dispatch WHERE run_id=? AND attempt_id=?",
                                  (run_id, attempt_id)).fetchone()
                 if row is None:
                     raise ValueError("diagnostic_original_attempt_missing")
-                ledger = RunBudgetLedger(connection=db)
-                if ledger.snapshot(run_id) is None or not ledger.attempts(run_id):
+                row = db.execute("SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)).fetchone()
+                if row is None or sum(a["kind"] == "http" and a["id"] == attempt_id
+                                      for a in json.loads(row[0])["actions"]) != 1:
                     raise ValueError("diagnostic_original_reservation_missing")
+                ledger = RunBudgetLedger(connection=db)
                 values = (prompt_tokens, completion_tokens, total_tokens)
                 if any(type(v) is not int or v < 0 for v in values) or total_tokens != prompt_tokens + completion_tokens:
                     raise ValueError("diagnostic_usage_invalid")

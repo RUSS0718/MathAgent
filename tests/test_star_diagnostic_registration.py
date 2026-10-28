@@ -1,3 +1,4 @@
+import copy
 import json
 import tempfile
 import unittest
@@ -37,3 +38,51 @@ class RegistrationTest(unittest.TestCase):
             manifest["sha256"] = digest({k: v for k, v in manifest.items() if k != "sha256"})
             with self.assertRaises(ValueError):
                 validate(manifest)
+
+    def test_all_stage_ceilings_and_conditional_not_started_are_explicit(self):
+        expected = {"P": (36, 2359296, 32400, 36000), "O": (3, 196608, 5400, 7200),
+                    "T": (24, 1572864, 32400, 36000), "T-3600": (4, 262144, 14400, 16200),
+                    "R": (16, 1048576, 28800, 32400), "S": (8, 524288, 14400, 16200)}
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = freeze(plan(), Path(directory) / "registration")
+            limits = dry_run(manifest)["phase_limits"]
+            for phase, values in expected.items():
+                self.assertEqual(values, tuple(limits[phase][k] for k in ("requests", "tokens", "wait", "batch")))
+            value = plan("S")
+            value["conditions_met"] = False
+            condition = freeze(value, Path(directory) / "conditional")
+            self.assertEqual("not_started", dry_run(condition)["status"])
+
+    def test_exact_65536_envelope_is_admitted_but_one_extra_byte_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            value = plan(count=1)
+            value["requests"][0]["prompt"] = "x" * 48966
+            manifest = freeze(value, Path(directory) / "exact")
+            self.assertEqual(49152, manifest["requests"][0]["input_estimate"])
+            self.assertEqual(dict(tokens=65536, logical=1, http=1, tools=0), manifest["single"])
+            value["requests"][0]["prompt"] += "x"
+            with self.assertRaisesRegex(ValueError, "too_long"):
+                freeze(value, Path(directory) / "over")
+
+    def test_frozen_fields_cannot_be_modified_and_source_must_match(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = freeze(plan(), Path(directory) / "registration")
+            changes = {"upstream": "a" * 40, "seed": 42, "stop": [],
+                       "parameters": {}, "source": {}, "window": {}, "requests": []}
+            for key, value in changes.items():
+                with self.subTest(key=key):
+                    changed = copy.deepcopy(manifest)
+                    changed[key] = value
+                    with self.assertRaises(ValueError):
+                        validate(changed)
+            changed = copy.deepcopy(manifest)
+            changed["source"]["sha"] = "0" * 40
+            changed["sha256"] = digest({k: v for k, v in changed.items() if k != "sha256"})
+            with self.assertRaisesRegex(ValueError, "source_changed"):
+                validate(changed, check_source=True)
+
+    def test_stage_request_count_and_wait_caps_cannot_be_exceeded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for value in (plan("O", 4), plan("T", 24)):
+                with self.assertRaisesRegex(ValueError, "limit"):
+                    freeze(value, Path(directory) / "invalid")

@@ -4,6 +4,7 @@ import json
 import math
 import re
 import subprocess
+from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
@@ -59,7 +60,7 @@ def _exact(value, names):
 
 
 def _request(request, phase):
-    _exact(request, "question prompt schema arm question_id timeout_seconds")
+    _exact(request, "question prompt schema arm question_id timeout_seconds stream")
     for name in ("question", "prompt"):
         if not isinstance(request[name], str) or not request[name].strip():
             raise ValueError("diagnostic_input_missing")
@@ -67,13 +68,15 @@ def _request(request, phase):
         raise ValueError("diagnostic_schema_missing")
     identifier(request["arm"])
     identifier(request["question_id"])
+    if type(request["stream"]) is not bool or (phase != "S" and request["stream"]):
+        raise ValueError("diagnostic_stream_invalid")
     wait = request["timeout_seconds"]
     allowed = {"P": {900}, "O": {1800}, "T": {900, 1800}, "T-3600": {3600}, "S": {1800}}
     if type(wait) is not int or (wait not in allowed.get(phase, range(1, 1801))):
         raise ValueError("diagnostic_wait_invalid")
     # Include the full wire-envelope estimate; never shorten a question/proof.
     size = len(json.dumps(dict(question=request["question"], prompt=request["prompt"],
-                              schema=request["schema"], **PARAMETERS),
+                              schema=request["schema"], stream=request["stream"], **PARAMETERS),
                           ensure_ascii=False).encode("utf-8"))
     if size + PARAMETERS["max_tokens"] > SINGLE["tokens"]:
         raise ValueError("diagnostic_input_too_long")
@@ -81,8 +84,10 @@ def _request(request, phase):
 
 
 def freeze(plan, directory):
-    _exact(plan, "registration_id phase seed window conditions_met requests")
+    _exact(plan, "registration_id phase seed endpoint window conditions_met requests")
     identifier(plan["registration_id"])
+    if not isinstance(plan["endpoint"], str) or not plan["endpoint"].strip():
+        raise ValueError("diagnostic_endpoint_missing")
     phase = plan["phase"]
     if phase not in PHASES or type(plan["seed"]) is not int:
         raise ValueError("diagnostic_phase_or_seed_invalid")
@@ -104,26 +109,28 @@ def freeze(plan, directory):
                              question_sha256=digest(request["question"]),
                              prompt_sha256=digest(request["prompt"]),
                              schema_sha256=digest(request["schema"]), input_estimate=size,
-                             timeout_seconds=request["timeout_seconds"],
+                             timeout_seconds=request["timeout_seconds"], stream=request["stream"],
                              shadow_seconds=900 if request["timeout_seconds"] == 1800 else None))
     if sum(r["timeout_seconds"] for r in requests) > PHASES[phase]["wait"]:
         raise ValueError("diagnostic_wait_limit")
     result = dict(version=1, registration_id=plan["registration_id"], phase=phase,
                   seed=plan["seed"], window=plan["window"], conditions_met=plan["conditions_met"],
                   source=source_identity(), upstream=UPSTREAM, parameters=PARAMETERS,
+                  endpoint_sha256=digest(plan["endpoint"]),
                   single=SINGLE, budget=PHASES[phase], stop=STOP, requests=requests)
+    result = deepcopy(result)
     result["sha256"] = digest(result)
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     private = directory / "private"
     private.mkdir()
-    write_new(private / "inputs.json", plan["requests"])
+    write_new(private / "plan.json", plan)
     write_new(directory / "manifest.json", result)
     return result
 
 
 def validate(manifest, *, check_source=False):
-    _exact(manifest, "version registration_id phase seed window conditions_met source upstream parameters single budget stop requests sha256")
+    _exact(manifest, "version registration_id phase seed window conditions_met source upstream parameters endpoint_sha256 single budget stop requests sha256")
     if digest({k: v for k, v in manifest.items() if k != "sha256"}) != manifest["sha256"]:
         raise ValueError("diagnostic_manifest_changed")
     if (manifest["version"] != 1 or manifest["upstream"] != UPSTREAM
@@ -131,6 +138,8 @@ def validate(manifest, *, check_source=False):
             or manifest["stop"] != STOP or manifest["budget"] != PHASES.get(manifest["phase"])):
         raise ValueError("diagnostic_contract_changed")
     identifier(manifest["registration_id"])
+    if not isinstance(manifest["endpoint_sha256"], str) or not re.fullmatch("[0-9a-f]{64}", manifest["endpoint_sha256"]):
+        raise ValueError("diagnostic_endpoint_invalid")
     phase = manifest["phase"]
     if type(manifest["seed"]) is not int or type(manifest["conditions_met"]) is not bool:
         raise ValueError("diagnostic_manifest_invalid")
@@ -142,9 +151,17 @@ def validate(manifest, *, check_source=False):
     if not isinstance(manifest["requests"], list) or not 1 <= len(manifest["requests"]) <= PHASES[phase]["requests"]:
         raise ValueError("diagnostic_request_limit")
     _exact(manifest["source"], "sha dirty files_sha256 runner_sha256 runner")
+    source = manifest["source"]
+    if (type(source["dirty"]) is not bool or source["runner"] != "scripts/run_star_diagnostic_102.py"
+            or not isinstance(source["sha"], str) or not re.fullmatch("[0-9a-f]{40}", source["sha"])
+            or any(not isinstance(source[k], str) or not re.fullmatch("[0-9a-f]{64}", source[k])
+                   for k in ("files_sha256", "runner_sha256"))):
+        raise ValueError("diagnostic_source_invalid")
     identities = []
     for request in manifest["requests"]:
-        _exact(request, "run_id session_id workspace_id question_id arm question_sha256 prompt_sha256 schema_sha256 input_estimate timeout_seconds shadow_seconds")
+        _exact(request, "run_id session_id workspace_id question_id arm question_sha256 prompt_sha256 schema_sha256 input_estimate timeout_seconds shadow_seconds stream")
+        if type(request["stream"]) is not bool or (phase != "S" and request["stream"]):
+            raise ValueError("diagnostic_stream_invalid")
         for key in ("run_id", "session_id", "workspace_id"):
             identities.append(identifier(request[key]))
         for key in ("question_id", "arm"):
@@ -170,7 +187,7 @@ def validate(manifest, *, check_source=False):
 
 def dry_run(manifest):
     validate(manifest)
-    return dict(phase=manifest["phase"], phase_limits=PHASES, single=SINGLE,
+    return dict(phase=manifest["phase"], phase_limits=deepcopy(PHASES), single=dict(SINGLE),
                 planned=len(manifest["requests"]), status="ready" if manifest["conditions_met"] else "not_started",
                 charged_reserved_ceiling=len(manifest["requests"]) * 65536,
                 request_wait_ceiling=sum(r["timeout_seconds"] for r in manifest["requests"]),
