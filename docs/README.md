@@ -16,6 +16,8 @@
 
 上述 v5 事实属于已消费批次，保持原样且不续跑。2026-10-28 新接受的[工具额度与完整回答续接合同](engineering/star-answer-continuation-contract.md)更新后续显式 Showcase / Solver Harness 运行的预算语义：工具额度用满只拒绝新工具动作；若模型、HTTP、token 和时间额度仍允许，Run 可继续推理、消费回执、生成答案并执行整题审查。4 项合成公共 Job 用例与 1 项固定 Docker Reference 用例通过；完整发布门禁的 879 项测试零失败、零跳过，测试接缝检查和六个故障注入探针均通过。此源码门禁未发真实 provider 请求，本地受控结果不代表真实 API 行为或数学正确率。
 
+2026-10-28 v7 已执行：[登记与预算](experiments/star-readiness-97-preregistration-draft.md)、[执行边界](engineering/star-readiness-97-execution-contract.md)和[真实结果](evals/star-readiness-97-status.md)。完整 Reference 九核心开启，扩展 candidate_registry/best_effort 关闭；两套同源码门禁各 920 项通过，官方 baseline 不变。真实多步 Run 的第二次 Explore 等待 900 秒后超时，以 `unknown_transport` 停止；没有完整数学答案或整题审查，未知用量保留预留，v7 已消费且不重跑。公开输出与脱敏归档分开保存；本次输出只有失败提示，不能视为答案完成或能力提升。历史批次不改写，#97 保持开放。
+
 早期未采纳的组件合同、Reference readiness 与架构效果方案见 [STAR 架构健壮性与组件作用实验方案](experiments/star-architecture-robustness-plan.md)，仅作历史参考，不是当前验收目标。
 
 spec #70（ALIGN-01..ALIGN-10，#71..#80）承接 #56 的语义偏移修复与重新验收：裁决消费与新动作身份、独立 ReplanDecision、Verifier/Explore 受控计算、分类账本与证明传递、协议失败与 unknown 分离、跨流程恢复，最终来源复核与发布判断见 [ALIGN-10 来源映射](evals/star-product-align10-source-mapping.md) 与 [ALIGN-10 发布记录](evals/star-product-align10-release.md)。记录区分 scripted/故障注入/live/replay 证据；真实非 Explore 快通道闭环尚未取得，历史工单关闭不升级为完整能力结论。

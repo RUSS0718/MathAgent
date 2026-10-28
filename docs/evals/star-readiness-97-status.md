@@ -1,6 +1,26 @@
 # #97 非流式就绪：离线与真实批次核对状态
 
-更新日期：2026-10-28。状态：离线工程门禁通过，已执行三次独立冻结的真实批次。最新 v5 在简单题的一次成功计算后耗尽工具预算，停止新增调用，多步题未派发。首批与 r8 的历史结果保留不变。自然非快通道、步骤证明和数学核验条件仍未满足，#97 保持开放。真实运行证据与数学判定分开记录。
+更新日期：2026-10-28。最新 v7 已完成同源码离线与发布门禁，但真实多步 Run 在第二次 Explore 请求等待 900 秒后以 `unknown_transport` 停止；没有完整数学答案、整题审查或交付绑定。已消费登记不续跑。历史批次结果保留，#97 保持开放。
+
+
+## 2026-10-28 v7 真实批次结果
+
+用户授权放宽预算后，以原 STAR Reference 九核心开启、`candidate_registry` 与 `best_effort` 关闭执行单题 `multi-05`。官方 baseline 未修改。冻结源码 revision 为 `5ff9fe19e506a7f75fcac183c22406aa75e3c7ca`，源码 SHA-256 为 `43f2e2b404fa19b7947c52fbf25f3d5af59ec442fb56706d00ec38ff9e4dad4a`，dirty 为 true。预览 canonical SHA-256 为 `9de3b7006e6834932c52e840e3ac784aba0572ba17553234cc1e51cb584412f8`，已授权 manifest 为 `5401acf448f69869856df6da9179137a58594d7f1a9130191bc2a489b2353839`。
+
+同源码执行 `uv run --offline --frozen python -B scripts/check.py --offline` 与 `uv run --offline --frozen python -B scripts/check_showcase_release.py --require-reference`，两次均为 920 项通过、零失败、零跳过，六组旁路探针通过；两命令分别耗时 1367.297 秒和 1334.156 秒，前后源码一致。证据为 `artifacts/issue-97-v7-final-gates-r2/report.json`。此前并行修改阶段的中断检查不计 PASS。
+
+真实 Job `run_67314b7d7b653fcf426d8322df6c1db3` 于 18:39 启动，批次耗时 936.593 秒：
+
+| 请求 | 结果 | 用量 |
+| --- | --- | --- |
+| 第一次 Explore | 非流式 HTTP 200，28.535 秒完成，`finish_reason=stop` | 2734 provider-known tokens |
+| 第二次 Explore | 900.183 秒后 timeout，未取得 HTTP 状态、首字节或 provider usage | 24342 reserved tokens，1 unknown / unresolved attempt |
+
+两次请求的实际 `max_tokens=16384`、timeout 为 900 秒，未因超时自动重发。合计 2 logical calls、2 HTTP attempts、0 题目工具调用、2 次成功环境预检；charged tokens 为 27076，其中包含 24342 reserved，不能重复相加或视为实际费用。费用为 `null`，`usage_complete=false`。
+
+终态为 `unknown_transport`，Job 为 `failed`，Run 为 `NEEDS_REVIEW`，execution 为 `needs_review`、whole_review 为 `not_reviewed`、binding 为 `unbound`。六项 bundle 一致性检查通过；未生成 delivery 绑定归档。原始汇总中的 `runs=[]` 与 `uncollected` 保留，不据此否认已记录的两个 attempts。运行库保留在 `artifacts/issue-97-runtime/star-readiness-97-0d3ugcuz/`。
+
+独立公开输出 `artifacts/issue-97-answers/v7-answer.jsonl` 只包含失败提示 “No complete answer is available for this run.”，不是数学答案；`answer_identity.present=true` 只证明字段非空。数学判定仍为 `unknown`，自然多步规划、步骤审查、工具消费、最终生成及整题交付条件未通过。归档为 `artifacts/issue-97-v7-live/`，v7 已消费，不重跑、不补题。增大预算已实际生效，但未解决此次请求超时；没有证据证明继续增大 Run 额度能解决 provider 等待问题。后续须先独立诊断超时原因，再决定新的登记，不能将本轮记作架构或能力验收通过。
 
 ## 2026-10-28 v5 真实批次结果
 

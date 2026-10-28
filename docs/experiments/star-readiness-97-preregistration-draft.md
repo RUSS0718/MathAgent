@@ -1,5 +1,7 @@
 # #97 v5 非流式两题登记记录（已消费）
 
+本文保留 v5 已消费登记的题目、预算和结果。文末新增的 v7 部分是独立的本地提案，不覆盖 v5 或 v6 历史。
+
 状态：用户已授权，v5 已执行并消费。原不可派发预览与 hash 保留在 `artifacts/issue-97-prereg/manifest-v5-reviewed-20261028.json` 及同名 `.sha256`；授权后另存 `artifacts/issue-97-prereg/live-manifest-v5.json`，SHA-256 为 `c664754f9fdaa57fcd3b9a01d2cb35fef76df19d633ab54585e33b97cc376e64`。简单题一次成功计算后达到工具硬限，批次停止，多步题未派发，详见[真实批次结果](../evals/star-readiness-97-status.md)。本记录保留冻结时题目与预算，不修改远程 GitHub issue，也不回写或续跑三份已消费登记。
 
 ## 样本与规范化输入
@@ -40,3 +42,41 @@
 传输未知、用量不完整或未决、任何失败或取消、硬限、源码或配置漂移、账本或交付绑定缺陷发生后，停止新增派发。保留已有 attempt、预留、失败和截止；不自动重发、换题、续跑或突破上限。迟到用量只结算原 attempt，迟到文本不得覆盖终态。数学正确性、错误或未知单独记录；LLM 接受不是数学证明。
 
 调用前的 v5 登记、适配器 timeout、批次墙钟与独立消费合同通过了 873 项零失败、零跳过门禁，测试接缝及六个旁路探针也通过。源码身份与报告 hash 见[核对状态](../evals/star-readiness-97-status.md)。`delivery.json` 记录验收与交付的 Git revision，并验证仅文档变化、源码 hash 不变；它保留冻结前未授权的历史状态。本次授权和执行不回写该交付文件。已消费的 v5 不续跑；任何后续真实复验须使用新的样本与预算登记，并在冻结具体身份后单独授权。
+
+## #97 v7 本地预登记提案（未冻结）
+
+提案版本为 `issue-97-nonstream-draft-v7`。本节记录用户更新后的本地目标，不替换 GitHub Issue #97 的原始内容。本次只更新本地文档，不对 GitHub issue 执行修改或关闭操作。
+
+### 原始要求与更新后的本地目标
+
+GitHub [Issue #97](https://github.com/RUSS0718/MathAgent/issues/97) 的原始合同要求完整 `star_reference` 配置，并禁止提高已登记预算。v7 候选预算超出该边界，所以它必须作为新版本单独审阅；v5 和 v6 的历史记录保持不变。
+
+更新后的本地目标是优先跑通原 STAR 架构并产出答案。保持 `solver_mode="star_reference"` 和完整 `STAR_REFERENCE_CONFIGURATION`，包括全部九项开启的核心功能、已登记工具、隔离镜像和各阶段配置。`candidate_registry` 与 `best_effort` 不加入本提案。
+
+### 候选样本与预算
+
+候选登记包含一次 `multi-05` 多步题 Run。规范化题面只在实际冻结登记中绑定，本文不复制题面原文。
+
+| 范围 | 限额 | v7 候选值 |
+| --- | --- | ---: |
+| 单次请求 | `max_output_tokens` | 16,384 tokens |
+| 单次请求 | `request_timeout_seconds` | 900 秒 |
+| 单个 Run | `logical_calls` | 24 |
+| 单个 Run | `http_attempts` | 72 |
+| 单个 Run | `problem_tool_calls` | 8 |
+| 单个 Run | `charged_tokens` | 524,288 tokens |
+| 单个 Run | `wall_seconds` | 7,200 秒 |
+| 单 Run 批次 | `runs` | 1 |
+| 单 Run 批次 | `environment_preflights` | 3 |
+| 单 Run 批次 | `tools_including_environment` | 11 |
+| 单 Run 批次 | `wall_seconds` | 7,500 秒 |
+
+单 Run 批次的总调用和 charged token 上限与该 Run 相同：24 次逻辑调用、72 次 HTTP 尝试、8 次题目工具调用和 524,288 charged tokens。批次最多执行 3 次环境预检，并把环境工具计入 11 次工具总额。
+
+### v7 已消费状态与验收结果
+
+v7 已依据本聊天用户既有授权完成源码冻结、精确 hash 核对和一次真实执行；不能再次派发。上述预算是实际执行上限，历史 v5/v6 不改写。两套同源码门禁各 920 项通过、零失败、零跳过，六组旁路探针通过。实际单请求输出上限 16384、timeout 900 秒均已核验。
+
+多步 Run 的第一次 Explore 成功，第二次 Explore 等待 900 秒后 timeout，终态 `unknown_transport`；保留 24342 reserved tokens 和一个 unknown / unresolved attempt，未自动重发。没有完整数学答案、整题审查或交付绑定，不能认定真实闭环通过。精确源码、manifest hash、用量及证据路径见[核对状态](../evals/star-readiness-97-status.md)。
+
+公开输出入口 `run-live --answer-output` 将正文保存到 `artifacts/issue-97-answers/` 的独立文件，脱敏归档不保存正文。写入失败先保留已观测用量与交付证据，再停止。此次文件只有失败提示，不是数学答案。当前需要诊断 provider 等待超时；不得续跑已消费的 v7。
