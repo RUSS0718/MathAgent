@@ -29,6 +29,7 @@ class InternPortError(RuntimeError):
 KNOWN_PROTOCOL_FAILURES = frozenset({
     "invalid_json", "invalid_role_schema", "empty_response", "truncated_response",
     "invalid_serialization_source",
+    "serialization_processing_deadline",
 })
 
 MAX_RESPONSE_EXCERPT_CHARS = 400
@@ -157,9 +158,9 @@ class InternModelPort:
             if not response.text.strip():
                 raise _protocol_failure("empty_response", record, response.text)
             if request.get("serialization_repair") is True:
-                from .serialization_port import parse_reply
+                from .serialization_port import parse_before_deadline
 
-                parsed = parse_reply(self, request, record, response.text, schema)
+                parsed = parse_before_deadline(self, request, record, response.text, schema)
                 record["status"] = "success"
                 return parsed
             try:
@@ -221,9 +222,9 @@ class InternModelPort:
             if not isinstance(text, str) or not text.strip():
                 raise _protocol_failure("empty_response", record, text)
             if request.get("serialization_repair") is True:
-                from .serialization_port import parse_reply
+                from .serialization_port import parse_before_deadline
 
-                parsed = parse_reply(self, request, record, text, schema)
+                parsed = parse_before_deadline(self, request, record, text, schema)
                 record["status"] = "success"
                 metrics["status"] = "completed"
                 yield {"result": parsed, "usage": dict(envelope.get("usage") or {})}
@@ -258,12 +259,12 @@ class InternModelPort:
 
     def _messages(self, request, schema):
         if request.get("serialization_source"):
-            from .serialization_port import repair_messages
+            from .serialization_port import before_deadline, repair_messages
 
             try:
                 if request.get("serialization_repair") is not True:
                     raise ValueError("serialization_repair_not_enabled")
-                return repair_messages(self, request, schema)
+                return before_deadline(self, request, {}, lambda: repair_messages(self, request, schema))
             except (ValueError, TypeError, KeyError, OSError, AttributeError):
                 raise InternPortError("invalid_serialization_source") from None
         original = request.get("problem", self.original_problem)

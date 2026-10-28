@@ -6,7 +6,7 @@ import re
 from ..tool_schemas import POLYNOMIAL_CHECK_SCHEMA, PYTHON_MATH_SCHEMA, schema_error
 
 
-def strict_object(text):
+def strict_object(text, *, exact_numbers=False):
     """Reject duplicate keys, non-JSON constants and non-object roots."""
     def pairs(items):
         result = {}
@@ -19,7 +19,10 @@ def strict_object(text):
     def constant(_value):
         raise ValueError("non_json_constant")
 
-    result = json.loads(text, object_pairs_hook=pairs, parse_constant=constant)
+    # Reject float atoms: binary rounding could make different original numeric
+    # parameters compare equal. Mathematical strings and exact integers are kept.
+    result = json.loads(text, object_pairs_hook=pairs, parse_constant=constant,
+                        **({"parse_float": constant} if exact_numbers else {}))
     if not isinstance(result, dict):
         raise ValueError("object_required")
     return result
@@ -29,7 +32,7 @@ def visible_values(text, schema):
     """Recover only an entire strict object, optionally in one exact JSON fence."""
     source = text.strip()
     match = re.fullmatch(r"```(?:json)?\r?\n(.*)\r?\n```", source, re.DOTALL)
-    value = strict_object(match[1] if match else source)
+    value = strict_object(match[1] if match else source, exact_numbers=True)
     validate_values(value, schema)
     return value
 
