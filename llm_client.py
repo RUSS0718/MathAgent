@@ -71,7 +71,7 @@ def _not_submitted(error: BaseException | None) -> bool:
 def product_attempt_limit(client):
     """Opt in to up to six metered attempts; preserve the legacy three-attempt cap."""
     explicit = getattr(client, "safe_retry_attempts", None)
-    return explicit if explicit is not None else min(client.retry, 3)
+    return explicit if explicit is not None else min(getattr(client, "retry", 1), 3)
 
 
 def product_retry_delay(failure, response, attempt_index, budget):
@@ -82,6 +82,8 @@ def product_retry_delay(failure, response, attempt_index, budget):
     delay = min(2**attempt_index, 15)
     safe = _not_submitted(failure)
     if response is not None and response.status_code == 429:
+        if not isinstance(failure, requests.HTTPError):
+            return None  # A timeout carrying headers is still an unknown outcome.
         value = response.headers.get("Retry-After", "")
         try:
             delay = float(value)

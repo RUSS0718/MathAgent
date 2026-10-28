@@ -127,6 +127,7 @@ class InternModelAdapter:
         max_tokens: int = 16_384,
         client_timeout: int | None = None,
         client_retry: int | None = None,
+        client_safe_retry_attempts: int | None = None,
         thinking_mode: bool | None = None,
         outbound_observer=None,
     ) -> None:
@@ -137,6 +138,7 @@ class InternModelAdapter:
         self.max_tokens = max_tokens
         self.client_timeout = client_timeout
         self.client_retry = client_retry
+        self.client_safe_retry_attempts = client_safe_retry_attempts
         self.thinking_mode = thinking_mode
 
     @controlled_action
@@ -247,6 +249,8 @@ class InternModelAdapter:
                 client_kwargs["timeout"] = self.client_timeout
             if self.client_retry is not None:
                 client_kwargs["retry"] = self.client_retry
+            if self.client_safe_retry_attempts is not None:
+                client_kwargs["safe_retry_attempts"] = self.client_safe_retry_attempts
             self._client = InternChatClient(**client_kwargs)
         except Exception as exc:  # noqa: BLE001 - missing credentials are expected locally
             category = getattr(exc, "category", None) or "configuration"
