@@ -131,10 +131,36 @@ def validate(manifest, *, check_source=False):
             or manifest["stop"] != STOP or manifest["budget"] != PHASES.get(manifest["phase"])):
         raise ValueError("diagnostic_contract_changed")
     identifier(manifest["registration_id"])
+    phase = manifest["phase"]
+    if type(manifest["seed"]) is not int or type(manifest["conditions_met"]) is not bool:
+        raise ValueError("diagnostic_manifest_invalid")
+    _exact(manifest["window"], "start end")
+    start, end = manifest["window"]["start"], manifest["window"]["end"]
+    if (any(type(n) not in {int, float} or not math.isfinite(n) for n in (start, end))
+            or not 0 < end - start <= PHASES[phase]["batch"]):
+        raise ValueError("diagnostic_window_invalid")
+    if not isinstance(manifest["requests"], list) or not 1 <= len(manifest["requests"]) <= PHASES[phase]["requests"]:
+        raise ValueError("diagnostic_request_limit")
+    _exact(manifest["source"], "sha dirty files_sha256 runner_sha256 runner")
     identities = []
     for request in manifest["requests"]:
+        _exact(request, "run_id session_id workspace_id question_id arm question_sha256 prompt_sha256 schema_sha256 input_estimate timeout_seconds shadow_seconds")
         for key in ("run_id", "session_id", "workspace_id"):
             identities.append(identifier(request[key]))
+        for key in ("question_id", "arm"):
+            identifier(request[key])
+        for key in ("question_sha256", "prompt_sha256", "schema_sha256"):
+            if not isinstance(request[key], str) or not re.fullmatch("[0-9a-f]{64}", request[key]):
+                raise ValueError("diagnostic_hash_invalid")
+        size = request["input_estimate"]
+        wait = request["timeout_seconds"]
+        allowed = {"P": {900}, "O": {1800}, "T": {900, 1800}, "T-3600": {3600}, "S": {1800}}
+        if (type(size) is not int or not 0 < size <= 49152 or type(wait) is not int
+                or wait not in allowed.get(phase, range(1, 1801))
+                or request["shadow_seconds"] != (900 if wait == 1800 else None)):
+            raise ValueError("diagnostic_request_limit")
+    if sum(r["timeout_seconds"] for r in manifest["requests"]) > PHASES[phase]["wait"]:
+        raise ValueError("diagnostic_wait_limit")
     if len(set(identities)) != len(identities):
         raise ValueError("diagnostic_identity_reused")
     if check_source and manifest["source"] != source_identity():
