@@ -30,6 +30,8 @@ REPAIR_INSTRUCTION = (
 
 def repair_enabled(config):
     """Product runs only: the same gate the planner repair uses."""
+    if config.get("features", {}).get("serialization_repair") is True:
+        return False  # The capability-free candidate owns the only repair credit.
     return config.get("features", {}).get("star_routing") is True
 
 

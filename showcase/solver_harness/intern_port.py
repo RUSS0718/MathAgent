@@ -28,6 +28,7 @@ class InternPortError(RuntimeError):
 # unfinished stream whose remote outcome stays unknown.
 KNOWN_PROTOCOL_FAILURES = frozenset({
     "invalid_json", "invalid_role_schema", "empty_response", "truncated_response",
+    "invalid_serialization_source",
 })
 
 MAX_RESPONSE_EXCERPT_CHARS = 400
@@ -259,7 +260,12 @@ class InternModelPort:
         if request.get("serialization_source"):
             from .serialization_port import repair_messages
 
-            return repair_messages(self, request, schema)
+            try:
+                if request.get("serialization_repair") is not True:
+                    raise ValueError("serialization_repair_not_enabled")
+                return repair_messages(self, request, schema)
+            except (ValueError, TypeError, KeyError, OSError, AttributeError):
+                raise InternPortError("invalid_serialization_source") from None
         original = request.get("problem", self.original_problem)
         if not isinstance(original, str) or not original.strip():
             raise InternPortError("missing_original_problem")

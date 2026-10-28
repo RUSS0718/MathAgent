@@ -16,6 +16,7 @@ def repair_messages(port, request, schema):
         "Target schema: " + json.dumps(schema, ensure_ascii=False))},
         {"role": "user", "content": json.dumps({
             "visible_reply": source, "error_category": "invalid_json",
+            "role": request["role"], "run_id": request["run_id"], "call_id": request["call_id"],
             "allowed_tools": [], "tool_policy": {"allow": []},
         }, ensure_ascii=False)}]
 

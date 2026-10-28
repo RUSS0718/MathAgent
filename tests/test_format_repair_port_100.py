@@ -45,6 +45,17 @@ class FormatRepairPortTest(unittest.TestCase):
         self.assertEqual(raw, json.loads(messages[-1]["content"])["visible_reply"])
         self.assertEqual([], json.loads(messages[-1]["content"])["allowed_tools"])
 
+    def test_f10_foreign_run_reference_is_rejected_before_http(self):
+        value = {"argument": "x=2", "claims": [], "blocked": False}
+        port, client = self.port(["```json\n" + json.dumps(value) + "\n```"])
+        with self.assertRaises(InternPortError) as failed:
+            port.complete(self.request())
+        with self.assertRaises(InternPortError) as denied:
+            port.complete(self.request(run_id="other-run", call_id="root:serialization-1",
+                serialization_source=failed.exception.response_ref))
+        self.assertEqual("invalid_serialization_source", denied.exception.category)
+        self.assertEqual(1, len(client.requests))
+
 
 if __name__ == "__main__":
     unittest.main()
