@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -163,3 +164,26 @@ class DiagnosticTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "control_result"):
                 job.continue_remaining()
             self.assertEqual(3, job.snapshot()["dispatched"])
+
+    def test_monitor_shows_running_during_p_continuation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = freeze(plan("P", 4), root / "registration")
+            job = DiagnosticJob(root / "registration", root / "archive", root / "registry.db")
+            job.run(limit=3)
+            waiting, release = threading.Event(), threading.Event()
+            mkdir = Path.mkdir
+            def slow_filesystem(path, *args, **kwargs):
+                if path.name == manifest["requests"][3]["workspace_id"]:
+                    waiting.set()
+                    if not release.wait(5):
+                        raise TimeoutError("fake filesystem stalled")
+                return mkdir(path, *args, **kwargs)
+            with patch.object(Path, "mkdir", slow_filesystem), ThreadPoolExecutor(1) as pool:
+                result = pool.submit(job.continue_remaining)
+                try:
+                    self.assertTrue(waiting.wait(5))
+                    self.assertEqual("running", job.snapshot()["status"])
+                finally:
+                    release.set()
+                self.assertEqual("completed", result.result()["status"])

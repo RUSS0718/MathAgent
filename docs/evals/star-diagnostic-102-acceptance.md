@@ -79,10 +79,12 @@ charged 已含 reserved，汇总不再相加。金额、不可观测远端并发
   注入额外 limits payload 的测试曾失败，改成数值白名单后通过；覆盖缺失/损坏/锁/WAL及前后文件 hash 一致。
 - CLI / process：专属测试先因入口/模块缺失失败，实施后验证显式子命令、路径拒绝、脱敏及 PID 创建时间识别。
 - P 包含关系：完整36项 fake，先3后33，前3项引用不变、总派发36、累计额度不重置；O900只是冻结影子点元数据，不新增 HTTP。
+- P 续接审查补测：私有控制结果摘要损坏先复现未拒绝，再加入摘要核验；
+  并发只读 monitor 曾在续接中显示 control_complete，新增公共 Job/monitor 用例后修正为 running。
 
 ## 证据与限制
 
-最终聚焦与相关回归71项通过，零skip、零expected-failure，45.941秒；其中 #102 专属29项。
+最终聚焦与相关回归72项通过，零skip、零expected-failure，47.435秒；其中 #102 专属30项。
 命令（完整模块，不挑选单个成功用例）：
 
 ```powershell
@@ -97,7 +99,14 @@ uv run --offline python demo_server.py --help
 `uv run --offline ruff check .` **未通过**：25处既存问题分布于16个其他文件；
 对每个报错文件用 `git show dc9dc807314ad3fe27373e9a5111fdf3dcc6752a:<path>` 与当前文件比较 SHA256，全部字节一致。
 未修改这些文件。详情 `ruff-all.json`；聚焦日志为 `final-focused-regression.log`，均在 ignored `artifacts/issue-102-validation-20261029/`。
-前一轮70项通过仅作迭代记录，以最终71项记录为准。
+前一轮70项和71项通过仅作迭代记录，以最终72项记录为准。
+
+增加续接运行态用例后，一轮72项组合中未修改的
+`tests.test_star_readiness_late.StarReadinessLateUsageTest.test_late_usage_updates_original_attempt_after_terminal_archive_is_frozen`
+失败：预期 unknown_transport，实际 evidence_mismatch；保留 `combined-72-failed.log`（48.884秒）。
+立即单独重跑完整 `tests.test_star_readiness_late`，3项通过（2.570秒，`readiness-late-rerun.log`）。
+该用例给运行预留2秒，但此处没有定位失败根因，不把推测当作结论，也未改动该模块。
+随后完整重跑相同72项组合通过（47.435秒），失败记录继续保留，供主聊天最终门禁关注。
 
 本票改动路径：`showcase/star_diagnostic{,_registration,_store,_monitor,_process}.py`、
 `scripts/run_star_diagnostic_102.py`、`tests/star_diagnostic_support.py`、

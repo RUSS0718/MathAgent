@@ -114,6 +114,8 @@ class DiagnosticJob:
             if not continuation:
                 initialize(db, self.manifest)
             ledger = RunBudgetLedger(connection=db)
+            if continuation:
+                status(db, "running")
             done = db.execute("SELECT count(*) FROM diagnostic_dispatch").fetchone()[0]
             for position in range(done, len(requests)):
                 if (self.archive / "cancel.json").exists() or (cancel_after is not None and position >= cancel_after):
