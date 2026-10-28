@@ -611,6 +611,8 @@ class InternChatClient:
                 if delay is None or time.monotonic() + delay >= logical_deadline:
                     break
                 if attempt + 1 < attempts_limit:
+                    if not _attempt_budget.can_retry(delay, estimate, max_tokens):
+                        break
                     time.sleep(delay)
             elif attempt + 1 < attempts_limit:
                 time.sleep(2**attempt)

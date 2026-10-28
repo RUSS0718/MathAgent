@@ -577,6 +577,8 @@ class InternStreamAdapter(InternModelAdapter):
                     response = None
                     if time.monotonic() + delay >= logical_deadline:
                         raise
+                    if not call_budget.can_retry(delay, len(body), self.max_tokens):
+                        raise
                     time.sleep(delay)
                     attempt = {**attempt, "attempt_id": uuid.uuid4().hex,
                                "attempt_index": index + 2, "status": "pending",

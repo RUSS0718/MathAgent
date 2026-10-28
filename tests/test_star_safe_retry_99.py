@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 import unittest
 from unittest.mock import patch
 
@@ -48,14 +49,15 @@ class SafeRetryCallTest(unittest.TestCase):
         self.enterContext(patch("llm_client.time.sleep", side_effect=self.sleeps.append))
 
     def call(self, streaming, replies, *, attempts=6, limits=None, metadata=None,
-             retry=1, metered=True, on_wait=None):
-        client = InternChatClient(timeout=180, retry=retry, safe_retry_attempts=attempts)
+             retry=1, metered=True, on_wait=None, timeout=180):
+        client = InternChatClient(timeout=timeout, retry=retry, safe_retry_attempts=attempts)
         client.api_base = "http://127.0.0.1:1/offline-substitute"
         adapter = (InternStreamAdapter if streaming else InternModelAdapter)(client, max_tokens=256)
         ledger = RunBudgetLedger()
         self.addCleanup(ledger.close)
         budget = ledger.ensure("safe-99", limits or RunBudgetLimits(max_runtime_seconds=180))
         self.budget = budget
+        self.original_deadline = budget.snapshot()["deadline_at"]
 
         def respond(*args, **kwargs):
             value = replies.pop(0)
@@ -97,3 +99,60 @@ class SafeRetryCallTest(unittest.TestCase):
                 snapshot = self.budget.snapshot()
                 self.assertEqual((1, 6, 0, 0), (snapshot["logical_calls"], snapshot["http_attempts"],
                                  snapshot["reserved_tokens"], snapshot["charged_tokens"]))
+
+    def test_exhausted_http_or_held_429_tokens_stop_before_waiting(self):
+        for streaming in (False, True):
+            for name, failure, limits in (
+                ("http", requests.ConnectTimeout(), RunBudgetLimits(max_http_attempts=1)),
+                ("tokens", Reply(status=429, retry_after="2"), RunBudgetLimits(max_tokens=650)),
+            ):
+                with self.subTest(streaming=streaming, resource=name):
+                    self.sleeps.clear()
+                    self.assertIsNone(self.call(streaming, [failure, Reply()], limits=limits))
+                    self.assertEqual(1, self.post.call_count)
+                    self.assertEqual([], self.sleeps)
+                    snapshot = self.budget.snapshot()
+                    self.assertEqual(1, snapshot["http_attempts"])
+                    if name == "tokens":
+                        self.assertEqual(1, snapshot["unknown_attempts"])
+                        self.assertGreater(snapshot["reserved_tokens"], 256)
+                        self.assertEqual(snapshot["reserved_tokens"], snapshot["charged_tokens"])
+
+    def test_insufficient_request_phase_batch_or_run_time_never_waits(self):
+        for streaming in (False, True):
+            for options in (
+                {"timeout": .1}, {"metadata": {"phase_deadline_at": time.time() + .1}},
+                {"metadata": {"batch_deadline_at": time.time() + .1}},
+                {"limits": RunBudgetLimits(max_runtime_seconds=.1)},
+            ):
+                with self.subTest(streaming=streaming, options=options):
+                    self.sleeps.clear()
+                    self.call(streaming, [requests.ConnectTimeout(), Reply()], **options)
+                    self.assertEqual(1, self.post.call_count)
+                    self.assertEqual([], self.sleeps)
+                    self.assertEqual(self.original_deadline, self.budget.snapshot()["deadline_at"])
+
+    def test_capacity_consumed_during_wait_is_rechecked_before_dispatch(self):
+        for streaming in (False, True):
+            with self.subTest(streaming=streaming):
+                def consume_capacity(delay):
+                    other = self.budget.model_call("concurrent")
+                    other.before_attempt({"attempt_id": "concurrent-attempt", "max_tokens": 1}, 1)
+
+                self.assertIsNone(self.call(streaming, [requests.ConnectTimeout(), Reply()],
+                                  limits=RunBudgetLimits(max_http_attempts=2), on_wait=consume_capacity))
+                self.assertEqual(1, self.post.call_count)
+                self.assertEqual(2, self.budget.snapshot()["http_attempts"])
+
+    def test_old_three_cap_and_unmetered_retry_behavior_are_preserved(self):
+        for streaming in (False, True):
+            with self.subTest(streaming=streaming):
+                self.sleeps.clear()
+                self.call(streaming, [requests.ConnectTimeout()] * 7, attempts=None, retry=8)
+                self.assertEqual(3, self.post.call_count)
+                self.assertEqual([1, 2], self.sleeps)
+        self.sleeps.clear()
+        self.call(False, [requests.ReadTimeout()] * 3, metered=False, retry=2)
+        self.assertEqual(2, self.post.call_count)
+        self.assertEqual([1], self.sleeps)
+        self.assertEqual(0, self.budget.snapshot()["http_attempts"])
