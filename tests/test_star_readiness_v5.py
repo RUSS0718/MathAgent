@@ -272,7 +272,8 @@ class StarReadinessV5Test(unittest.TestCase):
                 self.addCleanup(server.shutdown)
                 self.addCleanup(release.set)
                 with patch.dict("os.environ", {"INTERN_API_KEY": "fixture-only",
-                                               "INTERN_MODEL": "intern-s2"}):
+                                               "INTERN_MODEL": "intern-s2",
+                                               "INTERN_API_BASE": "https://chat.intern-ai.org.cn/api/v1/chat/completions"}):
                     adapter = _build_adapter({"model": V5_MODEL,
                                               "provider_endpoint": "https://chat.intern-ai.org.cn/api/v1/chat/completions"})
                 client = adapter._get_client()
