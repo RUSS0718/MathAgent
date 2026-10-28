@@ -65,20 +65,25 @@ class StarToolTest(StarJobFixture, unittest.TestCase):
         math = self.client.get(f"/api/runs/{job_id}").get_json()["result"]["solver"]
         self.assertEqual("STEP_VERIFY", math["phase"])
 
-    def test_tool_hard_limit_stops_next_claim_and_verifier(self):
+    def test_tool_ceiling_denies_next_claim_but_allows_review_and_answer(self):
         actual = []
         registry = ToolRegistry()
         registry.register("polynomial_check", lambda args: actual.append(args) or 2)
         step = deepcopy(STEP)
         step["claims"].append(deepcopy(step["claims"][0]))
-        self.open_star([NEED_PLAN, PLAN, step], SHOWCASE_STAR_FEATURES=FEATURES,
+        self.open_star([NEED_PLAN, PLAN, step, VERDICT, {"final_response": "1+1=2"}, ACCEPT], SHOWCASE_STAR_FEATURES=FEATURES,
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8, max_tool_calls=1),
             SHOWCASE_STAR_REGISTRY=registry)
         job_id = self.create_job()
-        self.assertEqual("failed", self.terminal(job_id)["status"])
+        self.assertEqual("succeeded", self.terminal(job_id)["status"])
         self.assertEqual([{}], actual)
         self.assertEqual(1, self.report(job_id)["budget"]["tool_calls"])
-        self.assertEqual(3, len(self.outbound))
+        self.assertEqual(6, len(self.outbound))
+        receipts = self.outbound[3]["report"]["tool_receipts"]
+        self.assertTrue(receipts[0]["executed"])
+        self.assertFalse(receipts[1]["executed"])
+        self.assertEqual("tool_call_budget_exhausted", receipts[1]["reason"])
+        self.assertEqual("accepted", self.report(job_id)["semantics"]["whole_review"])
 
     def test_registry_precheck_thread_charges_original_run_once(self):
         actual = []

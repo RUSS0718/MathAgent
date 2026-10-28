@@ -299,25 +299,26 @@ class StarBestEffortTest(StarJobFixture, unittest.TestCase):
         self.assertIsNone(solver['best_effort'])
         self.assertEqual(['2'], [v['answer_text'] for v in solver['candidate_history']])
 
-    def test_tool_hard_limit_stops_other_claim_and_verifier_before_selection(self):
+    def test_tool_ceiling_allows_answer_without_forcing_best_effort_selection(self):
         from copy import deepcopy
 
         from showcase.tools import ToolRegistry
-        from tests.test_star_product_tools import FEATURES, NEED_PLAN, PLAN, STEP
+        from tests.star_product_support import ACCEPT
+        from tests.test_star_product_tools import FEATURES, NEED_PLAN, PLAN, STEP, VERDICT
 
         actual = []
         registry = ToolRegistry()
         registry.register('polynomial_check', lambda args: actual.append(args) or 2)
         step = deepcopy(STEP)
         step['claims'].append(deepcopy(step['claims'][0]))
-        self.open_star([NEED_PLAN, PLAN, step], SHOWCASE_STAR_FEATURES=FEATURES,
+        self.open_star([NEED_PLAN, PLAN, step, VERDICT, {'final_response': '1+1=2'}, ACCEPT], SHOWCASE_STAR_FEATURES=FEATURES,
             SHOWCASE_STAR_REGISTRY=registry,
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8,
                                                 max_tool_calls=1))
         _, job = self.start_best_effort()
         self.assertEqual([{}], actual)
-        self.assertEqual(3, len(self.outbound))
+        self.assertEqual(6, len(self.outbound))
         self.assertEqual(1, job['result']['budget']['tool_calls'])
-        self.assertEqual('tool_call_budget_exhausted',
-            job['result']['solver']['best_effort']['termination_reason'])
-        self.assertEqual('no_eligible_candidate', job['result']['solver']['best_effort']['status'])
+        self.assertEqual('succeeded', job['status'])
+        self.assertEqual('1+1=2', job['result']['final_response'])
+        self.assertIsNone(job['result']['solver']['best_effort'])

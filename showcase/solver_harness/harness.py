@@ -334,11 +334,8 @@ class SolverHarness:
             prepared["role_context"] = prepare_role_context(latest, prepared)
             prepared["state_revision"] = latest["state_revision"]
         tools = allowed_tool_ids(latest, request.get("role"), self._config, self._tool_port)
-        if tools:
-            prepared["allowed_tools"] = list(
-                dict.fromkeys([*prepared.get("allowed_tools", []), *tools])
-            )
-            prepared["tool_policy"] = {"allow": prepared["allowed_tools"]}
+        prepared["allowed_tools"] = tools
+        prepared["tool_policy"] = {"allow": tools}
         return prepared
 
     def precheck_report(self, run):

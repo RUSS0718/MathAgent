@@ -75,7 +75,6 @@ class RobustFaultTest(StarJobFixture, unittest.TestCase):
             (RunBudgetLimits(max_model_calls=3, max_http_attempts=10), 3, 1),
             (RunBudgetLimits(max_model_calls=10, max_http_attempts=3), 3, 1),
             (RunBudgetLimits(max_tokens=1), 0, 0),
-            (RunBudgetLimits(max_tool_calls=0), 0, 0),
         ]
         for limits, calls, tools in cases:
             with self.subTest(limits=limits):
@@ -89,6 +88,22 @@ class RobustFaultTest(StarJobFixture, unittest.TestCase):
                 self.assertEqual(calls, report["budget"]["http_attempts"])
                 self.assertEqual(tools, report["budget"]["tool_calls"])
                 self.assertNotEqual("accepted", report["semantics"]["whole_review"])
+
+    def test_zero_tool_quota_allows_numeric_reasoning_and_whole_review(self):
+        self.open_numeric([REVIEW, FINAL, WHOLE_ACCEPT], limits=RunBudgetLimits(max_tool_calls=0))
+        job_id = self.create_job()
+        job = self.terminal(job_id)
+        self.assertEqual("succeeded", job["status"], job)
+        self.assertEqual(FINAL["final_response"], job["result"]["final_response"])
+        self.assertEqual([], self.tools)
+        report = self.report(job_id)
+        self.assertEqual(6, report["budget"]["http_attempts"])
+        self.assertEqual(0, report["budget"]["tool_calls"])
+        self.assertEqual("accepted", report["semantics"]["whole_review"])
+        self.assertEqual("same_artifact", report["semantics"]["binding"])
+        receipt = self.outbound[3]["report"]["tool_receipts"][0]
+        self.assertFalse(receipt["executed"])
+        self.assertEqual("tool_call_budget_exhausted", receipt["reason"])
 
     def test_cancel_after_numeric_review_never_binds_late_final_text(self):
         entered, release = threading.Event(), threading.Event()
