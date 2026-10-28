@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+import uuid
 from threading import Event
 
 from showcase.python_executor import DockerPythonExecutor
@@ -20,20 +21,29 @@ class DockerExecutorTest(unittest.TestCase):
         self.executor = DockerPythonExecutor(image=IMAGE, artifact_root=folder.name,
             timeout_seconds=3, max_output_bytes=8192)
 
+    @staticmethod
+    def new_run_id():
+        return "run_docker_" + uuid.uuid4().hex
+
+    def assert_no_run_containers(self, run_id):
+        containers = subprocess.run(["docker", "ps", "-a", "-q", "--filter",
+            f"label=mathagent.run_id={run_id}"], capture_output=True, text=True,
+            timeout=5, check=False)
+        self.assertEqual(0, containers.returncode, containers.stderr)
+        self.assertEqual("", containers.stdout.strip())
+
     def execute(self, code):
-        result = self.executor.execute(code, run_id="run_docker", call_id="actual_tool",
+        run_id = self.new_run_id()
+        result = self.executor.execute(code, run_id=run_id, call_id="actual_tool",
             input_payload={"code": code})
         self.assertTrue(result["executed"], result)
         self.assertTrue(result["cleanup_verified"], result)
         self.assertLessEqual(result["retained_output_bytes"], 8192)
-        containers = subprocess.run(["docker", "ps", "-a", "-q", "--filter",
-            "label=mathagent.run_id=run_docker"], capture_output=True, text=True, timeout=5, check=False)
-        self.assertEqual(0, containers.returncode, containers.stderr)
-        self.assertEqual("", containers.stdout.strip())
-        return result
+        self.assert_no_run_containers(run_id)
+        return result, run_id
 
     def test_fixed_mathematical_environment_actually_executes(self):
-        result = self.execute("import sympy,numpy,mpmath; print(sympy.__version__,numpy.__version__,mpmath.__version__); print(sympy.factorint(360))")
+        result, run_id = self.execute("import sympy,numpy,mpmath; print(sympy.__version__,numpy.__version__,mpmath.__version__); print(sympy.factorint(360))")
         self.assertEqual("success", result["status"])
         self.assertIn("1.14.0 2.3.4 1.3.0", result["stdout"])
         self.assertIn("{2: 3, 3: 2, 5: 1}", result["stdout"])
@@ -41,7 +51,7 @@ class DockerExecutorTest(unittest.TestCase):
         self.assertEqual("b7a9e5f6a93d6d4a31f129bbd4bdee69efccb6ded0fb230d78aafaf37af98377",
             result["environment"]["base_sha256"])
         input_bytes = self.executor.artifacts.verify(
-            result["input_ref"], run_id="run_docker", call_id="actual_tool")
+            result["input_ref"], run_id=run_id, call_id="actual_tool")
         self.assertEqual({"code": "import sympy,numpy,mpmath; print(sympy.__version__,numpy.__version__,mpmath.__version__); print(sympy.factorint(360))"},
             json.loads(input_bytes))
 
@@ -55,7 +65,7 @@ class DockerExecutorTest(unittest.TestCase):
             "import os\nwhile True: os.write(1,b'B'*4096)",
         ):
             with self.subTest(code=code):
-                result = self.execute(code)
+                result, _ = self.execute(code)
                 self.assertEqual("output_limit", result["status"], result)
                 self.assertGreater(result["observed_output_bytes"], 8192)
 
@@ -69,13 +79,13 @@ class DockerExecutorTest(unittest.TestCase):
             "import subprocess; p=[subprocess.Popen(['sleep','10']) for _ in range(50)]",
         ):
             with self.subTest(code=code):
-                result = self.execute(code)
+                result, _ = self.execute(code)
                 self.assertNotEqual("success", result["status"], result)
                 self.assertNotEqual(0, result["exit_code"])
 
     def test_timeout_kills_container_with_descendant(self):
         self.executor.timeout_seconds = 8
-        result = self.execute("import subprocess,time; subprocess.Popen(['sleep','60']); time.sleep(60)")
+        result, _ = self.execute("import subprocess,time; subprocess.Popen(['sleep','60']); time.sleep(60)")
         self.assertEqual("timeout", result["status"])
         self.assertNotEqual(0, result["exit_code"])
         self.assertTrue(result["timeout"])
@@ -83,7 +93,7 @@ class DockerExecutorTest(unittest.TestCase):
 
     def test_cpu_limit_terminates_a_busy_loop(self):
         self.executor.timeout_seconds = 8
-        result = self.execute("while True: pass")
+        result, _ = self.execute("while True: pass")
         self.assertNotEqual("success", result["status"])
         self.assertNotEqual(0, result["exit_code"])
         # The wall guard is the terminating bound now that the CPU budget is
@@ -103,17 +113,15 @@ class DockerExecutorTest(unittest.TestCase):
         folder = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
         executor = DockerPythonExecutor(image=IMAGE, artifact_root=folder)
+        run_id = self.new_run_id()
         result = executor.execute(
             "total = sum(i * i for i in range(80_000_000))\nprint(total % 1000007)",
-            run_id="run_docker_default", call_id="actual_tool", input_payload={})
+            run_id=run_id, call_id="actual_tool", input_payload={})
         self.assertTrue(result["executed"], result)
         self.assertTrue(result["cleanup_verified"], result)
         self.assertEqual("success", result["status"])
         self.assertEqual(0, result["exit_code"])
-        containers = subprocess.run(["docker", "ps", "-a", "-q", "--filter",
-            "label=mathagent.run_id=run_docker_default"], capture_output=True,
-            text=True, timeout=5, check=False)
-        self.assertEqual("", containers.stdout.strip())
+        self.assert_no_run_containers(run_id)
 
     def test_cancellation_kills_a_sleeping_container(self):
         cancelled = Event()
@@ -124,13 +132,15 @@ class DockerExecutorTest(unittest.TestCase):
             cancelled.set()
             return False
 
-        result = self.executor.execute("import time; time.sleep(60)", run_id="run_docker",
+        run_id = self.new_run_id()
+        result = self.executor.execute("import time; time.sleep(60)", run_id=run_id,
             call_id="actual_tool", input_payload={"code": "import time; time.sleep(60)"},
             canceled=is_cancelled)
         self.assertTrue(result["executed"])
         self.assertEqual("canceled", result["status"])
         self.assertTrue(result["cleanup_verified"])
         self.assertFalse(result["unknown_outcome"])
+        self.assert_no_run_containers(run_id)
 
 
 if __name__ == "__main__":
