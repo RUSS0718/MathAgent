@@ -221,7 +221,15 @@ class RunBudgetLedger:
                             break  # A later failed observation cannot undo a confirmed result.
                         projection = public_attempt({**event, "usage": usage}, run_id=run_id, role=action["role"])
                         projection["deadline_at"] = previous_attempt.get("deadline_at") or projection["deadline_at"]
-                        action["public_attempt"] = {**projection, "started_at_utc": previous_attempt.get("started_at_utc") or event.get("started_at_utc"), "dispatch_status": "transport_observed", "solver_call_id": public_solver_call_id(run_id, action.get("solver_call_id"))}
+                        if event.get("status") == "not_submitted":
+                            dispatch_status = "not_submitted"
+                        elif (event.get("error_category") == "timeout"
+                              and event.get("http_status") is None
+                              and event.get("response_headers_seconds") is None):
+                            dispatch_status = "reserved_dispatch_unconfirmed"
+                        else:
+                            dispatch_status = "transport_observed"
+                        action["public_attempt"] = {**projection, "started_at_utc": previous_attempt.get("started_at_utc") or event.get("started_at_utc"), "dispatch_status": dispatch_status, "solver_call_id": public_solver_call_id(run_id, action.get("solver_call_id"))}
                     action.update(
                         status=event.get("status", "unknown"),
                         usage=usage,

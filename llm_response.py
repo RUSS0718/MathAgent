@@ -47,6 +47,8 @@ def public_attempt(
 ) -> dict[str, Any]:
     source = event.get("usage") if isinstance(event.get("usage"), Mapping) else event
     usage = {key: _count(source.get(key)) for key in USAGE_FIELDS}
+    status = event.get("status")
+    dispatch_status = "not_submitted" if status == "not_submitted" else event.get("dispatch_status")
     return {
         "attempt_id": safe_identifier(event.get("attempt_id")),
         "logical_call_id": safe_identifier(event.get("logical_call_id")),
@@ -55,7 +57,7 @@ def public_attempt(
         "action": safe_identifier(role),
         "attempt_index": _count(event.get("attempt_index")),
         "started_at_utc": event.get("started_at_utc") if isinstance(event.get("started_at_utc"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}T[0-9:.]+(?:Z|[+-]\d{2}:\d{2})", event["started_at_utc"]) else None,
-        "dispatch_status": event.get("dispatch_status") if event.get("dispatch_status") in {"reserved_dispatch_unconfirmed", "transport_observed"} else None,
+        "dispatch_status": dispatch_status if dispatch_status in {"reserved_dispatch_unconfirmed", "transport_observed", "not_submitted"} else None,
         "requested_model": safe_identifier(
             event.get("request_model_id", event.get("requested_model"))
         ),
@@ -66,7 +68,7 @@ def public_attempt(
             event.get("response_id", event.get("provider_request_id"))
         ),
         "finish_reason": safe_identifier(event.get("finish_reason")),
-        "status": event.get("status") if event.get("status") in {"success", "error"} else "unknown",
+        "status": "error" if status == "not_submitted" else status if status in {"success", "error"} else "unknown",
         "http_status": _count(event.get("http_status")),
         "duration_seconds": _duration(event.get("duration_seconds")),
         "error_category": safe_identifier(event.get("error_category")),

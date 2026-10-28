@@ -13,6 +13,34 @@ from tests.star_product_support import SOLVED, StarJobFixture
 
 
 class NonstreamLateTest(StarJobFixture, unittest.TestCase):
+    def test_late_empty_choices_preserves_original_unknown_reservation(self):
+        self.open_star([], SHOWCASE_STAR_FEATURES={"strict_completion": True})
+        callbacks, sends = [], []
+
+        class Reply:
+            status_code = 200
+
+        def transport(_url, *, on_late_response, **_kwargs):
+            sends.append(True)
+            callbacks.append(on_late_response)
+            raise requests.ReadTimeout("offline deadline")
+            yield
+
+        with patch("showcase.request_transport.response_events", side_effect=transport):
+            job_id = self.create_job()
+            before = self.terminal(job_id)
+            callbacks[0](Reply(), json.dumps({"choices": [], "usage": {"prompt_tokens": 7,
+                "completion_tokens": 3, "total_tokens": 10}}).encode(), .01, .2, True)
+            after = self.job(job_id)
+        self.assertEqual([True], sends)
+        self.assertEqual(before["status"], after["status"])
+        self.assertEqual(before["result"]["solver"], after["result"]["solver"])
+        self.assertEqual(before["result"]["budget"]["reserved_tokens"],
+                         after["result"]["budget"]["reserved_tokens"])
+        self.assertEqual(1, after["result"]["budget"]["unresolved_attempts"])
+        attempt, = after["result"]["request_attempts"]
+        self.assertEqual("missing_finish_reason", attempt["error_category"])
+        self.assertEqual(10, attempt["usage"]["total_tokens"])
     def test_slow_late_sqlite_settlement_does_not_delay_timeout(self):
         self.open_star([], SHOWCASE_STAR_FEATURES={"strict_completion": True})
         entered, release, finished = (threading.Event() for _ in range(3))

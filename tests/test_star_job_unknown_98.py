@@ -85,6 +85,33 @@ class PublicJobUnknownTest(StarJobFixture, unittest.TestCase):
             self.assertEqual("unknown", attempt["metering_status"])
             self.assertIsNone(attempt["usage"]["total_tokens"])
 
+    def test_empty_choices_with_usage_keeps_missing_finish_reservation(self):
+        self.open_star([], retry=3, SHOWCASE_STAR_FEATURES={"strict_completion": True})
+
+        class Reply:
+            status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def close(self):
+                pass
+
+            def iter_content(self, chunk_size=1):
+                yield json.dumps({"choices": [], "usage": {"prompt_tokens": 7,
+                    "completion_tokens": 3, "total_tokens": 10}}).encode()
+
+        self.post.side_effect = lambda *_args, **_kwargs: Reply()
+        job = self.terminal(self.create_job())
+        budget = job["result"]["budget"]
+        attempt, = job["result"]["request_attempts"]
+        self.assertEqual("failed", job["status"])
+        self.assertEqual("needs_review", job["result"]["solver"]["recovery"]["status"])
+        self.assertEqual(1, self.post.call_count)
+        self.assertEqual(1, budget["unresolved_attempts"])
+        self.assertEqual(budget["local_input_estimate"] + 256, budget["reserved_tokens"])
+        self.assertEqual(10, attempt["usage"]["total_tokens"])
+        self.assertEqual("missing_finish_reason", attempt["error_category"])
     def test_unconfirmed_partial_usage_does_not_double_charge_original_reservation(self):
         self.open_star([], retry=3, SHOWCASE_STAR_FEATURES={"strict_completion": True})
 

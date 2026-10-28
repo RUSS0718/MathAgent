@@ -44,8 +44,12 @@ def _not_submitted(error: BaseException | None) -> bool:
     """Only positive connection-establishment evidence permits automatic resend."""
     from urllib3.exceptions import NewConnectionError
 
+    from showcase.request_transport import DeadlineNotSubmitted
+
     # The current failure wins over stale exception-handler context. Only
     # explicit transport wrappers (reason/args) carry establishment evidence.
+    if isinstance(error, DeadlineNotSubmitted):
+        return True
     if isinstance(error, requests.ReadTimeout):
         return False
     seen = set()
@@ -232,7 +236,6 @@ class InternChatClient:
                 "started_at_utc": datetime.now(UTC).isoformat(),
                 "request_purpose": request_purpose,
                 "effective_timeout_seconds": effective_timeout,
-                "deadline_at": time.time() + max(0, logical_deadline - time.monotonic()) if _attempt_budget is not None else None,
                 "requests_timeout_seconds": self.timeout,
                 "provider_stream": False,
                 "requests_stream": _attempt_budget is not None,
@@ -252,6 +255,7 @@ class InternChatClient:
             if _attempt_budget is not None:
                 from showcase.attempt_projection import MeteredAttemptEvent
 
+                request_event["deadline_at"] = time.time() + max(0, logical_deadline - time.monotonic())
                 request_event = MeteredAttemptEvent(request_event)
                 request_event.state_lock = attempt_state_lock
                 estimate = len(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"))
@@ -264,6 +268,7 @@ class InternChatClient:
             response = None
             failure: BaseException | None = None
             late_response_settled = False
+            local_processing_timeout = False
             try:
                 request_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                 if _attempt_budget is not None:
@@ -333,6 +338,11 @@ class InternChatClient:
                                     error_category="http_status",
                                     error_type="HTTPError",
                                 )
+                            elif (getattr(_attempt_budget, "strict_completion", False)
+                                  and late_choices == []):
+                                request_event.update(response_fields, status="error",
+                                                     error_category="missing_finish_reason",
+                                                     error_type="EmptyChoices")
                             elif not valid_completion_shape:
                                 request_event.update(
                                     response_fields,
@@ -415,6 +425,9 @@ class InternChatClient:
                     data = response.json()
                 usage = provider_usage(data.get("usage"))
                 request_event.update(usage)
+                if (_attempt_budget is not None and getattr(_attempt_budget, "strict_completion", False)
+                        and data.get("choices") == []):
+                    raise ChatClientError("missing_finish_reason", "empty_choices")
                 choice = data["choices"][0]
                 finish_reason = safe_identifier(choice.get("finish_reason"))
                 if _attempt_budget is not None and getattr(_attempt_budget, "strict_completion", False) and finish_reason is None:
@@ -479,6 +492,9 @@ class InternChatClient:
                     }
                 )
                 self.latencies.append(time.perf_counter() - started)
+                if _attempt_budget is not None and time.monotonic() >= logical_deadline:
+                    local_processing_timeout = True
+                    raise requests.ReadTimeout("logical_deadline_exceeded_during_processing")
                 return content
             except requests.Timeout as exc:
                 last_category = "timeout"
@@ -523,7 +539,7 @@ class InternChatClient:
                         request_event["duration_seconds"] = round(
                             time.perf_counter() - attempt_started, 3
                         )
-                    if failure is not None and not late_response_settled:
+                    if failure is not None and not late_response_settled and not local_processing_timeout:
                         failure_response = (
                             response if response is not None else getattr(failure, "response", None)
                         )

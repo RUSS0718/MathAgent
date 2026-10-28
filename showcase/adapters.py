@@ -300,6 +300,8 @@ class InternStreamAdapter(InternModelAdapter):
         attempt.update(effective_timeout_seconds=effective_timeout, deadline_at=time.time() + max(0, logical_deadline - time.monotonic()))
         attempt["requests_timeout_seconds"] = configured or effective_timeout
         attempt["retry_limit"] = limit
+        local_processing_timeout = False
+        result = None
         try:
             from llm_client import _not_submitted, product_retry_delay
 
@@ -437,6 +439,17 @@ class InternStreamAdapter(InternModelAdapter):
 
                     pending_chunks = []
                     stream_complete = False
+
+                    def check_processing_deadline():
+                        nonlocal local_processing_timeout
+                        if time.monotonic() < logical_deadline:
+                            return
+                        attempt.update({key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")})
+                        if stream_complete and saw_done and (not (metadata or {}).get("strict_completion") or finish_reason is not None):
+                            attempt.update(status="success", finish_reason=finish_reason, response_model_id=model_id)
+                            local_processing_timeout = True
+                        raise requests.ReadTimeout("logical_deadline_exceeded_during_processing")
+
                     for kind, value in response_events(
                         client.api_base,
                         headers=headers,
@@ -458,16 +471,21 @@ class InternStreamAdapter(InternModelAdapter):
                                 line, _, remainder = line_buffer.partition(b"\n")
                                 line_buffer = bytearray(remainder)
                                 parse_line(line)
+                                check_processing_deadline()
                                 for delta_chunk in pending_chunks:
                                     yield delta_chunk
+                                    check_processing_deadline()
                                 pending_chunks.clear()
                         elif kind == "complete":
                             stream_complete = True
                             attempt["completion_seconds"] = time.monotonic() - attempt_started
                     if line_buffer:
                         parse_line(line_buffer)
+                        check_processing_deadline()
                         for delta_chunk in pending_chunks:
                             yield delta_chunk
+                            check_processing_deadline()
+                    check_processing_deadline()
                     if (metadata or {}).get("strict_completion") is True and stream_complete and (not saw_done or finish_reason is None):
                         attempt.update({key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")})
                         raise AdapterError("missing_stream_terminal" if not saw_done else "missing_finish_reason")
@@ -479,7 +497,7 @@ class InternStreamAdapter(InternModelAdapter):
                     if call_budget and _not_submitted(failure):
                         attempt.update(status="not_submitted", prompt_tokens=0,
                                        completion_tokens=0, total_tokens=0)
-                    else:
+                    elif not local_processing_timeout:
                         attempt.update(status="error")
                     if delay is None or index + 1 >= limit:
                         raise
@@ -514,7 +532,7 @@ class InternStreamAdapter(InternModelAdapter):
             )
             attempt["duration_seconds"] = round(time.monotonic() - attempt_started, 3)
             attempts.append(dict(attempt))
-            yield {
+            result = {
                 "type": "result",
                 "text": "".join(parts),
                 "usage": usage,
@@ -522,6 +540,8 @@ class InternStreamAdapter(InternModelAdapter):
                 "model": model_id,
                 "attempts": record_attempts(attempts, metadata),
             }
+            check_processing_deadline()
+            yield result
         except AdapterError as exc:
             attempt.update(status="error", error_category=exc.category, error_type=type(exc).__name__)
             attempt["duration_seconds"] = round(time.monotonic() - attempt_started, 3)
@@ -531,12 +551,17 @@ class InternStreamAdapter(InternModelAdapter):
         except Exception as exc:  # noqa: BLE001 - provider details stay out of events
             category = _request_failure_category(exc)
             from llm_client import _not_submitted
-            attempt.update(status="not_submitted" if _not_submitted(exc) else "error",
-                           error_category=category, error_type=type(exc).__name__)
+            if not local_processing_timeout:
+                attempt.update(status="not_submitted" if _not_submitted(exc) else "error",
+                               error_category=category, error_type=type(exc).__name__)
             attempt["duration_seconds"] = round(time.monotonic() - attempt_started, 3)
-            attempts.append(dict(attempt))
+            if attempts and attempts[-1].get("attempt_id") == attempt.get("attempt_id"):
+                attempts[-1] = dict(attempt)
+            else:
+                attempts.append(dict(attempt))
             error = AdapterError(category, type(exc).__name__)
-            error.request_attempts = record_attempts(attempts, metadata)
+            error.request_attempts = (result["attempts"] if local_processing_timeout and result is not None
+                                      else record_attempts(attempts, metadata))
             raise error from exc
         finally:
             attempt["duration_seconds"] = round(time.monotonic() - attempt_started, 3)

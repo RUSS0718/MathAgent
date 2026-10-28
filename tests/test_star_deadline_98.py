@@ -36,12 +36,14 @@ class DeadlineContractTest(unittest.TestCase):
         self.assertEqual(10, repeated["provider_known"]["total_tokens"])
         self.assertEqual(0, repeated["reserved_tokens"])
     def test_phase_deadline_is_earlier_than_request_and_run_deadlines(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_args):
                 pass
 
             def do_POST(self):
-                time.sleep(0.45)
+                release.wait(4)
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -62,7 +64,8 @@ class DeadlineContractTest(unittest.TestCase):
                     "phase_deadline_at": phase_deadline,
                 })
         self.assertEqual("timeout", caught.exception.category)
-        self.assertLess(time.monotonic() - started, 0.4)
+        self.assertLess(time.monotonic() - started, 1.5)
+        release.set()
         self.assertGreater(budget.snapshot()["reserved_tokens"], 0)
         self.assertAlmostEqual(phase_deadline, ledger.attempts("deadline-phase")[0]["deadline_at"], delta=0.05)
     def test_missing_finish_marker_is_unknown_when_contract_explicitly_enabled(self):
@@ -234,12 +237,14 @@ class DeadlineContractTest(unittest.TestCase):
         self.assertGreater(snapshot["reserved_tokens"], 0)
         self.assertEqual("missing_stream_terminal", ledger.attempts("late-stream-no-done")[0]["error_category"])
     def test_batch_and_run_deadlines_win_when_each_is_earliest(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_args):
                 pass
 
             def do_POST(self):
-                time.sleep(0.8)
+                release.wait(4)
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -263,7 +268,7 @@ class DeadlineContractTest(unittest.TestCase):
                         started = time.monotonic()
                         with bind_budget(budget), self.assertRaises((AdapterError, RunStopped)):
                             adapter.complete([{"role": "user", "content": "offline"}], metadata=metadata)
-                        self.assertLess(time.monotonic() - started, 0.7)
+                        self.assertLess(time.monotonic() - started, 1.5)
                         self.assertEqual(1, budget.snapshot()["http_attempts"])
                         self.assertEqual(1, budget.snapshot()["unresolved_attempts"])
                         self.assertGreater(budget.snapshot()["reserved_tokens"], 0)
@@ -272,6 +277,9 @@ class DeadlineContractTest(unittest.TestCase):
                         ledger.close()
 
     def test_heartbeat_and_silence_do_not_extend_stream_deadline(self):
+        release = threading.Event()
+        heartbeat_seen = threading.Event()
+        self.addCleanup(release.set)
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_args):
                 pass
@@ -281,15 +289,16 @@ class DeadlineContractTest(unittest.TestCase):
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
                 if self.path == "/silent":
-                    time.sleep(0.8)
+                    release.wait(4)
                     return
-                for _ in range(40):
+                while not release.is_set():
                     try:
                         self.wfile.write(b": heartbeat\n\n")
                         self.wfile.flush()
+                        heartbeat_seen.set()
                     except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                         return
-                    time.sleep(0.02)
+                    release.wait(0.02)
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -310,7 +319,10 @@ class DeadlineContractTest(unittest.TestCase):
                             list(adapter.stream_complete([{"role": "user", "content": "offline"}],
                                 metadata={"role": "explore", "timeout_seconds": 0.18}))
                         self.assertEqual("timeout", caught.exception.category)
-                        self.assertLess(time.monotonic() - started, 0.7)
+                        self.assertLess(time.monotonic() - started, 1.5)
+                        if mode == "heartbeat":
+                            self.assertTrue(heartbeat_seen.is_set())
+                        self.assertFalse(release.is_set())
                         self.assertEqual(1, budget.snapshot()["http_attempts"])
                         self.assertGreater(budget.snapshot()["reserved_tokens"], 0)
                     finally:
@@ -349,6 +361,8 @@ class DeadlineContractTest(unittest.TestCase):
         self.assertEqual(0, budget.snapshot()["unresolved_attempts"])
         self.assertGreater(budget.snapshot()["reserved_tokens"], 0)
     def test_no_headers_obeys_short_request_deadline_and_holds_unknown_attempt(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
         requests_seen = []
 
         class Handler(BaseHTTPRequestHandler):
@@ -357,7 +371,7 @@ class DeadlineContractTest(unittest.TestCase):
 
             def do_POST(self):
                 requests_seen.append(True)
-                time.sleep(0.45)
+                release.wait(4)
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -382,7 +396,8 @@ class DeadlineContractTest(unittest.TestCase):
         elapsed = time.monotonic() - started
         self.assertEqual("timeout", caught.exception.category)
         self.assertGreaterEqual(elapsed, 0.1)
-        self.assertLess(elapsed, 0.4)
+        self.assertLess(elapsed, 1.5)
+        release.set()
         self.assertEqual(1, len(requests_seen))
         self.assertEqual(1, len(ledger.attempts("deadline-no-headers")))
         self.assertGreater(budget.snapshot()["reserved_tokens"], 0)

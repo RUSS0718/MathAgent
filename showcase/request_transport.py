@@ -75,6 +75,10 @@ def _invoke_late_response(
         callback(*arguments, body_complete)
 
 
+class DeadlineNotSubmitted(requests.ReadTimeout):
+    """The local deadline expired before the transport started."""
+
+
 def response_events(
     url: str,
     *,
@@ -114,6 +118,8 @@ def response_events(
     reader_finished = False
     late_callback_invoked = False
     late_lock = threading.Lock()
+    dispatch_lock = threading.Lock()
+    dispatch_started = False
 
     def settle_late(complete):
         nonlocal late_callback_invoked
@@ -130,7 +136,7 @@ def response_events(
             pass
 
     def read_response() -> None:
-        nonlocal response, response_headers_seconds, body_complete, reader_finished
+        nonlocal response, response_headers_seconds, body_complete, reader_finished, dispatch_started
         try:
             if loopback_only and provider_endpoint_only:
                 raise ValueError("conflicting_transport_policy")
@@ -138,6 +144,10 @@ def response_events(
                 strict_loopback_post if loopback_only else
                 strict_provider_post if provider_endpoint_only else requests.post
             )
+            with dispatch_lock:
+                if detached.is_set() or time.monotonic() >= deadline:
+                    raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
+                dispatch_started = True
             response = post(url, timeout=timeout, stream=True, **request_kwargs)
             response_headers_at = time.monotonic()
             response_headers_seconds = response_headers_at - started
@@ -178,6 +188,20 @@ def response_events(
                 except Exception:
                     pass
 
+    def detach_reader():
+        with dispatch_lock:
+            detached.set()
+            not_submitted = not dispatch_started
+        with late_lock:
+            should_settle = reader_finished
+        if not not_submitted and should_settle:
+            threading.Thread(target=settle_late, args=(body_complete,),
+                             name="showcase-late-settlement", daemon=True).start()
+        return not_submitted
+
+    if time.monotonic() >= deadline:
+        raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
+
     worker = threading.Thread(
         target=read_response,
         name=f"showcase-http-reader-{threading.current_thread().name}",
@@ -189,12 +213,8 @@ def response_events(
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 deadline_hit = True
-                with late_lock:
-                    detached.set()
-                    should_settle = reader_finished
-                if should_settle:
-                    threading.Thread(target=settle_late, args=(body_complete,),
-                                     name="showcase-late-settlement", daemon=True).start()
+                if detach_reader():
+                    raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
                 raise requests.ReadTimeout("logical_deadline_exceeded")
             try:
                 kind, value = events.get(timeout=min(remaining, 0.05))
@@ -207,4 +227,7 @@ def response_events(
                 return
     finally:
         if not deadline_hit:
-            canceled.set()
+            if time.monotonic() >= deadline:
+                detach_reader()
+            else:
+                canceled.set()
