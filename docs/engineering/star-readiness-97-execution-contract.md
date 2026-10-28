@@ -1,6 +1,6 @@
 # #97 非流式批次执行合同
 
-状态：离线实现与发布门禁通过；2026-10-28 已按独立冻结登记执行一次真实两题批次。实际结果及未达成的多步非快通道条件见[就绪核对记录](../evals/star-readiness-97-status.md)。用户已确认[两题登记草案](../experiments/star-readiness-97-preregistration-draft.md)中的单 Run 与整批预算映射。该 manifest 是一次性授权并已消费；不得续跑或重试，任何新增真实调用都须新登记和具体授权。旧 RB08 注册、结果和执行器合同保持不变。
+状态：离线实现与发布门禁通过。2026-10-28 已按两个独立冻结登记执行真实批次。首批完成，但多步样本未进入登记要求的非快通道。r8 批次完成简单题后，多步题的第二次 Explore 请求超时，批次以 `unknown_transport` 停止并保留一个未决 attempt。两个 manifest 均已消费，不得续跑或重试。实际结果和仍未达成的条件见[就绪核对记录](../evals/star-readiness-97-status.md)。已确认[两题登记草案](../experiments/star-readiness-97-preregistration-draft.md)中的单 Run 与整批预算映射。任何新增真实调用都须使用新登记并取得针对该登记的授权。旧 RB08 注册、结果和执行器合同保持不变。
 
 ## 登记与身份
 

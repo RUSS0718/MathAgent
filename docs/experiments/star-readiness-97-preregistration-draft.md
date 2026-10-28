@@ -1,6 +1,6 @@
 # #97 非流式两题登记草案
 
-状态：预算映射已由用户确认；2026-10-28 已基于独立冻结 manifest 执行一次真实批次。原草案仍保留创建时的不可派发状态，不作为已授权登记。草案与旧 RB08 E1/E2 独立，不改变旧合同或历史记录。`artifacts/issue-97-prereg/draft-v2.json` 保存精确输入，文件 SHA-256 为 `cfc091faf41865c87ad5b196cd48183f2f1ebf874224dc22581ef16d0bed6f34`。正式 manifest、一次性授权及实际结果见[就绪核对记录](../evals/star-readiness-97-status.md)。
+状态：预算映射已由用户确认；2026-10-28 已基于两个独立冻结 manifest 执行两次真实批次。原草案仍保留创建时的不可派发状态，不作为已授权登记。草案与旧 RB08 E1/E2 独立，不改变旧合同或历史记录。`artifacts/issue-97-prereg/draft-v2.json` 保存精确输入，文件 SHA-256 为 `cfc091faf41865c87ad5b196cd48183f2f1ebf874224dc22581ef16d0bed6f34`。正式 manifest、一次性授权及实际结果见[就绪核对记录](../evals/star-readiness-97-status.md)。
 
 ## 样本和身份
 

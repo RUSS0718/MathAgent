@@ -1,8 +1,21 @@
 # #97 非流式就绪：离线与真实批次核对状态
 
-更新日期：2026-10-28。状态：离线工程门禁通过，已执行一次冻结的两题真实批次；批次完整结束，但多步题没有自然经过登记要求的非快通道，因此 #97 验收仍未全部达成，Issue 保持开放。真实运行证据与数学判定分开记录。
+更新日期：2026-10-28。状态：离线工程门禁通过，已执行两次独立冻结的真实批次。首批完整结束，但多步题没有进入登记要求的非快通道。r8 批次完成简单题后，多步 Job 的第二次 Explore 请求超时，协调器以 `unknown_transport` 停止并保留一个未决 attempt。自然非快通道、步骤证明和数学核验条件仍未满足，#97 保持开放。真实运行证据与数学判定分开记录。
 
-## 2026-10-28 冻结批次结果
+## 2026-10-28 r8 真实批次结果
+
+真实调用前，固定 Docker 镜像下的干净克隆通过发布门禁：865 项测试通过，零失败、零跳过；`showcase_release=PASS`。测试接缝检查和六个旁路探针均通过。门禁报告位于 `artifacts/issue-97-v4-final-20261028-r8/gate-report.json`。冻结源码 revision 为 `6bf499446fdc5172aca0b6359fb17a5c105302e6`，源码 SHA-256 为 `90d65722be39255bd5168c3e7218ccfa5af4bec6279d2ff3c529573d64b8905d`。
+
+r8 live manifest 位于 `artifacts/issue-97-prereg/live-manifest-r8.json`，SHA-256 为 `13f9eb8d82d86c881fb4a2d07bdf55f99d4445ac6cb4841fd368943569efca1d`。登记固定 Intern S2、非流式 `star_reference`、`simple-03` 与 `multi-03`、请求参数、源码身份和原定预算。两题各派发一次，没有操作员重发。15 个脱敏归档文件的 SHA-256 均通过核验，归档位于 `artifacts/issue-97-v4-final-20261028-r8-live/`。
+
+| 样本 | 公共 Job | 实际路径与工程结果 | 预算与用量 | 验收判定 |
+| --- | --- | --- | --- | --- |
+| `simple-03` | `run_bd1651388a4e491572a1bcc1b8cb6d1f` | 3 次非流式请求成功；Job `succeeded`；整题审查 `accepted`，绑定 `same_artifact`。归档分类为 `fastpath_no_step_proofs`。 | 3 logical calls、3 HTTP attempts、0 题目工具调用、7,682 已计费且已知 tokens；0 reserved、unknown 或 unresolved。 | 简单快通道有 live 工程证据；数学核验状态为 `unknown`。 |
+| `multi-03` | `run_069306098d1b107288131a0337c5861c` | 首次 Explore 请求在 117.789 秒后收到 HTTP 200 和用量。第二次 Explore 请求等待 180.022 秒后超时，没有响应头或 provider usage。Job 以 `star_needs_review` 失败；协调器未能收集完成的 Run，并保留 SQLite 运行库。 | 2 logical calls、2 HTTP attempts、0 题目工具调用、7,355 已知 tokens、16,701 reserved tokens、1 unknown 和 1 unresolved attempt。 | 协调器以 `unknown_transport` 停止。Planner、Reasoner、步骤审查及题目工具均未覆盖；不重试该 Job。 |
+
+批次汇总为 `stop_reason=unknown_transport`、2 个已派发 Job、1 个已收集 Run、3 次环境预检、5 logical calls、5 HTTP attempts、0 题目工具调用、31,738 charged tokens、15,037 provider-known tokens、16,701 reserved tokens、1 unknown 和 1 unresolved attempt。墙钟为 377.125 秒，实际费用未知，记 `null`。运行库保留在 `artifacts/issue-97-runtime/star-readiness-97-96a39w_x/`，保留原因为 `job_archive_incomplete`。检查时没有迟到用量补记文件。客户端记录只能证明第二次 Explore 请求在 180 秒截止前没有收到响应头，不能确认 provider 是否收到或处理了请求。请求传输与账本聚焦复核有 79 项通过、3 项因 Docker 环境缺失而跳过；未发现本地缺陷，未修改运行时代码或测试。该 manifest 与归档目录均已一次性消费；不得续跑、重试或替换样本。任何后续 live 请求都需要新登记和针对该登记的授权。
+
+## 2026-10-28 首批冻结批次结果
 
 真实调用前，在固定 Docker 镜像和移除 provider 凭证的测试环境中运行 `uv run --offline --frozen --no-sync python -B scripts/check_showcase_release.py --require-reference`：828 项测试通过、零失败、零跳过，`showcase_release=PASS`。冻结后的源码身份为 revision `40fb59bde44e3ce0c899a3d541b442201c3d8497`、源码 SHA-256 `813145e762009aee87983e436d6f7c9af33a8e8f4baf63696d66809c26fd2fcc`、`dirty_status=true`；工作树中的 retro 改动已纳入该源码身份检查。
 
@@ -15,11 +28,11 @@
 
 两题最终响应的数值均与独立计算结果匹配；然而公共 Job 的内置核验状态均为 `unknown`，这项数值核对不等同于形式证明。归档不含答案正文，只保留身份 hash、脱敏阶段/用量摘要和绑定信息。批次汇总为 `stop_reason=completed`、2/2 Run、3 次环境预检、8 logical calls、8 HTTP attempts、2 题目工具调用、24,066 charged/known tokens、0 reserved/unknown/unresolved，墙钟 166.282 秒；实际费用未知，记 `null`。没有追加、重试或替换样本。
 
-协调器报告的临时运行库清理状态是 `deferred`。逐项确认两个 Run 的 8 个 HTTP ledger action 均为 `success` 且没有未决 action 后，已清理本次专属的临时 SQLite/响应目录；脱敏归档保留。当前只完成冻结批次中实际触发的路径；多步非快通道、步骤证明和数学核验仍未达标，故不关闭 #97，也不更新旧 E1/E2 或关联工单的结果。
+协调器报告的临时运行库清理状态是 `deferred`。逐项确认两个 Run 的 8 个 HTTP ledger action 均为 `success` 且没有未决 action 后，已清理首批专属的临时 SQLite/响应目录；脱敏归档保留。这段清理状态只描述首批运行，不包含 r8 保留的运行库。
 
 ## 2026-10-27 历史研发记录
 
-下列开发回合、组件矩阵和发布检查属于 2026-10-27 前置记录；其中“待完成”“未覆盖”只描述当时状态。2026-10-28 的冻结批次结果和当前总判定以上方为准。集成分支为 `showcase-star-readiness-97`；retro 改动作为 dirty source 纳入后续源码身份检查。
+下列开发回合、组件矩阵和发布检查属于 2026-10-27 前置记录；其中“待完成”“未覆盖”只描述当时状态。2026-10-28 两次真实批次结果和当前总判定以上方为准。集成分支为 `showcase-star-readiness-97`；retro 改动作为 dirty source 纳入后续源码身份检查。
 
 已实现独立登记适配、批次预算准入、严格 loopback 传输和一次性协调器。恢复、Skill、用量及传输聚焦组 34 项通过。取消后的报告验证来源与 Run Evidence 已统一；取消请求遇到 worker 同时进入终态时保留原结果，不能吞掉仍在运行时的取消错误。迟到结算及取消竞争连续三轮通过；包含固定镜像公共 Job 的相关聚焦组 32 项通过、无 skip，Evidence 历史另 2 项通过。早先两次聚焦命令有模块名称或模块导入方式错误，不计通过；以上数字来自纠正后的实际运行。
 
