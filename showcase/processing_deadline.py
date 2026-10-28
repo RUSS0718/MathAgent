@@ -31,7 +31,18 @@ def process_before_deadline(process, deadline, on_late):
 
     threading.Thread(target=run, name="showcase-response-processing", daemon=True).start()
     ready.wait(max(0, deadline - time.monotonic()))
-    with lock:
+    if not lock.acquire(timeout=max(0, deadline - time.monotonic())):
+        def detach_later():
+            with lock:
+                state["detached"] = True
+                completed = state["complete"]
+                result, error = state["result"], state["error"]
+            if completed:
+                on_late(result, error)
+
+        threading.Thread(target=detach_later, name="showcase-late-handoff", daemon=True).start()
+        raise requests.ReadTimeout("logical_deadline_exceeded_during_processing")
+    try:
         if state["complete"] and time.monotonic() < deadline:
             result, error = state["result"], state["error"]
             if error is not None:
@@ -40,6 +51,8 @@ def process_before_deadline(process, deadline, on_late):
         state["detached"] = True
         completed = state["complete"]
         result, error = state["result"], state["error"]
+    finally:
+        lock.release()
     if completed:
         threading.Thread(target=on_late, args=(result, error),
                          name="showcase-late-processing", daemon=True).start()
