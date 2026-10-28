@@ -2,6 +2,26 @@
 
 更新日期：2026-10-28。状态：离线工程门禁通过，已执行两次独立冻结的真实批次。首批完整结束，但多步题没有进入登记要求的非快通道。r8 批次完成简单题后，多步 Job 的第二次 Explore 请求超时，协调器以 `unknown_transport` 停止并保留一个未决 attempt。自然非快通道、步骤证明和数学核验条件仍未满足，#97 保持开放。真实运行证据与数学判定分开记录。
 
+## v5 拟议登记状态
+
+当前状态：`draft_not_dispatchable`。按用户最新指示形成 v5 草案，最终待审阅预览为 `artifacts/issue-97-prereg/manifest-v5-reviewed-20261028.json`；冻结不代表 live API 授权，本轮没有 v5 API 执行。本地文档拟议将[远程 Issue #97](https://github.com/RUSS0718/MathAgent/issues/97)原合同中的“不得提高现有预算”调整为更长的等待预算；本轮不修改该 GitHub issue。已消费的 v2/v4 登记和 2026-10-28 两次真实批次不变。
+
+v5 候选为 Project Euler Problem 5 与 IMO 2025 Problem 4。此前把 IMO 多步候选称为 Problem 1 是错误的；IMO 官方[题目页](https://www.imo-official.org/problems/2025/)确认其为 Day 2 Problem 4（亦见[官方 PDF](https://www.imo-official.org/assets/documents/problems/2025/2025_eng.pdf)）。按用户允许提高预算的最新指示，拟议单请求 timeout 为 600 秒；简单题 Run 900 秒、多步题 Run 3600 秒、全批 4800 秒。token、logical calls、HTTP attempts、题目工具调用、Run 数和预检次数保持既有上限。候选输入、SHA-256 及估算依据见[v5 登记草案](../experiments/star-readiness-97-preregistration-draft.md)，执行边界见[v5 执行合同](../engineering/star-readiness-97-execution-contract.md)。
+
+较长 wall-clock 只会给慢请求更多等待时间，不能保证模型自然选择非快通道，也不能保证产生步骤证明或数学正确结果。未自然触发的能力仍记为 `not_covered`。本轮已实现 v5 登记、timeout、批次 deadline 和独立消费合同，聚焦测试及完整发布门禁通过；具体登记仍需单独取得明确授权，之后才可调用 live API。
+
+此前普通 sandbox 检查的失败已定位到运行环境：Git 的 `dubious ownership` 检查导致 setup 返回 `artifact_path_invalid`，无 Docker daemon 权限时实验 Job admission 返回 `503 star_prerequisites_unverified`。独立 HEAD 副本的 setup 6 项通过，实验前置失败也可在原 HEAD 复现；未据此修改产品行为或放宽测试。首轮 v5 全仓检查使用无 `.env`、固定 Docker 镜像的隔离副本，但审查补充测试后源码身份变化，该次检查已中止，不计 PASS。最终证据以修订后的固定源码门禁报告为准。
+
+v5 实现提交为 `16885e7476ad67cb13bc8d1a63453297118b0d04`。聚焦组运行 77 项，76 项通过，1 项因未启用 Docker 集成而跳过；Ruff 与差异检查通过。这些检查覆盖 600 秒配置传入服务器、配置漂移拒绝、登记耗时计入全批、实际本地 HTTP 等待被 Run 或批次 deadline 截断、未知请求不重发、恢复保留原截止、迟到用量结算，以及冻结预览与按精确 hash 授权两个独立操作。真实题面已移出执行源码和测试。聚焦组中的 skip 不计为 Docker 覆盖；后续最终门禁已启用固定镜像和 Docker 集成，结果如下。
+
+独立审查的规范轴未发现硬性违规；两道题的调用限额断言缺口已补齐。版本分支重复属于启发式建议，本轮保留现有版本选择方式。规格轴发现的授权时序和题面入库两项，均已在提交 `16885e7` 上独立复核关闭；复核未运行测试或修改源码。
+
+最终门禁在不含 `.env`、移除 `INTERN_*` 环境变量的隔离副本中执行，固定镜像为 `sha256:fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d`。`scripts/check_showcase_release.py --require-reference` 的 873 项测试全部通过，零失败、零跳过，`showcase_release=PASS`；测试接缝和六个旁路探针全部退出 0。该命令包含仓库合同、官方 baseline 与导入边界、两个 help 入口及 Solver 发布检查；没有重复运行含相同完整套件的 `scripts/check.py --offline`，首轮中断命令不计 PASS。
+
+报告位于 `artifacts/issue-97-v5-offline-20261028-r2/gate-report.json`，SHA-256 为 `e17c5fb0da10bec8fdf3b15871b128d94b470d352f5581f4b0d42998ce255650`。运行前后及隔离副本的身份一致：revision `16885e7476ad67cb13bc8d1a63453297118b0d04`、源码 SHA-256 `37a9f1994019c582593cb807247ade9d59d72e3f28a2fd7c550ffc562e629b64`、dirty 状态为 true。组件映射从同一完整套件的发现列表与零失败、零跳过结果中核对得到 58 个测试，无单独重跑；结果为 `component-matrix-from-suite.json`，SHA-256 为 `75e3a3d4e2ca6bd30e79d09688ab0de373d9ac6494a012e172ec125bf6f84fc6`。这些证据仅为 scripted、fault-injection 或 replay，不是 provider-live 或数学能力证据。
+
+文档交付提交后的 `delivery.json` 分别记录验收身份、交付身份及仅文档差异，并验证源码 hash 不变；不把两个 Git revision 称为同一身份。待审阅预览使用交付时的实际身份，仍为 `execution_authorized=false`；对应 hash 见同名 `.sha256` 文件。没有创建已授权的 v5 live manifest，也未消费 v5 批次。
+
 ## 2026-10-28 r8 真实批次结果
 
 真实调用前，固定 Docker 镜像下的干净克隆通过发布门禁：865 项测试通过，零失败、零跳过；`showcase_release=PASS`。测试接缝检查和六个旁路探针均通过。门禁报告位于 `artifacts/issue-97-v4-final-20261028-r8/gate-report.json`。冻结源码 revision 为 `6bf499446fdc5172aca0b6359fb17a5c105302e6`，源码 SHA-256 为 `90d65722be39255bd5168c3e7218ccfa5af4bec6279d2ff3c529573d64b8905d`。
