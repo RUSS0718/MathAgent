@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .star_diagnostic_registration import ROOT
 
+
 def default_registry():
     common = subprocess.check_output(["git", "rev-parse", "--git-common-dir"],
                                      cwd=ROOT, text=True).strip()
