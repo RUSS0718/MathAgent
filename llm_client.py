@@ -274,10 +274,18 @@ class InternChatClient:
                 if _attempt_budget is not None:
                     from showcase.request_transport import response_events
 
+                    unparsed = object()
+
                     def settle_late(
-                        response, body, headers_seconds, completion_seconds, body_complete=True
+                        response, body, headers_seconds, completion_seconds, body_complete=True,
+                        *, parsed=unparsed,
                     ):
                         nonlocal late_response_settled
+                        if body_complete and parsed is unparsed:
+                            try:
+                                parsed = json.loads(body)
+                            except (TypeError, ValueError):
+                                parsed = None
                         with attempt_state_lock:
                             request_event.late_callback_received = True
                             if not body_complete:
@@ -285,10 +293,6 @@ class InternChatClient:
 
                                 refresh_attempt_projection(request_event)
                                 return
-                            try:
-                                parsed = json.loads(body)
-                            except (TypeError, ValueError):
-                                parsed = None
                             late_data = parsed if isinstance(parsed, Mapping) else {}
                             status_code = getattr(response, "status_code", None)
                             late_usage = provider_usage(late_data.get("usage"))
@@ -404,7 +408,26 @@ class InternChatClient:
                             response_body.extend(value)
                         elif kind == "complete":
                             request_event["completion_seconds"] = time.perf_counter() - attempt_started
-                    data = json.loads(response_body)
+                    from showcase.processing_deadline import process_before_deadline
+
+                    def settle_processed(parsed, error):
+                        if error is not None and not isinstance(error, (TypeError, ValueError)):
+                            import logging
+
+                            logging.getLogger(__name__).warning(
+                                "late processing unresolved: run_id=%s attempt_id=%s",
+                                _attempt_budget.run_id, request_event.get("attempt_id"),
+                            )
+                            return  # Keep the original unknown reservation for review.
+                        settle_late(
+                            response, response_body, request_event.get("response_headers_seconds"),
+                            request_event.get("completion_seconds") or time.perf_counter() - attempt_started,
+                            parsed=parsed,
+                        )
+
+                    data = process_before_deadline(
+                        lambda: json.loads(response_body), logical_deadline, settle_processed
+                    )
                 else:
                     if self.loopback_only or self.provider_endpoint_only:
                         from showcase.request_transport import (

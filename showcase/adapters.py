@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -192,10 +193,32 @@ class InternModelAdapter:
             error = AdapterError(str(category), type(exc).__name__)
             error.request_attempts = attempts
             raise error from exc
-        text, usage = _extract_response(raw)
-        parsed = parse_tool_requests(
-            text, raw.get("tool_calls") if isinstance(raw, Mapping) else None
-        )
+        def normalize_response():
+            text, usage = _extract_response(raw)
+            parsed = parse_tool_requests(
+                text, raw.get("tool_calls") if isinstance(raw, Mapping) else None
+            )
+            return text, usage, parsed
+
+        if budget is None:
+            text, usage, parsed = normalize_response()
+        else:
+            from .processing_deadline import process_before_deadline
+
+            source_attempts = raw.get("attempts", ()) if isinstance(raw, Mapping) else ()
+            absolute = source_attempts[-1].get("deadline_at") if source_attempts else None
+            remaining = call_budget.remaining_seconds()
+            if isinstance(absolute, (int, float)):
+                remaining = min(remaining, max(0, absolute - time.time()))
+            try:
+                text, usage, parsed = process_before_deadline(
+                    normalize_response, time.monotonic() + remaining,
+                    lambda _result, _error: None,
+                )
+            except requests.ReadTimeout as exc:
+                error = AdapterError("timeout", "local_processing_deadline")
+                error.request_attempts = record_attempts(source_attempts, metadata)
+                raise error from exc
         attempts = record_attempts(raw.get("attempts", ()), metadata) if isinstance(raw, Mapping) else ()
         return ModelResponse(
             text=text,
@@ -301,6 +324,8 @@ class InternStreamAdapter(InternModelAdapter):
         attempt["requests_timeout_seconds"] = configured or effective_timeout
         attempt["retry_limit"] = limit
         local_processing_timeout = False
+        timeout_attempts = None
+        late_state = None
         result = None
         try:
             from llm_client import _not_submitted, product_retry_delay
@@ -317,8 +342,10 @@ class InternStreamAdapter(InternModelAdapter):
                         attempt_timeout = min(attempt_timeout, call_budget.before_attempt(attempt, len(body)))
                     attempt["effective_timeout_seconds"] = attempt_timeout
 
+                    late_state = {"lock": threading.Lock(), "event": None}
+
                     def settle_late(response, raw_body, headers_seconds, completion_seconds,
-                                    body_complete=True, late_snapshot=dict(attempt)):
+                                    body_complete=True, late_snapshot=dict(attempt), late_state=late_state):
                         late_attempt = dict(late_snapshot)
                         late_usage = {}
                         late_finish = None
@@ -388,7 +415,9 @@ class InternStreamAdapter(InternModelAdapter):
                         if call_budget is not None:
                             from .run_budget_late import settle_late_with_retry
 
-                            settle_late_with_retry(call_budget, late_attempt)
+                            with late_state["lock"]:
+                                settle_late_with_retry(call_budget, late_attempt)
+                                late_state["event"] = late_attempt
 
                     if self.outbound_observer is not None:
                         self.outbound_observer(normalized)
@@ -398,7 +427,7 @@ class InternStreamAdapter(InternModelAdapter):
                     finish_reason = None
                     saw_done = False
 
-                    def parse_line(raw_line):
+                    def parse_line(raw_line, late_state=late_state):
                         nonlocal finish_reason, model_id, saw_done
                         line = raw_line.decode("utf-8", errors="replace").strip()
                         if not line.startswith("data:"):
@@ -411,7 +440,37 @@ class InternStreamAdapter(InternModelAdapter):
                             saw_done = True
                             return
                         try:
-                            chunk = json.loads(content)
+                            if call_budget is None:
+                                chunk = json.loads(content)
+                            else:
+                                from .processing_deadline import process_before_deadline
+
+                                partial_snapshot = dict(attempt)
+
+                                def settle_partial(parsed, error):
+                                    if error is not None or not isinstance(parsed, Mapping):
+                                        return
+                                    known_usage = parsed.get("usage")
+                                    if not isinstance(known_usage, Mapping):
+                                        return
+                                    from .run_budget_late import settle_late_with_retry
+
+                                    with late_state["lock"]:
+                                        partial = dict(late_state["event"] or {
+                                            **partial_snapshot, "status": "unknown",
+                                            "error_category": "timeout",
+                                        })
+                                        partial.update({key: known_usage.get(key) for key in
+                                                        ("prompt_tokens", "completion_tokens", "total_tokens")})
+                                        settle_late_with_retry(call_budget, partial)
+
+                                try:
+                                    chunk = process_before_deadline(
+                                        lambda: json.loads(content), logical_deadline, settle_partial,
+                                    )
+                                except requests.ReadTimeout:
+                                    transport_events.close()
+                                    raise
                         except ValueError as exc:
                             raise AdapterError("invalid_response", "invalid_sse_chunk") from exc
                         choices = chunk.get("choices")
@@ -450,7 +509,7 @@ class InternStreamAdapter(InternModelAdapter):
                             local_processing_timeout = True
                         raise requests.ReadTimeout("logical_deadline_exceeded_during_processing")
 
-                    for kind, value in response_events(
+                    transport_events = response_events(
                         client.api_base,
                         headers=headers,
                         data=body,
@@ -459,7 +518,8 @@ class InternStreamAdapter(InternModelAdapter):
                         loopback_only=getattr(client, "loopback_only", False),
                         provider_endpoint_only=getattr(client, "provider_endpoint_only", False),
                         on_late_response=settle_late,
-                    ):
+                    )
+                    for kind, value in transport_events:
                         if kind == "headers":
                             response = value
                             attempt["http_status"] = response.status_code
@@ -537,14 +597,36 @@ class InternStreamAdapter(InternModelAdapter):
             )
             attempt["duration_seconds"] = round(time.monotonic() - attempt_started, 3)
             attempts.append(dict(attempt))
-            result = {
-                "type": "result",
-                "text": "".join(parts),
-                "usage": usage,
-                "finish_reason": finish_reason,
-                "model": model_id,
-                "attempts": record_attempts(attempts, metadata),
-            }
+            def assemble_result():
+                projection_metadata = {**(metadata or {}), "run_id": call_budget.run_id} if call_budget else metadata
+                return {
+                    "type": "result",
+                    "text": "".join(parts),
+                    "usage": usage,
+                    "finish_reason": finish_reason,
+                    "model": model_id,
+                    "attempts": record_attempts(attempts, projection_metadata),
+                }
+
+            if call_budget is None:
+                result = assemble_result()
+            else:
+                from .processing_deadline import process_before_deadline
+                from .request_attempts import publish_attempts
+
+                try:
+                    result = process_before_deadline(
+                        assemble_result, logical_deadline, lambda _result, _error: None
+                    )
+                except requests.ReadTimeout:
+                    from llm_response import public_attempt
+
+                    local_processing_timeout = True
+                    timeout_attempts = (public_attempt(attempt, run_id=call_budget.run_id,
+                                                       role=(metadata or {}).get("role")),)
+                    publish_attempts(timeout_attempts)
+                    raise
+                publish_attempts(result["attempts"])
             check_processing_deadline()
             yield result
         except AdapterError as exc:
@@ -565,7 +647,8 @@ class InternStreamAdapter(InternModelAdapter):
             else:
                 attempts.append(dict(attempt))
             error = AdapterError(category, type(exc).__name__)
-            error.request_attempts = (result["attempts"] if local_processing_timeout and result is not None
+            error.request_attempts = (timeout_attempts if timeout_attempts is not None else
+                                      result["attempts"] if local_processing_timeout and result is not None
                                       else record_attempts(attempts, metadata))
             raise error from exc
         finally:
@@ -573,7 +656,16 @@ class InternStreamAdapter(InternModelAdapter):
             if not attempts:
                 attempts.append(dict(attempt))
             if call_budget is not None:
-                call_budget.after_attempt(attempt)
+                # Never wait for a late settlement: if it owns the gate, it will
+                # either persist its evidence or leave the original reservation.
+                if late_state is None:
+                    call_budget.after_attempt(attempt)
+                elif late_state["lock"].acquire(blocking=False):
+                    try:
+                        if late_state["event"] is None:
+                            call_budget.after_attempt(attempt)
+                    finally:
+                        late_state["lock"].release()
 
 
 def _request_failure_category(exc: BaseException) -> str:
