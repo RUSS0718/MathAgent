@@ -22,16 +22,148 @@ from scripts.run_star_readiness_97 import (
     build_parser,
     main,
 )
+from showcase import star_readiness_registration
 from showcase.star_readiness_registration import MODEL, digest
+from showcase.star_readiness_v7 import V7_DRAFT_VERSION
 from tests.test_star_readiness_registration import (
     SOURCE,
     TEST_V3_QUESTION_SPECS,
     synthetic_v3_draft,
 )
 from tests.test_star_readiness_v5 import TEST_V5_QUESTION_SPECS, v5_draft
+from tests.test_star_readiness_v7_registration import QUESTION_SPEC as V7_TEST_QUESTION_SPEC
+from tests.test_star_readiness_v7_registration import synthetic_v7_draft
 
 
 class StarReadinessCliTest(unittest.TestCase):
+    def test_v7_commands_accept_an_explicit_draft_version_and_paths(self):
+        parser = build_parser()
+
+        freeze = parser.parse_args([
+            "freeze-live", "--draft-version", "v7",
+            "--draft", "artifacts/v7-draft.json", "--manifest", "artifacts/v7-preview.json",
+        ])
+        authorize = parser.parse_args([
+            "authorize-live", "--draft-version", "v7",
+            "--manifest", "artifacts/v7-preview.json", "--manifest-sha256", "a" * 64,
+            "--authorized-manifest", "artifacts/v7-live.json", "--confirm-live",
+        ])
+        run = parser.parse_args([
+            "run-live", "--draft-version", "v7",
+            "--manifest", "artifacts/v7-live.json", "--manifest-sha256", "b" * 64,
+            "--archive", "artifacts/v7-run", "--execute-live",
+        ])
+
+        self.assertEqual("v7", freeze.draft_version)
+        self.assertEqual("v7", authorize.draft_version)
+        self.assertEqual("v7", run.draft_version)
+
+    def test_explicit_v7_rejects_a_v5_draft(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            draft = artifacts / "draft.json"
+            draft.write_text(json.dumps(v5_draft()), encoding="utf-8")
+            stderr = io.StringIO()
+            with (
+                patch("scripts.run_star_readiness_97.ROOT", root),
+                patch("scripts.run_star_readiness_97.ARTIFACTS", artifacts),
+                contextlib.redirect_stderr(stderr),
+            ):
+                result = main([
+                    "freeze-live", "--draft-version", "v7", "--draft", str(draft),
+                    "--manifest", str(artifacts / "preview.json"),
+                ])
+            self.assertEqual(1, result)
+            self.assertEqual("star_readiness_draft_version_mismatch", json.loads(stderr.getvalue())["error"])
+            self.assertFalse((artifacts / "preview.json").exists())
+
+    def test_v7_freeze_uses_v7_defaults_only_when_explicitly_selected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts" / "issue-97-prereg"
+            artifacts.mkdir(parents=True)
+            draft = artifacts / "draft-v7.json"
+            manifest = artifacts / "manifest-v7-preview.json"
+            draft.write_text(json.dumps(synthetic_v7_draft()), encoding="utf-8")
+            with (
+                patch("scripts.run_star_readiness_97.ROOT", root),
+                patch("scripts.run_star_readiness_97.ARTIFACTS", root / "artifacts"),
+                patch.object(
+                    star_readiness_registration, "V7_QUESTION_SPECS", (V7_TEST_QUESTION_SPEC,)
+                ),
+                patch("showcase.star_readiness_coordinator.current_source_identity", return_value=SOURCE),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                result = main(["freeze-live", "--draft-version", "v7"])
+
+            self.assertEqual(0, result)
+            frozen = json.loads(manifest.read_text(encoding="utf-8"))
+            self.assertEqual(V7_DRAFT_VERSION, frozen["draft_version"])
+            self.assertFalse(frozen["execution_authorized"])
+
+    def test_v7_preview_requires_explicit_hash_and_authorization_before_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifacts = root / "artifacts" / "issue-97-prereg"
+            artifacts.mkdir(parents=True)
+            draft = artifacts / "draft-v7.json"
+            preview = artifacts / "manifest-v7-preview.json"
+            live = artifacts / "live-manifest-v7.json"
+            draft.write_text(json.dumps(synthetic_v7_draft()), encoding="utf-8")
+            outputs = [io.StringIO(), io.StringIO(), io.StringIO()]
+            runner = Mock(return_value={"stop_reason": "completed"})
+            coordinator = SimpleNamespace(run=runner)
+
+            with (
+                patch("scripts.run_star_readiness_97.ROOT", root),
+                patch("scripts.run_star_readiness_97.ARTIFACTS", root / "artifacts"),
+                patch.object(
+                    star_readiness_registration, "V7_QUESTION_SPECS", (V7_TEST_QUESTION_SPEC,)
+                ),
+                patch("showcase.star_readiness_coordinator.current_source_identity", return_value=SOURCE),
+                patch("scripts.run_star_readiness_97._build_adapter", return_value=object()),
+                patch(
+                    "showcase.star_readiness_coordinator.StarReadinessCoordinator",
+                    return_value=coordinator,
+                ) as factory,
+                patch("showcase.star_readiness_coordinator.ARTIFACTS", root / "claims"),
+            ):
+                with contextlib.redirect_stdout(outputs[0]):
+                    self.assertEqual(0, main([
+                        "freeze-live", "--draft-version", "v7", "--draft", str(draft),
+                        "--manifest", str(preview),
+                    ]))
+                frozen = json.loads(preview.read_text(encoding="utf-8"))
+                preview_hash = digest(frozen)
+                authorize_args = [
+                    "authorize-live", "--draft-version", "v7", "--manifest", str(preview),
+                    "--manifest-sha256", preview_hash, "--authorized-manifest", str(live),
+                    "--confirm-live",
+                ]
+                wrong_hash_args = authorize_args.copy()
+                wrong_hash_args[wrong_hash_args.index(preview_hash)] = "0" * 64
+                with contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(1, main(wrong_hash_args))
+                self.assertFalse(live.exists())
+                with contextlib.redirect_stdout(outputs[1]):
+                    self.assertEqual(0, main(authorize_args))
+                authorized = json.loads(live.read_text(encoding="utf-8"))
+                run_args = [
+                    "run-live", "--draft-version", "v7", "--manifest", str(live),
+                    "--manifest-sha256", digest(authorized), "--archive",
+                    str(artifacts / "run-v7"), "--execute-live",
+                ]
+                with contextlib.redirect_stdout(outputs[2]):
+                    self.assertEqual(0, main(run_args))
+
+            self.assertFalse(frozen["execution_authorized"])
+            self.assertTrue(authorized["execution_authorized"])
+            factory.assert_called_once()
+            self.assertEqual(authorized, factory.call_args.kwargs["manifest"])
+            runner.assert_called_once_with()
+
     def test_default_freeze_uses_v5_draft_without_an_iana_timezone_database(self):
         self.assertEqual(
             ROOT / "artifacts" / "issue-97-prereg" / "draft-v5.json",

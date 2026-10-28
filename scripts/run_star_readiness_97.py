@@ -3,6 +3,7 @@
 import argparse
 import json
 import sys
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -21,19 +22,45 @@ def build_parser():
     freeze = commands.add_parser(
         "freeze-live", help="freeze a non-dispatchable registration from a supported draft"
     )
-    freeze.add_argument("--draft", type=Path, default=DEFAULT_DRAFT)
-    freeze.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
+    freeze.add_argument("--draft-version", choices=("v5", "v7"))
+    freeze.add_argument("--draft", type=Path)
+    freeze.add_argument("--manifest", type=Path)
     authorize = commands.add_parser("authorize-live", help="authorize an exact reviewed preview hash")
+    authorize.add_argument("--draft-version", choices=("v5", "v7"))
     authorize.add_argument("--manifest", type=Path, required=True)
     authorize.add_argument("--manifest-sha256", required=True)
-    authorize.add_argument("--authorized-manifest", type=Path, default=DEFAULT_LIVE_MANIFEST)
+    authorize.add_argument("--authorized-manifest", type=Path)
     authorize.add_argument("--confirm-live", action="store_true", required=True)
     run = commands.add_parser("run-live", help="run one frozen batch through live Intern S2")
+    run.add_argument("--draft-version", choices=("v5", "v7"))
     run.add_argument("--manifest", type=Path, required=True)
     run.add_argument("--manifest-sha256", required=True)
     run.add_argument("--archive", type=Path, required=True)
+    run.add_argument("--answer-output", type=Path,
+                     help="exclusive public-answer JSONL file directly under artifacts/issue-97-answers")
     run.add_argument("--execute-live", action="store_true", required=True)
     return parser
+
+
+def _version_paths(version):
+    """Return the historical default artifact paths for an explicitly selected CLI version."""
+    if version == "v7":
+        preregistration = ARTIFACTS / "issue-97-prereg"
+        return (
+            preregistration / "draft-v7.json",
+            preregistration / "manifest-v7-preview.json",
+            preregistration / "live-manifest-v7.json",
+        )
+    return DEFAULT_DRAFT, DEFAULT_MANIFEST, DEFAULT_LIVE_MANIFEST
+
+
+def _require_draft_version(record, version):
+    """Reject an explicitly selected CLI version when the artifact carries another version."""
+    if version is None:
+        return
+    expected = f"issue-97-nonstream-draft-{version}"
+    if record.get("version", record.get("draft_version")) != expected:
+        raise ValueError("star_readiness_draft_version_mismatch")
 
 
 def _inside_artifacts(path):
@@ -58,11 +85,13 @@ def _freeze(args):
     from showcase.star_readiness_coordinator import current_source_identity
     from showcase.star_readiness_registration import adapt_draft, digest
 
-    manifest_path = _inside_artifacts(args.manifest)
+    default_draft, default_manifest, _ = _version_paths(args.draft_version)
+    manifest_path = _inside_artifacts(args.manifest or default_manifest)
     if manifest_path.exists():
         raise ValueError("star_readiness_manifest_already_exists")
-    draft_path = _inside_artifacts(args.draft)
+    draft_path = _inside_artifacts(args.draft or default_draft)
     draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    _require_draft_version(draft, args.draft_version)
     source = current_source_identity()
     manifest = adapt_draft(draft, current_source=source)
     manifest_hash = digest(manifest)
@@ -80,11 +109,13 @@ def _authorize(args):
     from showcase.star_readiness_coordinator import current_source_identity
     from showcase.star_readiness_registration import authorize_live_registration, digest
 
+    _, _, default_live_manifest = _version_paths(args.draft_version)
     preview_path = _inside_artifacts(args.manifest)
-    manifest_path = _inside_artifacts(args.authorized_manifest)
+    manifest_path = _inside_artifacts(args.authorized_manifest or default_live_manifest)
     if manifest_path.exists():
         raise ValueError("star_readiness_manifest_already_exists")
     preview = json.loads(preview_path.read_text(encoding="utf-8"))
+    _require_draft_version(preview, args.draft_version)
     manifest = authorize_live_registration(
         preview,
         expected_sha256=args.manifest_sha256,
@@ -132,6 +163,7 @@ def _build_adapter(manifest):
 
 def _run(args):
     """Execute the registered batch in a unique, ignored archive directory."""
+    from showcase.star_readiness_answer_delivery import AnswerOutput
     from showcase.star_readiness_coordinator import StarReadinessCoordinator
     from showcase.star_readiness_registration import digest
 
@@ -140,17 +172,23 @@ def _run(args):
     if archive_path.exists():
         raise ValueError("star_readiness_archive_already_exists")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    _require_draft_version(manifest, args.draft_version)
     if digest(manifest) != args.manifest_sha256:
         raise ValueError("star_readiness_registration_identity_mismatch")
-    adapter = _build_adapter(manifest)
-    coordinator = StarReadinessCoordinator(
-        archive_path,
-        adapters={"nonstream": adapter},
-        manifest=manifest,
-        manifest_sha256=args.manifest_sha256,
-        evidence_kind="live",
-    )
-    result = coordinator.run()
+    answer_path = getattr(args, "answer_output", None)
+    output = (AnswerOutput(_inside_artifacts(answer_path), artifacts=ARTIFACTS,
+                           archive=archive_path) if answer_path is not None else nullcontext())
+    with output as sink:
+        adapter = _build_adapter(manifest)
+        coordinator = StarReadinessCoordinator(
+            archive_path,
+            adapters={"nonstream": adapter},
+            manifest=manifest,
+            manifest_sha256=args.manifest_sha256,
+            evidence_kind="live",
+            **({"answer_sink": sink} if sink is not None else {}),
+        )
+        result = coordinator.run()
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0 if result["stop_reason"] == "completed" else 1
 

@@ -15,6 +15,25 @@ from .star_readiness_v5 import (
     V5_ROUND_LIMITS,
     V5_RUN_LIMITS,
 )
+from .star_readiness_v6 import (
+    V6_AUTHORIZATION_SCOPE,
+    V6_DRAFT_VERSION,
+    V6_MODEL,
+    V6_PREVIOUS_DRAFT_SHA256,
+    V6_QUESTION_SPECS,
+    V6_ROUND_LIMITS,
+    V6_RUN_LIMITS,
+)
+from .star_readiness_v7 import (
+    V7_ADAPTER_VERSION,
+    V7_AUTHORIZATION_SCOPE,
+    V7_DRAFT_VERSION,
+    V7_MODEL,
+    V7_PREVIOUS_DRAFT_SHA256,
+    V7_QUESTION_SPECS,
+    V7_ROUND_LIMITS,
+    V7_RUN_LIMITS,
+)
 
 ADAPTER_VERSION = "issue-97-registration-adapter-v3"
 V2_DRAFT_VERSION = "issue-97-nonstream-draft-v2"
@@ -180,12 +199,12 @@ def digest(value):
 
 
 def adapt_draft(draft, *, current_source):
-    """Adapt a compatible v2, v3, v4, or v5 draft into a non-dispatchable manifest."""
+    """Adapt a compatible v2-v7 draft into a non-dispatchable manifest."""
     record = _json_copy(draft)
     _validate_draft(record)
     source = _validate_source(current_source)
     manifest = {
-        "adapter_version": ADAPTER_VERSION,
+        "adapter_version": _adapter_version_for_draft_version(record["version"]),
         "authorization_date": None,
         "authorization_scope": None,
         "draft_sha256": digest(record),
@@ -224,7 +243,7 @@ def authorize_live_registration(
     explicit_authorization,
     authorization_date,
 ):
-    """Authorize an unapproved v3, v4, or v5 loopback manifest; keep v2 read-only."""
+    """Authorize an unapproved v3-v7 loopback manifest; keep v2 read-only."""
     if explicit_authorization is not True:
         raise ValueError("star_readiness_live_authorization_required")
     if not isinstance(authorization_date, str):
@@ -239,7 +258,10 @@ def authorize_live_registration(
         expected_sha256=expected_sha256,
         current_source=current_source,
     )
-    if record["draft_version"] not in (V3_DRAFT_VERSION, V4_DRAFT_VERSION, V5_DRAFT_VERSION):
+    if record["draft_version"] not in (
+        V3_DRAFT_VERSION, V4_DRAFT_VERSION, V5_DRAFT_VERSION, V6_DRAFT_VERSION,
+        V7_DRAFT_VERSION,
+    ):
         raise ValueError("star_readiness_live_draft_version_invalid")
     if record["execution_authorized"] is not False or record["provider_mode"] != "loopback_only":
         raise ValueError("star_readiness_live_authorization_invalid")
@@ -276,7 +298,12 @@ def _json_copy(value):
 
 
 def _validate_draft(record):
-    if not isinstance(record, dict) or set(record) != _DRAFT_KEYS:
+    if not isinstance(record, dict):
+        raise ValueError("star_readiness_registration_invalid")
+    expected_draft_keys = _DRAFT_KEYS
+    if record.get("version") == V7_DRAFT_VERSION:
+        expected_draft_keys = _DRAFT_KEYS | {"authorization_scope"}
+    if set(record) != expected_draft_keys:
         raise ValueError("star_readiness_registration_invalid")
     question_specs = _question_specs_for_draft_version(record["version"])
     if (
@@ -292,6 +319,11 @@ def _validate_draft(record):
         or record["evidence_types"] != ["scripted", "fault_injection", "live", "replay"]
         or not isinstance(record["previous_draft_sha256"], str)
         or not _HASH_RE.fullmatch(record["previous_draft_sha256"])
+        or (record["version"] == V6_DRAFT_VERSION
+            and record["previous_draft_sha256"] != V6_PREVIOUS_DRAFT_SHA256)
+        or (record["version"] == V7_DRAFT_VERSION
+            and (record["previous_draft_sha256"] != V7_PREVIOUS_DRAFT_SHA256
+                 or record["authorization_scope"] != V7_AUTHORIZATION_SCOPE))
     ):
         raise ValueError("star_readiness_registration_invalid")
     _validate_historical_source(record["source_identity"])
@@ -327,7 +359,9 @@ def _validate_manifest(record):
         or set(record) != _MANIFEST_KEYS
         or type(record["schema_version"]) is not int
         or record["schema_version"] != 2
-        or record["adapter_version"] != ADAPTER_VERSION
+        or record["adapter_version"] != _adapter_version_for_draft_version(
+            record["draft_version"]
+        )
         or not isinstance(record["draft_sha256"], str)
         or not _HASH_RE.fullmatch(record["draft_sha256"])
         or record["stop_on"] != STOP_ON
@@ -457,6 +491,10 @@ def _question_specs_for_draft_version(version):
         return V4_QUESTION_SPECS
     if version == V5_DRAFT_VERSION:
         return V5_QUESTION_SPECS
+    if version == V6_DRAFT_VERSION:
+        return V6_QUESTION_SPECS
+    if version == V7_DRAFT_VERSION:
+        return V7_QUESTION_SPECS
     raise ValueError("star_readiness_registration_invalid")
 
 
@@ -469,19 +507,45 @@ def _authorization_scope_for_draft_version(version):
         return V4_AUTHORIZATION_SCOPE
     if version == V5_DRAFT_VERSION:
         return V5_AUTHORIZATION_SCOPE
+    if version == V6_DRAFT_VERSION:
+        return V6_AUTHORIZATION_SCOPE
+    if version == V7_DRAFT_VERSION:
+        return V7_AUTHORIZATION_SCOPE
     raise ValueError("star_readiness_registration_invalid")
 
 
+def _adapter_version_for_draft_version(version):
+    return V7_ADAPTER_VERSION if version == V7_DRAFT_VERSION else ADAPTER_VERSION
+
+
 def _model_for_draft_version(version):
-    return V5_MODEL if version == V5_DRAFT_VERSION else MODEL
+    if version == V5_DRAFT_VERSION:
+        return V5_MODEL
+    if version == V6_DRAFT_VERSION:
+        return V6_MODEL
+    if version == V7_DRAFT_VERSION:
+        return V7_MODEL
+    return MODEL
 
 
 def _run_limits_for_draft_version(version):
-    return V5_RUN_LIMITS if version == V5_DRAFT_VERSION else RUN_LIMITS
+    if version == V5_DRAFT_VERSION:
+        return V5_RUN_LIMITS
+    if version == V6_DRAFT_VERSION:
+        return V6_RUN_LIMITS
+    if version == V7_DRAFT_VERSION:
+        return V7_RUN_LIMITS
+    return RUN_LIMITS
 
 
 def _round_limits_for_draft_version(version):
-    return V5_ROUND_LIMITS if version == V5_DRAFT_VERSION else ROUND_LIMITS
+    if version == V5_DRAFT_VERSION:
+        return V5_ROUND_LIMITS
+    if version == V6_DRAFT_VERSION:
+        return V6_ROUND_LIMITS
+    if version == V7_DRAFT_VERSION:
+        return V7_ROUND_LIMITS
+    return ROUND_LIMITS
 
 
 def _validate_source(value):

@@ -19,9 +19,11 @@ from .star_product_runtime import CONTRACT_PYTHON_IMAGE_ID
 class ExperimentServer:
     def __init__(self, path, transport, adapter, policy, evidence_kind,
                  *, refresh_preflight_each_call=False, late_usage_evidence_dir=None,
-                 request_timeout_seconds=CONDITIONS["timeout"]):
+                 request_timeout_seconds=CONDITIONS["timeout"],
+                 max_output_tokens=8192):
         self.adapter, self.transport, self.evidence_kind = adapter, transport, evidence_kind
         self.request_timeout_seconds = request_timeout_seconds
+        self.max_output_tokens = max_output_tokens
         self.refresh_preflight_each_call = refresh_preflight_each_call
         self.preflight_count = 0
         self.contexts = {}
@@ -73,7 +75,7 @@ class ExperimentServer:
             raise ValueError("scripted_provider_must_be_loopback")
         if (adapter.model_id != CONDITIONS["model"] or client.model != CONDITIONS["model"]
                 or client.timeout != self.request_timeout_seconds or client.retry != CONDITIONS["retry"]
-                or adapter.max_tokens != CONDITIONS["max_tokens"]
+                or adapter.max_tokens != self.max_output_tokens
                 or adapter.temperature != CONDITIONS["temperature"]
                 or adapter.thinking_mode is not CONDITIONS["thinking_mode"]):
             raise ValueError("experiment_conditions_mismatch")

@@ -66,6 +66,44 @@ def frozen_manifest():
     return readiness_registration.adapt_draft(draft, current_source=SOURCE)
 
 
+def v7_frozen_manifest(question_spec):
+    """Create a frozen v7 manifest for coordinator admission-routing tests."""
+    question_id, source, question_type, prompt_sha256 = question_spec
+    text = QUESTION_TEXTS[1][3]
+    draft = {
+        "authorization_scope": readiness_registration.V7_AUTHORIZATION_SCOPE,
+        "budget_status": "proposed_unapproved",
+        "dirty_status": True,
+        "enforcement": "not_implemented",
+        "evidence_types": ["scripted", "fault_injection", "live", "replay"],
+        "execution_authorized": False,
+        "model": deepcopy(readiness_registration.V7_MODEL),
+        "original_batch": "unchanged_not_counted",
+        "previous_draft_sha256": readiness_registration.V7_PREVIOUS_DRAFT_SHA256,
+        "question_encoding": "UTF-8 exact text with LF separators, no trailing newline",
+        "questions": [{
+            "id": question_id,
+            "prompt_sha256": prompt_sha256,
+            "source": source,
+            "text": text,
+            "type": question_type,
+        }],
+        "round_limits": deepcopy(readiness_registration.V7_ROUND_LIMITS),
+        "runner_qualification": "not_implemented",
+        "schedule": [{
+            "attempts": 1,
+            "limits": deepcopy(readiness_registration.V7_RUN_LIMITS[0]),
+            "question": question_id,
+            "transport": "nonstream",
+        }],
+        "source_identity": {"revision": SOURCE["revision"], "source_sha256": SOURCE["source_sha256"]},
+        "status": "draft_not_dispatchable",
+        "stop_on": deepcopy(readiness_registration.STOP_ON),
+        "version": readiness_registration.V7_DRAFT_VERSION,
+    }
+    return readiness_registration.adapt_draft(draft, current_source=SOURCE)
+
+
 class ScriptedServer:
     """In-memory scripted server that never sends a provider request."""
 
@@ -76,9 +114,10 @@ class ScriptedServer:
 
     def __init__(self, path, transport, adapter, policy, evidence_kind,
                  *, refresh_preflight_each_call=False, late_usage_evidence_dir=None,
-                 request_timeout_seconds=180):
+                 request_timeout_seconds=180, max_output_tokens=8192):
         self.path, self.transport, self.adapter = path, transport, adapter
         self.policy, self.evidence_kind = policy, evidence_kind
+        self.max_output_tokens = max_output_tokens
         self.dispatched = []
         self.accepted_job_ids = []
         self.preflight_count = 0
@@ -962,6 +1001,64 @@ class StarReadinessCoordinatorTest(unittest.TestCase):
             readiness_registration.V5_DRAFT_VERSION + ".consumed"
         )
         self.assertEqual("a" * 64 + "\n", marker.read_text(encoding="utf-8"))
+
+    def test_v6_draft_version_has_an_independent_one_time_consumption_marker(self):
+        manifest_hash = "d" * 64
+        _claim_live_registration(manifest_hash, readiness_registration.V6_DRAFT_VERSION)
+        marker = self.folder / "artifacts" / "issue-97-prereg" / (
+            readiness_registration.V6_DRAFT_VERSION + ".consumed"
+        )
+
+        self.assertEqual(manifest_hash + "\n", marker.read_text(encoding="utf-8"))
+        with self.assertRaisesRegex(ValueError, "already_consumed"):
+            _claim_live_registration("e" * 64, readiness_registration.V6_DRAFT_VERSION)
+        self.assertEqual(manifest_hash + "\n", marker.read_text(encoding="utf-8"))
+
+    def test_v7_consumption_marker_is_independent_and_one_time(self):
+        manifest_hash = "f" * 64
+        _claim_live_registration(manifest_hash, readiness_registration.V6_DRAFT_VERSION)
+        _claim_live_registration(manifest_hash, readiness_registration.V7_DRAFT_VERSION)
+        markers = self.folder / "artifacts" / "issue-97-prereg"
+        v6_marker = markers / (readiness_registration.V6_DRAFT_VERSION + ".consumed")
+        v7_marker = markers / (readiness_registration.V7_DRAFT_VERSION + ".consumed")
+
+        self.assertEqual(manifest_hash + "\n", v6_marker.read_text(encoding="utf-8"))
+        self.assertEqual(manifest_hash + "\n", v7_marker.read_text(encoding="utf-8"))
+        with self.assertRaisesRegex(ValueError, "already_consumed"):
+            _claim_live_registration("e" * 64, readiness_registration.V7_DRAFT_VERSION)
+        self.assertEqual(manifest_hash + "\n", v6_marker.read_text(encoding="utf-8"))
+        self.assertEqual(manifest_hash + "\n", v7_marker.read_text(encoding="utf-8"))
+
+    def test_v7_frozen_version_is_passed_to_both_admission_checks(self):
+        text = QUESTION_TEXTS[1][3]
+        question_spec = (
+            "multi-05",
+            "https://example.test/multi-05",
+            "public_multistep",
+            hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        )
+        run_limits = {
+            "charged_tokens": 262144,
+            "http_attempts": 24,
+            "logical_calls": 18,
+            "problem_tool_calls": 4,
+            "wall_seconds": 3600,
+        }
+
+        with patch.object(readiness_registration, "V7_QUESTION_SPECS", (question_spec,)):
+            with patch.object(readiness_registration, "V7_RUN_LIMITS", (run_limits,)):
+                manifest = v7_frozen_manifest(question_spec)
+                coordinator = StarReadinessCoordinator(
+                    self.folder / "v7-round",
+                    adapters=self.coordinator.adapters,
+                    manifest=manifest,
+                    manifest_sha256=readiness_registration.digest(manifest),
+                )
+                result = coordinator.run()
+
+        self.assertEqual("completed", result["stop_reason"])
+        self.assertEqual([text], ScriptedServer.instances[-1].dispatched)
+        self.assertEqual(16384, ScriptedServer.instances[-1].max_output_tokens)
 
     def test_v4_consumption_is_independent_of_v3_and_cannot_be_reset_by_changing_hash(self):
         _claim_live_registration("a" * 64, readiness_registration.V3_DRAFT_VERSION)

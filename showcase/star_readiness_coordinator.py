@@ -27,6 +27,8 @@ from .star_readiness_registration import (
     V3_DRAFT_VERSION,
     V4_DRAFT_VERSION,
     V5_DRAFT_VERSION,
+    V6_DRAFT_VERSION,
+    V7_DRAFT_VERSION,
     digest,
     registration,
 )
@@ -43,6 +45,10 @@ def _claim_live_registration(manifest_sha256, draft_version):
         batch_key = V4_DRAFT_VERSION
     elif draft_version == V5_DRAFT_VERSION:
         batch_key = V5_DRAFT_VERSION
+    elif draft_version == V6_DRAFT_VERSION:
+        batch_key = V6_DRAFT_VERSION
+    elif draft_version == V7_DRAFT_VERSION:
+        batch_key = V7_DRAFT_VERSION
     elif draft_version == V3_DRAFT_VERSION:
         batch_key = V3_DRAFT_VERSION
     elif draft_version == V2_DRAFT_VERSION and manifest_sha256 == V2_LIVE_MANIFEST_SHA256:
@@ -80,7 +86,8 @@ class _StopBatch(Exception):
 class StarReadinessCoordinator:
     """Execute each registered question at most once in an immutable archive."""
 
-    def __init__(self, path, *, adapters, manifest, manifest_sha256, evidence_kind="scripted"):
+    def __init__(self, path, *, adapters, manifest, manifest_sha256, evidence_kind="scripted",
+                 answer_sink=None):
         if evidence_kind not in {"scripted", "live"}:
             raise ValueError("star_readiness_evidence_kind_invalid")
         if not isinstance(adapters, dict) or "nonstream" not in adapters:
@@ -90,6 +97,7 @@ class StarReadinessCoordinator:
         self.manifest = deepcopy(manifest)
         self.manifest_sha256 = manifest_sha256
         self.evidence_kind = evidence_kind
+        self.answer_sink = answer_sink
         self._check_execution_profile()
 
     def _check_execution_profile(self):
@@ -251,6 +259,7 @@ class StarReadinessCoordinator:
         unresolved_dispatches = []
         records = []
         retention_reason = None
+        answer_delivery_failed = False
         preflight_ids = set()
         preflight_count = 0
         usage = {
@@ -291,6 +300,7 @@ class StarReadinessCoordinator:
                 refresh_preflight_each_call=True,
                 late_usage_evidence_dir=self.path / "supplemental-usage",
                 request_timeout_seconds=frozen["model"]["request_timeout_seconds"],
+                max_output_tokens=frozen["model"]["max_output_tokens"],
             )
             server.check_conditions()
             archive.put("configuration-startup.json", self._verified_configuration(server))
@@ -302,6 +312,8 @@ class StarReadinessCoordinator:
                 first_entry["limits"],
                 remaining_seconds=max(0, round_wall_seconds - (time.monotonic() - started)),
                 preflights=0,
+                runs=len(attempted),
+                registration_version=frozen["draft_version"],
             )
             if first_admission:
                 stop = first_admission
@@ -332,6 +344,8 @@ class StarReadinessCoordinator:
                     entry["limits"],
                     remaining_seconds=remaining,
                     preflights=preflight_count,
+                    runs=len(attempted),
+                    registration_version=frozen["draft_version"],
                 )
                 if stop_reason:
                     stop = stop_reason
@@ -414,21 +428,30 @@ class StarReadinessCoordinator:
                 if not self._bundle_consistent(bundle, job_id):
                     stop = "evidence_mismatch"
                     break
+                if self.answer_sink is not None:
+                    try:
+                        self.answer_sink(entry["question"], job_id,
+                                         (bundle["job"].get("result") or {}).get("final_response"))
+                    except Exception as exc:
+                        answer_delivery_failed = True
+                        failure_type = type(exc).__name__
+                        retention_reason = "answer_delivery_failed"
                 archive.put(f"run-{index:02d}.json", run_record(bundle, job_id=job_id))
-                if response_recovered:
+                if response_recovered or answer_delivery_failed:
                     snapshot, contexts = server.provenance(job_id)
                     delivery = evaluate_delivery(bundle["job"], snapshot, contexts)
                     archive.put(f"delivery-{index:02d}.json", delivery_record(delivery))
                     record = {"index": index, "question": entry["question"], "job_id": job_id}
                     records.append(record)
-                    retention_reason = None
+                    if not answer_delivery_failed:
+                        retention_reason = None
 
                 report = bundle.get("report") if isinstance(bundle, dict) else None
                 budget = report.get("budget") if isinstance(report, dict) else None
                 observed_usage = self._usage(budget)
                 if observed_usage is None:
                     usage["usage_complete"] = False
-                    stop = "usage_incomplete"
+                    stop = "failure" if answer_delivery_failed else "usage_incomplete"
                     break
                 self._add_usage(usage, observed_usage)
                 if response_recovered:
@@ -437,6 +460,11 @@ class StarReadinessCoordinator:
                     else:
                         # Release the reservation only after identity and both archives commit.
                         unresolved_dispatches.pop()
+                if answer_delivery_failed:
+                    if self._usage_unknown(budget, observed_usage):
+                        usage["usage_complete"] = False
+                    stop = "failure"
+                    break
                 semantics = report.get("semantics") or {}
                 if semantics.get("transport") == "unknown":
                     stop = "unknown_transport"
@@ -493,7 +521,8 @@ class StarReadinessCoordinator:
                             runtime_storage,
                             [item["job_id"] for item in dispatched],
                             grace_seconds=self.manifest["model"]["request_timeout_seconds"] + 1,
-                            preserve=bool(unresolved_dispatches) or len(records) < len(dispatched),
+                            preserve=(answer_delivery_failed or bool(unresolved_dispatches)
+                                      or len(records) < len(dispatched)),
                             retention_reason=(retention_reason or
                                               ("pending_settlement" if unresolved_dispatches else None)),
                         )
