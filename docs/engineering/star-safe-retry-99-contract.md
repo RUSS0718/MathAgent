@@ -1,6 +1,6 @@
 # #99 安全传输重试合同
 
-状态：实施合同；基点 `dc9dc807314ad3fe27373e9a5111fdf3dcc6752a`，Refs: #99。
+状态：离线工程验收通过；基点 `dc9dc807314ad3fe27373e9a5111fdf3dcc6752a`，Refs: #99。结果与限制见[验收记录](../evals/star-safe-retry-99-acceptance.md)。
 
 ## 范围与决策
 
