@@ -250,17 +250,22 @@ class StarComputeBoundsTest(StarJobFixture, unittest.TestCase):
         self.open_bounded([NEED_PLAN, PLAN, STEP,
                            self.request(1, "step_verifier"),
                            self.request(2, "step_verifier"),
-                           self.request(3, "step_verifier"), CONTINUE], 16, tool_limit=3)
+                           self.request(3, "step_verifier"), CONTINUE,
+                           {"final_response": "1+1=2"}, ACCEPT], 16, tool_limit=3)
         job_id = self.create_job()
         job = self.terminal(job_id)
-        self.assertEqual("failed", job["status"], job)
-        self.assertIn("Hard budget exhausted", job["result"]["final_response"])
+        self.assertEqual("succeeded", job["status"], job)
+        self.assertEqual("1+1=2", job["result"]["final_response"])
         self.assertEqual([{"coefficients": [1]}, {"coefficients": [2]},
                           {"coefficients": [3]}], self.executed)
-        self.assertEqual(6, self.post.call_count)
+        self.assertEqual(9, self.post.call_count)
         self.assertEqual(3, self.report(job_id)["budget"]["tool_calls"])
-        receipts = self.outbound[-1]["report"]["tool_receipts"]
-        self.assertEqual([2, 2], [receipt["output"] for receipt in receipts])
+        self.assertEqual("accepted", self.report(job_id)["semantics"]["whole_review"])
+        self.assertEqual("same_artifact", self.report(job_id)["semantics"]["binding"])
+        step_review = next(item for item in reversed(self.outbound)
+                           if item.get("role") == "step_verifier")
+        receipts = step_review["report"]["tool_receipts"]
+        self.assertEqual(2, receipts[-1]["output"])
         self.assertEqual(3, len(self.client.get(
             f"/api/runs/{job_id}/evidence").get_json()["tools"]))
 
@@ -283,14 +288,17 @@ class StarComputeBoundsTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(0, self.report(job_id)["budget"]["tool_calls"])
 
     def test_sixteen_is_still_limited_by_shared_s3(self):
-        self.open_bounded([NEED_PLAN, PLAN, STEP, PREMATURE, CONTINUE], 16, tool_limit=1)
+        self.open_bounded([NEED_PLAN, PLAN, STEP, PREMATURE, CONTINUE,
+                           {"final_response": "1+1=2"}, ACCEPT], 16, tool_limit=1)
         job_id = self.create_job()
         job = self.terminal(job_id)
-        self.assertEqual("failed", job["status"], job)
-        self.assertIn("Hard budget exhausted", job["result"]["final_response"])
+        self.assertEqual("succeeded", job["status"], job)
+        self.assertEqual("1+1=2", job["result"]["final_response"])
         self.assertEqual([{"coefficients": [1]}], self.executed)
-        self.assertEqual(4, self.post.call_count)
+        self.assertEqual(7, self.post.call_count)
         self.assertEqual(1, self.report(job_id)["budget"]["tool_calls"])
+        self.assertEqual("accepted", self.report(job_id)["semantics"]["whole_review"])
+        self.assertEqual("same_artifact", self.report(job_id)["semantics"]["binding"])
         tools = self.client.get(f"/api/runs/{job_id}/evidence").get_json()["tools"]
         self.assertEqual(1, len(tools))
 
