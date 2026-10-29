@@ -153,10 +153,13 @@ def dispatch(harness, run, operation, request, session_dispatch):
         }
         _save(harness, run, record)
         prepared = harness.prepare_request(run, prepared)
+        from .serialization_repair import enabled, repair_failure
+
+        serialization = enabled(harness._config)
         partial = []
 
         def checkpoint():
-            record.update(status="streaming", partial_text="".join(partial))
+            record.update(status="streaming", partial_text="" if serialization else "".join(partial))
             _save(harness, run, record)
 
         try:
@@ -180,20 +183,25 @@ def dispatch(harness, run, operation, request, session_dispatch):
             record.update(
                 status="tool_error" if getattr(exc, "tool_error", False)
                 else "protocol_failed" if known_protocol else "unknown_outcome",
-                partial_text="".join(partial),
+                partial_text="" if serialization else "".join(partial),
                 usage=getattr(exc, "usage", None),
                 finish_reason=getattr(exc, "finish_reason", None),
-                response_excerpt=getattr(exc, "response_excerpt", None),
+                response_excerpt=None if serialization else getattr(exc, "response_excerpt", None),
                 error_type=type(exc).__name__,
                 error_category=category,
             )
+            if serialization:
+                record.update(response_ref=getattr(exc, "response_ref", None),
+                              serialization_eligible=getattr(exc, "serialization_eligible", False))
             _save(harness, run, record, status=None if known_protocol else "interrupted")
+            if serialization and known_protocol:
+                return repair_failure(harness, run, record, operation, prepared)
             raise CallInterrupted(run["run_id"], record["call_id"]) from None
         latest = harness.get_run(run["run_id"])
         if latest["state"]["phase"] == "TERMINAL":
             record.update(
                 status="ignored_late_response",
-                partial_text="".join(partial),
+                partial_text="" if serialization else "".join(partial),
                 usage=response.get("usage"),
             )
             _save(harness, run, record)
@@ -201,7 +209,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
         record.update(
             status="completed",
             response=response,
-            partial_text="".join(partial),
+            partial_text="" if serialization else "".join(partial),
             usage=response.get("usage"),
         )
         _save(harness, run, record)

@@ -28,6 +28,8 @@ class InternPortError(RuntimeError):
 # unfinished stream whose remote outcome stays unknown.
 KNOWN_PROTOCOL_FAILURES = frozenset({
     "invalid_json", "invalid_role_schema", "empty_response", "truncated_response",
+    "invalid_serialization_source",
+    "serialization_processing_deadline",
 })
 
 MAX_RESPONSE_EXCERPT_CHARS = 400
@@ -114,11 +116,16 @@ def _loads_known_escape_rescue(text):
 class InternModelPort:
     """Reasoner/Verifier/Meta bridge, with no implicit live adapter creation."""
 
-    def __init__(self, adapter: InternModelAdapter | None = None, *, original_problem=None, deadlines=None):
+    def __init__(self, adapter: InternModelAdapter | None = None, *, original_problem=None, deadlines=None,
+                 restricted_reply_dir=None):
         self.adapter = adapter
         self.original_problem = original_problem
         self.deadlines = deadlines
         self.invocations = []
+        from .restricted_replies import RestrictedReplies
+
+        self.restricted_replies = (RestrictedReplies(restricted_reply_dir)
+                                   if restricted_reply_dir is not None else None)
 
     def verify(self, request):
         if request.get("role") not in {"step_verifier", "whole_solution_verifier"}:
@@ -150,6 +157,12 @@ class InternModelPort:
                 raise InternPortError(response.error_category)
             if not response.text.strip():
                 raise _protocol_failure("empty_response", record, response.text)
+            if request.get("serialization_repair") is True:
+                from .serialization_port import parse_before_deadline
+
+                parsed = parse_before_deadline(self, request, record, response.text, schema)
+                record["status"] = "success"
+                return parsed
             try:
                 parsed = _loads_known_escape_rescue(response.text)
             except (TypeError, ValueError) as exc:
@@ -171,7 +184,9 @@ class InternModelPort:
             raise
         finally:
             record["duration_seconds"] = time.monotonic() - started
-            self.invocations.append(redact(record))
+            from .serialization_port import public_invocation
+
+            self.invocations.append(redact(public_invocation(record, request.get("serialization_repair"))))
 
     def _complete_stream(self, request, schema, messages):
         """Stream fragments through the caller's audit; strict schema gates the result.
@@ -206,6 +221,14 @@ class InternModelPort:
             text = envelope.get("text")
             if not isinstance(text, str) or not text.strip():
                 raise _protocol_failure("empty_response", record, text)
+            if request.get("serialization_repair") is True:
+                from .serialization_port import parse_before_deadline
+
+                parsed = parse_before_deadline(self, request, record, text, schema)
+                record["status"] = "success"
+                metrics["status"] = "completed"
+                yield {"result": parsed, "usage": dict(envelope.get("usage") or {})}
+                return
             try:
                 parsed = _loads_known_escape_rescue(text)
             except (TypeError, ValueError) as exc:
@@ -230,9 +253,20 @@ class InternModelPort:
             raise
         finally:
             record["duration_seconds"] = time.monotonic() - started
-            self.invocations.append(redact(record))
+            from .serialization_port import public_invocation
+
+            self.invocations.append(redact(public_invocation(record, request.get("serialization_repair"))))
 
     def _messages(self, request, schema):
+        if request.get("serialization_source"):
+            from .serialization_port import before_deadline, repair_messages
+
+            try:
+                if request.get("serialization_repair") is not True:
+                    raise ValueError("serialization_repair_not_enabled")
+                return before_deadline(self, request, {}, lambda: repair_messages(self, request, schema))
+            except (ValueError, TypeError, KeyError, OSError, AttributeError):
+                raise InternPortError("invalid_serialization_source") from None
         original = request.get("problem", self.original_problem)
         if not isinstance(original, str) or not original.strip():
             raise InternPortError("missing_original_problem")

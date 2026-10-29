@@ -30,6 +30,8 @@ REPAIR_INSTRUCTION = (
 
 def repair_enabled(config):
     """Product runs only: the same gate the planner repair uses."""
+    if config.get("features", {}).get("serialization_repair") is True:
+        return False  # The capability-free candidate owns the only repair credit.
     return config.get("features", {}).get("star_routing") is True
 
 
@@ -73,6 +75,11 @@ def completed_call_id(calls, call_id):
             return call_id
         call_id = resolved
         repaired = repair_call_id(call_id)
+        serialized = f"{call_id}:serialization-1"
+        if (serialized in calls and current.get("response_ref") is not None
+                and calls[serialized].get("request", {}).get("serialization_source")
+                == current["response_ref"]):
+            repaired = serialized
         candidate = calls.get(repaired, {})
         if (current.get("status") != "completed" and candidate
                 and all(candidate.get(key) == original.get(key)
