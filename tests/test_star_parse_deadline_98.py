@@ -332,7 +332,6 @@ class ProcessingDeadlineTest(unittest.TestCase):
         ledger = RunBudgetLedger()
         self.addCleanup(ledger.close)
         budget = ledger.ensure("slow-stream-assembly", RunBudgetLimits(max_runtime_seconds=8))
-        deadline = time.time() + .35
         entered, release, finished = (threading.Event() for _ in range(3))
         self.addCleanup(release.set)
         packet = {"choices": [{"delta": {}, "finish_reason": "stop"}],
@@ -364,6 +363,7 @@ class ProcessingDeadlineTest(unittest.TestCase):
             adapter = InternStreamAdapter(InternChatClient(timeout=3, retry=1), max_tokens=32)
 
         def run():
+            deadline = time.time() + .35
             try:
                 with bind_budget(budget):
                     chunks.extend(adapter.stream_complete(
