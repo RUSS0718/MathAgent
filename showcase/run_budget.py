@@ -304,6 +304,17 @@ class RunBudget:
     def after_attempt(self, event):
         self.ledger.settle(self.run_id, event["attempt_id"], event)
 
+    def can_retry(self, delay, input_estimate, output_cap):
+        """Advisory admission before waiting; dispatch still reserves atomically."""
+        check_control()
+        snapshot = self.snapshot()
+        limits = snapshot["limits"]
+        return (
+            delay < self.remaining_seconds()
+            and snapshot["http_attempts"] < limits["max_http_attempts"]
+            and snapshot["charged_tokens"] + input_estimate + output_cap <= limits["max_tokens"]
+        )
+
     def snapshot(self):
         return self.ledger.snapshot(self.run_id)
 
