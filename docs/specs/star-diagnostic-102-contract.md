@@ -40,4 +40,8 @@ SQLite 中保存调度 intent 及 S3；intent 有而 HTTP 未落账时按全 env
 源码身份包括 runner 及全部 tracked/untracked Python 源码、依赖文件（排除 tests/test.md、缓存与产物）。
 manifest 只含 hash 和受限元数据；题面、prompt、完整可见回复和答案在 ignored artifacts 私有目录；不保存隐藏推理。
 PID、OS进程创建时间、stdout/stderr 路径写入运行记录；PID 不代表远端状态。monitor 只读 SQLite，不能使用 immutable=1。
+生产者在终态/控制边界 checkpoint 并切换 DELETE 后关闭；P 续接由生产者恢复 WAL。
+monitor 每次使用独立短子进程、`mode=ro&readonly_shm=1`、query_only 和单一读事务，
+避免复用当前进程 writer 的可写 SHM 映射。WAL 缺少既有 WAL/SHM 时返回 unavailable，不初始化或修复。
+监控子进程最多等待5秒，SQLite 锁等待0.2秒；锁冲突或子进程失败保守返回 unavailable。
 本票不启动长批次或 heartbeat；完整组合门禁由主聊天协调，skip 不计通过。

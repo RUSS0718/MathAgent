@@ -61,7 +61,7 @@ charged 已含 reserved，汇总不再相加。金额、不可观测远端并发
 `process.json` 指向本次实际 PID、OS 创建时间和独立 stdout/stderr；`process-*.json` 保留每次所有者记录。
 该文件的 `monitor_argv` 可作为参数数组复用。monitor 的 PID 创建时间比对可以识别退出和复用；
 `restart_requires_review` 仅表明本地所有者失效，不宣称远端已结束。
-查询使用 SQLite mode=ro、query_only 和单一读事务，读取 WAL，不使用 immutable=1，也不实例化写账本。
+查询使用独立短子进程中的 SQLite mode=ro、readonly_shm=1、query_only 和单一读事务，读取 WAL，不使用 immutable=1，也不实例化写账本。
 缺文件/缺表/坏账本/锁不可读时返回 unavailable；不会初始化、消费、取消、修复或自动清理。
 
 如后续确需后台 fake，可用 `Start-Process -WindowStyle Hidden` 启动 **uv run --offline python**，
@@ -116,3 +116,28 @@ uv run --offline python demo_server.py --help
 本票不测真实900/1800秒等待，不提供 live 派发或物理远端取消保证；进程中断用 fake crash 窗口建模，不宣称断电持久性。
 没有工具执行，未调用 Docker；既有 #98 固定镜像验收只作为上游证据引用，不把未运行的隔离检查计为通过。
 全仓 offline / Reference / release 组合门禁留给主聊天协调。本票的工程验收不能证明数学能力或真实 provider 兼容。
+
+## 集成评审修复候选（2026-10-29）
+
+原只读测试在 `run()` 已执行首次快照后才记录文件 hash，遗漏关闭 WAL 库没有 sidecar 的情况。
+新增测试直接使用生产者 initialize / S3 / status 后关闭连接，不经过 Job 快照；旧实现首次监控新增 WAL/SHM，明确失败。
+生产者现在在终态（含 P 控制边界）执行 checkpoint 与 DELETE journal 切换，续接时恢复 WAL；
+缺少 sidecar 的旧 WAL 库返回 unavailable，成功 Job 的终态返回、后续 CLI 监控和 P 续接仍可使用。
+
+只调整关闭流程仍不足：新增活跃 WAL 首读文件 hash 断言发现 SHM read mark 被修改。
+实测运行时为 uv Python 3.12.13 / SQLite 3.50.4；`readonly_shm=1` 独立进程读取保持 hash，
+同进程则复用 writer 的可写 SHM 节点，故所有监控均隔离到短子进程（DELETE 也可能在续接时切回 WAL）。
+固定版本 [Windows VFS 源码](https://raw.githubusercontent.com/sqlite/sqlite/version-3.50.4/src/os_win.c)
+第4122行读取此参数，第4127–4143行复用进程内 winShmNode；
+[Unix VFS](https://github.com/sqlite/sqlite/blob/version-3.50.4/src/os_unix.c) 也处理此参数。没有以参数无报错作为支持证据。
+生产者关闭前切换 DELETE 的依据是 [SQLite WAL 文档第5节](https://www.sqlite.org/wal.html#read_only_databases)。没有升级运行时或依赖。
+文件路径与字节 hash 测试覆盖：关闭 WAL 库首次及重复读取、正常终态归档、未 checkpoint 的新 WAL 提交首次及重复读取，
+以及已完成 backfill 后与重复 PASSIVE checkpoint 并发读取。checkpoint 自身有待写页时会合法改变文件，不能把该变化算作 reader 写盘。
+
+运行限制：每次监控增加一次子进程启动，5秒进程上限/0.2秒 SQLite 等锁后可返回 unavailable；
+生产者切换 journal 需要取得 SQLite 锁。损坏、缺 sidecar 或需要恢复的归档由拥有写权限的生产者处理，monitor 不执行恢复。
+不支持把此 Windows 实测外推到自定义 SQLite VFS，也未独立执行 POSIX 宿主验证。
+最终五个诊断专属完整模块，加 `tests.test_run_budget` 与 `tests.test_baseline_snapshot` 共47项通过（106.019秒），零跳过；
+命令为 `uv run --offline --no-sync python -B -m unittest tests.test_star_diagnostic_registration tests.test_star_diagnostic tests.test_star_diagnostic_monitor tests.test_star_diagnostic_process tests.test_star_diagnostic_cli tests.test_run_budget tests.test_baseline_snapshot`。
+本轮变更 Python 文件的 Ruff、11个 baseline hash 与官方导入边界均通过。
+这是聚焦修复候选，全系列门禁与修复后的验收复审仍由主聊天协调，不声明最终通过。

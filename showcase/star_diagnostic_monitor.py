@@ -1,8 +1,11 @@
 """Read committed diagnostic/S3 state without constructing a writer or runner."""
 import json
 import math
+import os
 import re
 import sqlite3
+import subprocess
+import sys
 from contextlib import closing
 from pathlib import Path
 
@@ -27,7 +30,8 @@ def _public_budget(state):
     return result
 
 
-def monitor(archive):
+def monitor(archive, *, _isolated=False):
+    """Keep WAL mappings isolated from any in-process producer's writable SHM cache."""
     archive = Path(archive).resolve()
     unavailable = dict(status="unavailable", charged_tokens=None, reserved_tokens=None,
                        remaining_tokens=None, remote_concurrency="unknown", cost=None)
@@ -35,11 +39,21 @@ def monitor(archive):
     if not database.is_file():
         return unavailable
     try:
-        # A read-only open must not create WAL shared memory during recovery.
+        if not _isolated:
+            # Isolate even a DELETE header: a continuation may restore WAL before open.
+            worker = subprocess.run(
+                [sys.executable, "-B", "-m", "showcase.star_diagnostic_monitor", str(archive)],
+                cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
+                encoding="utf-8", timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            return json.loads(worker.stdout) if worker.returncode == 0 else unavailable
+        # Closed legacy WAL archives need a writer-owned checkpoint, never recovery here.
         wal = Path(str(database) + "-wal")
-        if wal.exists() and wal.stat().st_size and not Path(str(database) + "-shm").exists():
+        with database.open("rb") as stream:
+            wal_mode = stream.read(20)[18:20] == b"\x02\x02"
+        if wal_mode and (not wal.is_file() or not Path(str(database) + "-shm").is_file()):
             return unavailable
-        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=.2)) as db:
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro&readonly_shm=1", uri=True, timeout=.2)) as db:
             db.execute("PRAGMA query_only=ON")
             db.execute("BEGIN")
             raw, state, last, last_at = db.execute("SELECT manifest,status,last_event,last_event_at FROM diagnostic_batch").fetchone()
@@ -108,5 +122,10 @@ def monitor(archive):
                         process_state=owner_state,
                         restart_requires_review=state == "running" and owner_state in {"exited", "reused"},
                         stdout=str(archive / "stdout.log"), stderr=str(archive / "stderr.log"))
-    except (OSError, sqlite3.Error, ValueError, KeyError, TypeError, IndexError):
+    except (OSError, sqlite3.Error, ValueError, KeyError, TypeError, IndexError,
+            subprocess.TimeoutExpired):
         return unavailable
+
+
+if __name__ == "__main__":
+    print(json.dumps(monitor(sys.argv[1], _isolated=True), ensure_ascii=False, allow_nan=False))

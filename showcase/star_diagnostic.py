@@ -113,6 +113,8 @@ class DiagnosticJob:
             db = sqlite3.connect(self.archive / "batch.sqlite3")
             if not continuation:
                 initialize(db, self.manifest)
+            else:
+                db.execute("PRAGMA journal_mode=WAL")
             ledger = RunBudgetLedger(connection=db)
             if continuation:
                 status(db, "running")
@@ -183,6 +185,9 @@ class DiagnosticJob:
             if db is not None:
                 try:
                     status(db, terminal)
+                    # Only the producer changes journal mode. Closed archives then need no sidecars.
+                    db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                    db.execute("PRAGMA journal_mode=DELETE")
                 finally:
                     db.close()
             mark(self.registry, self.manifest, terminal)
