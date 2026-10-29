@@ -159,10 +159,18 @@ class ExperimentServer:
                 # Snapshot preserves unknown reservations even if a worker is still unwinding.
                 break
             time.sleep(.01)
-        return dict(job=self.get(f"/api/agent/jobs/{job_id}"),
-                    report=self.get(f"/api/agent/jobs/{job_id}/report")["report"],
-                    evidence=self.get(f"/api/runs/{job_id}/evidence"),
-                    run=self.get(f"/api/runs/{job_id}"))
+        # Terminal Jobs can still receive accounting updates. Fence the local
+        # endpoint reads with the same Job projection, rather than archiving
+        # a report from before an update and evidence from after it.
+        for _ in range(3):
+            job = self.get(f"/api/agent/jobs/{job_id}")
+            bundle = dict(job=job,
+                          report=self.get(f"/api/agent/jobs/{job_id}/report")["report"],
+                          evidence=self.get(f"/api/runs/{job_id}/evidence"),
+                          run=self.get(f"/api/runs/{job_id}"))
+            if job == self.get(f"/api/agent/jobs/{job_id}"):
+                return bundle
+        raise ValueError("experiment_public_snapshot_unstable")
 
     def close(self):
         self.adapter.outbound_observer = self._previous_observer
