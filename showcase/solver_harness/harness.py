@@ -75,6 +75,9 @@ class SolverHarness:
         self._product_recovery = False
         self._event_observer = event_observer
         self._config = _normalize_config(config)
+        if (self._config.get("features", {}).get("serialization_repair") is True
+                and self._config.get("features", {}).get("stream_recovery") is not True):
+            raise SolverValidationError("serialization_repair_requires_call_audit")
         self._config_hash = _hash_json(self._config)
         self._tool_port = tool_port
         self._meta_port = meta_port
@@ -338,6 +341,11 @@ class SolverHarness:
         tools = allowed_tool_ids(latest, request.get("role"), self._config, self._tool_port)
         prepared["allowed_tools"] = tools
         prepared["tool_policy"] = {"allow": tools}
+        if self._config.get("features", {}).get("serialization_repair") is True:
+            prepared.update(serialization_repair=True, strict_completion=True,
+                            problem_hash=latest["state"]["problem_hash"])
+            if prepared.get("serialization_source"):
+                prepared.update(allowed_tools=[], tool_policy={"allow": []})
         return prepared
 
     def precheck_report(self, run):

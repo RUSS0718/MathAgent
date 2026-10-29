@@ -15,7 +15,7 @@ CORE_FEATURES = frozenset({
 
 def full_config(budget, features=None):
     if features is not None and (not isinstance(features, Mapping) or any(
-        key not in CORE_FEATURES | {"strict_completion"} or type(value) is not bool for key, value in features.items()
+        key not in CORE_FEATURES | {"strict_completion", "serialization_repair"} or type(value) is not bool for key, value in features.items()
     )):
         raise ValueError("star_full_features_invalid")
     enabled = dict.fromkeys(CORE_FEATURES, True) if features is None else dict(features)
@@ -38,7 +38,7 @@ def core_gaps(config):
 
 def limited_config(budget, features=None, registry=None):
     if features is not None and (not isinstance(features, Mapping) or any(
-        key not in OPTIONAL_FEATURES | {"strict_completion"} or type(value) is not bool for key, value in features.items()
+        key not in OPTIONAL_FEATURES | {"strict_completion", "serialization_repair"} or type(value) is not bool for key, value in features.items()
     )):
         raise ValueError("star_features_invalid")
     if registry is not None and not isinstance(registry, ToolRegistry):

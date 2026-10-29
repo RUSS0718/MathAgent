@@ -6,7 +6,9 @@ from .plan import validate_plan
 
 
 def generated_plan(harness, run, invoke, request, version, config):
-    retries = 1 if config.get("features", {}).get("star_routing") is True else 0
+    from .protocol_repair import repair_enabled
+
+    retries = 1 if repair_enabled(config) else 0
     repair = {}
     for attempt in range(retries + 1):
         reason = budget_reason(run["state"], config)
@@ -27,6 +29,8 @@ def generated_plan(harness, run, invoke, request, version, config):
                 },
             )
         except CallInterrupted:
+            if config.get("features", {}).get("serialization_repair") is True:
+                raise
             latest = harness.get_run(run["run_id"])
             last = next(
                 (
