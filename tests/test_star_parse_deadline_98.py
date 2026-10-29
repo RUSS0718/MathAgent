@@ -220,6 +220,26 @@ class ProcessingDeadlineTest(unittest.TestCase):
         self.assertEqual(0, budget.snapshot()["unresolved_attempts"])
         self.assertEqual(0, budget.snapshot()["reserved_tokens"])
     def test_late_partial_parse_cannot_replace_complete_invalid_stream_evidence(self):
+        self.assert_late_partial_preserves_invalid_evidence()
+
+    def test_delayed_partial_worker_cannot_block_complete_invalid_stream_evidence(self):
+        start = threading.Thread.start
+
+        def delayed_start(worker):
+            if worker.name == "showcase-response-processing":
+                target = worker._target
+
+                def delayed():
+                    time.sleep(.6)  # Start the partial parse after the original .5s deadline.
+                    target()
+
+                worker._target = delayed
+            return start(worker)
+
+        with patch.object(threading.Thread, "start", delayed_start):
+            self.assert_late_partial_preserves_invalid_evidence()
+
+    def assert_late_partial_preserves_invalid_evidence(self):
         ledger = RunBudgetLedger()
         self.addCleanup(ledger.close)
         budget = ledger.ensure("partial-after-invalid", RunBudgetLimits(max_runtime_seconds=8))
@@ -242,7 +262,9 @@ class ProcessingDeadlineTest(unittest.TestCase):
                 pass
 
         def loads(value, *args, **kwargs):
-            if isinstance(value, str) and '"fragment"' in value and not entered.is_set():
+            # Block only the partial parser, even if full-body late parsing wins scheduling.
+            if (threading.current_thread().name == "showcase-response-processing"
+                    and isinstance(value, str) and '"fragment"' in value and not entered.is_set()):
                 entered.set()
                 if not release.wait(5):
                     raise AssertionError("first parse not released")
@@ -281,6 +303,8 @@ class ProcessingDeadlineTest(unittest.TestCase):
                 time.sleep(.01)
             before, = ledger.attempts(budget.run_id)
             self.assertEqual("invalid_response", before["error_category"])
+            self.assertEqual("error", before["status"])
+            self.assertEqual(10, before["usage"]["total_tokens"])
             release.set()
             self.assertTrue(partial_done.wait(3))
             after, = ledger.attempts(budget.run_id)
