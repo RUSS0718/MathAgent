@@ -18,7 +18,6 @@ class ProcessingDeadlineTest(unittest.TestCase):
         ledger = RunBudgetLedger()
         self.addCleanup(ledger.close)
         budget = ledger.ensure("slow-json-parse", RunBudgetLimits(max_runtime_seconds=8))
-        phase_deadline = time.time() + .35
         entered, release, finished = (threading.Event() for _ in range(3))
         self.addCleanup(release.set)
         body = json.dumps({"choices": [{"finish_reason": "stop", "message": {"content": "ok"}}],
@@ -51,6 +50,7 @@ class ProcessingDeadlineTest(unittest.TestCase):
         def run():
             try:
                 with bind_budget(budget):
+                    phase_deadline = time.time() + .35
                     response = adapter.complete([{"role": "user", "content": "offline"}],
                         metadata={"role": "explore", "phase_deadline_at": phase_deadline,
                                   "strict_completion": True})
@@ -95,7 +95,6 @@ class ProcessingDeadlineTest(unittest.TestCase):
         ledger = RunBudgetLedger()
         self.addCleanup(ledger.close)
         budget = ledger.ensure("late-invalid-json", RunBudgetLimits(max_runtime_seconds=8))
-        deadline = time.time() + .5
         entered, release, finished = (threading.Event() for _ in range(3))
         self.addCleanup(release.set)
         body = b"{invalid"
@@ -124,6 +123,7 @@ class ProcessingDeadlineTest(unittest.TestCase):
         def run():
             try:
                 with bind_budget(budget):
+                    deadline = time.time() + .5
                     adapter.complete([{"role": "user", "content": "offline"}],
                         metadata={"role": "explore", "phase_deadline_at": deadline})
             except BaseException as exc:
@@ -154,7 +154,6 @@ class ProcessingDeadlineTest(unittest.TestCase):
         ledger = RunBudgetLedger()
         self.addCleanup(ledger.close)
         budget = ledger.ensure("slow-stream-reconcile", RunBudgetLimits(max_runtime_seconds=8))
-        deadline = time.time() + .5
         entered, release, finished = (threading.Event() for _ in range(3))
         self.addCleanup(release.set)
         packet = {"choices": [{"delta": {"content": "fragment"}, "finish_reason": "stop"}],
@@ -187,6 +186,7 @@ class ProcessingDeadlineTest(unittest.TestCase):
         def run():
             try:
                 with bind_budget(budget):
+                    deadline = time.time() + .5
                     chunks.extend(adapter.stream_complete(
                         [{"role": "user", "content": "offline"}],
                         metadata={"role": "explore", "phase_deadline_at": deadline,
@@ -257,7 +257,6 @@ class ProcessingDeadlineTest(unittest.TestCase):
         ledger = RunBudgetLedger()
         self.addCleanup(ledger.close)
         budget = ledger.ensure("partial-after-invalid", RunBudgetLimits(max_runtime_seconds=8))
-        deadline = time.time() + .5
         entered, release, finished, partial_done = (threading.Event() for _ in range(4))
         self.addCleanup(release.set)
         packet = {"choices": [{"delta": {"content": "fragment"}, "finish_reason": "stop"}],
@@ -296,6 +295,7 @@ class ProcessingDeadlineTest(unittest.TestCase):
         def run():
             try:
                 with bind_budget(budget):
+                    deadline = time.time() + .5
                     list(adapter.stream_complete([{"role": "user", "content": "offline"}],
                          metadata={"role": "explore", "phase_deadline_at": deadline,
                                    "strict_completion": True}))
@@ -402,7 +402,7 @@ class ProcessingDeadlineTest(unittest.TestCase):
         ledger = RunBudgetLedger()
         self.addCleanup(ledger.close)
         budget = ledger.ensure("slow-stream-" + pause, RunBudgetLimits(max_runtime_seconds=8))
-        deadline = time.time() + .35
+        deadline_at = []
         entered, release, finished = (threading.Event() for _ in range(3))
         self.addCleanup(release.set)
         data = {"choices": [{"delta": {"content": "fragment"}, "finish_reason": "stop"}],
@@ -434,9 +434,10 @@ class ProcessingDeadlineTest(unittest.TestCase):
         def run():
             try:
                 with bind_budget(budget):
+                    deadline_at.append(time.time() + .35)
                     for chunk in adapter.stream_complete(
                         [{"role": "user", "content": "offline"}],
-                        metadata={"role": "explore", "phase_deadline_at": deadline,
+                        metadata={"role": "explore", "phase_deadline_at": deadline_at[0],
                                   "strict_completion": True},
                     ):
                         chunks.append(chunk)
@@ -454,7 +455,7 @@ class ProcessingDeadlineTest(unittest.TestCase):
             worker = threading.Thread(target=run, daemon=True)
             worker.start()
             self.assertTrue(entered.wait(3))
-            time.sleep(max(0, deadline - time.time()) + .05)
+            time.sleep(max(0, deadline_at[0] - time.time()) + .05)
             release.set()
             self.assertTrue(finished.wait(3))
             worker.join(1)
