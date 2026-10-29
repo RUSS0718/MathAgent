@@ -4,12 +4,14 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 import unittest
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from showcase.flask_app import create_app
+from showcase.python_executor import DockerPythonExecutor
 from showcase.run_budget import RunBudgetLimits
 from tests.star_product_support import StarJobFixture
 
@@ -44,6 +46,10 @@ def docker_events(run_id):
 
 @unittest.skipUnless(IMAGE, "set MATHAGENT_TEST_PYTHON_IMAGE to a validated local exact image ID")
 class StarProductPythonTest(StarJobFixture, unittest.TestCase):
+    # Observe the 20s tool allowance plus Docker lifecycle and Job persistence;
+    # this test-only window does not change any execution deadline.
+    observation_timeout_seconds = 40
+
     def setUp(self):
         # open_star keeps its API-key patch until cleanup; its environment
         # snapshot includes the enclosing image patch. Restore the original
@@ -54,6 +60,25 @@ class StarProductPythonTest(StarJobFixture, unittest.TestCase):
                             "SHOWCASE_STAR_PYTHON_IMAGE_ID", original))
 
     def test_public_job_runs_registered_python_once_and_keeps_verified_artifacts(self):
+        self.assert_registered_python_job_and_artifacts()
+
+    def test_slow_docker_metadata_keeps_public_job_and_artifact_contract(self):
+        original_command = DockerPythonExecutor._command
+        delayed = []
+
+        def command(args):
+            if args[:2] == ["image", "inspect"] and not delayed:
+                delayed.append(True)
+                # A metadata response within its 15s command allowance can
+                # arrive after the ordinary scripted Job's 8s observation.
+                time.sleep(8.25)
+            return original_command(args)
+
+        with patch.object(DockerPythonExecutor, "_command", staticmethod(command)):
+            self.assert_registered_python_job_and_artifacts()
+        self.assertEqual([True], delayed)
+
+    def assert_registered_python_job_and_artifacts(self):
         with patch.dict(os.environ, {"SHOWCASE_STAR_PYTHON_IMAGE_ID": IMAGE}):
             self.open_star([NEED_PLAN, PLAN, STEP, VERDICT, FINAL, ACCEPT],
                 SHOWCASE_STAR_EVIDENCE_KIND="scripted",

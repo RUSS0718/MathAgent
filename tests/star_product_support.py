@@ -65,6 +65,8 @@ class RawProviderContent:
 
 
 class StarJobFixture:
+    observation_timeout_seconds = 8
+
     def open_star(self, replies, *, retry=1, **config):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
@@ -141,7 +143,7 @@ class StarJobFixture:
         return response.get_json()["job_id"]
 
     def wait_for(self, predicate):
-        deadline = time.monotonic() + 8
+        deadline = time.monotonic() + self.observation_timeout_seconds
         while time.monotonic() < deadline:
             value = predicate()
             if value:

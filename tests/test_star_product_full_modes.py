@@ -24,6 +24,10 @@ CORE = {
 
 @unittest.skipUnless(IMAGE, "requires independently validated local Docker image ID")
 class StarFullModeTest(StarJobFixture, unittest.TestCase):
+    # Match real-tool observation: 20s execution plus lifecycle/persistence.
+    # Ordinary scripted/deadline fixtures keep their original 8s window.
+    observation_timeout_seconds = 40
+
     def open_full(self, replies, **config):
         self.open_star(replies, SHOWCASE_STAR_FULL_ENABLED=True,
             SHOWCASE_STAR_PYTHON_IMAGE_ID=IMAGE, **config)
