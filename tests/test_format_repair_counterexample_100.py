@@ -25,15 +25,25 @@ from tests.test_star_product_counterexample import (
 
 class FormatRepairCounterexampleTest(StarJobFixture, unittest.TestCase):
     def test_completed_research_repair_resumes_original_review_before_next_reasoner(self):
+        self.assert_research_recovery(double_repair=False)
+
+    def test_double_verifier_and_research_repair_replays_original_roots_after_exit(self):
+        self.assert_research_recovery(double_repair=True)
+
+    def assert_research_recovery(self, *, double_repair):
         with tempfile.TemporaryDirectory() as directory, ExitStack() as cleanup:
             folder = Path(directory)
             process = subprocess.run([sys.executable, "-B", "-m", "tests.format_repair_worker_100",
-                directory, "research-completed"], capture_output=True, timeout=25)
+                directory, "double-research-completed" if double_repair else "research-completed"], capture_output=True, timeout=25)
             self.assertEqual(72, process.returncode, process.stderr.decode(errors="replace"))
             job_id = (folder / "job_id").read_text()
             sent = [json.loads(line) for line in (folder / "requests.jsonl").read_text().splitlines()]
-            self.assertEqual(["explore", "planner", "reasoner", "step_verifier", "researcher", "researcher"],
+            self.assertEqual(["explore", "planner", "reasoner", "step_verifier",
+                              *(["step_verifier"] if double_repair else []), "researcher", "researcher"],
                              [request["role"] for request in sent])
+            if double_repair:
+                self.assertEqual(sent[3]["call_id"] + ":serialization-1", sent[4]["call_id"])
+            self.assertEqual(sent[3]["call_id"] + ":counterexample", sent[-2]["call_id"])
             self.assertEqual(sent[-2]["call_id"] + ":serialization-1", sent[-1]["call_id"])
             repaired = {"argument": "Every real x has a smaller real value x-1.",
                 "claims": [{"statement": "There is no minimum.", "label": "hard-verify"}], "blocked": False}
@@ -43,7 +53,7 @@ class FormatRepairCounterexampleTest(StarJobFixture, unittest.TestCase):
             for name in ("showcase_workspace_service", "showcase_run_service", "loopback_store"):
                 cleanup.callback(self.app.extensions[name].close)
             original = self.job(job_id)["result"]["budget"]
-            self.assertEqual(6, original["http_attempts"])
+            self.assertEqual(7 if double_repair else 6, original["http_attempts"])
             resumed = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={}, headers=self.headers())
             self.assertEqual(202, resumed.status_code, resumed.get_json())
             final = self.terminal(job_id)
@@ -56,16 +66,25 @@ class FormatRepairCounterexampleTest(StarJobFixture, unittest.TestCase):
             self.assertEqual(["CHALLENGE", "ACCEPT"], [e["verdict"] for e in reviews])
             self.assertIn("x=-1", reviews[0]["objection_summary"])
             self.assertEqual(original["deadline_at"], final["result"]["budget"]["deadline_at"])
-            self.assertEqual(10, final["result"]["budget"]["http_attempts"])
+            self.assertEqual(11 if double_repair else 10, final["result"]["budget"]["http_attempts"])
 
     def test_repaired_research_is_consumed_with_its_claim_binding(self):
+        self.assert_research_consumed(double_repair=False)
+
+    def test_double_verifier_and_research_repair_is_consumed_with_original_binding(self):
+        self.assert_research_consumed(double_repair=True)
+
+    def assert_research_consumed(self, *, double_repair):
         for result, gate in ((FOUND, "FAIL"), (NOT_FOUND, "UNCERTAIN")):
             with self.subTest(verdict=result["verdict"]):
                 self.open_star([
-                    NEED_PLAN, PLAN, STEP, ACCEPT,
+                    NEED_PLAN, PLAN, STEP,
+                    *([RawProviderContent("```json\n" + json.dumps(ACCEPT) + "\n```")] if double_repair else []),
+                    ACCEPT,
                     RawProviderContent("```json\n" + json.dumps(result) + "\n```"), result,
                 ], SHOWCASE_STAR_FEATURES={**FEATURES, "serialization_repair": True},
-                    SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=6, max_http_attempts=6))
+                    SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=7 if double_repair else 6,
+                                                       max_http_attempts=7 if double_repair else 6))
                 created = self.client.post("/api/agent/jobs", json={"message": PROBLEM,
                     "session_id": self.session, "solver_mode": "star_limited"}, headers=self.headers())
                 self.assertEqual(202, created.status_code)
@@ -86,7 +105,8 @@ class FormatRepairCounterexampleTest(StarJobFixture, unittest.TestCase):
                 self.assertNotIn(original["claim"], json.dumps(self.outbound_messages[-1]))
                 self.assertEqual([], repair["allowed_tools"])
                 budget = job["result"]["budget"]
-                self.assertEqual((6, 6, 0, 0, 60), tuple(budget[key] for key in (
+                expected = (7, 7, 0, 0, 70) if double_repair else (6, 6, 0, 0, 60)
+                self.assertEqual(expected, tuple(budget[key] for key in (
                     "logical_calls", "http_attempts", "tool_calls", "unknown_attempts", "charged_tokens")))
 
 

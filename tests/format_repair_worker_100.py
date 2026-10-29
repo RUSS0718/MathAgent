@@ -29,7 +29,8 @@ def config(folder, *, research=False):
 def main():
     folder = Path(sys.argv[1])
     ready = threading.Event()
-    research_exit = sys.argv[2:] == ["research-completed"]
+    double_repair = sys.argv[2:] == ["double-research-completed"]
+    research_exit = double_repair or sys.argv[2:] == ["research-completed"]
     completed_exit = research_exit or sys.argv[2:] == ["completed"]
     commit = SolverHarness.commit_event
 
@@ -38,6 +39,7 @@ def main():
         event = kwargs["event"]
         if (completed_exit and event["type"] == "call_audit"
                 and event.get("outcome") == "completed"
+                and (not research_exit or result["state"]["calls"][event["call_id"]]["role"] == "researcher")
                 and event.get("call_id", "").endswith(":serialization-1")):
             os._exit(72)
         return result
@@ -53,7 +55,8 @@ def main():
         value = ({"explore": NEED_PLAN, "planner": PLAN, "reasoner": STEP,
                   "step_verifier": ACCEPT, "researcher": FOUND}[context["role"]]
                  if research_exit else SOLVED)
-        wrapped = "visible_reply" not in context and (not research_exit or context["role"] == "researcher")
+        wrapped = "visible_reply" not in context and (not research_exit or context["role"] == "researcher"
+                                                     or double_repair and context["role"] == "step_verifier")
 
         class Reply:
             status_code = 200

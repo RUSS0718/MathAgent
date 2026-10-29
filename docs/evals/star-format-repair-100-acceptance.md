@@ -99,3 +99,9 @@ P2：FOUND / NOT_FOUND 的完整 fenced researcher 回复修复后，旧实现�
 新增 researcher 修复 completed 后真实退出的公共 resume 回归：先消费原 Verifier 与 researcher，再执行后续四次调用；累计 HTTP=10，原 deadline 不变。
 这组新用例及重启、反例、候选、会话、流式、最终绑定、重试组合和预算的十个完整模块共57项通过，零跳过；变更 Ruff 与11个 baseline hash / 官方导入边界通过。
 以上仅为聚焦红绿证据；全系列组合门禁和修复后的独立验收复审尚待主聊天执行。
+
+后续 P2 复审发现：pending review 虽解析 researcher 谱系，仍直接读取上游 Verifier 的失败 root。
+新增双 Verifier / researcher 序列化修复公共用例，以及 researcher 修复 completed 后真实进程退出的恢复用例。
+退出恢复用例先失败（7次 HTTP、零后续派发）；只解析 Verifier 响应位置而继续返回原 root 后通过，
+恢复仅执行后续四次调用，累计11次 HTTP，原 deadline 不变。正常双修复的 FOUND / NOT_FOUND 分别保持 FAIL / UNCERTAIN。
+这组反例、修复重启、既有反例、v5、预算和 baseline 六个完整模块共37项通过（55.158秒），零跳过；仍待独立验收复审。

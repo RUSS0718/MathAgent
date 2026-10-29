@@ -18,7 +18,8 @@ def pending_review(run):
     step = run["state"].get("steps", {}).get(run["state"].get("current_step"), {})
     for record in step.get("counterexample_checks", {}).values():
         if completed_call_id(run["state"].get("calls", {}), record["call_id"]) == call.get("call_id"):
-            verifier = run["state"].get("calls", {}).get(record["verifier_call_id"], {})
+            calls = run["state"].get("calls", {})
+            verifier = calls.get(completed_call_id(calls, record["verifier_call_id"]), {})
             if verifier.get("status") == "completed":
                 return record["verifier_call_id"], deepcopy(verifier["response"])
     return None
