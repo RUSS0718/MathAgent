@@ -14,10 +14,40 @@ from showcase.flask_app import create_app
 from showcase.solver_harness import SolverHarness
 from showcase.star_product_config import limited_config
 from tests.format_repair_worker_100 import config
-from tests.star_product_support import StarJobFixture
+from tests.star_product_support import ACCEPT, POLISH, StarJobFixture
 
 
 class FormatRepairRestartTest(StarJobFixture, unittest.TestCase):
+    def test_completed_repair_replays_after_process_exit_without_session_identity_change(self):
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as cleanup:
+            folder = Path(directory)
+            process = subprocess.run([
+                sys.executable, "-B", "-m", "tests.format_repair_worker_100", directory, "completed"],
+                capture_output=True, timeout=25)
+            self.assertEqual(72, process.returncode, process.stderr.decode(errors="replace"))
+            job_id = (folder / "job_id").read_text()
+            before = [json.loads(line) for line in (folder / "requests.jsonl").read_text().splitlines()]
+            self.assertEqual(2, len(before))
+            self.assertEqual(before[0]["call_id"] + ":serialization-1", before[1]["call_id"])
+            self.open_star([POLISH, ACCEPT], **config(folder))
+            for name in ("showcase_workspace_service", "showcase_run_service", "loopback_store"):
+                cleanup.callback(self.app.extensions[name].close)
+            initial = self.job(job_id)
+            original = initial["result"]["budget"]
+            self.assertEqual(2, original["http_attempts"])
+            resumed = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={},
+                                       headers=self.headers())
+            self.assertEqual(202, resumed.status_code, resumed.get_json())
+            final = self.terminal(job_id)
+            self.assertEqual("succeeded", final["status"], final)
+            self.assertEqual(["explore_polish", "whole_solution_verifier"],
+                             [request["role"] for request in self.outbound])
+            self.assertEqual("1+1=2", final["result"]["final_response"])
+            budget = final["result"]["budget"]
+            self.assertEqual(original["deadline_at"], budget["deadline_at"])
+            self.assertEqual((4, 4, 0, 0, 40), tuple(budget[key] for key in (
+                "logical_calls", "http_attempts", "unknown_attempts", "reserved_tokens", "charged_tokens")))
+
     def test_f08_real_process_exit_keeps_credit_call_reservation_and_deadline(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)

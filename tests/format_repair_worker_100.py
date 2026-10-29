@@ -12,6 +12,7 @@ from llm_client import InternChatClient
 from showcase.adapters import InternModelAdapter
 from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
+from showcase.solver_harness import SolverHarness
 from tests.star_product_support import SOLVED
 
 
@@ -26,6 +27,17 @@ def config(folder):
 def main():
     folder = Path(sys.argv[1])
     ready = threading.Event()
+    completed_exit = sys.argv[2:] == ["completed"]
+    commit = SolverHarness.commit_event
+
+    def exit_after_completed(harness, run_id, **kwargs):
+        result = commit(harness, run_id, **kwargs)
+        event = kwargs["event"]
+        if (completed_exit and event["type"] == "call_audit"
+                and event.get("outcome") == "completed"
+                and event.get("call_id", "").endswith(":serialization-1")):
+            os._exit(72)
+        return result
 
     def provider(*args, **kwargs):
         ready.wait(5)
@@ -33,7 +45,7 @@ def main():
         with (folder / "requests.jsonl").open("a", encoding="utf-8") as log:
             log.write(json.dumps({"call_id": context["call_id"], "role": context["role"]}) + "\n")
             log.flush()
-        if "visible_reply" in context:
+        if "visible_reply" in context and not completed_exit:
             os._exit(71)
 
         class Reply:
@@ -50,13 +62,15 @@ def main():
 
             def json(self):
                 return {"model": "intern-s2", "choices": [{"finish_reason": "stop", "message": {
-                    "content": "```json\n" + json.dumps(SOLVED) + "\n```"}}],
+                    "content": (json.dumps(SOLVED) if "visible_reply" in context
+                                else "```json\n" + json.dumps(SOLVED) + "\n```")}}],
                     "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}}
 
         return Reply()
 
     with patch.dict(os.environ, {"INTERN_API_KEY": "offline-only"}), patch(
-            "llm_client.requests.post", side_effect=provider):
+            "llm_client.requests.post", side_effect=provider), patch.object(
+            SolverHarness, "commit_event", exit_after_completed):
         app = create_app(config(folder))
         client = app.test_client()
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]

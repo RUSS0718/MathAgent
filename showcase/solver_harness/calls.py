@@ -215,7 +215,9 @@ def dispatch(harness, run, operation, request, session_dispatch):
         _save(harness, run, record)
         return response
 
-    result = session_dispatch(harness, run, invoke, request)
+    # Serialization repairs were dispatched without a session; recovery must hash the same request.
+    result = (invoke(request) if request.get("serialization_source")
+              else session_dispatch(harness, run, invoke, request))
     harness._product_recovery = False
     return result
 
