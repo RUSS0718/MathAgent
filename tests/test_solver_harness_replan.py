@@ -150,7 +150,7 @@ class ReplanTest(unittest.TestCase):
 class ReplanRulingGateTest(unittest.TestCase):
     """Only the current transition's unconsumed APPROVE_REPLAN ruling archives (ALIGN-AC-14)."""
 
-    def seed_replan(self, meta_decision):
+    def seed_replan(self, meta_decision, *, ruling_source=True):
         store = SQLiteStore(":memory:")
         config = {"max_model_calls": 4}
         with SolverHarness(store=store, config=config) as harness:
@@ -164,10 +164,13 @@ class ReplanRulingGateTest(unittest.TestCase):
                     "step_id": "s1", "decided_at_revision": run["state_revision"] + 1,
                 },
             }
+            # Valid approvals need both the committed ruling and its current intervention.
+            if ruling_source and updates["meta_decision"] is not None:
+                updates["meta_interventions"] = [dict(updates["meta_decision"])]
             harness.commit_event(
                 "r",
                 expected_revision=run["state_revision"],
-                event={"event_id": "seed-replan", "type": "seed"},
+                event={"event_id": "seed-replan", "type": "meta_decided" if ruling_source else "seed"},
                 state_updates=updates,
             )
         return store, config
@@ -180,9 +183,12 @@ class ReplanRulingGateTest(unittest.TestCase):
         return run["state"], planner.requests
 
     def test_missing_or_mismatched_ruling_escalates_instead_of_archiving(self):
-        for meta_decision in (None, {**DECISION, "decision": "CONTINUE"}):
-            with self.subTest(meta_decision=meta_decision):
-                state, requests = self.run_replan(*self.seed_replan(meta_decision), [])
+        for meta_decision, ruling_source in (
+            (None, True), ({**DECISION, "decision": "CONTINUE"}, True), (DECISION, False),
+        ):
+            with self.subTest(meta_decision=meta_decision, ruling_source=ruling_source):
+                state, requests = self.run_replan(
+                    *self.seed_replan(meta_decision, ruling_source=ruling_source), [])
                 self.assertEqual([], requests)
                 self.assertEqual("META_DECIDE", state["phase"])
                 self.assertEqual(1, state["plan_version"])
