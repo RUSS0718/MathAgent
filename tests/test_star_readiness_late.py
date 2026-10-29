@@ -21,6 +21,57 @@ from tests.test_star_readiness_coordinator import QUESTION_SPECS, SOURCE, frozen
 class StarReadinessLateUsageTest(unittest.TestCase):
     """Verify a late loopback response updates S3 after #97 archives an unknown Job."""
 
+    def test_collection_repeats_local_reads_when_attempt_changes_between_endpoints(self):
+        server = Mock()
+        version = [0]
+
+        def get(path):
+            if path.endswith("/report"):
+                return {"report": {"request_attempts": [{"version": version[0]}]}}
+            if path.endswith("/evidence"):
+                version[0] = 1
+                return {"request_attempts": [{"version": 1}]}
+            if path == "/api/agent/jobs/job-1":
+                return {"job_id": "job-1", "status": "failed", "result": {"version": version[0]}}
+            return {"run_id": "job-1"}
+
+        server.get.side_effect = get
+        bundle = ExperimentServer.collect(server, "job-1", time.time() - 1)
+        self.assertEqual(bundle["report"]["request_attempts"], bundle["evidence"]["request_attempts"])
+        self.assertEqual(1, bundle["job"]["result"]["version"])
+        server.post.assert_not_called()
+
+    def test_collection_preserves_stable_evidence_mismatch(self):
+        server = Mock()
+
+        def get(path):
+            if path.endswith("/report"):
+                return {"report": {"request_attempts": [{"version": 0}]}}
+            if path.endswith("/evidence"):
+                return {"request_attempts": [{"version": 1}]}
+            return {"status": "failed"}
+
+        server.get.side_effect = get
+        bundle = ExperimentServer.collect(server, "job-1", time.time() - 1)
+        self.assertNotEqual(bundle["report"]["request_attempts"], bundle["evidence"]["request_attempts"])
+        server.post.assert_not_called()
+
+    def test_collection_fails_boundedly_when_projection_keeps_changing(self):
+        server = Mock()
+        reads = []
+
+        def get(path):
+            if path == "/api/agent/jobs/job-1":
+                reads.append(True)
+                return {"status": "failed", "result": {"revision": len(reads)}}
+            return {"report": {}} if path.endswith("/report") else {}
+
+        server.get.side_effect = get
+        with self.assertRaisesRegex(ValueError, "experiment_public_snapshot_unstable"):
+            ExperimentServer.collect(server, "job-1", time.time() - 1)
+        self.assertLessEqual(len(reads), 7)  # initial check and at most three fences
+        server.post.assert_not_called()
+
     def test_late_usage_updates_original_attempt_after_terminal_archive_is_frozen(self):
         """Keep terminal files immutable while recording post-terminal usage separately."""
         provider = LoopbackProvider("late")
@@ -141,7 +192,7 @@ class StarReadinessLateUsageTest(unittest.TestCase):
         server = Mock()
         server.get.side_effect = [
             {"status": "running"}, {"status": "failed"}, {"status": "failed"},
-            {"report": {}}, {}, {},
+            {"report": {}}, {}, {}, {"status": "failed"},
         ]
         server.post.side_effect = ValueError("experiment_public_admission_failed")
 

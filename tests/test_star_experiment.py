@@ -257,18 +257,23 @@ class ExperimentPublicJobTest(unittest.TestCase):
         self.assertNotEqual("completed", result["stop_reason"])
 
     def test_cancel_while_independent_review_waits_stops_waiting(self):
-        completed = threading.Event()
+        entered, release, completed = (threading.Event() for _ in range(3))
+        self.addCleanup(release.set)
 
         def waiting_review(key, question, bundle):
-            threading.Timer(.05, self.coordinator.cancel).start()
-            time.sleep(.6)
+            entered.set()
+            self.coordinator.cancel()
+            release.wait(30)  # leak guard, not a required scheduler ordering
             completed.set()
             return independent_review(key, question, bundle)
 
         result = self.execute(reviewer=waiting_review)
         self.assertEqual("canceled", result["stop_reason"], result)
+        self.assertTrue(entered.is_set())
         self.assertFalse(completed.is_set(), "Review waiting must honor the round cancellation")
         self.assertEqual(1, result["executed_runs"])
+        release.set()
+        self.assertTrue(completed.wait(5))
 
     def test_known_protocol_defect_stops_after_bounded_repair_without_unknown(self):
         result = self.execute("protocol")
