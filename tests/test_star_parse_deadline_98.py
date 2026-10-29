@@ -224,20 +224,34 @@ class ProcessingDeadlineTest(unittest.TestCase):
 
     def test_delayed_partial_worker_cannot_block_complete_invalid_stream_evidence(self):
         start = threading.Thread.start
+        original_loads = json.loads
+        full_fragment_parsed = threading.Event()
+        parse_order = []
+
+        def observed_loads(value, *args, **kwargs):
+            parsed = original_loads(value, *args, **kwargs)
+            if (threading.current_thread().name == "showcase-late-settlement"
+                    and isinstance(value, str) and '"fragment"' in value):
+                parse_order.append("complete")
+                full_fragment_parsed.set()
+            return parsed
 
         def delayed_start(worker):
             if worker.name == "showcase-response-processing":
                 target = worker._target
 
                 def delayed():
-                    time.sleep(.6)  # Start the partial parse after the original .5s deadline.
-                    target()
+                    if full_fragment_parsed.wait(3):
+                        parse_order.append("partial")
+                        target()
 
                 worker._target = delayed
             return start(worker)
 
-        with patch.object(threading.Thread, "start", delayed_start):
+        with (patch.object(threading.Thread, "start", delayed_start),
+              patch.object(json, "loads", observed_loads)):
             self.assert_late_partial_preserves_invalid_evidence()
+        self.assertEqual(["complete", "partial"], parse_order)
 
     def assert_late_partial_preserves_invalid_evidence(self):
         ledger = RunBudgetLedger()
