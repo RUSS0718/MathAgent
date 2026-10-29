@@ -88,3 +88,14 @@ uv run python -m unittest tests.test_star_product_protocol_failure tests.test_st
 这些证据只支持工程候选。任意损坏 JSON、非法转义或无法还原原值的回复不在修复范围；不研究续写。修复不会判断原数学内容是否正确或与题目相关，原文中的指令仍是不可信数据，后续原角色审查负责数学判断。工具提议不等于工具回执或已证事实。
 
 未执行真实 provider、真实配对效果实验、全仓约 22 分钟组合门禁或全系列两轴最终审查；这些由主聊天分别协调。宿主实测为 Windows ACL；POSIX 权限分支未独立运行。历史 v7 没有完整回复，未构造其原文，也未更改或续跑历史批次。`tests/test.md` 未读取、修改、提交或删除。
+
+## 集成评审修复候选（2026-10-29）
+
+P1：新增公共 Job 在 `:serialization-1` completed 审计落盘后真实进程退出的回归。旧实现恢复失败；
+恢复保持无会话派发身份后成功，只派发后续 polish / whole review，原 deadline 与累计四次 logical/HTTP 不变。
+
+P2：FOUND / NOT_FOUND 的完整 fenced researcher 回复修复后，旧实现的 step review 为 invalid。
+修复保留控制器 claim 绑定（不进入修复 prompt），并复用既有 `completed_call_id` 解析消费和 pending review 的谱系。
+新增 researcher 修复 completed 后真实退出的公共 resume 回归：先消费原 Verifier 与 researcher，再执行后续四次调用；累计 HTTP=10，原 deadline 不变。
+这组新用例及重启、反例、候选、会话、流式、最终绑定、重试组合和预算的十个完整模块共57项通过，零跳过；变更 Ruff 与11个 baseline hash / 官方导入边界通过。
+以上仅为聚焦红绿证据；全系列组合门禁和修复后的独立验收复审尚待主聊天执行。

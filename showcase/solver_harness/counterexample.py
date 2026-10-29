@@ -5,6 +5,7 @@ from copy import deepcopy
 
 from .budget import budget_reason, stop
 from .calls import CallInterrupted
+from .protocol_repair import completed_call_id
 
 
 def pending_review(run):
@@ -16,7 +17,7 @@ def pending_review(run):
         return None
     step = run["state"].get("steps", {}).get(run["state"].get("current_step"), {})
     for record in step.get("counterexample_checks", {}).values():
-        if record.get("call_id") == call.get("call_id") or call.get("retry_of") == record.get("call_id"):
+        if completed_call_id(run["state"].get("calls", {}), record["call_id"]) == call.get("call_id"):
             verifier = run["state"].get("calls", {}).get(record["verifier_call_id"], {})
             if verifier.get("status") == "completed":
                 return record["verifier_call_id"], deepcopy(verifier["response"])
@@ -110,9 +111,7 @@ def run_check(harness, run, *, problem, declared, verifier_call_id):
     except Exception:
         run = harness.get_run(run["run_id"])
     valid = valid_result(result)
-    from .calls import latest_retry_id
-
-    record["call_id"] = latest_retry_id(run["state"].get("calls", {}), call_id)
+    record["call_id"] = completed_call_id(run["state"].get("calls", {}), call_id)
     record.update(status="completed" if valid else "invalid", result=deepcopy(result) if valid else None)
     if valid:
         record["evidence_category"] = (

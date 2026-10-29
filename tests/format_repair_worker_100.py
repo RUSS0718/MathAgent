@@ -14,20 +14,23 @@ from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
 from showcase.solver_harness import SolverHarness
 from tests.star_product_support import SOLVED
+from tests.test_star_product_counterexample import ACCEPT, FEATURES, FOUND, NEED_PLAN, PLAN, STEP
 
 
-def config(folder):
+def config(folder, *, research=False):
     return {"TESTING": True, "SHOWCASE_DATA_DIR": str(folder), "SHOWCASE_STAR_ENABLED": True,
             "SHOWCASE_JOB_DELAY_SECONDS": 0, "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection",
-            "SHOWCASE_STAR_FEATURES": {"serialization_repair": True},
+            "SHOWCASE_STAR_FEATURES": {"serialization_repair": True, **(FEATURES if research else {})},
             "SHOWCASE_STAR_ADAPTER": InternModelAdapter(InternChatClient(retry=1), max_tokens=256),
-            "SHOWCASE_STAR_BUDGET": RunBudgetLimits(max_model_calls=8, max_http_attempts=8)}
+            "SHOWCASE_STAR_BUDGET": RunBudgetLimits(max_model_calls=12 if research else 8,
+                                                  max_http_attempts=12 if research else 8)}
 
 
 def main():
     folder = Path(sys.argv[1])
     ready = threading.Event()
-    completed_exit = sys.argv[2:] == ["completed"]
+    research_exit = sys.argv[2:] == ["research-completed"]
+    completed_exit = research_exit or sys.argv[2:] == ["completed"]
     commit = SolverHarness.commit_event
 
     def exit_after_completed(harness, run_id, **kwargs):
@@ -47,6 +50,10 @@ def main():
             log.flush()
         if "visible_reply" in context and not completed_exit:
             os._exit(71)
+        value = ({"explore": NEED_PLAN, "planner": PLAN, "reasoner": STEP,
+                  "step_verifier": ACCEPT, "researcher": FOUND}[context["role"]]
+                 if research_exit else SOLVED)
+        wrapped = "visible_reply" not in context and (not research_exit or context["role"] == "researcher")
 
         class Reply:
             status_code = 200
@@ -62,8 +69,8 @@ def main():
 
             def json(self):
                 return {"model": "intern-s2", "choices": [{"finish_reason": "stop", "message": {
-                    "content": (json.dumps(SOLVED) if "visible_reply" in context
-                                else "```json\n" + json.dumps(SOLVED) + "\n```")}}],
+                    "content": ("```json\n" + json.dumps(value) + "\n```" if wrapped
+                                else json.dumps(value))}}],
                     "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}}
 
         return Reply()
@@ -71,7 +78,7 @@ def main():
     with patch.dict(os.environ, {"INTERN_API_KEY": "offline-only"}), patch(
             "llm_client.requests.post", side_effect=provider), patch.object(
             SolverHarness, "commit_event", exit_after_completed):
-        app = create_app(config(folder))
+        app = create_app(config(folder, research=research_exit))
         client = app.test_client()
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
         headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}

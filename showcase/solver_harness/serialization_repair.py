@@ -43,12 +43,12 @@ def repair_failure(harness, run, failed, operation, request):
     run.clear()
     run.update(reserved)
     repair = {key: request[key] for key in (
-        "run_id", "role", "problem_hash", "action", "guidance_request", "solution_candidate",
+        "run_id", "role", "problem_hash", "action", "guidance_request", "solution_candidate", "claim",
         "timeout_seconds", "phase_deadline_at", "batch_deadline_at") if key in request}
     repair.update(call_id=call_id, serialization_source=failed["response_ref"],
                   serialization_repair=True, strict_completion=True,
                   allowed_tools=[], tool_policy={"allow": []})
-    # solution_candidate binds the controller audit; repair_messages excludes it
+    # solution_candidate and claim bind the controller audit; repair_messages excludes them
     # from the model context, which contains only the original visible reply.
     # No session dispatch: repaired content is validated before the owning role
     # records it. The repair role never sees history or the original question.
