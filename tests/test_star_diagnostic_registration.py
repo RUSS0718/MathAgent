@@ -9,6 +9,31 @@ from tests.star_diagnostic_support import plan
 
 
 class RegistrationTest(unittest.TestCase):
+    def test_freeze_and_validation_agree_on_each_phase_wait_policy(self):
+        cases = {"P": (900, 901), "O": (1800, 900), "T": (900, 1800, 901),
+                 "T-3600": (3600, 1800), "R": (1, 1800, 1801), "S": (1800, 900)}
+        with tempfile.TemporaryDirectory() as directory:
+            for phase, waits in cases.items():
+                value = plan(phase, count=1)
+                value["requests"][0]["timeout_seconds"] = waits[0]
+                manifest = freeze(value, Path(directory) / phase)
+                for wait in waits:
+                    with self.subTest(phase=phase, wait=wait):
+                        changed = copy.deepcopy(manifest)
+                        changed["requests"][0].update(timeout_seconds=wait,
+                            shadow_seconds=900 if wait == 1800 else None)
+                        changed["sha256"] = digest({k: v for k, v in changed.items() if k != "sha256"})
+                        value["requests"][0]["timeout_seconds"] = wait
+                        target = Path(directory) / f"{phase}-{wait}"
+                        if wait == waits[-1]:
+                            with self.assertRaisesRegex(ValueError, "wait_invalid"):
+                                freeze(value, target)
+                            with self.assertRaisesRegex(ValueError, "request_limit"):
+                                validate(changed)
+                        else:
+                            validate(changed)
+                            freeze(value, target)
+
     def test_freeze_is_redacted_and_phase_limits_do_not_double_count(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = freeze(plan(), Path(directory) / "registration")

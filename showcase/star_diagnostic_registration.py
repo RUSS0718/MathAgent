@@ -22,6 +22,8 @@ PHASES = {
     "R": dict(requests=16, tokens=1048576, wait=28800, batch=32400),
     "S": dict(requests=8, tokens=524288, wait=14400, batch=16200),
 }
+PHASE_WAITS = {"P": {900}, "O": {1800}, "T": {900, 1800}, "T-3600": {3600},
+               "R": range(1, 1801), "S": {1800}}
 
 
 def digest(value):
@@ -71,8 +73,7 @@ def _request(request, phase):
     if type(request["stream"]) is not bool or (phase != "S" and request["stream"]):
         raise ValueError("diagnostic_stream_invalid")
     wait = request["timeout_seconds"]
-    allowed = {"P": {900}, "O": {1800}, "T": {900, 1800}, "T-3600": {3600}, "S": {1800}}
-    if type(wait) is not int or (wait not in allowed.get(phase, range(1, 1801))):
+    if type(wait) is not int or wait not in PHASE_WAITS[phase]:
         raise ValueError("diagnostic_wait_invalid")
     # Include the full wire-envelope estimate; never shorten a question/proof.
     size = len(json.dumps(dict(question=request["question"], prompt=request["prompt"],
@@ -171,9 +172,8 @@ def validate(manifest, *, check_source=False):
                 raise ValueError("diagnostic_hash_invalid")
         size = request["input_estimate"]
         wait = request["timeout_seconds"]
-        allowed = {"P": {900}, "O": {1800}, "T": {900, 1800}, "T-3600": {3600}, "S": {1800}}
         if (type(size) is not int or not 0 < size <= 49152 or type(wait) is not int
-                or wait not in allowed.get(phase, range(1, 1801))
+                or wait not in PHASE_WAITS[phase]
                 or request["shadow_seconds"] != (900 if wait == 1800 else None)):
             raise ValueError("diagnostic_request_limit")
     if sum(r["timeout_seconds"] for r in manifest["requests"]) > PHASES[phase]["wait"]:

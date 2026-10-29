@@ -140,4 +140,6 @@ uv run --offline python demo_server.py --help
 最终五个诊断专属完整模块，加 `tests.test_run_budget` 与 `tests.test_baseline_snapshot` 共47项通过（106.019秒），零跳过；
 命令为 `uv run --offline --no-sync python -B -m unittest tests.test_star_diagnostic_registration tests.test_star_diagnostic tests.test_star_diagnostic_monitor tests.test_star_diagnostic_process tests.test_star_diagnostic_cli tests.test_run_budget tests.test_baseline_snapshot`。
 本轮变更 Python 文件的 Ruff、11个 baseline hash 与官方导入边界均通过。
+P3 的重复等待策略已合并为唯一 `PHASE_WAITS` 查表，freeze 与 manifest validate 共用；
+新增六个阶段的允许/拒绝等待值矩阵（含 R 的1/1800/1801边界），包含在上述47项中。这是保持行为的去重，不声称原实现存在行为红例。
 这是聚焦修复候选，全系列门禁与修复后的验收复审仍由主聊天协调，不声明最终通过。
