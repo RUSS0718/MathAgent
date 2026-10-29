@@ -13,10 +13,27 @@ from tests.star_product_support import StarJobFixture
 from tests.test_star_product_tools import FEATURES, NEED_PLAN, PLAN, STEP
 
 
+def arm_parser_deadline(policy):
+    # Start the registered window after fixture setup, before submitting any
+    # Job. Never move an active Run's deadline to make a late parser pass.
+    started = time.time()
+    policy.round_deadline_at = started + 10
+    policy.phase_deadline_at = started + 2.5
+
+
 class JobParseDeadlineTest(StarJobFixture, unittest.TestCase):
+    def test_slow_fixture_setup_does_not_consume_parser_deadline(self):
+        original_open = self.open_star
+
+        def delayed_open(*args, **kwargs):
+            original_open(*args, **kwargs)
+            time.sleep(2.75)
+
+        with patch.object(self, "open_star", side_effect=delayed_open):
+            self.test_blocked_late_tool_reply_only_settles_original_attempt()
+
     def test_blocked_late_tool_reply_only_settles_original_attempt(self):
-        deadline = time.time() + 2.5
-        policy = ExperimentRunPolicy(time.time() + 10, phase_deadline_at=deadline)
+        policy = ExperimentRunPolicy(time.time() + 10)
         executed = []
         registry = ToolRegistry()
         registry.register("polynomial_check", lambda args: executed.append(args) or 2)
@@ -33,6 +50,7 @@ class JobParseDeadlineTest(StarJobFixture, unittest.TestCase):
             return json.loads(value, *args, **kwargs)
 
         with patch("llm_client.json", SimpleNamespace(loads=loads, dumps=json.dumps)):
+            arm_parser_deadline(policy)
             job_id = self.create_job()
             self.assertTrue(entered.wait(5))
             before = self.terminal(job_id)
@@ -64,8 +82,7 @@ class JobParseDeadlineTest(StarJobFixture, unittest.TestCase):
         from llm_client import InternChatClient
         from showcase.adapters import InternStreamAdapter
 
-        deadline = time.time() + 2.5
-        policy = ExperimentRunPolicy(time.time() + 10, phase_deadline_at=deadline)
+        policy = ExperimentRunPolicy(time.time() + 10)
         executed = []
         registry = ToolRegistry()
         registry.register("polynomial_check", lambda args: executed.append(args) or 2)
@@ -85,6 +102,7 @@ class JobParseDeadlineTest(StarJobFixture, unittest.TestCase):
             return json.loads(value, *args, **kwargs)
 
         with patch("showcase.adapters.json", SimpleNamespace(loads=loads, dumps=json.dumps)):
+            arm_parser_deadline(policy)
             job_id = self.create_job()
             self.assertTrue(entered.wait(5))
             before = self.terminal(job_id)
@@ -115,8 +133,7 @@ class JobParseDeadlineTest(StarJobFixture, unittest.TestCase):
         from showcase.adapters import InternStreamAdapter
         from showcase.request_attempts import record_attempts
 
-        deadline = time.time() + 2.5
-        policy = ExperimentRunPolicy(time.time() + 10, phase_deadline_at=deadline)
+        policy = ExperimentRunPolicy(time.time() + 10)
         executed = []
         registry = ToolRegistry()
         registry.register("polynomial_check", lambda args: executed.append(args) or 2)
@@ -139,6 +156,7 @@ class JobParseDeadlineTest(StarJobFixture, unittest.TestCase):
             return record_attempts(events, metadata)
 
         with patch("showcase.adapters.record_attempts", side_effect=slow_record):
+            arm_parser_deadline(policy)
             job_id = self.create_job()
             self.assertTrue(entered.wait(5))
             before = self.terminal(job_id)
@@ -160,8 +178,7 @@ class JobParseDeadlineTest(StarJobFixture, unittest.TestCase):
     def test_blocked_tool_normalization_does_not_continue_the_job(self):
         from showcase.adapters import parse_tool_requests
 
-        deadline = time.time() + 2.5
-        policy = ExperimentRunPolicy(time.time() + 10, phase_deadline_at=deadline)
+        policy = ExperimentRunPolicy(time.time() + 10)
         executed = []
         registry = ToolRegistry()
         registry.register("polynomial_check", lambda args: executed.append(args) or 2)
@@ -179,6 +196,7 @@ class JobParseDeadlineTest(StarJobFixture, unittest.TestCase):
             return parse_tool_requests(text, *args, **kwargs)
 
         with patch("showcase.adapters.parse_tool_requests", side_effect=parse):
+            arm_parser_deadline(policy)
             job_id = self.create_job()
             self.assertTrue(entered.wait(5))
             before = self.terminal(job_id)
