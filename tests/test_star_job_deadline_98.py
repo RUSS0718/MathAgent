@@ -12,8 +12,7 @@ from tests.star_product_support import SOLVED, StarJobFixture
 
 class PublicJobDeadlineTest(StarJobFixture, unittest.TestCase):
     def test_buffered_complete_reply_reconciles_if_job_consumer_misses_deadline(self):
-        phase_deadline = time.time() + 1.2
-        policy = ExperimentRunPolicy(time.time() + 8, phase_deadline_at=phase_deadline)
+        policy = ExperimentRunPolicy(time.time() + 8)
         self.open_star([], retry=3, SHOWCASE_STAR_EXPERIMENT_POLICY=policy,
                        SHOWCASE_STAR_FEATURES={"strict_completion": True})
         reader_finished = threading.Event()
@@ -35,6 +34,8 @@ class PublicJobDeadlineTest(StarJobFixture, unittest.TestCase):
                     "completion_tokens": 3, "total_tokens": 10}}).encode()
 
         self.post.side_effect = lambda *_args, **_kwargs: Reply()
+        phase_deadline = time.time() + 1.2
+        policy.phase_deadline_at = phase_deadline
         job = self.terminal(self.create_job())
         self.assertTrue(reader_finished.is_set())
         self.assertEqual("failed", job["status"])
@@ -102,8 +103,7 @@ class PublicJobDeadlineTest(StarJobFixture, unittest.TestCase):
         self.assertEqual("timeout", attempts[0]["error_category"])
         self.assertAlmostEqual(batch_deadline, attempts[0]["deadline_at"], delta=0.08)
     def test_phase_deadline_reaches_inflight_request_and_preserves_unknown(self):
-        phase_deadline = time.time() + 1.2
-        policy = ExperimentRunPolicy(time.time() + 8, phase_deadline_at=phase_deadline)
+        policy = ExperimentRunPolicy(time.time() + 8)
         self.open_star([], retry=3, SHOWCASE_STAR_EXPERIMENT_POLICY=policy,
                        SHOWCASE_STAR_FEATURES={"strict_completion": True})
         release = threading.Event()
@@ -130,6 +130,8 @@ class PublicJobDeadlineTest(StarJobFixture, unittest.TestCase):
             return Reply()
 
         self.post.side_effect = delayed
+        phase_deadline = time.time() + 1.2
+        policy.phase_deadline_at = phase_deadline
         job_id = self.create_job()
         job = self.terminal(job_id)
         self.assertEqual("failed", job["status"])

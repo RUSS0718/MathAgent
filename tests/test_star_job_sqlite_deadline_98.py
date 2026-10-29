@@ -16,9 +16,8 @@ from tests.star_product_support import SOLVED, StarJobFixture
 
 class JobSqliteDeadlineTest(StarJobFixture, unittest.TestCase):
     def test_write_lock_keeps_unknown_attempt_visible_until_terminal_is_persisted(self):
-        deadline = time.time() + 2
-        self.open_star([], SHOWCASE_STAR_EXPERIMENT_POLICY=ExperimentRunPolicy(
-            time.time() + 15, phase_deadline_at=deadline),
+        policy = ExperimentRunPolicy(time.time() + 15)
+        self.open_star([], SHOWCASE_STAR_EXPERIMENT_POLICY=policy,
             SHOWCASE_STAR_FEATURES={"strict_completion": True})
         service = self.app.extensions["showcase_workspace_service"]
         ledger = service.budget_ledger
@@ -68,6 +67,8 @@ class JobSqliteDeadlineTest(StarJobFixture, unittest.TestCase):
 
         try:
             with patch("showcase.request_transport.response_events", side_effect=transport):
+                deadline = time.time() + 2
+                policy.phase_deadline_at = deadline
                 job_id = self.create_job()
                 self.assertTrue(held.wait(5))
                 self.assertTrue(timeout_sent.wait(max(0, deadline - time.time()) + 3),

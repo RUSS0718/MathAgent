@@ -87,8 +87,6 @@ class DispatchBoundaryTest(unittest.TestCase):
         self.addCleanup(release.set)
         source, first = inspect.getsourcelines(request_transport.response_events)
         post_line = next(first + i for i, line in enumerate(source) if "response = post(" in line)
-        deadline = time.time() + .5
-
         def trace(frame, event, arg):
             if frame.f_code.co_name == "read_response" and event == "line" and frame.f_lineno == post_line:
                 parked.set()
@@ -106,6 +104,7 @@ class DispatchBoundaryTest(unittest.TestCase):
         try:
             with patch("showcase.request_transport.requests.post", side_effect=fake_post):
                 with bind_budget(budget), self.assertRaises(AdapterError) as caught:
+                    deadline = time.time() + .5
                     adapter.complete([{"role": "user", "content": "offline"}],
                                      metadata={"role": "explore", "phase_deadline_at": deadline})
                 self.assertTrue(parked.is_set())

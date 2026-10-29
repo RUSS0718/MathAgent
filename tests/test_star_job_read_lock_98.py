@@ -16,9 +16,8 @@ from tests.star_product_support import StarJobFixture
 
 class JobReadLockTest(StarJobFixture, unittest.TestCase):
     def test_job_read_at_deadline_does_not_wait_for_blocked_workspace_writer(self):
-        deadline = time.time() + 2
-        self.open_star([], SHOWCASE_STAR_EXPERIMENT_POLICY=ExperimentRunPolicy(
-            time.time() + 20, phase_deadline_at=deadline),
+        policy = ExperimentRunPolicy(time.time() + 20)
+        self.open_star([], SHOWCASE_STAR_EXPERIMENT_POLICY=policy,
             SHOWCASE_STAR_FEATURES={"strict_completion": True})
         service = self.app.extensions["showcase_workspace_service"]
         delivered = threading.Event()
@@ -70,6 +69,8 @@ class JobReadLockTest(StarJobFixture, unittest.TestCase):
                 finished.set()
 
         with patch("showcase.request_transport.response_events", side_effect=transport):
+            deadline = time.time() + 2
+            policy.phase_deadline_at = deadline
             job_id = self.create_job()
             self.assertTrue(delivered.wait(3))
             self.assertNotIn("observation", self.job(job_id))

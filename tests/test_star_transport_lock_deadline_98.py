@@ -58,7 +58,6 @@ class TransportLockDeadlineTest(unittest.TestCase):
         ledger = RunBudgetLedger()
         self.addCleanup(ledger.close)
         budget = ledger.ensure("dispatch-gate-busy", RunBudgetLimits(max_runtime_seconds=8))
-        deadline = time.time() + .5
         failures, sends = [], []
         with patch.dict(os.environ, {"INTERN_API_KEY": "offline-placeholder"}):
             adapter = InternModelAdapter(InternChatClient(timeout=3, retry=1), max_tokens=32)
@@ -66,6 +65,7 @@ class TransportLockDeadlineTest(unittest.TestCase):
         def run():
             try:
                 with bind_budget(budget):
+                    deadline = time.time() + .5
                     adapter.complete([{"role": "user", "content": "offline"}],
                                      metadata={"role": "explore", "phase_deadline_at": deadline})
             except BaseException as exc:
@@ -95,7 +95,6 @@ class TransportLockDeadlineTest(unittest.TestCase):
     def test_busy_late_lock_returns_then_settles_complete_reply_once(self):
         entered, release, finished, settled = (threading.Event() for _ in range(4))
         self.addCleanup(release.set)
-        deadline = time.monotonic() + .5
         errors, callbacks = [], []
         body = json.dumps({"ok": True}).encode()
 
@@ -112,6 +111,7 @@ class TransportLockDeadlineTest(unittest.TestCase):
 
         def run():
             try:
+                deadline = time.monotonic() + .5
                 events = response_events("https://offline.invalid", deadline=deadline, timeout=3,
                                          on_late_response=late)
                 self.assertEqual("headers", next(events)[0])

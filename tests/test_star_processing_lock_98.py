@@ -20,7 +20,7 @@ class ProcessingHandoffLockTest(unittest.TestCase):
         ledger = RunBudgetLedger()
         self.addCleanup(ledger.close)
         budget = ledger.ensure("processing-gate-busy", RunBudgetLimits(max_runtime_seconds=15))
-        deadline = time.time() + 3
+        deadline_at = []
         body = json.dumps({
             "choices": [{"finish_reason": "stop", "message": {"content": "ok"}}],
             "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
@@ -78,9 +78,10 @@ class ProcessingHandoffLockTest(unittest.TestCase):
         def run():
             try:
                 with bind_budget(budget):
+                    deadline_at.append(time.time() + 3)
                     results.append(adapter.complete(
                         [{"role": "user", "content": "offline"}],
-                        metadata={"role": "explore", "phase_deadline_at": deadline,
+                        metadata={"role": "explore", "phase_deadline_at": deadline_at[0],
                                   "strict_completion": True},
                     ))
             except BaseException as exc:
@@ -95,7 +96,7 @@ class ProcessingHandoffLockTest(unittest.TestCase):
             worker.start()
             try:
                 self.assertTrue(entered.wait(5), "processing did not reach the handoff")
-                self.assertTrue(finished.wait(max(0, deadline - time.time()) + 3),
+                self.assertTrue(finished.wait(max(0, deadline_at[0] - time.time()) + 3),
                                 "caller waited for the preempted processing lock")
                 self.assertFalse(release.is_set())
                 pending, = ledger.attempts(budget.run_id)
