@@ -30,7 +30,11 @@ def process_before_deadline(process, deadline, on_late):
             on_late(result, error)
 
     threading.Thread(target=run, name="showcase-response-processing", daemon=True).start()
-    ready.wait(max(0, deadline - time.monotonic()))
+    while not ready.is_set():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        ready.wait(remaining)
     if not lock.acquire(timeout=max(0, deadline - time.monotonic())):
         def detach_later():
             with lock:
