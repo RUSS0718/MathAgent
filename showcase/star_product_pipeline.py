@@ -122,8 +122,13 @@ class StarProductPipeline:
         deadlines = ({"phase_deadline_at": self.experiment_policy.phase_deadline_at,
                       "batch_deadline_at": self.experiment_policy.round_deadline_at}
                      if self.experiment_policy is not None else None)
-        port = InternModelPort(self.adapter, original_problem=problem, deadlines=deadlines)
         base = self.full_config if solver_mode in FULL_MODES else self.config
+        from pathlib import Path
+
+        private_dir = (Path(self.database_path).resolve().parent / "restricted-protocol-replies"
+                       if base["features"].get("serialization_repair") is True else None)
+        port = InternModelPort(self.adapter, original_problem=problem, deadlines=deadlines,
+                               restricted_reply_dir=private_dir)
         features = dict(base["features"])
         # SP-13 合同：reference 核心恰为 9 项；candidate_registry/best_effort 仅由
         # Best-Effort 附加；受限模式保留 SP-11 已验收的候选历史行为。
