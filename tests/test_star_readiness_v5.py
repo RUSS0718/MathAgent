@@ -245,6 +245,9 @@ class StarReadinessV5Test(unittest.TestCase):
     def test_v5_nonstream_http_wait_obeys_run_and_round_deadlines_without_resend(self):
         for limiting_deadline in ("run", "round"):
             with self.subTest(limiting_deadline=limiting_deadline):
+                # Hold wall time through setup. Transport's monotonic deadline can
+                # conservatively expire earlier after a slow remaining-budget read.
+                clock = self.enterContext(patch("time.time", return_value=time.time()))
                 release = threading.Event()
                 received = []
 
@@ -254,6 +257,8 @@ class StarReadinessV5Test(unittest.TestCase):
 
                     def do_POST(self):
                         received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                        # Expire the original Run/round only after the request is in flight.
+                        clock.return_value = original_deadline + .001
                         release.wait(2)
                         body = json.dumps({
                             "model": "intern-s2", "choices": [{
