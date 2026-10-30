@@ -1,4 +1,4 @@
-"""Run the repository suite and report each skipped test and its reason."""
+"""Run the full or explicitly selected unittest suite and report skipped tests."""
 
 from __future__ import annotations
 
@@ -57,8 +57,13 @@ def discover_suite(tests_dir):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--require-reference", action="store_true")
+    parser.add_argument("test_names", nargs="*")
     args = parser.parse_args()
-    suite = discover_suite(ROOT / "tests")
+    suite = (
+        unittest.defaultTestLoader.loadTestsFromNames(args.test_names)
+        if args.test_names
+        else discover_suite(ROOT / "tests")
+    )
     required = REFERENCE_TESTS if args.require_reference else frozenset()
     return 0 if run_suite(suite, stream=sys.stderr, required=required).wasSuccessful() else 1
 

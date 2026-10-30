@@ -58,8 +58,31 @@ class ReplayReleaseTest(unittest.TestCase):
         ):
             self.assertEqual(0, check_showcase_release.main())
         self.assertIn("showcase_release=PASS", output.getvalue())
-        self.assertTrue(
-            any("scripts/run_unittest_report.py" in call.args[0] for call in run.call_args_list)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(
+            [check_showcase_release.sys.executable, "scripts/check_workspace.py", "--offline"],
+            commands,
+        )
+        test_commands = [command for command in commands if "scripts/run_unittest_report.py" in command]
+        self.assertEqual(1, len(test_commands))
+        self.assertEqual(
+            set(check_showcase_release.STAR_ACCEPTANCE_TESTS),
+            set(test_commands[0][2:]),
+        )
+        self.assertIn(
+            [
+                check_showcase_release.sys.executable,
+                "scripts/check_solver_release.py",
+                "--matrix-only",
+            ],
+            commands,
+        )
+        self.assertFalse(
+            any(
+                "scripts/check_solver_release.py" in command
+                and "--matrix-only" not in command
+                for command in commands
+            )
         )
         baseline.assert_called_once()
         evidence.assert_called_once()
@@ -74,7 +97,13 @@ class ReplayReleaseTest(unittest.TestCase):
             redirect_stdout(StringIO()),
         ):
             self.assertEqual(0, check_showcase_release.main())
-        self.assertTrue(any("--require-reference" in call.args[0] for call in run.call_args_list))
+        command = next(
+            call.args[0]
+            for call in run.call_args_list
+            if "scripts/run_unittest_report.py" in call.args[0]
+        )
+        self.assertIn("--require-reference", command)
+        self.assertIn("tests.test_star_rb06_recovery", command)
 
 
 if __name__ == "__main__":

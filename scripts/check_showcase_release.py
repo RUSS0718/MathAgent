@@ -15,6 +15,11 @@ REPLAY = ROOT / "docs" / "replay" / "showcase-replay-v0.1.json"
 EVIDENCE_JSON = ROOT / "docs" / "evals" / "v0.2-release-evidence.json"
 EVIDENCE_MD = ROOT / "docs" / "evals" / "v0.2-release-evidence.md"
 BASELINE = ROOT / "BASELINE.json"
+STAR_ACCEPTANCE_TESTS = (
+    "tests.test_star_product_explore_compute.StarExploreComputeTest",
+    "tests.test_star_product_protocol_failure.StarProtocolFailureTest",
+    "tests.test_star_product_protocol_failure.StarProtocolFenceTest",
+)
 sys.path.insert(0, str(ROOT))
 
 from showcase.redaction import sensitive_markers  # noqa: E402
@@ -88,15 +93,17 @@ def main() -> int:
         help="fail when the selected full Reference tests are skipped or missing",
     )
     args = parser.parse_args()
-    test_command = [sys.executable, "scripts/run_unittest_report.py"]
+    test_command = [sys.executable, "scripts/run_unittest_report.py", *STAR_ACCEPTANCE_TESTS]
     if args.require_reference:
         test_command.append("--require-reference")
+        test_command.append("tests.test_star_product_full_modes.StarFullModeTest")
+        test_command.append("tests.test_star_rb06_recovery")
     checks = [
         [sys.executable, "scripts/check_workspace.py", "--offline"],
+        [sys.executable, "scripts/check_solver_release.py", "--matrix-only"],
         test_command,
         [sys.executable, "demo_server.py", "--help"],
         [sys.executable, "showcase_server.py", "--help"],
-        [sys.executable, "scripts/check_solver_release.py"],
     ]
     for command in checks:
         environment = os.environ.copy()
