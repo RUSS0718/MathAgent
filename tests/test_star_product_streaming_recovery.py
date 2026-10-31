@@ -360,7 +360,17 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
                         "retry_call": {"call_id": old_id, "new_call_id": str(uuid.uuid4())}},
                         headers=self.headers())
                     self.assertEqual(202, response.status_code, response.get_json())
-                    final = self.terminal(job_id)
+                    # The resumed path persists one redacted activity event per
+                    # stream boundary. Keep the recovery assertion bounded, but
+                    # allow the Windows SQLite worker enough time to drain all
+                    # eleven controlled calls.
+                    deadline = time.monotonic() + 45
+                    final = self.job(job_id)
+                    while final["status"] not in {"succeeded", "failed", "canceled"} \
+                            and time.monotonic() < deadline:
+                        time.sleep(.02)
+                        final = self.job(job_id)
+                    self.assertIn(final["status"], {"succeeded", "failed", "canceled"}, final)
                     self.assertEqual("succeeded", final["status"], final)
                     self.assertEqual(11, len((folder / "requests.jsonl").read_text().splitlines()))
                     budget = final["result"]["budget"]
