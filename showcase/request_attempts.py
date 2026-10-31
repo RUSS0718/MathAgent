@@ -30,6 +30,16 @@ def record_attempts(events, metadata=None):
     return tuple(records)
 
 
+def publish_attempts(records):
+    """Publish already-projected attempts in the calling execution context."""
+    capture = _capture.get()
+    if capture:
+        for record in records:
+            capture[1].append(record)
+            if capture[2]:
+                capture[2]({"type": "request_attempt", "job_id": capture[0], "attempt": record})
+
+
 def capture_pipeline_attempts(function):
     @wraps(function)
     def run(self, run_id, *args, **kwargs):

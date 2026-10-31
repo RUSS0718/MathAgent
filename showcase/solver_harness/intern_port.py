@@ -42,14 +42,21 @@ def _protocol_failure(category, record, text):
     return error
 
 
-def _request_metadata(request):
+def _request_metadata(request, deadlines=None):
     """Pure adapter metadata mapping for one invocation; no metering inside."""
-    return {
+    metadata = {
         "run_id": request.get("run_id"),
         "call_id": request.get("call_id"),
         "role": request["role"],
         "timeout_seconds": request.get("timeout_seconds"),
+        "phase_deadline_at": request.get("phase_deadline_at"),
+        "batch_deadline_at": request.get("batch_deadline_at"),
+        "strict_completion": request.get("strict_completion") is True,
     }
+    for name, limit in (deadlines or {}).items():
+        if limit is not None:
+            metadata[name] = min(metadata[name], limit) if metadata[name] is not None else limit
+    return metadata
 
 
 def _invocation_record(request, model_id, *, stream=False):
@@ -107,9 +114,10 @@ def _loads_known_escape_rescue(text):
 class InternModelPort:
     """Reasoner/Verifier/Meta bridge, with no implicit live adapter creation."""
 
-    def __init__(self, adapter: InternModelAdapter | None = None, *, original_problem=None):
+    def __init__(self, adapter: InternModelAdapter | None = None, *, original_problem=None, deadlines=None):
         self.adapter = adapter
         self.original_problem = original_problem
+        self.deadlines = deadlines
         self.invocations = []
 
     def verify(self, request):
@@ -127,7 +135,7 @@ class InternModelPort:
         started = time.monotonic()
         record = _invocation_record(request, self.adapter.model_id)
         try:
-            response = self.adapter.complete(messages, metadata=_request_metadata(request))
+            response = self.adapter.complete(messages, metadata=_request_metadata(request, self.deadlines))
             record.update(
                 effective_model=response.model_id,
                 returned_model=response.returned_model,
@@ -178,7 +186,7 @@ class InternModelPort:
 
         try:
             envelope = None
-            for chunk in self.adapter.stream_complete(messages, metadata=_request_metadata(request)):
+            for chunk in self.adapter.stream_complete(messages, metadata=_request_metadata(request, self.deadlines)):
                 if chunk.get("type") == "text_delta" and isinstance(chunk.get("text"), str):
                     metrics["fragments"] += 1
                     metrics["bytes"] += len(chunk["text"].encode("utf-8"))
