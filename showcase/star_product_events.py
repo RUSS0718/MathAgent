@@ -26,6 +26,7 @@ def decision_fields(event, state, invocations=()):
         "rescued_result_count", "failure_type", "action_type", "use_pure_reasoning",
         "specific_task_consumed", "triggered_by", "counterexample_verdict",
         "decision_revision", "classified_outcomes", "rejected_outcomes",
+        "stream_metrics",
     ) if key in event}
     roles = {
         "step_reported": "reasoner",
@@ -111,6 +112,25 @@ def decision_fields(event, state, invocations=()):
                 "bytes": stream["bytes"],
                 "status": stream["status"],
             }
+        calls = state.get("calls", {})
+        if isinstance(calls, Mapping):
+            call = next(
+                (item for item in reversed(list(calls.values()))
+                 if isinstance(item, Mapping) and item.get("role") in accepted_roles),
+                None,
+            )
+            activity = call.get("stream_metrics") if isinstance(call, Mapping) else None
+            if isinstance(activity, Mapping):
+                fields["stream_activity"] = {
+                    key: activity.get(key)
+                    for key in (
+                        "dispatched_at", "response_headers_at", "first_event_at",
+                        "first_reasoning_at", "first_content_at", "last_activity_at",
+                        "completion_at", "event_count", "reasoning_chars", "content_bytes",
+                        "usage_known", "status",
+                    )
+                    if activity.get(key) is not None
+                }
         skills = invocation.get("active_skill_ids")
         if isinstance(skills, list) and all(isinstance(item, str) for item in skills):
             fields["active_skill_ids"] = skills

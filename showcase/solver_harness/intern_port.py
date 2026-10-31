@@ -42,7 +42,7 @@ def _protocol_failure(category, record, text):
     return error
 
 
-def _request_metadata(request, deadlines=None):
+def _request_metadata(request, deadlines=None, activity_observer=None):
     """Pure adapter metadata mapping for one invocation; no metering inside."""
     metadata = {
         "run_id": request.get("run_id"),
@@ -56,6 +56,8 @@ def _request_metadata(request, deadlines=None):
     for name, limit in (deadlines or {}).items():
         if limit is not None:
             metadata[name] = min(metadata[name], limit) if metadata[name] is not None else limit
+    if callable(activity_observer):
+        metadata["activity_observer"] = activity_observer
     return metadata
 
 
@@ -114,10 +116,12 @@ def _loads_known_escape_rescue(text):
 class InternModelPort:
     """Reasoner/Verifier/Meta bridge, with no implicit live adapter creation."""
 
-    def __init__(self, adapter: InternModelAdapter | None = None, *, original_problem=None, deadlines=None):
+    def __init__(self, adapter: InternModelAdapter | None = None, *, original_problem=None,
+                 deadlines=None, activity_observer=None):
         self.adapter = adapter
         self.original_problem = original_problem
         self.deadlines = deadlines
+        self.activity_observer = activity_observer
         self.invocations = []
 
     def verify(self, request):
@@ -130,12 +134,18 @@ class InternModelPort:
             raise InternPortError("live_not_enabled")
         schema = response_schema(request)
         messages = self._messages(request, schema)
+        activity_observer = request.get("activity_observer")
+        if not callable(activity_observer):
+            activity_observer = self.activity_observer
         if callable(getattr(self.adapter, "stream_complete", None)):
-            return self._complete_stream(request, schema, messages)
+            return self._complete_stream(request, schema, messages, activity_observer)
         started = time.monotonic()
         record = _invocation_record(request, self.adapter.model_id)
         try:
-            response = self.adapter.complete(messages, metadata=_request_metadata(request, self.deadlines))
+            response = self.adapter.complete(
+                messages,
+                metadata=_request_metadata(request, self.deadlines, activity_observer),
+            )
             record.update(
                 effective_model=response.model_id,
                 returned_model=response.returned_model,
@@ -173,7 +183,7 @@ class InternModelPort:
             record["duration_seconds"] = time.monotonic() - started
             self.invocations.append(redact(record))
 
-    def _complete_stream(self, request, schema, messages):
+    def _complete_stream(self, request, schema, messages, activity_observer=None):
         """Stream fragments through the caller's audit; strict schema gates the result.
 
         Each ``text_delta`` is yielded as it arrives so ``calls`` persists it before
@@ -186,7 +196,10 @@ class InternModelPort:
 
         try:
             envelope = None
-            for chunk in self.adapter.stream_complete(messages, metadata=_request_metadata(request, self.deadlines)):
+            for chunk in self.adapter.stream_complete(
+                messages,
+                metadata=_request_metadata(request, self.deadlines, activity_observer),
+            ):
                 if chunk.get("type") == "text_delta" and isinstance(chunk.get("text"), str):
                     metrics["fragments"] += 1
                     metrics["bytes"] += len(chunk["text"].encode("utf-8"))

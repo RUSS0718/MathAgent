@@ -265,6 +265,8 @@ class InternStreamAdapter(InternModelAdapter):
 
     def stream_complete(self, messages, *, metadata=None):
         """Yield provider fragments, then exactly one complete result envelope."""
+        from .stream_activity import notify
+
         client = self._get_client()
         if any(not isinstance(getattr(client, name, None), str) for name in ("api_base", "authorization")):
             raise AdapterError("stream_transport_unavailable")
@@ -327,6 +329,8 @@ class InternStreamAdapter(InternModelAdapter):
         timeout_attempts = None
         late_state = None
         result = None
+        activity_observer = (metadata or {}).get("activity_observer")
+        activity_status = None
         try:
             from llm_client import _not_submitted, product_retry_delay
 
@@ -436,6 +440,7 @@ class InternStreamAdapter(InternModelAdapter):
                         attempt["event_count"] += 1
                         if attempt["first_event_seconds"] is None:
                             attempt["first_event_seconds"] = time.monotonic() - attempt_started
+                        notify(activity_observer, "event", event_count=attempt["event_count"])
                         if content == "[DONE]":
                             saw_done = True
                             return
@@ -482,11 +487,13 @@ class InternStreamAdapter(InternModelAdapter):
                             if attempt["first_reasoning_seconds"] is None:
                                 attempt["first_reasoning_seconds"] = time.monotonic() - attempt_started
                             attempt["reasoning_chars"] += len(reasoning)
+                            notify(activity_observer, "reasoning", event_count=attempt["event_count"], reasoning_chars=attempt["reasoning_chars"])
                         if isinstance(piece, str) and piece:
                             if attempt["first_content_seconds"] is None:
                                 attempt["first_content_seconds"] = time.monotonic() - attempt_started
                             parts.append(piece)
                             attempt["content_bytes"] += len(piece.encode("utf-8"))
+                            notify(activity_observer, "content", event_count=attempt["event_count"], content_bytes=attempt["content_bytes"])
                             yield_piece = {"type": "text_delta", "text": piece}
                             pending_chunks.append(yield_piece)
                         if isinstance(choice.get("finish_reason"), str):
@@ -495,6 +502,7 @@ class InternStreamAdapter(InternModelAdapter):
                             model_id = chunk["model"]
                         if isinstance(chunk.get("usage"), Mapping):
                             usage.update(chunk["usage"])
+                            notify(activity_observer, "usage", event_count=attempt["event_count"], usage_known=True)
 
                     pending_chunks = []
                     stream_complete = False
@@ -524,6 +532,7 @@ class InternStreamAdapter(InternModelAdapter):
                             response = value
                             attempt["http_status"] = response.status_code
                             attempt["response_headers_seconds"] = time.monotonic() - attempt_started
+                            notify(activity_observer, "response_headers")
                             response.raise_for_status()
                         elif kind == "bytes":
                             if attempt["first_byte_seconds"] is None:
@@ -597,6 +606,8 @@ class InternStreamAdapter(InternModelAdapter):
             )
             attempt["duration_seconds"] = round(time.monotonic() - attempt_started, 3)
             attempts.append(dict(attempt))
+            activity_status = "completed"
+            notify(activity_observer, "completion", event_count=attempt["event_count"], reasoning_chars=attempt["reasoning_chars"], content_bytes=attempt["content_bytes"], usage_known=bool(usage))
             def assemble_result():
                 projection_metadata = {**(metadata or {}), "run_id": call_budget.run_id} if call_budget else metadata
                 return {
@@ -630,6 +641,8 @@ class InternStreamAdapter(InternModelAdapter):
             check_processing_deadline()
             yield result
         except AdapterError as exc:
+            activity_status = "unknown"
+            notify(activity_observer, "unknown")
             attempt.update(status="error", error_category=exc.category, error_type=type(exc).__name__)
             attempt["duration_seconds"] = round(time.monotonic() - attempt_started, 3)
             attempts.append(dict(attempt))
@@ -637,6 +650,8 @@ class InternStreamAdapter(InternModelAdapter):
             raise
         except Exception as exc:  # noqa: BLE001 - provider details stay out of events
             category = _request_failure_category(exc)
+            activity_status = "deadline" if category == "timeout" else "disconnect" if category == "connectivity" else "unknown"
+            notify(activity_observer, activity_status)
             from llm_client import _not_submitted
             if not local_processing_timeout:
                 attempt.update(status="not_submitted" if _not_submitted(exc) else "error",
@@ -652,6 +667,8 @@ class InternStreamAdapter(InternModelAdapter):
                                       else record_attempts(attempts, metadata))
             raise error from exc
         finally:
+            if activity_status is None:
+                notify(activity_observer, "cancel")
             attempt["duration_seconds"] = round(time.monotonic() - attempt_started, 3)
             if not attempts:
                 attempts.append(dict(attempt))

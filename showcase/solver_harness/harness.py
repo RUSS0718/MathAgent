@@ -284,7 +284,8 @@ class SolverHarness:
             )
             and normalized_updates
             and not (
-                normalized_event["type"] == "call_audit" and set(normalized_updates) <= {"calls"}
+                normalized_event["type"] in {"call_audit", "call_activity"}
+                and set(normalized_updates) <= {"calls"}
             )
         ):
             raise SolverValidationError(

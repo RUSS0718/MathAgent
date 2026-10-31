@@ -6,7 +6,7 @@ from .tools import ToolRegistry
 
 OPTIONAL_FEATURES = frozenset({
     "final_generation", "final_solution_review", "local_code_tool", "meta_guidance",
-    "reexplore_after_replan", "skills",
+    "reexplore_after_replan", "skills", "stream_activity",
 })
 CORE_FEATURES = frozenset({
     "star_routing", "persistent_sessions", "stream_recovery", *OPTIONAL_FEATURES,

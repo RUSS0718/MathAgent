@@ -133,6 +133,8 @@ class StarProductPipeline:
             features["best_effort"] = True
         config = {**base, **({"hint_mode": "user_hint"} if solver_hint is not None else {}),
                   "features": features}
+        if callable(getattr(self.adapter, "stream_complete", None)):
+            config["features"]["stream_activity"] = True
         if self.experiment_policy is not None:
             limits = current_budget().snapshot()["limits"]
             config.update(max_model_calls=limits["max_model_calls"],

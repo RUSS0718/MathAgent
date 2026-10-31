@@ -4,6 +4,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from copy import deepcopy
+from datetime import UTC, datetime
 
 from ..redaction import redact
 from .intern_port import KNOWN_PROTOCOL_FAILURES
@@ -23,7 +24,9 @@ def pending_call(run):
     if not calls:
         return None
     record = max(calls.values(), key=lambda item: item["request_revision"])
-    audit = {"call_audit", "session_recorded", "call_retry_authorized", "session_started"}
+    audit = {
+        "call_audit", "call_activity", "session_recorded", "call_retry_authorized", "session_started"
+    }
     if any(event["state_revision"] > record["request_revision"]
            and event["type"] not in audit for event in run["events"]):
         return None
@@ -41,7 +44,7 @@ def latest_retry_id(calls, call_id):
     return call_id
 
 
-def _save(harness, run, record, *, status=None):
+def _save(harness, run, record, *, status=None, event_type="call_audit", event_fields=None):
     latest = harness.get_run(run["run_id"])
     updates = {"calls": {**latest["state"].get("calls", {}), record["call_id"]: redact(record)}}
     if status is not None and latest["state"]["phase"] != "TERMINAL":
@@ -51,9 +54,10 @@ def _save(harness, run, record, *, status=None):
         expected_revision=latest["state_revision"],
         event={
             "event_id": f"call-{record['call_id']}-{record['status']}-{latest['state_revision']}",
-            "type": "call_audit",
+            "type": event_type,
             "call_id": record["call_id"],
             "outcome": record["status"],
+            **(event_fields or {}),
         },
         state_updates=updates,
     )
@@ -116,6 +120,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "state_revision",
             "session_history_authority",
             "prompt_fingerprint",
+            "activity_observer",
         }
         safe_request = {
             key: deepcopy(value) for key, value in prepared.items() if key not in excluded
@@ -151,8 +156,71 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "partial_text": "",
             "usage": None,
         }
+        activity_enabled = harness._config.get("features", {}).get("stream_activity") is True
+        if activity_enabled:
+            record["stream_metrics"] = {
+                "status": "dispatched",
+                "dispatched_at": datetime.now(UTC).isoformat(),
+                "response_headers_at": None,
+                "first_event_at": None,
+                "first_reasoning_at": None,
+                "first_content_at": None,
+                "last_activity_at": None,
+                "completion_at": None,
+                "event_count": 0,
+                "reasoning_chars": 0,
+                "content_bytes": 0,
+                "usage_known": False,
+            }
         _save(harness, run, record)
         prepared = harness.prepare_request(run, prepared)
+        if activity_enabled:
+            def observe_activity(activity):
+                if not isinstance(activity, Mapping):
+                    return
+                latest = harness.get_run(run["run_id"])
+                current = latest["state"].get("calls", {}).get(call_id, record)
+                metrics = dict(current.get("stream_metrics", record["stream_metrics"]))
+                kind = activity.get("kind")
+                at = activity.get("at")
+                if not isinstance(at, str) or not at.strip():
+                    at = datetime.now(UTC).isoformat()
+                metrics["last_activity_at"] = at
+                if kind == "response_headers":
+                    metrics["response_headers_at"] = metrics["response_headers_at"] or at
+                elif kind in {"event", "reasoning", "content", "usage"}:
+                    metrics["event_count"] = max(
+                        metrics.get("event_count", 0), int(activity.get("event_count", 0) or 0)
+                    )
+                    if kind == "event" and metrics["first_event_at"] is None:
+                        metrics["first_event_at"] = at
+                    if kind == "reasoning":
+                        metrics["first_reasoning_at"] = metrics["first_reasoning_at"] or at
+                    if kind == "content":
+                        metrics["first_content_at"] = metrics["first_content_at"] or at
+                    for key in ("reasoning_chars", "content_bytes"):
+                        value = activity.get(key)
+                        if type(value) is int and value >= 0:
+                            metrics[key] = max(metrics.get(key, 0), value)
+                    if kind == "usage":
+                        metrics["usage_known"] = activity.get("usage_known") is True
+                elif kind == "completion":
+                    metrics["completion_at"] = at
+                    metrics["status"] = "completed"
+                    metrics["usage_known"] = activity.get("usage_known") is True
+                elif kind in {"disconnect", "cancel", "deadline", "unknown"}:
+                    metrics["status"] = "unknown"
+                safe_metrics = {key: value for key, value in metrics.items() if key != "text"}
+                record["stream_metrics"] = safe_metrics
+                _save(
+                    harness,
+                    run,
+                    record,
+                    event_type="call_activity",
+                    event_fields={"activity_kind": kind or "activity", "stream_metrics": safe_metrics},
+                )
+
+            prepared["activity_observer"] = observe_activity
         partial = []
 
         def checkpoint():
