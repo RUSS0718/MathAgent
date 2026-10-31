@@ -278,6 +278,7 @@ class InternModelPort:
         tools = {"polynomial_check": POLYNOMIAL_CHECK_SCHEMA, "python_math": PYTHON_MATH_SCHEMA}
         context = deepcopy(dict(request))
         context.pop("prompt_layers", None)
+        context.pop("activity_observer", None)
         context["original_problem"] = original
         context["tool_argument_schemas"] = {
             name: value for name, value in tools.items() if name in request.get("allowed_tools", [])
