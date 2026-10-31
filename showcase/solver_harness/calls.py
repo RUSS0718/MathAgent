@@ -217,7 +217,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
                     run,
                     record,
                     event_type="call_activity",
-                    event_fields={"activity_kind": kind or "activity", "stream_metrics": safe_metrics},
+                    event_fields={"activity_kind": kind or "activity", "stream_activity": safe_metrics},
                 )
 
             prepared["activity_observer"] = observe_activity
