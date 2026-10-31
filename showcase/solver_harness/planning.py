@@ -4,7 +4,7 @@ from .finalize import budget_reason, commit, dispatch, finish
 from .plan import validate_plan
 
 
-def generate_initial_plan(harness, run, *, problem, model_port, config):
+def generate_initial_plan(harness, run, *, problem, model_port, config, metadata=None):
     if run["state"]["phase"] != "PLAN" or not config.get("features", {}).get("final_generation"):
         return run
     reason = budget_reason(run["state"], config)
@@ -49,7 +49,21 @@ def generate_initial_plan(harness, run, *, problem, model_port, config):
             preplan_hint=state.get("preplan_hint"),
             instruction="Return a Plan with version and 1..20 steps with step_id, title, objective and earlier-step depends_on references.",
         )
-    if config.get("features", {}).get("star_routing") is True:
+    if config.get("features", {}).get("planner_checkpoints") is True:
+        from .planner_checkpoint import generate_checkpoint_plan
+
+        run, plan = generate_checkpoint_plan(
+            harness,
+            run,
+            problem=problem,
+            model_port=model_port,
+            request=request,
+            version=version,
+            config=config,
+        )
+        if plan is None:
+            return run
+    elif config.get("features", {}).get("star_routing") is True:
         from .plan_generation import generated_plan
 
         run, plan = generated_plan(
