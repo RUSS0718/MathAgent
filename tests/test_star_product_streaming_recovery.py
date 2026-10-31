@@ -201,6 +201,16 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         expected_bytes = sum(len(piece.encode("utf-8"))
                              for piece in split_fragments(STEP))
         self.assertEqual(expected_bytes, reported["stream_metrics"]["bytes"])
+        activity_metrics = []
+        for line in stream.splitlines():
+            if not line.startswith("data: "):
+                continue
+            payload = json.loads(line[6:])
+            if payload.get("solver_event_type") == "call_activity":
+                activity_metrics.append(payload["stream_activity"])
+        self.assertTrue(activity_metrics, stream)
+        self.assertTrue(any(item.get("first_content_at") for item in activity_metrics))
+        self.assertTrue(all("text" not in item for item in activity_metrics))
         evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
         timeline_metrics = [event["stream_metrics"] for event in evidence["timeline"]
                             if event.get("stream_metrics")]
