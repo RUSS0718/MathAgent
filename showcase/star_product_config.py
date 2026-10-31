@@ -8,14 +8,16 @@ OPTIONAL_FEATURES = frozenset({
     "final_generation", "final_solution_review", "local_code_tool", "meta_guidance",
     "reexplore_after_replan", "skills", "stream_activity",
 })
+EXPERIMENTAL_FEATURES = frozenset({"reasoner_checkpoints"})
 CORE_FEATURES = frozenset({
     "star_routing", "persistent_sessions", "stream_recovery", *OPTIONAL_FEATURES,
 })
+SUPPORTED_FEATURES = CORE_FEATURES | EXPERIMENTAL_FEATURES
 
 
 def full_config(budget, features=None):
     if features is not None and (not isinstance(features, Mapping) or any(
-        key not in CORE_FEATURES | {"strict_completion"} or type(value) is not bool for key, value in features.items()
+        key not in SUPPORTED_FEATURES | {"strict_completion"} or type(value) is not bool for key, value in features.items()
     )):
         raise ValueError("star_full_features_invalid")
     enabled = dict.fromkeys(CORE_FEATURES, True) if features is None else dict(features)
@@ -38,7 +40,7 @@ def core_gaps(config):
 
 def limited_config(budget, features=None, registry=None):
     if features is not None and (not isinstance(features, Mapping) or any(
-        key not in OPTIONAL_FEATURES | {"strict_completion"} or type(value) is not bool for key, value in features.items()
+        key not in OPTIONAL_FEATURES | EXPERIMENTAL_FEATURES | {"strict_completion"} or type(value) is not bool for key, value in features.items()
     )):
         raise ValueError("star_features_invalid")
     if registry is not None and not isinstance(registry, ToolRegistry):

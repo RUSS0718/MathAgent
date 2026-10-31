@@ -149,6 +149,29 @@ SCHEMAS = {
     "researcher": obj({"findings": TEXTS}),
 }
 
+SCHEMAS["reasoner_checkpoint"] = obj(
+    {
+        "checkpoint": obj(
+            {
+                "protocol_version": {"type": "integer", "minimum": 1},
+                "checkpoint_id": TEXT,
+                "status": {"enum": ["YIELD", "FINAL", "BLOCKED", "FAILED"]},
+                "objective": TEXT,
+                "argument": TEXT,
+                "claims": {"type": "array", "items": CLAIM},
+                "blocked": {"type": "boolean"},
+                "dependencies": TEXTS,
+                "evidence": TEXTS,
+                "gaps": TEXTS,
+                "next_action": TEXT,
+            },
+            ["protocol_version", "checkpoint_id", "status", "objective", "argument",
+             "claims", "blocked", "dependencies", "evidence", "gaps", "next_action"],
+        ),
+    },
+    ["checkpoint"],
+)
+
 SCHEMAS["planner_checkpoint"] = obj(
     {
         "checkpoint": obj(
@@ -182,6 +205,8 @@ SCHEMAS["planner_checkpoint"] = obj(
 
 def response_schema(request):
     role = request["role"]
+    if role == "reasoner" and request.get("checkpoint_protocol"):
+        return SCHEMAS["reasoner_checkpoint"]
     if role == "planner" and request.get("checkpoint_protocol"):
         return SCHEMAS["planner_checkpoint"]
     if role == "researcher" and request.get("action") == "counterexample_check":

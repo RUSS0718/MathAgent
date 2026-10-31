@@ -155,6 +155,13 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         **({"pending_replan_request": redact(deepcopy(pending_replan))}
            if pending_replan is not None else {}),
     }
+    if harness._config.get("features", {}).get("reasoner_checkpoints") is True:
+        from .reasoner_checkpoint import current_checkpoints
+
+        checkpoints = current_checkpoints(state)
+        if checkpoints:
+            request["reasoner_checkpoint"] = deepcopy(checkpoints[-1])
+            request["open_obligations"] = list(checkpoints[-1].get("gaps", []))
     if isinstance(metadata.get("tool_failure"), str):
         request["tool_failure"] = metadata["tool_failure"]
     revision = run["state_revision"]

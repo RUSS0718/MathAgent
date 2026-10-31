@@ -271,6 +271,12 @@ class InternModelPort:
             "If a report already contains tool_receipts, review those actual inputs/outputs and continue the review; the runtime executed them, not you. "
             "A reviewer may propose at most one tool_request per reply while its verdict is still pending; judge only from recorded receipts, never from assumed outputs."
         )
+        if request.get("checkpoint_protocol"):
+            instructions += (
+                " This Reasoner call uses the checkpoint protocol: return only the checkpoint wrapper; "
+                "YIELD must retain open gaps, FINAL must have no gaps, and a checkpoint is a partial "
+                "handoff rather than completion of the whole Step."
+            )
         system = [{"role": "system", "content": instructions}]
         system.extend(
             {"role": "system", "content": json.dumps(layer, ensure_ascii=False)} for layer in layers
