@@ -328,6 +328,12 @@ class RunBudget:
     def snapshot(self):
         return self.ledger.snapshot(self.run_id)
 
+    def absolute_deadline(self):
+        """Keep the original UTC deadline; never round-trip through duration clocks."""
+        deadline = self.snapshot()["deadline_at"]
+        scoped = getattr(self, "deadline_at", None)
+        return min(deadline, scoped) if scoped is not None else deadline
+
     def remaining_seconds(self):
         return max(0.001, self.snapshot()["deadline_at"] - time.time())
 

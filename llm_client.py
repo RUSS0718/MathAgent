@@ -220,16 +220,13 @@ class InternChatClient:
         self.last_response_metadata = None
         # Only the explicit metered product path opts into conservative retries.
         attempts_limit = min(self.retry, 3) if _attempt_budget is not None else self.retry
-        logical_deadline = time.monotonic() + effective_timeout
+        clock = time.monotonic
         if _attempt_budget is not None:
-            # remaining_seconds() may read the shared SQLite ledger and block
-            # behind its writer.  Anchor the wall-clock remainder after that
-            # read so the persisted absolute deadline is not shortened by
-            # evaluating time.monotonic() first.
-            budget_remaining = _attempt_budget.remaining_seconds()
-            logical_deadline = min(
-                logical_deadline, time.monotonic() + budget_remaining
-            )
+            from showcase.deadline_clock import guarded_utc_clock
+            clock = guarded_utc_clock(time.time)
+        logical_deadline = clock() + effective_timeout
+        if _attempt_budget is not None:
+            logical_deadline = min(logical_deadline, _attempt_budget.absolute_deadline())
         for attempt in range(attempts_limit):
             attempt_started = time.perf_counter()
             attempt_state_lock = threading.RLock()
@@ -260,13 +257,13 @@ class InternChatClient:
             if _attempt_budget is not None:
                 from showcase.attempt_projection import MeteredAttemptEvent
 
-                request_event["deadline_at"] = time.time() + max(0, logical_deadline - time.monotonic())
+                request_event["deadline_at"] = logical_deadline
                 request_event = MeteredAttemptEvent(request_event)
                 request_event.state_lock = attempt_state_lock
                 estimate = len(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"))
                 attempt_timeout = min(
                     effective_timeout,
-                    max(0.001, logical_deadline - time.monotonic()),
+                    max(0.001, logical_deadline - clock()),
                     _attempt_budget.before_attempt(request_event, estimate),
                 )
                 request_event["effective_timeout_seconds"] = attempt_timeout
@@ -397,6 +394,7 @@ class InternChatClient:
                         headers=headers,
                         data=request_data,
                         deadline=logical_deadline,
+                        clock=clock,
                         timeout=self.timeout,
                         loopback_only=self.loopback_only,
                         provider_endpoint_only=self.provider_endpoint_only,
@@ -431,7 +429,7 @@ class InternChatClient:
                         )
 
                     data = process_before_deadline(
-                        lambda: json.loads(response_body), logical_deadline, settle_processed
+                        lambda: json.loads(response_body), logical_deadline, settle_processed, clock=clock
                     )
                 else:
                     if self.loopback_only or self.provider_endpoint_only:
@@ -520,7 +518,7 @@ class InternChatClient:
                     }
                 )
                 self.latencies.append(time.perf_counter() - started)
-                if _attempt_budget is not None and time.monotonic() >= logical_deadline:
+                if _attempt_budget is not None and clock() >= logical_deadline:
                     local_processing_timeout = True
                     raise requests.ReadTimeout("logical_deadline_exceeded_during_processing")
                 return content
@@ -601,7 +599,7 @@ class InternChatClient:
                     self._request_sequence += 1
             if _attempt_budget is not None:
                 delay = product_retry_delay(failure, response, attempt, _attempt_budget)
-                if delay is None or time.monotonic() + delay >= logical_deadline:
+                if delay is None or clock() + delay >= logical_deadline:
                     break
                 if attempt + 1 < attempts_limit:
                     time.sleep(delay)

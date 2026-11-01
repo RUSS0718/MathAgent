@@ -7,12 +7,13 @@ from contextvars import Context
 import requests
 
 
-def process_before_deadline(process, deadline, on_late):
+def process_before_deadline(process, deadline, on_late, *, clock=None):
     """Run processing without waiting for a timed-out worker or its callback.
 
     Exactly one side owns the result: the caller before the deadline, or the
     late callback afterwards. The daemon thread is not cancelled by timeout.
     """
+    clock = time.monotonic if clock is None else clock
     lock = threading.Lock()
     ready = threading.Event()
     state = {"detached": False, "complete": False, "result": None, "error": None}
@@ -30,8 +31,9 @@ def process_before_deadline(process, deadline, on_late):
             on_late(result, error)
 
     threading.Thread(target=run, name="showcase-response-processing", daemon=True).start()
-    ready.wait(max(0, deadline - time.monotonic()))
-    if not lock.acquire(timeout=max(0, deadline - time.monotonic())):
+    while not ready.is_set() and clock() < deadline:
+        ready.wait(max(0, deadline - clock()))
+    if not lock.acquire(timeout=max(0, deadline - clock())):
         def detach_later():
             with lock:
                 state["detached"] = True
@@ -43,7 +45,7 @@ def process_before_deadline(process, deadline, on_late):
         threading.Thread(target=detach_later, name="showcase-late-handoff", daemon=True).start()
         raise requests.ReadTimeout("logical_deadline_exceeded_during_processing")
     try:
-        if state["complete"] and time.monotonic() < deadline:
+        if state["complete"] and clock() < deadline:
             result, error = state["result"], state["error"]
             if error is not None:
                 raise error

@@ -83,6 +83,7 @@ def response_events(
     url: str,
     *,
     deadline: float,
+    clock: Callable[[], float] | None = None,
     timeout: float,
     loopback_only: bool = False,
     provider_endpoint_only: bool = False,
@@ -92,15 +93,16 @@ def response_events(
     """Yield response headers, body bytes and completion under an absolute deadline.
 
     Requests performs blocking I/O, so a daemon reader thread feeds a bounded
-    queue while the caller enforces the wall-clock deadline. When the caller
+    queue while the caller enforces the deadline in the supplied clock domain. When the caller
     reaches its deadline, it detaches while the reader may finish later to settle
     response metadata. That local timeout never implies provider cancellation.
     """
+    clock = time.monotonic if clock is None else clock
     events: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=16)
     canceled = threading.Event()
     detached = threading.Event()
     deadline_hit = False
-    started = time.monotonic()
+    started = time.perf_counter()
 
     def publish(event: tuple[str, Any]) -> bool:
         while not canceled.is_set() and not detached.is_set():
@@ -131,7 +133,7 @@ def response_events(
             body = bytes(response_body)
         try:
             _invoke_late_response(on_late_response, response, body, response_headers_seconds,
-                                  time.monotonic() - started, complete)
+                                  time.perf_counter() - started, complete)
         except Exception:
             pass
 
@@ -145,20 +147,20 @@ def response_events(
                 strict_provider_post if provider_endpoint_only else requests.post
             )
             with dispatch_lock:
-                if detached.is_set() or time.monotonic() >= deadline:
+                if detached.is_set() or clock() >= deadline:
                     raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
                 dispatch_started = True
             if not loopback_only and not provider_endpoint_only:
                 request_kwargs["allow_redirects"] = False
             # This narrows, but cannot eliminate, the post-check scheduling window.
             # Once dispatch is committed the caller must retain an unconfirmed reservation.
-            if canceled.is_set() or detached.is_set() or time.monotonic() >= deadline:
+            if canceled.is_set() or detached.is_set() or clock() >= deadline:
                 return
             response = post(url, timeout=timeout, stream=True, **request_kwargs)
             status_code = getattr(response, "status_code", None)
             if type(status_code) is int and 300 <= status_code < 400:
                 raise requests.HTTPError("metered_redirect_rejected", response=response)
-            response_headers_at = time.monotonic()
+            response_headers_at = time.perf_counter()
             response_headers_seconds = response_headers_at - started
             publish(("headers", response))
             if callable(getattr(response, "iter_content", None)):
@@ -173,7 +175,7 @@ def response_events(
                         response_body.extend(chunk)
                     if not detached.is_set():
                         publish(("bytes", chunk))
-                if detached.is_set() and time.monotonic() >= deadline + timeout:
+                if detached.is_set() and clock() >= deadline + timeout:
                     settle_late(False)
                     return
             body_complete = True
@@ -221,7 +223,7 @@ def response_events(
                              name="showcase-late-settlement", daemon=True).start()
         return not_submitted
 
-    if time.monotonic() >= deadline:
+    if clock() >= deadline:
         raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
 
     worker = threading.Thread(
@@ -232,7 +234,7 @@ def response_events(
     worker.start()
     try:
         while True:
-            remaining = deadline - time.monotonic()
+            remaining = deadline - clock()
             if remaining <= 0:
                 deadline_hit = True
                 if detach_reader():
@@ -249,7 +251,7 @@ def response_events(
                 return
     finally:
         if not deadline_hit:
-            if time.monotonic() >= deadline:
+            if clock() >= deadline:
                 detach_reader()
             else:
                 canceled.set()
