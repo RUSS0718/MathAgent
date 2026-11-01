@@ -4,13 +4,21 @@
 
 **日期：** 2026-11-01（Asia/Shanghai）
 
-**范围：** Issue #120 / CP-05，基于集成 HEAD `a0541c9`，只接入 Showcase 的显式 STAR 配置。官方 `user_agent.ReasoningAgent`、`implementations/`、默认预算和 baseline 没有改动。
+**范围：** Issue #120 / CP-05，最终冻结提交 `e0e67e4`（分支 `fix/showcase-cp05-implement-spec-closeout`，基于集成 HEAD `6972aaf`），只接入 Showcase 的显式 STAR 配置。官方 `user_agent.ReasoningAgent`、`implementations/`、默认预算和 baseline 没有改动。
 
 ## 验收合同
 
-候选配置同时显式打开 `planner_checkpoints`、`reasoner_checkpoints`、`meta_guidance`、`final_generation` 和 `final_solution_review`；控制配置关闭两个 checkpoint 开关。控制配置继续使用旧的 Explore → Plan → Reasoner → Verifier → Final 路径，关闭开关时不增加模型调用。
+控制版与候选版使用同一个受控公共 Job、同一个单步 toy task 和同一组脚本化回复。控制版配置为 `final_generation=true`、`final_solution_review=true`，两个 checkpoint 和 `meta_guidance` 均关闭；候选版在此基础上显式打开 `planner_checkpoints=true`、`reasoner_checkpoints=true`、`meta_guidance=true`。流式配置不由 adapter 是否具有 `stream_complete` 推断，只有 `stream_activity=true` 时才选择流式调用和活动投影。
 
-CP-05 的公共 Job 入口是 `POST /api/agent/jobs`，观察面是 Job、事件 SSE、报告和 Evidence。测试使用脚本化 loopback 响应，预算为 12 个逻辑模型调用、12 个 HTTP attempt、0 个工具调用；默认运行时与 token 上限仍由既有 `RunBudgetLimits` 计算。角色、轮次、状态和脱敏后的摘要可复核，原题、完整 prompt、隐藏答案、Meta 任务正文、完整 checkpoint ID 和个人信息不进入公共证据。
+两套配置的规范化 JSON 指纹（UTF-8、键排序、紧凑分隔符后 SHA-256）为：控制版 `ab8942a128c8ccc5fc39e91e14b53c3ddc5777b8947d450d1b59ca83cac93527`，候选版 `19cffe90fe245695acc92779ca61289136a0b690a98e95c90a90b4ef42151256`。两次运行均为本地脚本 loopback，`thinking_mode` 为 `None`，不向 provider 请求发送 thinking 开关；transport 为受控 HTTP loopback/脚本响应，禁止真实 provider 请求。
+
+协议与 Schema 指纹同样使用规范化 JSON SHA-256：`explore=89fbfab654098a2025a0b69375f8dc8a7d8000391507639243712ca85a3a1473`，`planner=47d696ba141a0df8916096620b35e322e402c59c41a80fca7b268a4c2ee2efee`，`reasoner=8836d710fac9532e05ef506e19a3da7fee87bb4a96b588396dd9842e83d986ef`，`step_verifier=f45df661a9c9ae45dee4ed363ed244c934a60b951d5cd4eeb2464b3fd2606eb7`，`final_generator=54ac692b082da9544bf9ee6ebc6c71cbf38396b8863aeb2e9d932de7f2cb6c10`，`whole_solution_verifier=edaea8b9ad088955e19001ef3b3bc6479028b604003ddf6dee7feeef56507aec8`；checkpoint protocol version 均为 `1`，Planner checkpoint Schema 指纹为 `ced41a67af4e3621e00be7239ed4ae73e1427def5d225c77669201ee3766d377`，Reasoner checkpoint Schema 指纹为 `8170e8838f48e6f5ddc5d00cbe6e2aa0f3297a90d3bf713579916aed85348f77`。
+
+CP-05 的公共 Job 入口是 `POST /api/agent/jobs`，观察面是 Job、事件 SSE、报告和 Evidence。任务粒度为每次运行一个公开 toy task、一个 Plan、一个 step；控制版角色调用序列为 `explore → planner → reasoner → step_verifier → final_generator → whole_solution_verifier`，共 6 个 logical/HTTP 调用；候选版为 `explore → planner → planner → reasoner → meta → reasoner → step_verifier → final_generator → whole_solution_verifier`，共 9 个 logical/HTTP 调用。两版均为 0 个工具调用，测试预算上限为 12 个 logical/HTTP 调用，token 与运行时上限仍由既有 `RunBudgetLimits` 计算。角色、轮次、状态和脱敏后的摘要可复核，原题、完整 prompt、隐藏答案、Meta 任务正文、完整 checkpoint ID 和个人信息不进入公共证据。
+
+候选版最多执行 2 个 Planner checkpoint round、2 个 Reasoner checkpoint round 和 1 次 Meta guidance；本次脚本路径实际使用 Planner `YIELD → FINAL`、Reasoner `YIELD → FINAL` 和 1 次 `retry_different_method`。控制版不创建 checkpoint。停批规则是：Job 到达 `succeeded`、`failed` 或 `canceled` 即停止；断流、未完成流、进程退出和未知远端结果进入 `needs_review`，不自动重发；取消或 deadline 后的迟到结果只允许按原 attempt 结算已知 usage，不得推进数学状态；预算、原 deadline 或协议硬失败均结束当前 Run，不换题、不扩预算。
+
+独立评分只对可复核工程合同计分，不对数学答案或 provider-live 效果计分：角色序列和轮次 25%，logical/HTTP/tool/token 预算与原 deadline 20%，Job/Report/Evidence 最终字段一致性 25%，流式六类故障矩阵 20%，恢复不重复与脱敏边界 10%。每项以公共断言的 pass/fail 记录；任一硬预算、取消、deadline、unknown 或协议合同被错误改写，该项为 fail。控制版作为同题基线，候选版只报告合同差异和新增调用成本，不将差异解释为能力提升。
 
 候选的非流式纵切顺序为：Explore 返回 `NEED_PLAN`；Planner 先交 `YIELD` 草案，再按反馈交合法 `FINAL` Plan；Reasoner 交局部成果；Verifier 审查并要求 Meta 的 `retry_different_method`；Reasoner 继续下一轮；Step Verifier 接受；Final Generator 生成最终文本；Whole Solution Verifier 完成最终审查。只有最终审查接受后 Job 才是 `succeeded`，checkpoint 局部成果不会直接成为最终答案。
 
