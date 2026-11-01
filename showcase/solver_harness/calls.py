@@ -120,6 +120,9 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "state_revision",
             "session_history_authority",
             "prompt_fingerprint",
+            "prompt_layers_fingerprint",
+            "schema_fingerprint",
+            "input_fingerprint",
             "activity_observer",
         }
         safe_request = {

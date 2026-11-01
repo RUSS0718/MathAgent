@@ -744,9 +744,8 @@ class WorkspaceService:
         self.waiting_input_marker = waiting_input_marker
         self.pipeline = pipeline
         self.star_pipeline = star_pipeline
-        self.budget_ledger = (
-            RunBudgetLedger(self.store._connection, self.store._lock)
-            if (pipeline is None and star_pipeline is None) or str(database_path) == ":memory:" else RunBudgetLedger(database_path=database_path)
+        self.budget_ledger = RunBudgetLedger(
+            self.store._connection, lock=self.store._lock, connection_lock=self.store._lock
         )
         self.checkpointer = None
         if (pipeline is not None and hasattr(pipeline, "checkpointer")) or star_pipeline is not None:

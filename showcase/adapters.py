@@ -320,7 +320,10 @@ class InternStreamAdapter(InternModelAdapter):
         started = time.monotonic()
         logical_deadline = started + effective_timeout
         if call_budget is not None:
-            logical_deadline = min(logical_deadline, started + call_budget.remaining_seconds())
+            # The ledger read can wait behind a writer; convert its remaining
+            # wall time to a monotonic deadline only after the read returns.
+            budget_remaining = call_budget.remaining_seconds()
+            logical_deadline = min(logical_deadline, time.monotonic() + budget_remaining)
         limit = min(getattr(client, "retry", 1), 3) if call_budget else 1
         attempt.update(effective_timeout_seconds=effective_timeout, deadline_at=time.time() + max(0, logical_deadline - time.monotonic()))
         attempt["requests_timeout_seconds"] = configured or effective_timeout

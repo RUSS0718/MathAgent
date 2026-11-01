@@ -11,13 +11,17 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 REFERENCE_TESTS = {
-    "test_star_product_full_modes.StarFullModeTest."
+    "tests.test_star_product_full_modes.StarFullModeTest."
     "test_reference_easy_problem_completes_fastpath_review_and_binding",
-    "test_star_product_full_modes.StarFullModeTest."
+    "tests.test_star_product_full_modes.StarFullModeTest."
     "test_reference_runs_same_public_job_with_real_tool_and_whole_review",
-    "test_star_rb06_recovery.RobustRecoveryTest."
+    "tests.test_star_rb06_recovery.RobustRecoveryTest."
     "test_reference_receipt_exit_resumes_same_job_through_final_review_and_binding",
 }
+
+
+def _canonical_test_id(test_id):
+    return test_id[6:] if test_id.startswith("tests.") else test_id
 
 
 def run_suite(suite, *, stream, required=frozenset()):
@@ -37,10 +41,14 @@ def run_suite(suite, *, stream, required=frozenset()):
             self.stream.writeln(f"\nSKIP {test.id()}: {reason}")
 
         def stopTestRun(self):
-            skipped = {test.id() for test, _ in self.skipped}
-            expected_failures = {test.id() for test, _ in self.expectedFailures}
-            missing = required - self.started
-            uncovered = missing | (required & (skipped | expected_failures))
+            started = {_canonical_test_id(test_id) for test_id in self.started}
+            skipped = {_canonical_test_id(test.id()) for test, _ in self.skipped}
+            expected_failures = {
+                _canonical_test_id(test.id()) for test, _ in self.expectedFailures
+            }
+            required_ids = {_canonical_test_id(test_id) for test_id in required}
+            missing = required_ids - started
+            uncovered = missing | (required_ids & (skipped | expected_failures))
             if uncovered:
                 marker = unittest.FunctionTestCase(lambda: None, description="Reference evidence")
                 self.errors.append((marker, "Not covered: " + ", ".join(sorted(uncovered))))

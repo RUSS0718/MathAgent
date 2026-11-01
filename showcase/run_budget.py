@@ -22,11 +22,9 @@ from .run_control import assert_dispatch_allowed, check_control, controlled_acti
 
 
 def public_solver_call_id(run_id, solver_call_id):
-    """Pseudonymize step-scoped call IDs before placing them in public evidence."""
+    """Pseudonymize every provider-facing call ID before public projection."""
     if not isinstance(solver_call_id, str) or not solver_call_id:
         return None
-    if ":reasoner:" not in solver_call_id and ":step-verifier:" not in solver_call_id:
-        return solver_call_id
     digest = hashlib.sha256(f"{run_id}:{solver_call_id}".encode()).hexdigest()[:32]
     return f"solver_call_{digest}"
 
@@ -77,28 +75,31 @@ def request_timeout(metadata):
 class RunBudgetLedger:
     """One SQLite row per Run, updated under BEGIN IMMEDIATE across workers."""
 
-    def __init__(self, connection=None, lock=None, *, database_path=":memory:"):
+    def __init__(self, connection=None, lock=None, *, database_path=":memory:", connection_lock=None):
         self.owns_connection = connection is None
         self.connection = connection or sqlite3.connect(str(database_path), check_same_thread=False)
-        self.lock = lock or threading.RLock()
+        self.lock = connection_lock if lock is None and connection_lock is not None else (
+            threading.RLock() if lock is None else lock
+        )
+        self.connection_lock = self.lock if connection_lock is None else connection_lock
         self._closed = False
         self.database_path = self.connection.execute("PRAGMA database_list").fetchone()[2]
         self.late_usage_evidence_dir = None
-        with self.lock:
+        with self.lock, self.connection_lock:
             self.connection.execute(
                 "CREATE TABLE IF NOT EXISTS run_budgets (run_id TEXT PRIMARY KEY, ledger_json TEXT NOT NULL)"
             )
             self.connection.commit()
 
     def close(self):
-        with self.lock:
+        with self.lock, self.connection_lock:
             if not self._closed and self.owns_connection:
                 self.connection.close()
             self._closed = True
 
     @contextmanager
     def _transaction(self, run_id):
-        with self.lock:
+        with self.lock, self.connection_lock:
             self.connection.execute("BEGIN IMMEDIATE")
             try:
                 row = self.connection.execute(
@@ -242,9 +243,13 @@ class RunBudgetLedger:
     def _read_row(self, run_id):
         if self.lock.acquire(blocking=False):
             try:
-                return self.connection.execute(
-                    "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
-                ).fetchone()
+                if self.connection_lock.acquire(blocking=False):
+                    try:
+                        return self.connection.execute(
+                            "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
+                        ).fetchone()
+                    finally:
+                        self.connection_lock.release()
             finally:
                 self.lock.release()
         if self.database_path:
@@ -256,7 +261,7 @@ class RunBudgetLedger:
                 ).fetchone()
             finally:
                 reader.close()
-        with self.lock:
+        with self.lock, self.connection_lock:
             return self.connection.execute(
                 "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
             ).fetchone()

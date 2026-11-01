@@ -37,6 +37,8 @@ def _parse(reply):
         values = checkpoint.get(key)
         if not isinstance(values, list) or any(not isinstance(item, str) for item in values):
             raise ValueError("invalid_planner_checkpoint_content")
+    if checkpoint["status"] == "YIELD" and not any(item.strip() for item in checkpoint["gaps"]):
+        raise ValueError("invalid_planner_checkpoint_content")
     return redact(checkpoint), reply.get("plan", checkpoint.get("plan"))
 
 

@@ -13,7 +13,7 @@ CORE_FEATURES = frozenset({
     "star_routing", "persistent_sessions", "stream_recovery",
     *(OPTIONAL_FEATURES - {"stream_activity"}),
 })
-SUPPORTED_FEATURES = CORE_FEATURES | EXPERIMENTAL_FEATURES
+SUPPORTED_FEATURES = CORE_FEATURES | OPTIONAL_FEATURES | EXPERIMENTAL_FEATURES
 
 
 def full_config(budget, features=None):

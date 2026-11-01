@@ -6,6 +6,7 @@ import os
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,6 +14,38 @@ from llm_response import USAGE_FIELDS, provider_usage, safe_identifier
 
 _ERROR_CATEGORIES = {"timeout", "connectivity", "missing_finish_reason", "missing_stream_terminal",
                      "invalid_response", "http_status"}
+
+
+@contextmanager
+def _shared_gate(ledger, *, blocking=True, timeout=None):
+    """Acquire the ledger and SQLite-owner locks in transaction order.
+
+    A timeout settlement must admit both locks before touching the shared
+    connection.  Acquiring only ``ledger.lock`` leaves the following
+    ``connection_lock`` acquisition unbounded when the Workspace owner is
+    writing the same connection.
+    """
+    locks = [ledger.lock]
+    if ledger.connection_lock is not ledger.lock:
+        locks.append(ledger.connection_lock)
+    acquired = []
+    deadline = time.monotonic() + timeout if timeout is not None else None
+    try:
+        for lock in locks:
+            if not blocking:
+                admitted = lock.acquire(blocking=False)
+            elif deadline is None:
+                admitted = lock.acquire()
+            else:
+                admitted = lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
+            if not admitted:
+                yield False
+                return
+            acquired.append(lock)
+        yield True
+    finally:
+        for lock in reversed(acquired):
+            lock.release()
 
 
 def _database_identity(ledger):
@@ -104,7 +137,7 @@ def reconcile_late_evidence(ledger, evidence_path):
                  **{key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")},
                  completion_tokens_details={"reasoning_tokens": usage.get("reasoning_tokens")},
                  prompt_tokens_details={"cached_tokens": usage.get("cached_tokens")})
-    with ledger.lock:
+    with _shared_gate(ledger):
         if ledger._closed:
             raise ValueError("reconciliation requires an open ledger")
         row = ledger.connection.execute("SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)).fetchone()
@@ -123,44 +156,38 @@ def _sqlite_busy(exc):
 def settle_late_with_retry(budget, event):
     """Bound transient SQLite retries; never redispatch the provider request."""
     for index in range(3):
-        acquired = budget.ledger.lock.acquire(timeout=.25)
-        if acquired:
-            try:
-                if budget.ledger._closed and not budget.ledger.database_path:
+        with _shared_gate(budget.ledger, timeout=.25) as admitted:
+            if admitted:
+                try:
+                    if budget.ledger._closed and not budget.ledger.database_path:
+                        break
+                    budget.after_attempt(event)
+                    return
+                except sqlite3.OperationalError as exc:
+                    if not _sqlite_busy(exc):
+                        break
+                except Exception:
                     break
-                budget.after_attempt(event)
-                return
-            except sqlite3.OperationalError as exc:
-                if not _sqlite_busy(exc):
-                    break
-            except Exception:
-                break
-            finally:
-                budget.ledger.lock.release()
         if index < 2:
             time.sleep(.1)
     _save_unresolved(budget.ledger, budget.run_id, event)
 
 
 def settle_timeout_nonblocking(budget, event):
-    """Do not wait for the ledger gate or SQLite's busy handler at timeout."""
+    """Do not wait for either shared gate or SQLite's busy handler at timeout."""
     ledger = budget.ledger
-    if ledger.lock.acquire(blocking=False):
-        try:
-            if not ledger._closed:
-                # This connection is exclusively protected by ledger.lock.
-                busy_timeout = ledger.connection.execute("PRAGMA busy_timeout").fetchone()[0]
-                try:
-                    ledger.connection.execute("PRAGMA busy_timeout = 0")
-                    budget.after_attempt(event)
-                    return
-                except sqlite3.OperationalError as exc:
-                    if not _sqlite_busy(exc):
-                        raise
-                finally:
-                    ledger.connection.execute(f"PRAGMA busy_timeout = {busy_timeout}")
-        finally:
-            ledger.lock.release()
+    with _shared_gate(ledger, blocking=False) as admitted:
+        if admitted and not ledger._closed:
+            busy_timeout = ledger.connection.execute("PRAGMA busy_timeout").fetchone()[0]
+            try:
+                ledger.connection.execute("PRAGMA busy_timeout = 0")
+                budget.after_attempt(event)
+                return
+            except sqlite3.OperationalError as exc:
+                if not _sqlite_busy(exc):
+                    raise
+            finally:
+                ledger.connection.execute(f"PRAGMA busy_timeout = {busy_timeout}")
     threading.Thread(target=settle_late_with_retry, args=(budget, dict(event)),
                      name="showcase-timeout-settlement", daemon=True).start()
 
@@ -173,7 +200,7 @@ def settle_closed(original, run_id, attempt_id, event):
     ledger = RunBudgetLedger(database_path=original.database_path)
     try:
         # Only an existing original HTTP reservation may be settled. No ensure/reserve.
-        with ledger.lock:
+        with _shared_gate(ledger):
             row = ledger.connection.execute("SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)).fetchone()
         actions = json.loads(row[0])["actions"] if row else []
         matches = [a for a in actions if a["id"] == attempt_id and a["kind"] == "http"]

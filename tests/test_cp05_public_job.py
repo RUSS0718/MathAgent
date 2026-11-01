@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -21,6 +22,13 @@ from tests.star_product_support import StarJobFixture
 from tests.test_star_product_planning import FEATURES as PLAN_FEATURES, STEP, VERDICT
 import tests.test_star_product_streaming_recovery as streaming_support
 from tests.test_star_product_tools import NEED_PLAN
+from showcase.solver_harness.intern_schemas import response_schema
+
+
+def fingerprint(value):
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 PLAN = {
@@ -29,9 +37,9 @@ PLAN = {
 }
 
 
-def planner_checkpoint(status="YIELD", marker="planner-draft", *, gaps=None):
+def planner_checkpoint(status="YIELD", marker="planner-draft", *, gaps=None, version=1):
     return {
-        "protocol_version": 1,
+        "protocol_version": version,
         "checkpoint_id": marker,
         "status": status,
         "objective": "derive the result",
@@ -78,16 +86,18 @@ class _JsonResponse:
 
 
 class CP05PublicJobTest(unittest.TestCase):
-    def open_app(self, replies, *, features=None):
+    def open_app(self, replies, *, features=None, budget=None):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.requests = []
+        self.messages = []
         remaining = list(replies)
 
         def post(*_args, **kwargs):
             payload = json.loads(kwargs["data"])
             context = json.loads(payload["messages"][-1]["content"])
             self.requests.append(context)
+            self.messages.append(payload["messages"])
             return _JsonResponse(remaining.pop(0))
 
         self.enterContext(patch.dict(os.environ, {"INTERN_API_KEY": "scripted-only"}))
@@ -104,7 +114,7 @@ class CP05PublicJobTest(unittest.TestCase):
                 "planner_checkpoints": True,
                 "reasoner_checkpoints": True,
             },
-            "SHOWCASE_STAR_BUDGET": RunBudgetLimits(
+            "SHOWCASE_STAR_BUDGET": budget or RunBudgetLimits(
                 max_model_calls=12, max_http_attempts=12, max_tool_calls=0
             ),
             "SHOWCASE_STAR_ADAPTER": InternModelAdapter(
@@ -139,6 +149,7 @@ class CP05PublicJobTest(unittest.TestCase):
             "evidence": evidence,
             "events": events,
             "requests": list(self.requests),
+            "messages": list(self.messages),
         }
 
     def wait_for_terminal(self, client, job_id):
@@ -202,12 +213,120 @@ class CP05PublicJobTest(unittest.TestCase):
         self.assertEqual("completed", job["result"]["solver"]["semantics"]["execution"])
         self.assertEqual("accepted", job["result"]["solver"]["semantics"]["whole_review"])
         self.assertEqual("The result follows from the accepted proof.", job["result"]["final_response"])
+        evidence = client.get(f"/api/runs/{job_id}/evidence").get_json()
+
+        runtime_entries = [
+            event for event in evidence["timeline"]
+            if event.get("role") and event.get("prompt_fingerprint")
+        ]
+        self.assertTrue(runtime_entries)
+        expected_prompt_fingerprints = {}
+        for request, messages in zip(self.requests, self.messages):
+            expected_prompt_fingerprints.setdefault(request["role"], set()).add(
+                fingerprint(messages)
+            )
+        actual_prompt_fingerprints = {}
+        for event in runtime_entries:
+            actual_prompt_fingerprints.setdefault(event["role"], set()).add(
+                event["prompt_fingerprint"]
+            )
+        self.assertEqual(expected_prompt_fingerprints, actual_prompt_fingerprints)
+        self.assertIn("final_generator", actual_prompt_fingerprints)
+        self.assertTrue(all(
+            all(value == "unavailable" for value in event["stream_activity"].values())
+            for event in runtime_entries
+        ))
+        self.assertEqual(
+            {fingerprint(response_schema(request)) for request in self.requests},
+            {event["schema_fingerprint"] for event in runtime_entries},
+        )
+        self.assertEqual(
+            {fingerprint("prove the result")},
+            {event["input_fingerprint"] for event in runtime_entries},
+        )
+        self.assertEqual(
+            {fingerprint(request) for request in self.requests},
+            {fingerprint(json.loads(messages[-1]["content"])) for messages in self.messages},
+        )
+
+        raw_call_ids = {request["call_id"] for request in self.requests}
+        public_call_ids = {
+            attempt["solver_call_id"] for attempt in job["result"]["request_attempts"]
+        }
+        self.assertTrue(public_call_ids)
+        self.assertTrue(all(call_id.startswith("solver_call_") for call_id in public_call_ids))
+        self.assertTrue(raw_call_ids.isdisjoint(public_call_ids))
 
         stream = client.get(f"/api/agent/jobs/{job_id}/events").get_data(as_text=True)
         self.assertIn("checkpoint_status", stream)
         self.assertIn("meta_guidance_decided", stream)
         self.assertNotIn("prove the result", stream)
         self.assertNotIn("close the implication symbolically", stream)
+
+    def test_public_job_stops_on_empty_planner_yield_without_continuation(self):
+        client, headers, session = self.open_app([
+            {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []},
+            {"checkpoint": planner_checkpoint(gaps=[])},
+        ])
+        created = client.post(
+            "/api/agent/jobs",
+            json={"message": "prove the result", "session_id": session, "solver_mode": "star_limited"},
+            headers=headers,
+        )
+        self.assertEqual(202, created.status_code, created.get_json())
+        job = self.wait_for_terminal(client, created.get_json()["job_id"])
+
+        self.assertEqual("failed", job["status"], job)
+        self.assertEqual(["explore", "planner"], [request["role"] for request in self.requests])
+
+    def test_public_planner_rejects_invalid_progress_and_budget_before_continuation(self):
+        cases = (
+            (
+                "invalid_version",
+                [
+                    {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []},
+                    {"checkpoint": planner_checkpoint(version=0)},
+                ],
+                None,
+                ["explore", "planner"],
+                "partial_aborted",
+            ),
+            (
+                "no_progress",
+                [
+                    {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []},
+                    {"checkpoint": planner_checkpoint()},
+                    {"checkpoint": planner_checkpoint()},
+                ],
+                None,
+                ["explore", "planner", "planner"],
+                "partial_aborted",
+            ),
+            (
+                "budget",
+                [
+                    {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []},
+                    {"checkpoint": planner_checkpoint()},
+                ],
+                RunBudgetLimits(max_model_calls=2, max_http_attempts=2, max_tool_calls=0),
+                ["explore", "planner"],
+                "partial_budget_exhausted",
+            ),
+        )
+        for name, replies, budget, roles, status in cases:
+            with self.subTest(case=name):
+                client, headers, session = self.open_app(replies, budget=budget)
+                created = client.post(
+                    "/api/agent/jobs",
+                    json={"message": "prove the result", "session_id": session,
+                          "solver_mode": "star_limited"},
+                    headers=headers,
+                )
+                self.assertEqual(202, created.status_code, created.get_json())
+                job = self.wait_for_terminal(client, created.get_json()["job_id"])
+                self.assertEqual("failed", job["status"], job)
+                self.assertEqual(status, job["result"]["solver"]["status"], job)
+                self.assertEqual(roles, [request["role"] for request in self.requests])
 
     def test_control_and_checkpoint_candidate_share_public_job_contract(self):
         control = self.run_public_job(

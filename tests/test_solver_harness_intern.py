@@ -1,6 +1,7 @@
 """Intern transmission observed through public Solver Harness ports."""
 
 import json
+import hashlib
 import unittest
 
 from showcase.adapters import InternModelAdapter
@@ -20,6 +21,71 @@ class FakeClient:
 
 
 class InternPortTest(unittest.TestCase):
+    def test_runtime_fingerprints_bind_actual_messages_input_and_schema(self):
+        from showcase.solver_harness.intern_port import InternModelPort
+        from showcase.solver_harness.intern_schemas import response_schema
+
+        reply = {
+            "checkpoint": {
+                "protocol_version": 1,
+                "checkpoint_id": "planner-draft",
+                "status": "YIELD",
+                "objective": "derive",
+                "dependencies": [],
+                "evidence": [],
+                "gaps": ["close the implication"],
+                "next_action": "close the implication",
+            }
+        }
+        client = FakeClient([{"content": json.dumps(reply), "finish_reason": "stop"}])
+        request = {
+            "role": "planner",
+            "checkpoint_protocol": True,
+            "prompt_fingerprint": "a" * 64,
+        }
+        port = InternModelPort(InternModelAdapter(client), original_problem="public input")
+        self.assertEqual(reply, port.complete(request))
+
+        def fingerprint(value):
+            return hashlib.sha256(
+                json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+            ).hexdigest()
+
+        messages = client.requests[0][0]
+        record = port.invocations[0]
+        self.assertEqual(fingerprint(messages), record["prompt_fingerprint"])
+        self.assertEqual(fingerprint("public input"), record["input_fingerprint"])
+        self.assertEqual(fingerprint(response_schema(request)), record["schema_fingerprint"])
+        self.assertEqual("a" * 64, record["prompt_layers_fingerprint"])
+        self.assertIn("This Planner call uses the checkpoint protocol", messages[0]["content"])
+        self.assertNotIn("This Reasoner call", messages[0]["content"])
+        self.assertIn("prompt_fingerprint", messages[-1]["content"])
+        self.assertNotIn("prompt_layers_fingerprint", messages[-1]["content"])
+        self.assertNotIn("schema_fingerprint", messages[-1]["content"])
+        self.assertNotIn("input_fingerprint", messages[-1]["content"])
+
+    def test_disabled_checkpoint_messages_keep_legacy_context_and_strip_audit_fields(self):
+        from showcase.solver_harness.intern_port import InternModelPort
+        from showcase.solver_harness.intern_schemas import response_schema
+
+        port = InternModelPort(original_problem="public input")
+        baseline = {
+            "role": "planner",
+            "prompt_layers": [{"layer": "legacy"}],
+            "prompt_fingerprint": "a" * 64,
+        }
+        audited = {
+            **baseline,
+            "input_fingerprint": "b" * 64,
+            "schema_fingerprint": "c" * 64,
+            "prompt_layers_fingerprint": "d" * 64,
+        }
+
+        self.assertEqual(
+            port._messages(baseline, response_schema(baseline)),
+            port._messages(audited, response_schema(audited)),
+        )
+
     def test_stream_capable_adapter_stays_non_streaming_without_explicit_switch(self):
         from showcase.solver_harness.intern_port import InternModelPort
         from showcase.adapters import ModelResponse

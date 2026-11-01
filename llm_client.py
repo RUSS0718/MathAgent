@@ -222,8 +222,13 @@ class InternChatClient:
         attempts_limit = min(self.retry, 3) if _attempt_budget is not None else self.retry
         logical_deadline = time.monotonic() + effective_timeout
         if _attempt_budget is not None:
+            # remaining_seconds() may read the shared SQLite ledger and block
+            # behind its writer.  Anchor the wall-clock remainder after that
+            # read so the persisted absolute deadline is not shortened by
+            # evaluating time.monotonic() first.
+            budget_remaining = _attempt_budget.remaining_seconds()
             logical_deadline = min(
-                logical_deadline, time.monotonic() + _attempt_budget.remaining_seconds()
+                logical_deadline, time.monotonic() + budget_remaining
             )
         for attempt in range(attempts_limit):
             attempt_started = time.perf_counter()

@@ -11,12 +11,67 @@ from unittest.mock import patch
 
 import requests
 
+from showcase import run_budget_late
 from llm_client import InternChatClient
 from showcase.adapters import AdapterError, InternModelAdapter, InternStreamAdapter
 from showcase.run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget
 
 
 class SqliteTimeoutContentionTest(unittest.TestCase):
+    def test_timeout_does_not_wait_for_shared_connection_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            gate = threading.RLock()
+            ledger = RunBudgetLedger(
+                database_path=Path(directory) / "shared-gate.sqlite",
+                connection_lock=gate,
+            )
+            budget = ledger.ensure("shared-gate", RunBudgetLimits(max_runtime_seconds=10))
+            attempt = {
+                "attempt_id": "shared-gate-attempt",
+                "logical_call_id": "shared-gate-call",
+                "role": "explore",
+                "max_tokens": 32,
+            }
+            budget.before_attempt(attempt, input_estimate=8)
+            held, release, returned = (threading.Event() for _ in range(3))
+
+            def hold_connection_gate():
+                gate.acquire()
+                held.set()
+                release.wait(2)
+                gate.release()
+
+            holder = threading.Thread(target=hold_connection_gate, daemon=True)
+            holder.start()
+            self.assertTrue(held.wait(1))
+
+            def timeout_settlement():
+                run_budget_late.settle_timeout_nonblocking(
+                    budget, {**attempt, "status": "unknown", "error_category": "timeout"}
+                )
+                returned.set()
+
+            worker = threading.Thread(target=timeout_settlement, daemon=True)
+            started = time.monotonic()
+            worker.start()
+            self.assertTrue(returned.wait(.2), "timeout settlement waited for the connection gate")
+            self.assertLess(time.monotonic() - started, .2)
+            self.assertFalse(release.is_set())
+            release.set()
+            holder.join(1)
+            worker.join(1)
+            try:
+                until = time.monotonic() + 3
+                while time.monotonic() < until:
+                    attempt_state, = ledger.attempts("shared-gate")
+                    if attempt_state.get("error_category") == "timeout":
+                        break
+                    time.sleep(.01)
+                self.assertEqual("timeout", attempt_state.get("error_category"))
+            finally:
+                release.set()
+                ledger.close()
+
     def test_timeout_does_not_wait_for_external_writer(self):
         for streaming in (False, True):
             with self.subTest(streaming=streaming):

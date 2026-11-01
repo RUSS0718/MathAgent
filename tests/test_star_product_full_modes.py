@@ -22,6 +22,19 @@ CORE = {
 }
 
 
+class StarProductConfigTest(unittest.TestCase):
+    def test_full_config_accepts_explicit_stream_activity_without_defaulting_on(self):
+        from showcase.star_product_config import CORE_FEATURES, full_config
+
+        budget = RunBudgetLimits(max_model_calls=3, max_http_attempts=3, max_tool_calls=0)
+        default = full_config(budget)
+        self.assertIsNot(True, default["features"].get("stream_activity"))
+        for enabled in (True, False):
+            features = {name: True for name in CORE_FEATURES}
+            features["stream_activity"] = enabled
+            self.assertEqual(enabled, full_config(budget, features)["features"]["stream_activity"])
+
+
 @unittest.skipUnless(IMAGE, "requires independently validated local Docker image ID")
 class StarFullModeTest(StarJobFixture, unittest.TestCase):
     def open_full(self, replies, **config):

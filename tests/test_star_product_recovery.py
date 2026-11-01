@@ -44,6 +44,66 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
     def test_process_exit_after_second_acceptance_resumes_third_step(self):
         self.assert_process_window("accepted")
 
+    def test_public_planner_checkpoint_process_recovery_and_duplicate_resume(self):
+        import json
+        import os
+        import subprocess
+        import sys
+        import tempfile
+        import time
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from showcase.flask_app import create_app
+        from tests.star_recovery_worker import config, provider
+
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            process = subprocess.run(
+                [sys.executable, "-m", "tests.star_recovery_worker", directory,
+                 "planner_checkpoint_yield"],
+                capture_output=True, timeout=30,
+            )
+            self.assertEqual(71, process.returncode, process.stderr.decode(errors="replace"))
+            job_id = (folder / "job_id").read_text()
+            before = [json.loads(line) for line in (folder / "requests.jsonl").read_text().splitlines()]
+            self.assertEqual(["explore", "planner"], [item["role"] for item in before])
+
+            with patch.dict(os.environ, {"INTERN_API_KEY": "scripted-only"}), patch(
+                    "llm_client.requests.post", side_effect=lambda *a, **kw: provider(folder, kw)):
+                app = create_app(config(folder))
+                try:
+                    client = app.test_client()
+                    csrf = client.get("/api/check_auth").get_json()["csrf_token"]
+                    job = client.get(f"/api/agent/jobs/{job_id}").get_json()
+                    original_budget = job["result"]["budget"]
+                    headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
+                    resumed = client.post(
+                        f"/api/agent/jobs/{job_id}/resume", json={}, headers=headers
+                    )
+                    self.assertEqual(202, resumed.status_code, resumed.get_json())
+                    duplicate = client.post(
+                        f"/api/agent/jobs/{job_id}/resume", json={}, headers=headers
+                    )
+                    self.assertEqual(200, duplicate.status_code, duplicate.get_json())
+                    deadline = time.monotonic() + 8
+                    while time.monotonic() < deadline:
+                        job = client.get(f"/api/agent/jobs/{job_id}").get_json()
+                        if job["status"] in {"succeeded", "failed", "canceled"}:
+                            break
+                        time.sleep(.01)
+                    self.assertEqual("succeeded", job["status"], job)
+                    after = [json.loads(line) for line in (folder / "requests.jsonl").read_text().splitlines()]
+                    self.assertEqual(before, after[:len(before)])
+                    self.assertEqual(11, len(after), [item["role"] for item in after])
+                    self.assertEqual(2, sum(item["role"] == "planner" for item in after))
+                    self.assertEqual(original_budget["deadline_at"], job["result"]["budget"]["deadline_at"])
+                    self.assertEqual(11, job["result"]["budget"]["logical_calls"])
+                    self.assertEqual(11, job["result"]["budget"]["http_attempts"])
+                finally:
+                    for name in ("showcase_workspace_service", "showcase_run_service", "loopback_store"):
+                        app.extensions[name].close()
+
     def test_process_exit_after_recorded_verifier_response_reuses_it(self):
         self.assert_process_window("response")
 

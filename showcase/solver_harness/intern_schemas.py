@@ -172,31 +172,46 @@ SCHEMAS["reasoner_checkpoint"] = obj(
     ["checkpoint"],
 )
 
+_PLANNER_CHECKPOINT_PROPERTIES = {
+    "protocol_version": {"type": "integer", "minimum": 1},
+    "checkpoint_id": TEXT,
+    "objective": TEXT,
+    "dependencies": TEXTS,
+    "evidence": TEXTS,
+    "next_action": TEXT,
+    "plan": {"oneOf": [SCHEMAS["planner"], {"enum": [None]}]},
+}
+_PLANNER_CHECKPOINT_REQUIRED = [
+    "protocol_version",
+    "checkpoint_id",
+    "status",
+    "objective",
+    "dependencies",
+    "evidence",
+    "gaps",
+    "next_action",
+]
+_PLANNER_CHECKPOINT_YIELD = obj(
+    {
+        **_PLANNER_CHECKPOINT_PROPERTIES,
+        "status": {"const": "YIELD", "type": "string"},
+        "gaps": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": r".*\S.*"}},
+    },
+    _PLANNER_CHECKPOINT_REQUIRED,
+)
+_PLANNER_CHECKPOINT_TERMINAL = obj(
+    {
+        **_PLANNER_CHECKPOINT_PROPERTIES,
+        "status": {"enum": ["FINAL", "BLOCKED", "FAILED"]},
+        "gaps": TEXTS,
+    },
+    _PLANNER_CHECKPOINT_REQUIRED,
+)
 SCHEMAS["planner_checkpoint"] = obj(
     {
-        "checkpoint": obj(
-            {
-                "protocol_version": {"type": "integer", "minimum": 1},
-                "checkpoint_id": TEXT,
-                "status": {"enum": ["YIELD", "FINAL", "BLOCKED", "FAILED"]},
-                "objective": TEXT,
-                "dependencies": TEXTS,
-                "evidence": TEXTS,
-                "gaps": TEXTS,
-                "next_action": TEXT,
-                "plan": {"oneOf": [SCHEMAS["planner"], {"enum": [None]}]},
-            },
-            [
-                "protocol_version",
-                "checkpoint_id",
-                "status",
-                "objective",
-                "dependencies",
-                "evidence",
-                "gaps",
-                "next_action",
-            ],
-        ),
+        "checkpoint": {
+            "oneOf": [_PLANNER_CHECKPOINT_YIELD, _PLANNER_CHECKPOINT_TERMINAL],
+        },
         "plan": {"oneOf": [SCHEMAS["planner"], {"enum": [None]}]},
     },
     ["checkpoint"],
