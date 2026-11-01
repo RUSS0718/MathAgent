@@ -105,7 +105,7 @@ class RunBudgetLedger:
                 raise sqlite3.OperationalError("database is locked")
             busy_timeout = self.connection.execute("PRAGMA busy_timeout").fetchone()[0]
             if timeout is not None:
-                self.connection.execute("PRAGMA busy_timeout = 0")
+                self.connection.execute(f"PRAGMA busy_timeout = {int(timeout * 1000)}")
             try:
                 with self._transaction_open(run_id) as state:
                     yield state
