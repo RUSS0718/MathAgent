@@ -10,9 +10,39 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..run_control import RunStopped
+from ..run_budget import public_solver_call_id
 from .product_control import controlled_patch
 
 _SOLVER_STORAGE_LOCK = threading.RLock()
+
+
+class _PublicCallLookup(dict):
+    """Keep persisted call keys private while accepting their public aliases."""
+
+    def __init__(self, run_id: str, records: Mapping[str, Any]) -> None:
+        super().__init__(records)
+        self._run_id = run_id
+
+    def _resolve(self, key: str) -> str:
+        if dict.__contains__(self, key):
+            return key
+        if isinstance(key, str) and key.startswith("solver_call_"):
+            matches = [
+                call_id for call_id in dict.__iter__(self)
+                if public_solver_call_id(self._run_id, call_id) == key
+            ]
+            if len(matches) == 1:
+                return matches[0]
+        return key
+
+    def __getitem__(self, key: str) -> Any:
+        return dict.__getitem__(self, self._resolve(key))
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return dict.get(self, self._resolve(key), default)
+
+    def __contains__(self, key: object) -> bool:
+        return dict.__contains__(self, self._resolve(key)) if isinstance(key, str) else False
 
 
 class SolverPersistenceError(RuntimeError):
@@ -259,6 +289,8 @@ class SolverStateStore:
                 or state.get("state_revision") != row["state_revision"]
             ):
                 raise SolverPersistenceError("get_run")
+            if isinstance(state.get("calls"), dict):
+                state["calls"] = _PublicCallLookup(run_id, state["calls"])
             event_rows = self._connection.execute(
                 """
                 SELECT event_json FROM solver_events

@@ -7,6 +7,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 
 from ..redaction import redact
+from ..run_budget import public_solver_call_id
 from .intern_port import KNOWN_PROTOCOL_FAILURES
 
 
@@ -37,11 +38,16 @@ def latest_retry_id(calls, call_id):
     """Resolve an immutable retry lineage without changing the original call."""
     for _ in range(len(calls)):
         successor = next((item for item in calls.values()
-                          if item.get("retry_of") == call_id), None)
+                          if retry_parent_id(item) == call_id), None)
         if successor is None:
             break
         call_id = successor["call_id"]
     return call_id
+
+
+def retry_parent_id(record):
+    """Return the private lineage ID while accepting older persisted records."""
+    return record.get("retry_of_internal", record.get("retry_of"))
 
 
 def _save(harness, run, record, *, status=None, event_type="call_audit", event_fields=None):
@@ -101,9 +107,13 @@ def dispatch(harness, run, operation, request, session_dispatch):
     current_id = latest_retry_id(calls, request.get("call_id"))
     if current_id != request.get("call_id"):
         record = calls[current_id]
-        request = {**request, "call_id": current_id, "retry_of": record["retry_of"]}
+        request = {**request, "call_id": current_id, "retry_of": retry_parent_id(record)}
     if retry and current_id == retry["call_id"]:
-        request = {**request, "call_id": retry["new_call_id"], "retry_of": retry["call_id"]}
+        request = {
+            **request,
+            "call_id": retry["new_call_id"],
+            "retry_of": retry["call_id"],
+        }
 
     def invoke(prepared):
         call_id = prepared.get("call_id")
@@ -154,11 +164,17 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "request": safe_request,
             "request_hash": identity_hash,
             "owner_instance": harness._instance_id,
-            "retry_of": prepared.get("retry_of"),
+            "retry_of": (
+                public_solver_call_id(run["run_id"], prepared["retry_of"])
+                if prepared.get("retry_of")
+                else None
+            ),
             "status": "dispatched",
             "partial_text": "",
             "usage": None,
         }
+        if prepared.get("retry_of"):
+            record["retry_of_internal"] = prepared["retry_of"]
         activity_enabled = harness._config.get("features", {}).get("stream_activity") is True
         if activity_enabled:
             record["stream_metrics"] = {
@@ -294,7 +310,7 @@ def retry_call(harness, run, problem, decision):
     if not isinstance(new_id, str) or not new_id.strip() or new_id == old_id:
         raise ValueError("retry requires a new call_id")
     if new_id in calls:
-        if calls[new_id].get("retry_of") != old_id:
+        if retry_parent_id(calls[new_id]) != old_id:
             raise ValueError("retry call identity conflict")
         return run
     state = run["state"]
@@ -331,7 +347,6 @@ def retry_call(harness, run, problem, decision):
     }
     harness.dispatch(run, operation, request)
     record = deepcopy(run["state"]["calls"][new_id])
-    record["retry_of"] = old_id
     _save(harness, run, record, status="recovered_pending_validation")
     return run
 

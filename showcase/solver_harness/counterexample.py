@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 
 from .budget import budget_reason, stop
-from .calls import CallInterrupted
+from .calls import CallInterrupted, retry_parent_id
 
 
 def pending_review(run):
@@ -16,7 +16,8 @@ def pending_review(run):
         return None
     step = run["state"].get("steps", {}).get(run["state"].get("current_step"), {})
     for record in step.get("counterexample_checks", {}).values():
-        if record.get("call_id") == call.get("call_id") or call.get("retry_of") == record.get("call_id"):
+        if (record.get("call_id") == call.get("call_id")
+                or retry_parent_id(call) == record.get("call_id")):
             verifier = run["state"].get("calls", {}).get(record["verifier_call_id"], {})
             if verifier.get("status") == "completed":
                 return record["verifier_call_id"], deepcopy(verifier["response"])

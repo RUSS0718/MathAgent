@@ -6,6 +6,7 @@ import time
 import uuid
 
 from .run_budget import public_solver_call_id
+from .solver_harness.calls import retry_parent_id
 from .star_product_modes import STAR_MODES
 
 
@@ -14,11 +15,11 @@ def recovery_projection(run):
     calls = state.get("calls", {})
     retries = [
         {"call_id": public_solver_call_id(run["run_id"], item["call_id"]),
-         "retry_of": public_solver_call_id(run["run_id"], item["retry_of"]),
+         "retry_of": public_solver_call_id(run["run_id"], retry_parent_id(item)),
          "status": item["status"]}
-        for item in calls.values() if item.get("retry_of")
+        for item in calls.values() if retry_parent_id(item)
     ]
-    replaced = {item.get("retry_of") for item in calls.values()}
+    replaced = {retry_parent_id(item) for item in calls.values() if retry_parent_id(item)}
     unknown = [
         {"call_id": public_solver_call_id(run["run_id"], item["call_id"]),
          "status": "unknown_outcome", "role": item["role"]}
