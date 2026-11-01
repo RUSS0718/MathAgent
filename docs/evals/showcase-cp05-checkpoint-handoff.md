@@ -38,7 +38,7 @@ CP-05 的公共 Job 入口是 `POST /api/agent/jobs`，观察面是 Job、事件
 
 ## #112 实验交接
 
-本交接保留 #112 的原批次身份、原始 `5/15` 标识、10 项 `not_run` 项、Planner `unknown` 身份、原 deadline 和预算预留。旧 raw、state、ledger 不改写；#112 仍按原登记保持 `unknown/not_run`，CP-05 的 loopback 结果不能替代或覆盖它。
+本交接保留 #112 的原批次身份、原始 `5/15` 标识、10 项 `not_run` 项、Planner `unknown` 身份、`deadline=unknown` 的原登记和预算预留。旧 raw、state、ledger 不改写；#112 仍按原登记保持 `unknown/not_run`，CP-05 的 loopback 结果不能替代或覆盖它。
 
 交接只增加本 CP-05 的可复核脱敏记录：
 
