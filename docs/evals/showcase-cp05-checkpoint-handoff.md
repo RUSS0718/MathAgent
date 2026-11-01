@@ -4,7 +4,7 @@
 
 **日期：** 2026-11-01（Asia/Shanghai）
 
-**范围：** Issue #120 / CP-05，源码冻结提交 `8e2246660e3cda867cb4fe0fa28a77eae390a60f`，源码树 `b36754128efbea1f32866fa7106d850a13bdf696`（分支 `fix/showcase-review-fixes`，基于集成 HEAD `047e8cd6522ab1a00dc49e2934ee73c8f36733a8`）。文档提交不作为源码冻结依据。只接入 Showcase 的显式 STAR 配置；官方 `user_agent.ReasoningAgent`、`implementations/`、默认预算和 baseline 没有改动。
+**范围：** Issue #120 / CP-05，源码冻结提交 `159f8918afaad39bcdd242326ef84b9d38a252c7`，源码树 `0cbf0502a95e99cd7f8498f36d57b950299c1ce2`（分支 `fix/showcase-review-fixes`，基于集成 HEAD `047e8cd6522ab1a00dc49e2934ee73c8f36733a8`）。文档提交不作为源码冻结依据。只接入 Showcase 的显式 STAR 配置；官方 `user_agent.ReasoningAgent`、`implementations/`、默认预算和 baseline 没有改动。
 
 ## 验收合同
 
@@ -57,3 +57,8 @@ provider-live 仍是独立门槛：需要单独授权、独立批次身份、固
 ## 本次修复验证边界
 
 本修复 worker 未启动全量测试；父线程保存的历史全量结果为 `1030 tests, errors=1, skipped=42`，唯一错误是 deadline 竞态用例的分类不稳定，单独诊断和重跑均通过，不能写成全量通过。新增 CP04 公共验收单独运行命令 `uv run python -m unittest tests.test_cp04_public_faults`，结果为 `6 tests, 0 errors, 0 skipped`。与既有 Reasoner/traceback/replan/recovery 聚焦模块联合运行结果为 `53 tests, 0 errors, skipped=1`；唯一 skip 是未设置已验证 Docker reference image 的参考预置测试。其余 CP-05、共享事务与非阻塞 settlement、deadline、流式矩阵、实际指纹、关闭协议和 Reference loader 检查属于父线程既有聚焦证据；本记录不把跳过视为通过。Docker 参考验收仍由最终门禁按 `MATHAGENT_TEST_PYTHON_IMAGE` 和 `--require-reference` 单独执行。
+
+
+2026-11-01 后续审查记录：父线程在 `60a4ac8` 的 146 项聚焦检查结果为 `3 failures, 1 error`，不能记为通过。两锁阻塞已由既有公共用例复现后修复：账本门独立于 Workspace 门，写连接与事务仍共享；同步 timeout 同时非阻塞检查两个门，迟到重试只在实际事务内取得共享连接门，并限制门等待与 SQLite 忙等待。UTC 截止现在直接采用原账本/phase/batch 的绝对值，不经低分辨率 monotonic 转换；回拨立即 fail-closed，耗时指标仍使用 `perf_counter`，原预算与默认未计量路径不扩展。两个迟到测试夹具仅将分片改为 64 字，避免 SQLite 逐事件持久化先耗尽目标阶段预算，保留预算和原断言。
+
+本轮定向证据为：新增回归及原四故障点/共享事务组 `15 tests, OK`；流式迟到/解析/SQLite contention 组 `22 tests, OK`；修正 stream assembly 目标夹具后相关七项 `7 tests, OK`；时钟回拨与 coordinator 组 `38 tests, OK (skipped=1)`。这些运行有重叠，不相加为独立总数。中途聚焦曾出现迟到事务提交 busy 和 stream assembly 阶段未到达；诊断记录与修复结果在仓库外 `review-fix-followup-report.md`，不以单跑通过替代组合证据。最终全量及 Docker strict Reference gate 仍由父线程唯一运行，当前无最终全量通过结论；#112 原登记、raw/state/ledger、`5/15`、`10 not_run`、Planner unknown 和 deadline unknown 不变。
