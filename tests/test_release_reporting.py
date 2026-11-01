@@ -1,10 +1,13 @@
 """Release reports expose skipped tests and enforce the Reference evidence gate."""
 
 import io
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from scripts import check_showcase_release, run_unittest_report
 from scripts.run_unittest_report import REFERENCE_TESTS, discover_suite, run_suite
 
 
@@ -102,6 +105,36 @@ class ReleaseReportingTest(unittest.TestCase):
             required={"tests." + test.id()},
         )
         self.assertTrue(result.wasSuccessful())
+
+    def test_strict_release_command_is_parseable_by_report_cli(self):
+        completed = unittest.mock.Mock(returncode=0, stdout="", stderr="")
+        commands = []
+
+        def fake_run(command, **_kwargs):
+            commands.append(command)
+            return completed
+
+        with (
+            patch.object(check_showcase_release.subprocess, "run", side_effect=fake_run),
+            patch.object(check_showcase_release, "check_baseline"),
+            patch.object(check_showcase_release, "check_release_evidence"),
+            patch("sys.argv", ["check_showcase_release.py", "--require-reference"]),
+        ):
+            self.assertEqual(0, check_showcase_release.main())
+
+        command = next(
+            command for command in commands if "scripts/run_unittest_report.py" in command
+        )
+        with (
+            patch.object(run_unittest_report.unittest.defaultTestLoader,
+                         "loadTestsFromNames", return_value=unittest.TestSuite()) as load,
+            patch.object(run_unittest_report, "run_suite") as run_suite_mock,
+            patch.object(run_unittest_report, "sys", sys),
+            patch.object(sys, "argv", command[1:]),
+        ):
+            run_suite_mock.return_value.wasSuccessful.return_value = True
+            self.assertEqual(0, run_unittest_report.main())
+        load.assert_called_once_with(command[3:])
 
 
 def _flatten(suite):
