@@ -30,7 +30,7 @@ class StreamLateRaceTest(StarJobFixture, unittest.TestCase):
             adapter = InternStreamAdapter(InternChatClient(timeout=2, retry=3), max_tokens=256)
         features = {"stream_activity": True, "strict_completion": strict,
                     **config.pop("SHOWCASE_STAR_FEATURES", {})}
-        self.open_star([], SHOWCASE_STAR_ADAPTER=adapter,
+        self.open_star([], stream_chunk_size=64, SHOWCASE_STAR_ADAPTER=adapter,
                        SHOWCASE_STAR_FEATURES=features, **config)
 
     def test_timeout_does_not_overwrite_inflight_late_success(self):

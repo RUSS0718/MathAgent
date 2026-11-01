@@ -159,7 +159,8 @@ class JobParseDeadlineTest(StarJobFixture, unittest.TestCase):
             adapter = ReasonerOnlyStreamAdapter(
                 InternChatClient(timeout=4, retry=1), max_tokens=256
             )
-        self.open_star([NEED_PLAN, PLAN, STEP], SHOWCASE_STAR_EXPERIMENT_POLICY=policy,
+        self.open_star([NEED_PLAN, PLAN, STEP], stream_chunk_size=64,
+                       SHOWCASE_STAR_EXPERIMENT_POLICY=policy,
                        SHOWCASE_STAR_ADAPTER=adapter, SHOWCASE_STAR_REGISTRY=registry,
                        SHOWCASE_STAR_FEATURES={**FEATURES, "stream_activity": True,
                                                "strict_completion": True})
