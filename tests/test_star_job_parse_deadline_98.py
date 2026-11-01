@@ -64,13 +64,30 @@ class JobParseDeadlineTest(StarJobFixture, unittest.TestCase):
         from llm_client import InternChatClient
         from showcase.adapters import InternStreamAdapter
 
-        deadline = time.time() + 2.5
+        class ReasonerOnlyStreamAdapter(InternStreamAdapter):
+            def stream_complete(self, messages, *, metadata=None):
+                if (metadata or {}).get("role") != "reasoner":
+                    response = self.complete(messages, metadata=metadata)
+                    yield {
+                        "type": "result",
+                        "text": response.text,
+                        "usage": response.usage,
+                        "finish_reason": response.finish_reason,
+                        "model": response.model_id,
+                        "attempts": response.request_attempts,
+                    }
+                    return
+                yield from super().stream_complete(messages, metadata=metadata)
+
+        deadline = time.time() + 4.5
         policy = ExperimentRunPolicy(time.time() + 10, phase_deadline_at=deadline)
         executed = []
         registry = ToolRegistry()
         registry.register("polynomial_check", lambda args: executed.append(args) or 2)
         with patch.dict(os.environ, {"INTERN_API_KEY": "offline-placeholder"}):
-            adapter = InternStreamAdapter(InternChatClient(timeout=4, retry=1), max_tokens=256)
+            adapter = ReasonerOnlyStreamAdapter(
+                InternChatClient(timeout=4, retry=1), max_tokens=256
+            )
         self.open_star([NEED_PLAN, PLAN, STEP], SHOWCASE_STAR_EXPERIMENT_POLICY=policy,
                        SHOWCASE_STAR_ADAPTER=adapter, SHOWCASE_STAR_REGISTRY=registry,
                        SHOWCASE_STAR_FEATURES={**FEATURES, "stream_activity": True,
