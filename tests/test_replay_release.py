@@ -103,6 +103,7 @@ class ReplayReleaseTest(unittest.TestCase):
             if "scripts/run_unittest_report.py" in call.args[0]
         )
         self.assertIn("--require-reference", command)
+        self.assertLess(command.index("--require-reference"), command.index(check_showcase_release.STAR_ACCEPTANCE_TESTS[0]))
         self.assertIn("tests.test_star_rb06_recovery", command)
 
 

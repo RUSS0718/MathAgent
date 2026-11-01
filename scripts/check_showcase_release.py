@@ -93,11 +93,15 @@ def main() -> int:
         help="fail when the selected full Reference tests are skipped or missing",
     )
     args = parser.parse_args()
-    test_command = [sys.executable, "scripts/run_unittest_report.py", *STAR_ACCEPTANCE_TESTS]
+    test_command = [sys.executable, "scripts/run_unittest_report.py"]
     if args.require_reference:
         test_command.append("--require-reference")
-        test_command.append("tests.test_star_product_full_modes.StarFullModeTest")
-        test_command.append("tests.test_star_rb06_recovery")
+    test_command.extend(STAR_ACCEPTANCE_TESTS)
+    if args.require_reference:
+        test_command.extend([
+            "tests.test_star_product_full_modes.StarFullModeTest",
+            "tests.test_star_rb06_recovery",
+        ])
     checks = [
         [sys.executable, "scripts/check_workspace.py", "--offline"],
         [sys.executable, "scripts/check_solver_release.py", "--matrix-only"],
