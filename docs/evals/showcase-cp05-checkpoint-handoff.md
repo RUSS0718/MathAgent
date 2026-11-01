@@ -4,7 +4,7 @@
 
 **日期：** 2026-11-01（Asia/Shanghai）
 
-**范围：** Issue #120 / CP-05，源码冻结提交 `ada085c23afec2de3dea4ca88df450d7c30c36df`，源码树 `48b837eaf9726726b8fa93c836c0db0844a5a223`（分支 `fix/showcase-review-fixes`，基于集成 HEAD `047e8cd6522ab1a00dc49e2934ee73c8f36733a8`）。文档提交不作为源码冻结依据。只接入 Showcase 的显式 STAR 配置；官方 `user_agent.ReasoningAgent`、`implementations/`、默认预算和 baseline 没有改动。
+**范围：** Issue #120 / CP-05，源码冻结提交 `8e2246660e3cda867cb4fe0fa28a77eae390a60f`，源码树 `b36754128efbea1f32866fa7106d850a13bdf696`（分支 `fix/showcase-review-fixes`，基于集成 HEAD `047e8cd6522ab1a00dc49e2934ee73c8f36733a8`）。文档提交不作为源码冻结依据。只接入 Showcase 的显式 STAR 配置；官方 `user_agent.ReasoningAgent`、`implementations/`、默认预算和 baseline 没有改动。
 
 ## 验收合同
 
@@ -31,7 +31,7 @@ CP-05 的公共 Job 入口是 `POST /api/agent/jobs`，观察面是 Job、事件
 | CP-01：公共 Job、状态投影、脱敏 | `tests/test_cp05_public_job.py::CP05PublicJobTest.test_non_stream_checkpoint_job_covers_handoff_meta_and_final_review` | 证明公共入口可达、角色顺序和最终审查绑定；不证明数学正确率 |
 | CP-02：流式活动与交接 | `tests/test_solver_harness_streaming_activity.py`、`tests/test_star_product_streaming_recovery.py` | 覆盖活动指标、片段持久化、交接和公共字段脱敏；文本正文不进入活动事件 |
 | CP-03：Planner 检查点 | `tests/test_solver_harness_planner_checkpoint.py`、`tests/test_cp05_public_job.py` 与 `tests/test_star_product_recovery.py::StarRecoveryTest.test_public_planner_checkpoint_process_recovery_and_duplicate_resume` | 覆盖 `YIELD → feedback → FINAL`、新调用身份、版本/空缺口/无进展/预算拒绝、进程退出、完成检查点复用和重复 resume 去重 |
-| CP-04：Reasoner 检查点与 Meta | `tests/test_solver_harness_reasoner_checkpoint.py`、`tests/test_star_product_traceback.py`、`tests/test_star_product_replan_decision.py`、`tests/test_star_product_recovery.py` 与 CP-05 公共 Job 测试 | 公共 Job 覆盖取消、旧 revision、依赖失效、合法 traceback、审批后的 replan、恢复后工具回执复用；局部成果、Verifier 审查、Meta 指导、下一轮及最终审查仍需最终 whole review 接受 |
+| CP-04：Reasoner 检查点与 Meta | `tests/test_cp04_public_faults.py::CP04PublicFaultTest` 的六个公共 Job 用例：`test_yield_verifier_objection_reaches_next_reasoner_before_final_review`、`test_cancel_during_reasoner_checkpoint_does_not_reach_verifier`、`test_resume_rejects_old_revision_after_reasoner_checkpoint_unknown`、`test_traceback_with_reasoner_checkpoints_excludes_invalidated_results`、`test_approved_replan_decision_dispatches_new_plan_with_reasoner_checkpoints`、`test_process_reopen_reuses_reasoner_checkpoint_and_tool_receipt_once`；辅助机制证据见 `tests/test_solver_harness_reasoner_checkpoint.py`、`tests/test_star_product_traceback.py`、`tests/test_star_product_replan_decision.py`、`tests/test_star_product_recovery.py` | 六例直接通过公共 Job 验证局部 `YIELD → Verifier` 异议 → 下一 Reasoner、checkpoint 阶段取消、旧 revision 拒绝、合法 traceback 后排除失效成果、批准 replan 后真实新 Plan/Reasoner，以及进程重开后的完成 checkpoint 与真实 tool receipt 复用；恢复例同时核对原 deadline、累计 logical/HTTP/token 账、旧 call identity 和重复 resume。旧 harness/helper 测试只作补充，不能替代这六例；最终结果仍需 whole review 接受 |
 | CP-05：集成与交接 | 本记录及 `tests/test_cp05_public_job.py` | 证明受控 loopback 工程闭环，不升级 provider-live 或能力结论 |
 
 流式边界沿用已有公共 Job 证据：正常活动、调用完成、静默、无正文、缺 usage、断流、取消和迟到结果分别保持完成、空正文失败、usage 未知、unknown、canceled 或忽略迟到响应的原合同；断流和进程退出保留 unknown 与预留，不自动重发。活动投影保留固定字段集合；未观测的时间点、计数、usage 状态和终态统一公开为 `unavailable`，不把缺失观测误报为成功。恢复测试还核对已完成检查点、已接受成果和工具回执复用，不重复模型或工具调用，累计 logical / HTTP / tool / token 计数与原 deadline 不被重置。
@@ -56,4 +56,4 @@ provider-live 仍是独立门槛：需要单独授权、独立批次身份、固
 
 ## 本次修复验证边界
 
-本修复 worker 只运行聚焦检查，未启动全量测试；父线程保存的历史全量结果为 `1030 tests, errors=1, skipped=42`，唯一错误是 deadline 竞态用例的分类不稳定，单独诊断和重跑均通过，不能写成全量通过。聚焦检查覆盖 CP-05 公共 Job、Planner 恢复、Reasoner/Verifier 故障、共享连接事务与非阻塞 settlement、deadline、流式矩阵、实际指纹、关闭协议和 Reference loader 两种 unittest identity。Docker 参考验收仍由最终门禁按 `MATHAGENT_TEST_PYTHON_IMAGE` 和 `--require-reference` 单独执行；本记录不把跳过视为通过。
+本修复 worker 未启动全量测试；父线程保存的历史全量结果为 `1030 tests, errors=1, skipped=42`，唯一错误是 deadline 竞态用例的分类不稳定，单独诊断和重跑均通过，不能写成全量通过。新增 CP04 公共验收单独运行命令 `uv run python -m unittest tests.test_cp04_public_faults`，结果为 `6 tests, 0 errors, 0 skipped`。与既有 Reasoner/traceback/replan/recovery 聚焦模块联合运行结果为 `53 tests, 0 errors, skipped=1`；唯一 skip 是未设置已验证 Docker reference image 的参考预置测试。其余 CP-05、共享事务与非阻塞 settlement、deadline、流式矩阵、实际指纹、关闭协议和 Reference loader 检查属于父线程既有聚焦证据；本记录不把跳过视为通过。Docker 参考验收仍由最终门禁按 `MATHAGENT_TEST_PYTHON_IMAGE` 和 `--require-reference` 单独执行。
