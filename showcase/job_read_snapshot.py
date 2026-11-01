@@ -39,11 +39,17 @@ def _with_accounting(payload, attempts, budget, ledger_attempts, star):
 
 
 def read_job_snapshot(store, job_id, user_id):
-    """Use one authorized SQLite read transaction; never infer an uncommitted result."""
+    """Read one committed STAR snapshot through an independent read-only connection.
+
+    ADR-0013 keeps one SQLite database and transaction boundary, not one Python
+    connection. Keeping this connection independent is part of the public
+    contract: a reader must not wait on a blocked in-process workspace writer.
+    """
     from .workspace import WorkspaceError
 
     uri = Path(store.database_path).resolve().as_uri() + "?mode=ro"
-    # A RESERVED writer permits reads; a brief commit may hold EXCLUSIVE.
+    # Do not acquire store._lock or reuse store._connection here. A RESERVED
+    # writer permits reads; a brief commit may hold EXCLUSIVE.
     # Match the ledger reader's bounded busy timeout for that commit window.
     with closing(sqlite3.connect(uri, uri=True, timeout=1)) as connection:
         connection.row_factory = sqlite3.Row

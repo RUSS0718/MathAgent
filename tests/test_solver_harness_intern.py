@@ -20,6 +20,40 @@ class FakeClient:
 
 
 class InternPortTest(unittest.TestCase):
+    def test_stream_capable_adapter_stays_non_streaming_without_explicit_switch(self):
+        from showcase.solver_harness.intern_port import InternModelPort
+        from showcase.adapters import ModelResponse
+
+        class StreamCapableAdapter:
+            model_id = "intern-test"
+
+            def __init__(self):
+                self.complete_calls = 0
+                self.stream_calls = 0
+
+            def complete(self, messages, *, metadata=None):
+                self.complete_calls += 1
+                return ModelResponse(
+                    text=json.dumps({
+                        "assessment": "NEED_PLAN",
+                        "worked": [],
+                        "failed": [],
+                        "candidates": [],
+                    }),
+                    finish_reason="stop",
+                )
+
+            def stream_complete(self, messages, *, metadata=None):
+                self.stream_calls += 1
+                raise AssertionError("streaming requires an explicit switch")
+
+        adapter = StreamCapableAdapter()
+        result = InternModelPort(adapter).complete({"role": "explore", "problem": "public"})
+
+        self.assertEqual("NEED_PLAN", result["assessment"])
+        self.assertEqual(1, adapter.complete_calls)
+        self.assertEqual(0, adapter.stream_calls)
+
     def test_original_problem_context_and_provider_metadata_survive_port(self):
         from showcase.solver_harness.intern_port import InternModelPort
 

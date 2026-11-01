@@ -117,11 +117,12 @@ class InternModelPort:
     """Reasoner/Verifier/Meta bridge, with no implicit live adapter creation."""
 
     def __init__(self, adapter: InternModelAdapter | None = None, *, original_problem=None,
-                 deadlines=None, activity_observer=None):
+                 deadlines=None, activity_observer=None, streaming=False):
         self.adapter = adapter
         self.original_problem = original_problem
         self.deadlines = deadlines
         self.activity_observer = activity_observer
+        self.streaming = streaming is True
         self.invocations = []
 
     def verify(self, request):
@@ -137,7 +138,7 @@ class InternModelPort:
         activity_observer = request.get("activity_observer")
         if not callable(activity_observer):
             activity_observer = self.activity_observer
-        if callable(getattr(self.adapter, "stream_complete", None)):
+        if self.streaming and callable(getattr(self.adapter, "stream_complete", None)):
             return self._complete_stream(request, schema, messages, activity_observer)
         started = time.monotonic()
         record = _invocation_record(request, self.adapter.model_id)

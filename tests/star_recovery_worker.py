@@ -212,6 +212,7 @@ def config(folder, *, crash_tools=False):
             "SHOWCASE_STAR_BUDGET": RunBudgetLimits(max_model_calls=calls, max_http_attempts=calls),
             "SHOWCASE_STAR_REGISTRY": registry,
             "SHOWCASE_STAR_FEATURES": {"final_generation": True, "final_solution_review": True,
+                                        "stream_activity": window in STREAM_WINDOWS,
                                        "local_code_tool": True,
                                        **({"meta_guidance": True}
                                           if window in GUIDANCE_WINDOWS

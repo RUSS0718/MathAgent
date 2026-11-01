@@ -10,7 +10,8 @@ OPTIONAL_FEATURES = frozenset({
 })
 EXPERIMENTAL_FEATURES = frozenset({"planner_checkpoints", "reasoner_checkpoints"})
 CORE_FEATURES = frozenset({
-    "star_routing", "persistent_sessions", "stream_recovery", *OPTIONAL_FEATURES,
+    "star_routing", "persistent_sessions", "stream_recovery",
+    *(OPTIONAL_FEATURES - {"stream_activity"}),
 })
 SUPPORTED_FEATURES = CORE_FEATURES | EXPERIMENTAL_FEATURES
 

@@ -118,10 +118,12 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         self.transport = ScriptedSSETransport(self, plans)
         self.enterContext(patch("showcase.adapters.requests.post", side_effect=self.transport))
         self.outbound = self.transport.outbound
+        features = {"stream_activity": True, **config.pop("SHOWCASE_STAR_FEATURES", {})}
         self.app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": folder.name,
             "SHOWCASE_JOB_DELAY_SECONDS": 0, "SHOWCASE_STAR_ENABLED": True,
             "SHOWCASE_STAR_ADAPTER": InternStreamAdapter(InternChatClient(retry=1), max_tokens=256),
-            "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection", **config})
+            "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection",
+            "SHOWCASE_STAR_FEATURES": features, **config})
         for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(self.app.extensions[name].close)
         self.client = self.app.test_client()

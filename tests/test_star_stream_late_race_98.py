@@ -28,7 +28,8 @@ class StreamLateRaceTest(StarJobFixture, unittest.TestCase):
     def open_stream(self, strict=True, **config):
         with patch.dict(os.environ, {"INTERN_API_KEY": "offline-placeholder"}):
             adapter = InternStreamAdapter(InternChatClient(timeout=2, retry=3), max_tokens=256)
-        features = {"strict_completion": strict, **config.pop("SHOWCASE_STAR_FEATURES", {})}
+        features = {"stream_activity": True, "strict_completion": strict,
+                    **config.pop("SHOWCASE_STAR_FEATURES", {})}
         self.open_star([], SHOWCASE_STAR_ADAPTER=adapter,
                        SHOWCASE_STAR_FEATURES=features, **config)
 

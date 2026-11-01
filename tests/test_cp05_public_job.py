@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import tempfile
 import time
 import unittest
 import uuid
+import requests
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +17,10 @@ from llm_client import InternChatClient
 from showcase.adapters import InternModelAdapter
 from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
+from tests.star_product_support import StarJobFixture
+from tests.test_star_product_planning import FEATURES as PLAN_FEATURES, STEP, VERDICT
+import tests.test_star_product_streaming_recovery as streaming_support
+from tests.test_star_product_tools import NEED_PLAN
 
 
 PLAN = {
@@ -72,7 +78,7 @@ class _JsonResponse:
 
 
 class CP05PublicJobTest(unittest.TestCase):
-    def open_app(self, replies):
+    def open_app(self, replies, *, features=None):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.requests = []
@@ -91,7 +97,7 @@ class CP05PublicJobTest(unittest.TestCase):
             "SHOWCASE_DATA_DIR": str(Path(directory.name) / "showcase"),
             "SHOWCASE_JOB_DELAY_SECONDS": 0,
             "SHOWCASE_STAR_ENABLED": True,
-            "SHOWCASE_STAR_FEATURES": {
+            "SHOWCASE_STAR_FEATURES": features or {
                 "final_generation": True,
                 "final_solution_review": True,
                 "meta_guidance": True,
@@ -113,6 +119,27 @@ class CP05PublicJobTest(unittest.TestCase):
         headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
         session = client.post("/api/new_chat", headers=headers).get_json()["new_session_id"]
         return client, headers, session
+
+    def run_public_job(self, replies, *, features):
+        client, headers, session = self.open_app(replies, features=features)
+        created = client.post(
+            "/api/agent/jobs",
+            json={"message": "prove the result", "session_id": session, "solver_mode": "star_limited"},
+            headers=headers,
+        )
+        self.assertEqual(202, created.status_code, created.get_json())
+        job_id = created.get_json()["job_id"]
+        job = self.wait_for_terminal(client, job_id)
+        report = client.get(f"/api/agent/jobs/{job_id}/report").get_json()["report"]
+        evidence = client.get(f"/api/runs/{job_id}/evidence").get_json()
+        events = client.get(f"/api/agent/jobs/{job_id}/events").get_data(as_text=True)
+        return {
+            "job": job,
+            "report": report,
+            "evidence": evidence,
+            "events": events,
+            "requests": list(self.requests),
+        }
 
     def wait_for_terminal(self, client, job_id):
         deadline = time.monotonic() + 8
@@ -182,6 +209,73 @@ class CP05PublicJobTest(unittest.TestCase):
         self.assertNotIn("prove the result", stream)
         self.assertNotIn("close the implication symbolically", stream)
 
+    def test_control_and_checkpoint_candidate_share_public_job_contract(self):
+        control = self.run_public_job(
+            [
+                {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []},
+                PLAN,
+                {"argument": "accepted proof", "claims": [], "blocked": False},
+                {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT", "objection": ""},
+                {"final_response": "The result follows from the accepted proof."},
+                {"verdict": "ACCEPT", "reason": "The complete candidate is consistent."},
+            ],
+            features={"final_generation": True, "final_solution_review": True},
+        )
+        candidate = self.run_public_job(
+            [
+                {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []},
+                {"checkpoint": planner_checkpoint()},
+                {"checkpoint": planner_checkpoint("FINAL", "planner-final", gaps=[]), "plan": PLAN},
+                reasoner_checkpoint(blocked=True),
+                {
+                    "action_type": "retry_different_method",
+                    "specific_task": "close the implication symbolically",
+                    "use_pure_reasoning": True,
+                    "trace_back_to": None,
+                    "rationale": "the first route is blocked",
+                },
+                reasoner_checkpoint("FINAL", "reasoner-final"),
+                {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT", "objection": ""},
+                {"final_response": "The result follows from the accepted proof."},
+                {"verdict": "ACCEPT", "reason": "The complete candidate is consistent."},
+            ],
+            features={
+                "final_generation": True,
+                "final_solution_review": True,
+                "meta_guidance": True,
+                "planner_checkpoints": True,
+                "reasoner_checkpoints": True,
+            },
+        )
+
+        self.assertEqual(
+            ["explore", "planner", "reasoner", "step_verifier", "final_generator",
+             "whole_solution_verifier"],
+            [request["role"] for request in control["requests"]],
+        )
+        self.assertEqual(
+            ["explore", "planner", "planner", "reasoner", "meta", "reasoner",
+             "step_verifier", "final_generator", "whole_solution_verifier"],
+            [request["role"] for request in candidate["requests"]],
+        )
+        self.assertEqual(6, control["job"]["result"]["budget"]["logical_calls"])
+        self.assertEqual(6, control["job"]["result"]["budget"]["http_attempts"])
+        self.assertEqual(9, candidate["job"]["result"]["budget"]["logical_calls"])
+        self.assertEqual(9, candidate["job"]["result"]["budget"]["http_attempts"])
+        for run in (control, candidate):
+            job, report, evidence = run["job"], run["report"], run["evidence"]
+            self.assertEqual("succeeded", job["status"])
+            self.assertEqual("completed", job["result"]["solver"]["semantics"]["execution"])
+            self.assertEqual("accepted", job["result"]["solver"]["semantics"]["whole_review"])
+            self.assertEqual("The result follows from the accepted proof.", job["result"]["final_response"])
+            self.assertEqual(job["result"]["final_response"], report["answer"])
+            self.assertEqual(report["answer"], evidence["report"]["answer"])
+            self.assertEqual(report["semantics"], evidence["semantics"])
+            self.assertEqual(report["checks"], evidence["verification"])
+            self.assertEqual(report["budget"], evidence["budget"])
+            self.assertEqual(report["request_attempts"], evidence["request_attempts"])
+            self.assertEqual(0, job["result"]["budget"]["tool_calls"])
+
     def test_checkpoint_feature_switch_is_rejected_only_when_unknown_and_disabled_path_stays_legacy(self):
         from showcase.run_budget import RunBudgetLimits
         from showcase.star_product_config import limited_config
@@ -224,6 +318,123 @@ class CP05DocumentationContractTest(unittest.TestCase):
             self.assertIn(marker, document)
         self.assertNotIn("INTERN_API_KEY", document)
         self.assertNotIn("Obey this exact response schema", document)
+
+
+class CP05StreamingMatrixTest(StarJobFixture, unittest.TestCase):
+    """CP-05 public Job stream outcomes using the existing SSE fixture."""
+
+    def open_stream(self, plans, **config):
+        return streaming_support.StarStreamingRecoveryTest.open_stream(self, plans, **config)
+
+    def plan_for(self, replies):
+        return streaming_support.StarStreamingRecoveryTest.plan_for(self, replies)
+
+    @staticmethod
+    def plan_without_usage(replies):
+        return [
+            [*streaming_support.split_fragments(reply), {"type": "result", "usage": {}}]
+            for reply in replies
+        ]
+
+    def test_public_stream_matrix(self):
+        features = {**PLAN_FEATURES, "stream_activity": True}
+        plan = {"version": 1, "steps": [
+            {"step_id": "sum", "title": "Add", "objective": "Compute 1+1"}
+        ]}
+
+        with self.subTest(case="normal"):
+            self.open_stream(
+                self.plan_for([NEED_PLAN, plan, STEP, VERDICT,
+                               {"final_response": "2"}, {"verdict": "ACCEPT"}]),
+                SHOWCASE_STAR_FEATURES=features,
+                SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8),
+            )
+            result = self.terminal(self.create_job())
+            self.assertEqual("succeeded", result["status"], result)
+            self.assertEqual(0, result["result"]["budget"]["unknown_attempts"])
+
+        with self.subTest(case="empty_body"):
+            self.open_stream(
+                [[{"type": "result"}]],
+                SHOWCASE_STAR_FEATURES=features,
+                SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=4, max_http_attempts=4),
+            )
+            result = self.terminal(self.create_job())
+            self.assertEqual("failed", result["status"], result)
+            failures = result["result"]["solver"]["recovery"]["protocol_failures"]
+            self.assertEqual("empty_response", failures[0]["error_category"])
+
+        with self.subTest(case="missing_usage"):
+            self.open_stream(
+                self.plan_without_usage([NEED_PLAN, plan, STEP, VERDICT,
+                                         {"final_response": "2"}, {"verdict": "ACCEPT"}]),
+                SHOWCASE_STAR_FEATURES=features,
+                SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8),
+            )
+            result = self.terminal(self.create_job())
+            self.assertEqual("succeeded", result["status"], result)
+            self.assertTrue(all(
+                attempt["usage"]["total_tokens"] is None
+                and attempt["metering_status"] == "unknown"
+                for attempt in result["result"]["request_attempts"]
+            ))
+
+        with self.subTest(case="disconnect"):
+            self.open_stream([
+                [*streaming_support.split_fragments(NEED_PLAN), {"type": "result"}],
+                [*streaming_support.split_fragments(plan), {"type": "result"}],
+                [streaming_support.split_fragments(STEP)[0], requests.Timeout("disconnect")],
+            ], SHOWCASE_STAR_FEATURES=features,
+                SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8))
+            result = self.terminal(self.create_job())
+            self.assertEqual("failed", result["status"], result)
+            recovery = result["result"]["solver"]["recovery"]
+            self.assertEqual("needs_review", recovery["status"])
+            self.assertEqual(1, len(recovery["unknown_calls"]))
+
+        with self.subTest(case="cancel"):
+            entered, release = threading.Event(), threading.Event()
+            self.addCleanup(release.set)
+
+            def block(_context):
+                entered.set()
+                release.wait(3)
+                return {"type": "result"}
+
+            self.open_stream([[block]], SHOWCASE_STAR_FEATURES=features,
+                             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=4, max_http_attempts=4))
+            job_id = self.create_job()
+            self.assertTrue(entered.wait(3))
+            self.assertEqual("canceled", self.cancel(job_id)["status"])
+            release.set()
+            self.assertEqual("canceled", self.terminal(job_id)["status"])
+
+        with self.subTest(case="late"):
+            from tests.test_star_stream_late_race_98 import StreamLateRaceTest, completed_sse
+
+            StreamLateRaceTest.open_stream(self)
+            callbacks = []
+
+            class Reply:
+                status_code = 200
+
+            def transport(_url, *, on_late_response, **_kwargs):
+                callbacks.append(on_late_response)
+                raise requests.ReadTimeout("deadline")
+                yield
+
+            with patch("showcase.request_transport.response_events", side_effect=transport):
+                job_id = self.create_job()
+                before = self.terminal(job_id)
+                before_solver = before["result"]["solver"]
+                attempt_id = before["result"]["request_attempts"][0]["attempt_id"]
+                callbacks[0](Reply(), completed_sse(), .01, .2, True)
+                after = self.job(job_id)
+            self.assertEqual("failed", before["status"])
+            self.assertEqual(before_solver, after["result"]["solver"])
+            self.assertEqual(attempt_id, after["result"]["request_attempts"][0]["attempt_id"])
+            self.assertEqual("success", after["result"]["request_attempts"][0]["status"])
+            self.assertEqual(10, after["result"]["request_attempts"][0]["usage"]["total_tokens"])
 
 
 if __name__ == "__main__":

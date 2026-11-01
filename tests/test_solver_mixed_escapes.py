@@ -49,7 +49,8 @@ class MixedEscapeStreamingJobTest(StarJobFixture, unittest.TestCase):
             adapter = InternStreamAdapter(InternChatClient(retry=1), max_tokens=256)
         from tests.test_star_product_planning import FEATURES
         from showcase.run_budget import RunBudgetLimits
-        self.open_star(replies, SHOWCASE_STAR_FEATURES=FEATURES, SHOWCASE_STAR_ADAPTER=adapter,
+        self.open_star(replies, SHOWCASE_STAR_FEATURES={**FEATURES, "stream_activity": True},
+                       SHOWCASE_STAR_ADAPTER=adapter,
                        SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=16, max_http_attempts=16))
         return self.create_job()
 

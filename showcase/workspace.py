@@ -918,6 +918,9 @@ class WorkspaceService:
                 self.checkpointer.stop(job_id, "FAILED", "job_execution_failed")
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
+        # File-backed STAR reads deliberately leave the writer connection and
+        # in-process lock to job_read_snapshot; that independent read-only
+        # connection is required by the non-blocking public snapshot contract.
         from .job_read_snapshot import read_job
 
         return read_job(self, job_id, user_id)

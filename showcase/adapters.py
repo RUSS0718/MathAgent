@@ -653,6 +653,7 @@ class InternStreamAdapter(InternModelAdapter):
             activity_status = "deadline" if category == "timeout" else "disconnect" if category == "connectivity" else "unknown"
             notify(activity_observer, activity_status)
             from llm_client import _not_submitted
+            from llm_response import public_attempt
             if not local_processing_timeout:
                 attempt.update(status="not_submitted" if _not_submitted(exc) else "error",
                                error_category=category, error_type=type(exc).__name__)
@@ -662,9 +663,19 @@ class InternStreamAdapter(InternModelAdapter):
             else:
                 attempts.append(dict(attempt))
             error = AdapterError(category, type(exc).__name__)
-            error.request_attempts = (timeout_attempts if timeout_attempts is not None else
-                                      result["attempts"] if local_processing_timeout and result is not None
-                                      else record_attempts(attempts, metadata))
+            if timeout_attempts is not None:
+                error.request_attempts = timeout_attempts
+            elif local_processing_timeout or time.monotonic() >= logical_deadline:
+                # Deadline ownership belongs to the caller. A late response
+                # may still be assembling its public attempt in a daemon
+                # worker, so do not wait for that work before failing the Job.
+                error.request_attempts = (public_attempt(
+                    attempt, run_id=call_budget.run_id if call_budget else None,
+                    role=(metadata or {}).get("role")),)
+            elif result is not None:
+                error.request_attempts = result["attempts"]
+            else:
+                error.request_attempts = record_attempts(attempts, metadata)
             raise error from exc
         finally:
             if activity_status is None:

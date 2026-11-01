@@ -20,7 +20,7 @@ class PublicJobUnknownTest(StarJobFixture, unittest.TestCase):
         policy = ExperimentRunPolicy(time.time() + 8, phase_deadline_at=time.time() + 1.2)
         self.open_star([], SHOWCASE_STAR_ADAPTER=adapter,
                        SHOWCASE_STAR_EXPERIMENT_POLICY=policy,
-                       SHOWCASE_STAR_FEATURES={"strict_completion": True})
+                       SHOWCASE_STAR_FEATURES={"stream_activity": True, "strict_completion": True})
         release = threading.Event()
         self.addCleanup(release.set)
 
@@ -165,7 +165,7 @@ class PublicJobUnknownTest(StarJobFixture, unittest.TestCase):
         with patch.dict(os.environ, {"INTERN_API_KEY": "offline-placeholder"}):
             adapter = InternStreamAdapter(InternChatClient(timeout=2, retry=3))
         self.open_star([], SHOWCASE_STAR_ADAPTER=adapter,
-                       SHOWCASE_STAR_FEATURES={"strict_completion": True})
+                       SHOWCASE_STAR_FEATURES={"stream_activity": True, "strict_completion": True})
 
         class Reply:
             status_code = 200
