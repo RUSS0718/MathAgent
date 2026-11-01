@@ -78,9 +78,7 @@ class RunBudgetLedger:
     def __init__(self, connection=None, lock=None, *, database_path=":memory:", connection_lock=None):
         self.owns_connection = connection is None
         self.connection = connection or sqlite3.connect(str(database_path), check_same_thread=False)
-        self.lock = connection_lock if lock is None and connection_lock is not None else (
-            threading.RLock() if lock is None else lock
-        )
+        self.lock = threading.RLock() if lock is None else lock
         self.connection_lock = self.lock if connection_lock is None else connection_lock
         self._closed = False
         self.database_path = self.connection.execute("PRAGMA database_list").fetchone()[2]
@@ -99,23 +97,41 @@ class RunBudgetLedger:
 
     @contextmanager
     def _transaction(self, run_id):
-        with self.lock, self.connection_lock:
-            self.connection.execute("BEGIN IMMEDIATE")
+        from .run_budget_late import _shared_gate, _settlement_timeout
+
+        timeout = _settlement_timeout.get()
+        with _shared_gate(self, timeout=timeout) as admitted:
+            if not admitted:
+                raise sqlite3.OperationalError("database is locked")
+            busy_timeout = self.connection.execute("PRAGMA busy_timeout").fetchone()[0]
+            if timeout is not None:
+                self.connection.execute("PRAGMA busy_timeout = 0")
             try:
-                row = self.connection.execute(
-                    "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
-                ).fetchone()
-                state = json.loads(row[0]) if row else None
-                yield state
-                if state is not None:
-                    self.connection.execute(
-                        "UPDATE run_budgets SET ledger_json=? WHERE run_id=?",
-                        (json.dumps(state), run_id),
-                    )
-                self.connection.commit()
-            except BaseException:
-                self.connection.rollback()
-                raise
+                with self._transaction_open(run_id) as state:
+                    yield state
+            finally:
+                if timeout is not None:
+                    self.connection.execute(f"PRAGMA busy_timeout = {busy_timeout}")
+
+    @contextmanager
+    def _transaction_open(self, run_id):
+        """Update only while both gates are held by the transaction caller."""
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.connection.execute(
+                "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
+            ).fetchone()
+            state = json.loads(row[0]) if row else None
+            yield state
+            if state is not None:
+                self.connection.execute(
+                    "UPDATE run_budgets SET ledger_json=? WHERE run_id=?",
+                    (json.dumps(state), run_id),
+                )
+            self.connection.commit()
+        except BaseException:
+            self.connection.rollback()
+            raise
 
     def ensure(self, run_id, limits, *, deadline_at=None):
         if deadline_at is not None and (type(deadline_at) not in {int, float} or not math.isfinite(deadline_at)):

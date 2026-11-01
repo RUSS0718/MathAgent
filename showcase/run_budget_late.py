@@ -7,6 +7,7 @@ import sqlite3
 import threading
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,6 +15,7 @@ from llm_response import USAGE_FIELDS, provider_usage, safe_identifier
 
 _ERROR_CATEGORIES = {"timeout", "connectivity", "missing_finish_reason", "missing_stream_terminal",
                      "invalid_response", "http_status"}
+_settlement_timeout = ContextVar("settlement_timeout", default=None)
 
 
 @contextmanager
@@ -156,7 +158,9 @@ def _sqlite_busy(exc):
 def settle_late_with_retry(budget, event):
     """Bound transient SQLite retries; never redispatch the provider request."""
     for index in range(3):
-        with _shared_gate(budget.ledger, timeout=.25) as admitted:
+        admitted = budget.ledger.lock.acquire(timeout=.25)
+        token = _settlement_timeout.set(.25)
+        try:
             if admitted:
                 try:
                     if budget.ledger._closed and not budget.ledger.database_path:
@@ -168,6 +172,10 @@ def settle_late_with_retry(budget, event):
                         break
                 except Exception:
                     break
+        finally:
+            _settlement_timeout.reset(token)
+            if admitted:
+                budget.ledger.lock.release()
         if index < 2:
             time.sleep(.1)
     _save_unresolved(budget.ledger, budget.run_id, event)

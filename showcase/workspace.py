@@ -745,7 +745,7 @@ class WorkspaceService:
         self.pipeline = pipeline
         self.star_pipeline = star_pipeline
         self.budget_ledger = RunBudgetLedger(
-            self.store._connection, lock=self.store._lock, connection_lock=self.store._lock
+            self.store._connection, connection_lock=self.store._lock
         )
         self.checkpointer = None
         if (pipeline is not None and hasattr(pipeline, "checkpointer")) or star_pipeline is not None:

@@ -138,7 +138,7 @@ class WorkspaceJobsContractTest(unittest.TestCase):
             try:
                 self.assertIs(service.budget_ledger.connection, service.store._connection)
                 self.assertIs(service.budget_ledger.connection_lock, service.store._lock)
-                self.assertIs(service.budget_ledger.lock, service.store._lock)
+                self.assertIsNot(service.budget_ledger.lock, service.store._lock)
             finally:
                 service.close()
 
