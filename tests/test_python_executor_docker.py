@@ -43,6 +43,10 @@ class DockerExecutorTest(unittest.TestCase):
         return result, run_id
 
     def test_fixed_mathematical_environment_actually_executes(self):
+        # Probe environment readiness with the product budget; timeout behavior
+        # is covered separately by the sleeping-child and busy-loop cases.
+        self.executor = DockerPythonExecutor(
+            image=IMAGE, artifact_root=self.executor.artifacts.root, max_output_bytes=8192)
         result, run_id = self.execute("import sympy,numpy,mpmath; print(sympy.__version__,numpy.__version__,mpmath.__version__); print(sympy.factorint(360))")
         self.assertEqual("success", result["status"])
         self.assertIn("1.14.0 2.3.4 1.3.0", result["stdout"])
