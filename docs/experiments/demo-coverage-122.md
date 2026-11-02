@@ -22,8 +22,6 @@
 
 比赛方案原件未随 worktree 提供；评分目标只按调用者提供的根 AGENTS.md 摘录处理。若后续需要逐条引用比赛方案，先补齐可核对的原件，再标记来源状态。
 
-比赛方案原件未随 worktree 提供；评分目标只按调用者提供的根 AGENTS.md 摘录处理。若后续需要逐条引用比赛方案，先补齐可核对的原件，再标记来源状态。
-
 详细的论文机制、固定上游路径、本地代码与差异分类沿用 [SP-01 来源审计](star-product-source-audit.md) 和 [ALIGN-10 来源映射](../evals/star-product-align10-source-mapping.md)，不复制其逐项历史映射。论文报告的结果基于论文自己的模型、数据和设置；本项目使用 Intern S2 与独立的产品运行合同，不能把论文结果移作本项目效果证据。
 
 原始来源：[STAR-PólyaMath 论文 v1](https://arxiv.org/html/2605.19338v1)、[固定上游 orchestrator 入口](https://github.com/Julius-Woo/STAR-PolyaMath/tree/5f2a86b5f4cf870be1b1d517c2d33c6932b01b7d)、[PR #121](https://github.com/RUSS0718/MathAgent/pull/121)。固定上游逐文件定位见上方来源审计，不以可变分支名代替 SHA。
