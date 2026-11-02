@@ -283,7 +283,7 @@ def _summary(state):
             any(a["usage"][field] is None for field in fields) for a in attempts
         ),
         "unresolved_attempts": sum(
-            a["status"] in {"reserved", "error", "unknown"} for a in attempts
+            a["status"] in {"reserved", "pending", "error", "unknown"} for a in attempts
         ),
         "tool_wall_time_seconds": sum(
             a.get("duration_seconds") or 0 for a in state["actions"] if a["kind"] == "tool"

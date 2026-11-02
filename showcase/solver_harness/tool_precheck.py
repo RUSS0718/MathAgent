@@ -245,6 +245,15 @@ def _remaining(state, config):
     return config.get("max_total_duration_seconds", 3600) - elapsed
 
 
+def _tool_quota_available(state, config):
+    """Use the same remaining quota for tool advertisement and execution admission."""
+    shared = current_budget()
+    budget = shared.snapshot() if shared else None
+    used = budget["tool_calls"] if budget else state.get("counters", {}).get("tool_calls", 0)
+    limit = budget["limits"]["max_tool_calls"] if budget else config.get("max_tool_calls", 8)
+    return used < limit
+
+
 def _denial(state, run_id, request, config, port):
     if not isinstance(request, Mapping) or not isinstance(request.get("arguments"), Mapping):
         return "not_executed"
@@ -270,10 +279,7 @@ def _denial(state, run_id, request, config, port):
         return "tool_not_allowed"
     if _remaining(state, config) <= 0:
         return "runtime_budget_exhausted"
-    shared = current_budget()
-    used = shared.snapshot()["tool_calls"] if shared else state["counters"]["tool_calls"]
-    limit = shared.snapshot()["limits"]["max_tool_calls"] if shared else config.get("max_tool_calls", 8)
-    if used >= limit:
+    if not _tool_quota_available(state, config):
         return "tool_call_budget_exhausted"
     if config.get("tool_timeout_seconds", 3) <= 0:
         return "timeout_budget_exhausted"
@@ -286,12 +292,14 @@ def _denial(state, run_id, request, config, port):
 
 
 def allowed_tool_ids(run, role, config, port):
-    """Advertise only registered, explicit, local permissions for this role."""
+    """Advertise registered local tools only while their execution quota remains."""
     if (
         config.get("features", {}).get("local_code_tool") is not True
         or port is None
         or role not in {"reasoner", "step_verifier", "whole_solution_verifier", "explore"}
         or run["state"].get("reasoning_mode") == "reason_noncoding"
     ):
+        return []
+    if not _tool_quota_available(run["state"], config):
         return []
     return sorted(SAFE_TOOLS & port.registered_tools & set(config.get("allowed_tools", [])))
