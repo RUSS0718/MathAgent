@@ -10,12 +10,13 @@ def persisted_solver(connection, run_id):
         return None
     state = json.loads(row[0])
     saved = connection.execute("SELECT snapshot_json FROM runs WHERE run_id=?", (run_id,)).fetchone()
-    answer = json.loads(saved[0]).get("final_response") if saved else None
+    snapshot = json.loads(saved[0]) if saved else {}
+    answer = snapshot.get("final_response")
     events = [json.loads(item[0]) for item in connection.execute(
         "SELECT event_json FROM solver_events WHERE run_id=? ORDER BY sequence", (run_id,)
     )]
     return {"run_id": run_id, "state_revision": state["state_revision"], "state": state,
-            "events": events}, answer
+            "events": events, "execution_status": snapshot.get("status")}, answer
 
 
 def current_solver(connection, run_id):
@@ -25,7 +26,8 @@ def current_solver(connection, run_id):
     if persisted is None:
         return None
     run, answer = persisted
-    return projection(run, answer=answer)
+    mode = connection.execute("SELECT verification_mode FROM workspace_jobs WHERE job_id=?", (run_id,)).fetchone()
+    return projection(run, answer=answer, verification_mode=mode[0] if mode else "auto")
 
 
 def project_solver_event(connection, job_id, event):

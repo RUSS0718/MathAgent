@@ -25,7 +25,12 @@ class StarProductPipeline:
 
     def __init__(self, database_path, *, adapter=None, evidence_kind="live", budget=None,
                  features=None, registry=None, hint_mode="none", full_enabled=False,
-                 full_features=None, full_budget=None):
+                 full_features=None, full_budget=None, experiment_policy=None):
+        from .star_experiment_policy import ExperimentRunPolicy
+
+        if experiment_policy is not None and not isinstance(experiment_policy, ExperimentRunPolicy):
+            raise ValueError("star_experiment_policy_invalid")
+        self.experiment_policy = experiment_policy
         if evidence_kind not in {"live", "scripted", "fault_injection"}:
             raise ValueError("star_evidence_kind_invalid")
         if adapter is not None and not isinstance(adapter, InternModelAdapter):
@@ -73,7 +78,9 @@ class StarProductPipeline:
         if probe:
             from .star_product_readiness import isolated_readiness
 
-            readiness = isolated_readiness(self.registry)
+            readiness = isolated_readiness(self.registry, max_runtime_seconds=(
+                min(45, self.experiment_policy.remaining()) if self.experiment_policy else 45),
+                deadline_at=self.experiment_policy.deadline_at if self.experiment_policy else None)
             self.readiness = readiness
         if not readiness["available"]:
             return [readiness["reason"]]
@@ -98,6 +105,8 @@ class StarProductPipeline:
         return self.full_config if mode in FULL_MODES else self.config
 
     def budget_for_mode(self, mode):
+        if mode in FULL_MODES and self.experiment_policy is not None:
+            return self.experiment_policy.budget()
         return self.full_budget if mode in FULL_MODES else self.budget
 
     def run(self, run_id, problem, *, verification_mode="auto", emit=None, solver_hint=None,
@@ -121,6 +130,11 @@ class StarProductPipeline:
             features["best_effort"] = True
         config = {**base, **({"hint_mode": "user_hint"} if solver_hint is not None else {}),
                   "features": features}
+        if self.experiment_policy is not None:
+            limits = current_budget().snapshot()["limits"]
+            config.update(max_model_calls=limits["max_model_calls"],
+                          max_tool_calls=limits["max_tool_calls"],
+                          max_total_duration_seconds=max(1, int(limits["max_runtime_seconds"])))
 
         def observe(run, event):
             if event:
@@ -132,7 +146,7 @@ class StarProductPipeline:
                       "node_name": "star", "step_id": public_event_id,
                       "title": "STAR " + event["type"],
                       "summary": event["type"],
-                      "solver": projection(run),
+                      "solver": projection(run, verification_mode=verification_mode),
                       **decision_fields(event, run["state"], port.invocations)})
 
         def solve():
@@ -188,7 +202,7 @@ class StarProductPipeline:
                 result = {
                     **mode_identity(solver_mode, config), "run_id": run_id,
                     "execution_mode": solver_mode, "evidence_kind": self.evidence_kind,
-                    "solver": projection(run, answer=answer),
+                    "solver": projection(run, answer=answer, verification_mode=verification_mode),
                     "status": "COMPLETED" if reviewed and verification_mode != "required" else "NEEDS_REVIEW",
                     "stage": math["phase"].lower(),
                     "final_response": answer,
@@ -220,12 +234,16 @@ class StarProductPipeline:
         sink({"type": "final_result" if result["status"] == "COMPLETED" else "needs_review",
               "job_id": run_id, "node_name": "terminal", "step_id": "terminal",
               "title": "STAR 已完成" if result["status"] == "COMPLETED" else "STAR 需要复核",
-              "message": "star_needs_review", "data": {"type": "text", "summary": result["summary"]}})
+              "message": "star_completed_llm_reviewed" if result["status"] == "COMPLETED"
+                         else result["error"]["category"],
+              "semantics": result["solver"]["semantics"],
+              "data": {"type": "text", "summary": result["summary"]}})
         return result
 
 
-def projection(run, *, answer=None):
+def projection(run, *, answer=None, verification_mode="auto"):
     from .star_product_summary import progress_summary
+    from .star_result_semantics import result_semantics
 
     state = run["state"]
     status = state["status"]
@@ -238,6 +256,7 @@ def projection(run, *, answer=None):
             "config_hash": state["config_hash"], "checkpoint_thread_id": run["run_id"],
             "recovery": recovery_projection(run),
             "progress": progress_summary(state),
+            "semantics": result_semantics(run, answer if answer is not None else state.get("final_response", ""), verification_mode=verification_mode, execution_status=run.get("execution_status")),
             **candidate_projection(run)}
 
 

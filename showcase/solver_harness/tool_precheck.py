@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from ..redaction import redact
 from ..run_budget import current_budget
+from .computation_evidence import has_computation_output
 
 POLICY_VERSION = "solver-local-precheck-1"
 SAFE_TOOLS = frozenset({"polynomial_check", "python_math"})
@@ -47,7 +48,7 @@ def precheck_report(harness, run, *, config, tool_port):
                 break
         refs = [receipt["receipt_id"]]
         claim["tool_evidence_refs"] = refs
-        if receipt["assertion_matched"]:
+        if receipt.get("comparison_status") == "matched" and receipt["assertion_matched"]:
             claim.update(label="verified", verification_scope="finite_computation")
     report["prechecked"] = True
     report["tool_evidence_refs"] = [
@@ -100,6 +101,8 @@ def _execute(harness, run, request, config, port, step_id, claim_index, *, recei
         "output": None,
         "timeout": False,
         "assertion_matched": False,
+        "comparison_status": "not_compared",
+        "output_available": False,
         "source": "skipped",
         "sandbox_policy_version": POLICY_VERSION,
         "input": None,
@@ -195,17 +198,21 @@ def _execute(harness, run, request, config, port, step_id, claim_index, *, recei
         if managed:
             receipt.update({key: result.get(key) for key in ("code_ref", "input_ref", "stdout_ref", "stderr_ref", "receipt_ref", "image", "environment", "sandbox_policy_version", "cleanup_verified", "retained_output_bytes", "observed_output_bytes", "executed", "signal", "oom_killed", "timeout", "unknown_outcome", "termination_reason")})
             receipt["unknown_outcome"] = result.get("unknown_outcome") is True or result.get("status") == "unknown_outcome"
+        receipt["output_available"] = has_computation_output({
+            "tool": receipt["tool"], "output": receipt["output"]})
         if (
             receipt["status"] == "success"
             and type(receipt["exit_code"]) is int
             and receipt["exit_code"] == 0
         ):
-            receipt["assertion_matched"] = (
-                request.get("scope") == "finite_computation"
-                and "expected_output" in request
-                and json.dumps(output, sort_keys=True, allow_nan=False)
-                == json.dumps(request["expected_output"], sort_keys=True, allow_nan=False)
-            )
+            if (receipt["output_available"] and request.get("scope") == "finite_computation"
+                    and "expected_output" in request):
+                receipt["assertion_matched"] = (
+                    json.dumps(output, sort_keys=True, allow_nan=False)
+                    == json.dumps(request["expected_output"], sort_keys=True, allow_nan=False)
+                )
+                receipt["comparison_status"] = (
+                    "matched" if receipt["assertion_matched"] else "mismatched")
     except (FutureTimeout, TimeoutError):
         receipt.update(
             status="timeout", timeout=True, unknown_outcome=True, reason="execution_outcome_unknown"

@@ -34,6 +34,7 @@ def applicable_independent_refs(record, state):
                     and receipt.get("status") == "success"
                     and receipt.get("source") == "local_precheck"
                     and receipt.get("assertion_matched") is True
+                    and receipt.get("comparison_status") == "matched"
                     and type(receipt.get("exit_code")) is int
                     and receipt["exit_code"] == 0
                     and not receipt.get("timeout")

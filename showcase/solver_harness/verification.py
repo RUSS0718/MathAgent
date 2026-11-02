@@ -231,7 +231,7 @@ def verify_step(
         declared = counterexample.target(report, reply["answer_claim"])
         if declared is None:
             verification.update(valid=False, reason="invalid_answer_claim_target")
-        elif not declared["both_directions_proved"]:
+        elif verification["valid"] and counterexample.missing_direction(declared):
             reserved = counterexample.run_check(
                 harness, reserved, problem=problem, declared=declared, verifier_call_id=call_id,
             )
@@ -372,7 +372,7 @@ def _run_guidance_for_failure(harness, run, max_model_calls, max_runtime_seconds
             failure_type, tool_failure = "code_issue", (
                 "output_mismatch" if status == "output_limit" else "execution_error"
             )
-        elif status == "success" and receipt.get("assertion_matched") is False:
+        elif status == "success" and receipt.get("comparison_status") == "mismatched":
             failure_type, tool_failure = "code_issue", "output_mismatch"
         if failure_type:
             break

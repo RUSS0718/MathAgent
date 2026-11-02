@@ -88,7 +88,7 @@ def explore(harness, run, problem):
                     "session_key": session,
                     "problem": problem,
                     "solution_candidate": finding.get("solution_candidate", ""),
-                    "instruction": "Polish the complete candidate; return solution_candidate. Do not add unsupported facts.",
+                    "instruction": "Preserve every original requirement, including any requested brief explanation, conditions, domain and answer format. Return a self-contained solution_candidate retaining the complete reasoning and conclusion for a fresh whole-solution verifier. Do not shorten a proof to just its answer or add unsupported facts.",
                 },
             )
             candidate = reply.get("solution_candidate") if isinstance(reply, dict) else None

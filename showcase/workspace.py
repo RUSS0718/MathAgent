@@ -876,7 +876,8 @@ class WorkspaceService:
                     return
                 limits = (pipeline.budget_for_mode(identity.get("solver_mode"))
                           if execution_mode in STAR_MODES else getattr(pipeline, "budget", RunBudgetLimits()))
-                with bind_budget(self.budget_ledger.ensure(job_id, limits)) as budget, bind_control(RunControl(self.store, job_id, budget, self.checkpointer)) as control:
+                deadline = getattr(getattr(pipeline, "experiment_policy", None), "deadline_at", None)
+                with bind_budget(self.budget_ledger.ensure(job_id, limits, deadline_at=deadline)) as budget, bind_control(RunControl(self.store, job_id, budget, self.checkpointer)) as control:
                     control.check()
                     state = pipeline.run(
                         job_id,

@@ -67,24 +67,44 @@ def review_record(run, candidate, verdict, *, call_id, origin, versions=None, fa
     }
 
 
-def delivery_verification(run, answer):
-    """Never infer a whole review from a step verdict or model supplied reference."""
+def review_binding(run, answer):
+    """Resolve the actual audited review independently of the delivered text.
+
+    An accepted old artifact remains a historical review, never an acceptance of
+    rewritten text. All consumers share these source checks, including replay.
+    """
     records = run["state"].get("whole_solution_reviews", [])
-    latest = records[-1] if records else {}
+    if not records:
+        return {"whole_review": "not_reviewed", "binding": "unbound"}
+    latest = records[-1]
     source = latest.get("source", {})
     call = run["state"].get("calls", {}).get(source.get("call_id"), {})
     valid = (
-        latest.get("verdict") == "ACCEPT"
-        and latest.get("artifact") == artifact_identity(answer)
+        latest.get("verdict") in {"ACCEPT", "REJECT"}
         and source.get("run_id") == run["run_id"]
+        and source.get("candidate_version") == len(records)
         and source.get("plan_version") == run["state"]["plan_version"]
         and source.get("attempt_index") == run["state"]["attempt_index"]
         and call.get("status") == "completed"
         and call.get("role") == "whole_solution_verifier"
         and call.get("run_id") == run["run_id"]
-        and call.get("response", {}).get("verdict") == "ACCEPT"
+        and call.get("response", {}).get("verdict") == latest.get("verdict")
+        and call.get("response", {}).get("tool_request") is None
         and artifact_identity(call.get("request", {}).get("solution_candidate", "")) == latest.get("artifact")
     )
+    same = latest.get("artifact") == artifact_identity(answer)
+    return {
+        "whole_review": ("accepted" if latest["verdict"] == "ACCEPT" else "rejected")
+                        if valid else "invalid_source",
+        "binding": "artifact_changed" if not same else "same_artifact" if valid else "unbound",
+    }
+
+
+def delivery_verification(run, answer):
+    """Never infer a whole review from a step verdict or model supplied reference."""
+    meaning = review_binding(run, answer)
+    valid = meaning == {"whole_review": "accepted", "binding": "same_artifact"}
+    records = run["state"].get("whole_solution_reviews", [])
     history = [bind_verification(answer, {
         "status": "unknown", "checker": "whole_solution_verifier",
         "checker_version": "star-whole-review-v1", "scope": "whole_solution_llm_review",

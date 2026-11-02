@@ -30,7 +30,12 @@ def target(report, declaration):
     index = declaration.get("claim_index")
     claims = report.get("claims", [])
     if (
-        set(declaration) != {"claim_index", "both_directions_proved", "assumptions", "approach"}
+        set(declaration) - {"claim_type"} != {
+            "claim_index", "both_directions_proved", "assumptions", "approach"}
+        or ("claim_type" in declaration and (
+            not isinstance(declaration["claim_type"], str) or declaration["claim_type"] not in {
+                "numerical_evaluation", "sharp_bound", "extremum",
+                "necessary_and_sufficient", "general_proof"}))
         or type(index) is not int or not 0 <= index < len(claims)
         or type(declaration.get("both_directions_proved")) is not bool
         or not isinstance(declaration.get("assumptions"), list)
@@ -40,6 +45,12 @@ def target(report, declaration):
     ):
         return None
     return {**deepcopy(dict(declaration)), "claim": claims[index]["statement"]}
+
+
+def missing_direction(declared):
+    """Legacy declarations remain applicable; finite evaluation has no converse."""
+    return (declared.get("claim_type") != "numerical_evaluation"
+            and not declared["both_directions_proved"])
 
 
 def run_check(harness, run, *, problem, declared, verifier_call_id):

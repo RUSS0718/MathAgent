@@ -39,7 +39,7 @@ def _persist_ledger_audit(executor, ledger, run_id, budget):
         return None
 
 
-def isolated_readiness(registry):
+def isolated_readiness(registry, *, max_runtime_seconds=45, deadline_at=None):
     executor = getattr(registry, "container_python_executor", None)
     if not isinstance(executor, DockerPythonExecutor):
         return {"available": False, "reason": "isolated_python_required"}
@@ -53,7 +53,8 @@ def isolated_readiness(registry):
     budget = None
     try:
         budget = ledger.ensure(run_id, RunBudgetLimits(
-            max_model_calls=0, max_http_attempts=0, max_tool_calls=1, max_runtime_seconds=45))
+            max_model_calls=0, max_http_attempts=0, max_tool_calls=1,
+            max_runtime_seconds=max_runtime_seconds), deadline_at=deadline_at)
         with bind_budget(budget), tool_request({
             "run_id": run_id, "call_id": "isolation-probe",
             "timeout_seconds": 8, "max_output_bytes": 16000,
