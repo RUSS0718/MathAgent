@@ -1,6 +1,9 @@
 """Release reports expose skipped tests and enforce the Reference evidence gate."""
 
 import io
+import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -136,6 +139,119 @@ class ReleaseReportingTest(unittest.TestCase):
             self.assertEqual(0, run_unittest_report.main())
         load.assert_called_once_with(command[3:])
 
+    def test_cli_captures_python_and_child_output_with_summary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module_path = root / "test_reporting_fixture.py"
+            module_path.write_text(
+                "import subprocess, sys, unittest\n"
+                "class Sample(unittest.TestCase):\n"
+                "    def test_pass(self):\n"
+                "        print('sample-python-stdout')\n"
+                "        print('sample-python-stderr', file=sys.stderr)\n"
+                "        subprocess.run([sys.executable, '-c', \"import sys; "
+                "print('sample-child-stdout 中文子进程'); "
+                "print('sample-child-stderr', file=sys.stderr)\"], check=True)\n"
+                "    @unittest.skip('optional dependency missing')\n"
+                "    def test_skip(self): pass\n"
+                "    @unittest.expectedFailure\n"
+                "    def test_expected_failure(self): self.fail('known limitation')\n",
+                encoding="utf-8",
+            )
+            summary_path = root / "nested" / "reports" / "summary.json"
+            diagnostics_path = root / "nested" / "reports" / "diagnostics.log"
+            completed = _run_report_cli(
+                module_path,
+                "--summary-json",
+                str(summary_path),
+                "--diagnostics",
+                str(diagnostics_path),
+                "test_reporting_fixture",
+            )
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            diagnostics = diagnostics_path.read_text(encoding="utf-8")
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertEqual(
+            {
+                "testsRun": 3,
+                "skipped": 1,
+                "failures": 0,
+                "errors": 0,
+                "expectedFailures": 1,
+                "unexpectedSuccesses": 0,
+                "status": "passed",
+            },
+            {
+                key: summary[key]
+                for key in (
+                    "testsRun",
+                    "skipped",
+                    "failures",
+                    "errors",
+                    "expectedFailures",
+                    "unexpectedSuccesses",
+                    "status",
+                )
+            },
+        )
+        self.assertIsInstance(summary["elapsed"], float)
+        self.assertGreater(summary["pid"], 0)
+        self.assertTrue(summary["start_time"])
+        self.assertNotIn("expected_failures", summary)
+        self.assertGreater(summary["diagnostic_lines"], 0)
+        self.assertIn("sample-python-stdout", diagnostics)
+        self.assertIn("sample-python-stderr", diagnostics)
+        self.assertIn("sample-child-stdout", diagnostics)
+        self.assertIn("中文子进程", diagnostics)
+        self.assertIn("sample-child-stderr", diagnostics)
+        self.assertIn("SKIP ", diagnostics)
+        self.assertIn("EXPECTED_FAILURE", diagnostics)
+        self.assertIn(str(summary_path), completed.stderr)
+        self.assertIn(str(diagnostics_path), completed.stderr)
+        self.assertNotIn("sample-child-stdout", completed.stdout + completed.stderr)
+
+    def test_cli_diagnostics_alone_keeps_failure_and_unknown_child_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            module_path = root / "test_reporting_failure_fixture.py"
+            module_path.write_text(
+                "import subprocess, sys, unittest\n"
+                "class Failing(unittest.TestCase):\n"
+                "    def test_failure(self):\n"
+                "        print('failure-python-stdout')\n"
+                "        print('unknown-python-diagnostic', file=sys.stderr)\n"
+                "        subprocess.run([sys.executable, '-c', \"import sys; "
+                "print('failure-child-stdout'); "
+                "print('unknown-child-diagnostic', file=sys.stderr)\"], check=True)\n"
+                "        self.fail('intentional failure')\n",
+                encoding="utf-8",
+            )
+            diagnostics_path = root / "nested" / "diagnostics.log"
+            completed = _run_report_cli(
+                module_path,
+                "--diagnostics",
+                str(diagnostics_path),
+                "test_reporting_failure_fixture",
+            )
+            diagnostics = diagnostics_path.read_text(encoding="utf-8")
+
+        self.assertEqual(1, completed.returncode)
+        self.assertIn("FAILED", completed.stderr)
+        self.assertIn("intentional failure", completed.stderr)
+        self.assertIn("Traceback", completed.stderr)
+        self.assertIn(str(diagnostics_path), completed.stderr)
+        self.assertIn("failure-python-stdout", diagnostics)
+        self.assertIn("unknown-python-diagnostic", diagnostics)
+        self.assertIn("failure-child-stdout", diagnostics)
+        self.assertIn("unknown-child-diagnostic", diagnostics)
+        self.assertIn("intentional failure", diagnostics)
+        expected_section = diagnostics.split("=== expected diagnostics ===", 1)[1].split(
+            "=== observed diagnostics ===", 1
+        )[0]
+        self.assertNotIn("unknown-python-diagnostic", expected_section)
+        self.assertNotIn("unknown-child-diagnostic", expected_section)
+
 
 def _flatten(suite):
     for item in suite:
@@ -143,3 +259,25 @@ def _flatten(suite):
             yield from _flatten(item)
         else:
             yield item
+
+
+def _run_report_cli(module_path, *arguments):
+    environment = os.environ.copy()
+    environment["PYTHONIOENCODING"] = "cp936"
+    existing_pythonpath = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(module_path.parent), existing_pythonpath) if part
+    )
+    return subprocess.run(
+        [
+            sys.executable,
+            str(Path(run_unittest_report.__file__).resolve()),
+            *arguments,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=environment,
+        check=False,
+    )
