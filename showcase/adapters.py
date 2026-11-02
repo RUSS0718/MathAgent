@@ -154,6 +154,12 @@ class InternModelAdapter:
             kwargs["thinking_mode"] = self.thinking_mode
         try:
             transport = getattr(client, "chat_response", client.chat)
+            requested_timeout = (metadata or {}).get("timeout_seconds")
+            if requested_timeout is not None:
+                if not _accepts_keyword(transport, "timeout_seconds"):
+                    raise AdapterError("unsupported_timeout_transport")
+                configured = getattr(client, "timeout", self.client_timeout) or requested_timeout
+                kwargs["timeout_seconds"] = min(configured, requested_timeout)
             budget = current_budget()
             if budget is not None:
                 if not _accepts_keyword(client.chat, "_attempt_budget") or not _accepts_keyword(transport, "_attempt_budget"):

@@ -61,6 +61,26 @@ class SQLiteStore:
                     PRIMARY KEY (run_id, artifact_id),
                     FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
                 );
+                CREATE TABLE IF NOT EXISTS solver_states (
+                    run_id TEXT PRIMARY KEY,
+                    state_json TEXT NOT NULL,
+                    problem_hash TEXT NOT NULL,
+                    config_hash TEXT NOT NULL,
+                    state_revision INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS solver_events (
+                    run_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    event_id TEXT NOT NULL,
+                    state_revision INTEGER NOT NULL,
+                    event_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (run_id, sequence),
+                    UNIQUE (run_id, event_id),
+                    FOREIGN KEY (run_id) REFERENCES solver_states(run_id) ON DELETE CASCADE
+                );
                 """
             )
             self._connection.commit()

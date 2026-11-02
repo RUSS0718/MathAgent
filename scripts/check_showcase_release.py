@@ -85,6 +85,7 @@ def main() -> int:
         [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
         [sys.executable, "demo_server.py", "--help"],
         [sys.executable, "showcase_server.py", "--help"],
+        [sys.executable, "scripts/check_solver_release.py"],
     ]
     for command in checks:
         environment = os.environ.copy()
