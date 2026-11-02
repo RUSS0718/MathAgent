@@ -118,10 +118,12 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         self.transport = ScriptedSSETransport(self, plans)
         self.enterContext(patch("showcase.adapters.requests.post", side_effect=self.transport))
         self.outbound = self.transport.outbound
+        features = {"stream_activity": True, **config.pop("SHOWCASE_STAR_FEATURES", {})}
         self.app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": folder.name,
             "SHOWCASE_JOB_DELAY_SECONDS": 0, "SHOWCASE_STAR_ENABLED": True,
             "SHOWCASE_STAR_ADAPTER": InternStreamAdapter(InternChatClient(retry=1), max_tokens=256),
-            "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection", **config})
+            "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection",
+            "SHOWCASE_STAR_FEATURES": features, **config})
         for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(self.app.extensions[name].close)
         self.client = self.app.test_client()
@@ -201,6 +203,16 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         expected_bytes = sum(len(piece.encode("utf-8"))
                              for piece in split_fragments(STEP))
         self.assertEqual(expected_bytes, reported["stream_metrics"]["bytes"])
+        activity_metrics = []
+        for line in stream.splitlines():
+            if not line.startswith("data: "):
+                continue
+            payload = json.loads(line[6:])
+            if payload.get("solver_event_type") == "call_activity":
+                activity_metrics.append(payload["stream_activity"])
+        self.assertTrue(activity_metrics, stream)
+        self.assertTrue(any(item.get("first_content_at") for item in activity_metrics))
+        self.assertTrue(all("text" not in item for item in activity_metrics))
         evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
         timeline_metrics = [event["stream_metrics"] for event in evidence["timeline"]
                             if event.get("stream_metrics")]
@@ -350,7 +362,17 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
                         "retry_call": {"call_id": old_id, "new_call_id": str(uuid.uuid4())}},
                         headers=self.headers())
                     self.assertEqual(202, response.status_code, response.get_json())
-                    final = self.terminal(job_id)
+                    # The resumed path persists one redacted activity event per
+                    # stream boundary. Keep the recovery assertion bounded, but
+                    # allow the Windows SQLite worker enough time to drain all
+                    # eleven controlled calls.
+                    deadline = time.monotonic() + 45
+                    final = self.job(job_id)
+                    while final["status"] not in {"succeeded", "failed", "canceled"} \
+                            and time.monotonic() < deadline:
+                        time.sleep(.02)
+                        final = self.job(job_id)
+                    self.assertIn(final["status"], {"succeeded", "failed", "canceled"}, final)
                     self.assertEqual("succeeded", final["status"], final)
                     self.assertEqual(11, len((folder / "requests.jsonl").read_text().splitlines()))
                     budget = final["result"]["budget"]

@@ -39,22 +39,37 @@ class RequestTransportLateCallbackTest(unittest.TestCase):
 
     def run_late_callback(self, response, callback, callback_called):
         """Release a mocked response only after the transport detaches at deadline."""
-        request_released = threading.Event()
+        request_released, dispatched = threading.Event(), threading.Event()
+        self.addCleanup(request_released.set)
+        outcomes = []
 
         def fake_post(*_args, **_kwargs):
-            if not request_released.wait(timeout=2):
+            dispatched.set()
+            if not request_released.wait(timeout=4):
                 raise TimeoutError("test did not release the mocked response")
             return response
 
         with patch("showcase.request_transport.requests.post", side_effect=fake_post):
             events = response_events(
                 "http://local.invalid",
-                deadline=time.monotonic() - 1,
+                deadline=time.monotonic() + 1,
                 timeout=5,
                 on_late_response=callback,
             )
-            with self.assertRaises(requests.ReadTimeout):
-                next(events)
+
+            def consume():
+                try:
+                    next(events)
+                except BaseException as exc:
+                    outcomes.append(exc)
+
+            worker = threading.Thread(target=consume, daemon=True)
+            worker.start()
+            self.assertTrue(dispatched.wait(2))
+            worker.join(3)
+            self.assertFalse(worker.is_alive(), "caller must not wait for the delayed response")
+            self.assertEqual(1, len(outcomes))
+            self.assertIs(type(outcomes[0]), requests.ReadTimeout)
             request_released.set()
             self.assertTrue(response.closed.wait(timeout=2))
 

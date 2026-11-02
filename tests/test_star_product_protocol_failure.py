@@ -50,7 +50,8 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
         from tests.star_product_support import SOLVED, POLISH
 
         adapter = InternStreamAdapter(InternChatClient(timeout=5, retry=1), max_tokens=256)
-        self.open_star([SOLVED, POLISH, ACCEPT], SHOWCASE_STAR_FEATURES=FEATURES,
+        self.open_star([SOLVED, POLISH, ACCEPT],
+                       SHOWCASE_STAR_FEATURES={**FEATURES, "stream_activity": True},
                        SHOWCASE_STAR_ADAPTER=adapter,
                        SHOWCASE_STAR_BUDGET=RunBudgetLimits(
                            max_model_calls=8, max_http_attempts=8, max_runtime_seconds=60))

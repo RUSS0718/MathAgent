@@ -86,6 +86,26 @@ CHAIN_GUIDANCE = {
     "use_pure_reasoning": False, "trace_back_to": 1,
     "rationale": "Rebuild the base step with its own computation",
 }
+PLANNER_CHECKPOINT_YIELD = {
+    "protocol_version": 1,
+    "checkpoint_id": "planner-yield-1",
+    "status": "YIELD",
+    "objective": "first fact",
+    "dependencies": [],
+    "evidence": ["exploration"],
+    "gaps": ["close the implication"],
+    "next_action": "close the implication",
+}
+PLANNER_CHECKPOINT_FINAL = {
+    "protocol_version": 1,
+    "checkpoint_id": "planner-final-1",
+    "status": "FINAL",
+    "objective": "first fact",
+    "dependencies": [],
+    "evidence": ["exploration"],
+    "gaps": [],
+    "next_action": "execute the plan",
+}
 
 
 def requests_so_far(folder):
@@ -212,6 +232,9 @@ def config(folder, *, crash_tools=False):
             "SHOWCASE_STAR_BUDGET": RunBudgetLimits(max_model_calls=calls, max_http_attempts=calls),
             "SHOWCASE_STAR_REGISTRY": registry,
             "SHOWCASE_STAR_FEATURES": {"final_generation": True, "final_solution_review": True,
+                                        "stream_activity": window in STREAM_WINDOWS,
+                                       **({"planner_checkpoints": True}
+                                          if window == "planner_checkpoint_yield" else {}),
                                        "local_code_tool": True,
                                        **({"meta_guidance": True}
                                           if window in GUIDANCE_WINDOWS
@@ -225,6 +248,11 @@ def reply_value(window, context, folder):
         return chain_reply(role, context, folder)
     if window in GUIDANCE_WINDOWS or window == REPLAN_GUIDANCE_WINDOW:
         return guidance_reply(role, context, folder)
+    if window == "planner_checkpoint_yield" and role == "planner":
+        planner_calls = sum(item.get("role") == "planner" for item in requests_so_far(folder))
+        return {"checkpoint": PLANNER_CHECKPOINT_YIELD if planner_calls == 1 else {
+            **PLANNER_CHECKPOINT_FINAL, "plan": PLAN,
+        }}
     if role == "explore":
         value = {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
         if window == "explore_tool" and sum(
@@ -404,6 +432,12 @@ def main():
             # ALIGN-06 crash window: die after the exploration's own tool receipt
             # commits, before the continuation reply is requested.
             if event.get("solver_event_type") == "tool_receipt" and last.get("role") == "explore":
+                while not (folder / "job_id").exists():
+                    time.sleep(.01)
+                os._exit(71)
+            return
+        if window == "planner_checkpoint_yield":
+            if event.get("solver_event_type") == "planner_checkpoint_yielded":
                 while not (folder / "job_id").exists():
                     time.sleep(.01)
                 os._exit(71)

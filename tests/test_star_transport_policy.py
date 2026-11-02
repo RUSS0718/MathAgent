@@ -133,6 +133,7 @@ class StarTransportPolicyTest(StarJobFixture, unittest.TestCase):
                                     for item in received))
 
     def test_stream_lifecycle_reports_reasoning_before_visible_content(self):
+        activities = []
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
                 pass
@@ -164,7 +165,7 @@ class StarTransportPolicyTest(StarJobFixture, unittest.TestCase):
         with bind_budget(budget):
             chunks = list(adapter.stream_complete(
                 [{"role": "user", "content": "Return an answer"}],
-                metadata={"role": "solver"},
+                metadata={"role": "solver", "activity_observer": activities.append},
             ))
 
         attempt = chunks[-1]["attempts"][0]
@@ -179,6 +180,14 @@ class StarTransportPolicyTest(StarJobFixture, unittest.TestCase):
         self.assertEqual("solver", attempt["request_purpose"])
         self.assertEqual(0.3, attempt["temperature"])
         self.assertEqual(256, attempt["max_tokens"])
+        kinds = [item["kind"] for item in activities]
+        self.assertIn("response_headers", kinds)
+        self.assertIn("reasoning", kinds)
+        self.assertIn("content", kinds)
+        self.assertIn("usage", kinds)
+        self.assertIn("completion", kinds)
+        self.assertLess(kinds.index("reasoning"), kinds.index("content"))
+        self.assertTrue(all("text" not in item for item in activities))
 
     def test_slow_trickled_bytes_without_newline_hit_logical_deadline(self):
         class Handler(BaseHTTPRequestHandler):

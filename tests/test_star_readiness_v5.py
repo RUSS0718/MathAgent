@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+from contextlib import nullcontext
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,7 +15,7 @@ from unittest.mock import patch
 
 from scripts.run_star_readiness_97 import _build_adapter
 from showcase import star_readiness_registration as registration_module
-from showcase.run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget
+from showcase.run_budget import ModelCallBudget, RunBudgetLedger, RunBudgetLimits, bind_budget
 from showcase.run_control import RunStopped
 from showcase.star_experiment_policy import ExperimentRunPolicy
 from showcase.star_experiment_server import ExperimentServer
@@ -272,7 +273,8 @@ class StarReadinessV5Test(unittest.TestCase):
                 self.addCleanup(server.shutdown)
                 self.addCleanup(release.set)
                 with patch.dict("os.environ", {"INTERN_API_KEY": "fixture-only",
-                                               "INTERN_MODEL": "intern-s2"}):
+                                               "INTERN_MODEL": "intern-s2",
+                                               "INTERN_API_BASE": "https://chat.intern-ai.org.cn/api/v1/chat/completions"}):
                     adapter = _build_adapter({"model": V5_MODEL,
                                               "provider_endpoint": "https://chat.intern-ai.org.cn/api/v1/chat/completions"})
                 client = adapter._get_client()
@@ -294,8 +296,23 @@ class StarReadinessV5Test(unittest.TestCase):
                 budget = ledger.ensure("deadline-fixture", policy.budget(), deadline_at=policy.deadline_at)
                 original_deadline = budget.snapshot()["deadline_at"]
                 started = time.monotonic()
-                with bind_budget(budget), self.assertRaisesRegex(RunStopped, "run_deadline_exhausted"):
-                    adapter.complete([{"role": "user", "content": "fixture"}], metadata={"role": "explore"})
+                original_remaining = ModelCallBudget.remaining_seconds
+                delayed_budgets = set()
+
+                def delayed_remaining(call_budget):
+                    if id(call_budget) not in delayed_budgets:
+                        delayed_budgets.add(id(call_budget))
+                        time.sleep(0.04)
+                    return original_remaining(call_budget)
+
+                delayed = patch.object(ModelCallBudget, "remaining_seconds", delayed_remaining)
+                delay_context = delayed if limiting_deadline == "run" else nullcontext()
+                with delay_context, bind_budget(budget), self.assertRaisesRegex(
+                    RunStopped, "run_deadline_exhausted"
+                ):
+                    adapter.complete(
+                        [{"role": "user", "content": "fixture"}], metadata={"role": "explore"}
+                    )
                 self.assertLess(time.monotonic() - started, 1)
                 self.assertEqual(600, ledger.attempts("deadline-fixture")[0]["requests_timeout_seconds"])
                 self.assertEqual(1, budget.snapshot()["http_attempts"])

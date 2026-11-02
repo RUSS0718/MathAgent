@@ -65,7 +65,7 @@ class RawProviderContent:
 
 
 class StarJobFixture:
-    def open_star(self, replies, *, retry=1, **config):
+    def open_star(self, replies, *, retry=1, stream_chunk_size=7, **config):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.data_dir = folder.name
@@ -97,9 +97,9 @@ class StarJobFixture:
                 def iter_lines(self, decode_unicode=True):
                     content = value.content if isinstance(value, RawProviderContent) else json.dumps(value)
                     # Split even inside escape pairs; SSE framing must not alter text.
-                    for offset in range(0, len(content), 7):
+                    for offset in range(0, len(content), stream_chunk_size):
                         yield "data: " + json.dumps({"choices": [{"delta": {
-                            "content": content[offset:offset + 7]}}]})
+                            "content": content[offset:offset + stream_chunk_size]}}]})
                     yield "data: " + json.dumps({"choices": [{"delta": {},
                         "finish_reason": "stop"}], "model": "intern-s2",
                         "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}})
