@@ -405,7 +405,7 @@ class InternStreamAdapter(InternModelAdapter):
                             missing = "invalid_response"
                         elif body_complete and not late_done:
                             missing = "missing_stream_terminal" if strict else "connectivity"
-                        elif body_complete and strict and late_finish is None:
+                        elif body_complete and strict and not late_finish:
                             missing = "missing_finish_reason"
                         else:
                             missing = None
@@ -519,7 +519,7 @@ class InternStreamAdapter(InternModelAdapter):
                         if clock() < logical_deadline:
                             return
                         attempt.update({key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")})
-                        if stream_complete and saw_done and (not (metadata or {}).get("strict_completion") or finish_reason is not None):
+                        if stream_complete and saw_done and (not (metadata or {}).get("strict_completion") or bool(finish_reason)):
                             attempt.update(status="success", finish_reason=finish_reason, response_model_id=model_id)
                             local_processing_timeout = True
                         raise requests.ReadTimeout("logical_deadline_exceeded_during_processing")
@@ -565,7 +565,7 @@ class InternStreamAdapter(InternModelAdapter):
                             yield delta_chunk
                             check_processing_deadline()
                     check_processing_deadline()
-                    if (metadata or {}).get("strict_completion") is True and stream_complete and (not saw_done or finish_reason is None):
+                    if (metadata or {}).get("strict_completion") is True and stream_complete and (not saw_done or not finish_reason):
                         attempt.update({key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")})
                         raise AdapterError("missing_stream_terminal" if not saw_done else "missing_finish_reason")
                     if not stream_complete or not saw_done:
