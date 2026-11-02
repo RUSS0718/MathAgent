@@ -727,7 +727,19 @@ class StarFullReferenceChainTest(StarJobFixture, unittest.TestCase):
             "solver_mode": "star_reference"}, headers=self.headers())
         self.assertEqual(202, response.status_code, response.get_json())
         job_id = response.get_json()["job_id"]
-        job = self.terminal(job_id)
+        pipeline = self.app.extensions["showcase_workspace_service"].star_pipeline
+        tool_timeout = pipeline.registry.container_python_executor.timeout_seconds
+        self.assertEqual(20, tool_timeout)
+        # This real Docker chain may use its entire registered tool envelope;
+        # reserve 20s more to observe its 19 model actions and SQLite commits.
+        observation_deadline = time.monotonic() + tool_timeout + 20
+        while True:
+            job = self.job(job_id)
+            if job["status"] in {"succeeded", "failed", "canceled"}:
+                break
+            if time.monotonic() >= observation_deadline:
+                self.fail({"status": job["status"], "budget": self.report(job_id)["budget"]})
+            time.sleep(.01)
         self.assertEqual("succeeded", job["status"], job)
         self.assertEqual("star_reference", job["result"]["execution_mode"])
         self.assertEqual([], job["result"]["missing_capabilities"])
@@ -744,8 +756,12 @@ class StarFullReferenceChainTest(StarJobFixture, unittest.TestCase):
                           "whole_solution_verifier"], roles, roles)
         budget = self.report(job_id)["budget"]
         self.assertEqual(19, budget["logical_calls"])
+        self.assertEqual(19, budget["http_attempts"])
         self.assertEqual(1, budget["tool_calls"])
         self.assertEqual(48, budget["limits"]["max_model_calls"])
+        self.assertEqual(1100, budget["limits"]["max_runtime_seconds"])
+        self.assertLessEqual(budget["tool_wall_time_seconds"], budget["wall_time_seconds"])
+        self.assertLess(budget["wall_time_seconds"], budget["limits"]["max_runtime_seconds"])
         # The redo's computation really executed in the contract image, and
         # the classified Lemma rests on that isolated receipt.
         review = next(item for item in self.outbound

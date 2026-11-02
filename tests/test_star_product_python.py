@@ -44,6 +44,15 @@ def docker_events(run_id):
 
 @unittest.skipUnless(IMAGE, "set MATHAGENT_TEST_PYTHON_IMAGE to a validated local exact image ID")
 class StarProductPythonTest(StarJobFixture, unittest.TestCase):
+    def setUp(self):
+        # open_star keeps its API-key patch until cleanup; its environment
+        # snapshot includes the enclosing image patch. Restore the original
+        # image last so that nested patch cleanup cannot enable tools later.
+        original = os.environ.get("SHOWCASE_STAR_PYTHON_IMAGE_ID")
+        self.addCleanup(lambda: os.environ.pop("SHOWCASE_STAR_PYTHON_IMAGE_ID", None)
+                        if original is None else os.environ.__setitem__(
+                            "SHOWCASE_STAR_PYTHON_IMAGE_ID", original))
+
     def test_public_job_runs_registered_python_once_and_keeps_verified_artifacts(self):
         with patch.dict(os.environ, {"SHOWCASE_STAR_PYTHON_IMAGE_ID": IMAGE}):
             self.open_star([NEED_PLAN, PLAN, STEP, VERDICT, FINAL, ACCEPT],

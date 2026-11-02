@@ -105,6 +105,13 @@ class StarJobFixture:
                         "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}})
                     yield "data: [DONE]"
 
+                def iter_content(self, chunk_size=1):
+                    if request.get("stream"):
+                        for line in self.iter_lines():
+                            yield (line + "\n\n").encode("utf-8")
+                    else:
+                        yield json.dumps(self.json()).encode("utf-8")
+
                 def json(self):
                     content = value.content if isinstance(value, RawProviderContent) else json.dumps(value)
                     return {"choices": [{"finish_reason": "stop", "message": {

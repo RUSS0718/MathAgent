@@ -6,6 +6,25 @@ from tests.mutation_support import require_assertion_failure, run_case
 
 
 class ProbeVerdictTest(unittest.TestCase):
+    def test_unrelated_assertion_does_not_prove_target_invariant(self):
+        class BrokenFixture(unittest.TestCase):
+            def test_behavior(self):
+                self.fail("subprocess exited before setup")
+
+        result = run_case(BrokenFixture("test_behavior"))
+        with self.assertRaisesRegex(AssertionError, "target invariant was not reached"):
+            require_assertion_failure(result, "receipt classification",
+                                      expected_assertion="not_compared")
+
+    def test_target_assertion_is_required_for_each_failure(self):
+        class Failing(unittest.TestCase):
+            def test_behavior(self):
+                self.assertEqual("not_compared", "mismatched")
+
+        result = run_case(Failing("test_behavior"))
+        self.assertEqual(1, require_assertion_failure(
+            result, "receipt classification", expected_assertion="not_compared"))
+
     def test_a_creash_in_the_patched_callable_is_not_a_detected_bypass(self):
         class Crashing(unittest.TestCase):
             def test_never_reaches_the_invariant(self):

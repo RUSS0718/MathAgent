@@ -11,7 +11,7 @@ import io
 import unittest
 
 
-def require_assertion_failure(result, name):
+def require_assertion_failure(result, name, *, expected_assertion=None):
     """Raise unless the run failed on an assertion; return the failure count."""
     if result.errors:
         first = result.errors[0][1]
@@ -20,6 +20,10 @@ def require_assertion_failure(result, name):
             f"{type(first).__name__}: {first}")
     if not result.failures:
         raise AssertionError(f"bypass was not detected by the expected invariant: {name}")
+    if expected_assertion is not None and any(
+        expected_assertion not in traceback for _, traceback in result.failures
+    ):
+        raise AssertionError(f"target invariant was not reached: {name}")
     return len(result.failures)
 
 
