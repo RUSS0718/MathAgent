@@ -1,0 +1,100 @@
+{
+  "issue": 85,
+  "code_commit": "47dc52241b0cac29e1e3c321f24cbea78e1dce89",
+  "code_tree": "135e10ae589f034e884cc7d5b8941436f180873a",
+  "evidence_root": "D:/project/工程化MathAgent/notes/star-maintenance",
+  "artifacts": [
+    {
+      "name": "review-fix-offline.log",
+      "sha256": "0a373105f23f3803e2a42f86f1ac8cf4b58730730426d900ff0b4c2f389e4aad"
+    },
+    {
+      "name": "review-fix-full.log",
+      "sha256": "f482d6a5583f8c4df7cf16f2e53f3e891d5ca821b84442b191054976da884274"
+    },
+    {
+      "name": "final-docker.log",
+      "sha256": "90e262805fbf7532f65570ea33fd2402cdd827671e1bb1e1eafeea5ab8c80e5d"
+    },
+    {
+      "name": "config-hash-red.log",
+      "sha256": "bedced87be20a13b03fee6be60898581d2b7aa2614ba3bb49f717dc29c83267c"
+    },
+    {
+      "name": "config-hash-green.log",
+      "sha256": "1f2185444d383479aeb4a2fdf7adbcbd720024e0a8685bda34487a0bc49871f0"
+    },
+    {
+      "name": "final-release-fixed.log",
+      "sha256": "62c72e95846e959f6ba34965b7fc56b17ff9e59b26945db77c3148764012c24f"
+    },
+    {
+      "name": "frontend-baseline.log",
+      "sha256": "1efb049bf73a4dbe8873d06500273d3e396e0382b536eb6133ab70e99d7d5510"
+    },
+    {
+      "name": "issue80-final-result.json",
+      "sha256": "142ccdc5f8a5e508b369f63c62b1470807c7c97187178e66c2bb2a1ad5b342b7"
+    },
+    {
+      "name": "issue-86-diagnosis.json",
+      "sha256": "d5e5b5ca3130c1db68dbe98784bb9290176c0411335ca30892e468c8c2764a12"
+    }
+  ],
+  "offline": {
+    "tested_commit": "fbcdb1716c87f9655698469dffc503bd7b0ac295",
+    "equivalent_commit": "8c87e3c29ba1123de77729ecd25b567b499d1118",
+    "tree": "5a08f746586345e72c0d14ffae93f1dfdacf6587",
+    "discovered": 648,
+    "passed": 618,
+    "skipped": 30,
+    "failed": 0
+  },
+  "docker_before_test_fix": {
+    "commit": "8c87e3c29ba1123de77729ecd25b567b499d1118",
+    "discovered": 648,
+    "passed": 646,
+    "skipped": 0,
+    "failed": 2
+  },
+  "release_after_fix": {
+    "commit": "47dc52241b0cac29e1e3c321f24cbea78e1dce89",
+    "exit": 0,
+    "status": "PASS",
+    "detailed_counts": null
+  },
+  "image_skips": [
+    "test_python_executor_docker.DockerExecutorTest.test_fixed_mathematical_environment_actually_executes",
+    "test_python_executor_docker.DockerExecutorTest.test_external_guard_catches_direct_fd_and_combined_streams",
+    "test_python_executor_docker.DockerExecutorTest.test_container_restrictions_have_actual_failure_examples",
+    "test_python_executor_docker.DockerExecutorTest.test_timeout_kills_container_with_descendant",
+    "test_python_executor_docker.DockerExecutorTest.test_cpu_limit_terminates_a_busy_loop",
+    "test_python_executor_docker.DockerExecutorTest.test_product_default_cpu_budget_runs_multi_second_computations",
+    "test_python_executor_docker.DockerExecutorTest.test_cancellation_kills_a_sleeping_container",
+    "test_star_product_align_recovery.StarFullReferenceChainTest.test_reference_chain_completes_with_real_isolated_computation",
+    "test_star_product_classified_outcomes.StarFullReferenceClassifiedOutcomeTest.test_reference_classified_computation_carries_real_isolated_receipt",
+    "test_star_product_continue_identity.StarFullReferenceContinueTest.test_reference_continue_completes_new_action_and_whole_review",
+    "test_star_product_explore_compute.StarFullReferenceExploreComputeTest.test_reference_explore_executes_own_isolated_computation",
+    "test_star_product_full_modes.StarFullModeTest.test_reference_runs_same_public_job_with_real_tool_and_whole_review",
+    "test_star_product_full_modes.StarFullModeTest.test_capabilities_expose_verifiable_preflight_artifact_reference",
+    "test_star_product_full_modes.StarFullModeTest.test_reference_preset_is_exactly_nine_core_features_and_registry_inactive",
+    "test_star_product_full_modes.StarFullModeTest.test_capabilities_expose_verifiable_preflight_budget_ledger",
+    "test_star_product_full_modes.StarFullModeTest.test_full_best_effort_selects_after_one_call_and_replays_without_dispatch",
+    "test_star_product_full_modes.StarFullModeTest.test_each_core_feature_missing_or_disabled_rejects_before_enqueue",
+    "test_star_product_full_modes.StarFullModeTest.test_runtime_isolation_failure_after_startup_rejects_without_model_or_job",
+    "test_star_product_full_modes.StarFullModeTest.test_full_options_and_disabled_review_reject_before_model",
+    "test_star_product_full_modes.StarFullModeTest.test_full_flag_does_not_upgrade_limited_mode_or_default_legacy",
+    "test_star_product_full_modes.StarFullModeTest.test_full_unknown_call_requires_new_identity_and_preserves_shared_deadline",
+    "test_star_product_full_modes.StarFullModeTest.test_full_best_effort_deadline_selects_only_previously_committed_candidate",
+    "test_star_product_guidance_consumption.StarGuidanceConsumptionTest.test_reference_preset_second_traceback_consumes_only_the_new_meta_ruling",
+    "test_star_product_protocol_failure.StarFullReferenceProtocolFailureTest.test_full_reference_reasoner_invalid_json_is_known_failure_and_ends_dispatch",
+    "test_star_product_protocol_failure.StarFullReferenceProtocolFailureTest.test_full_reference_planner_invalid_json_repairs_with_new_identity",
+    "test_star_product_python.StarProductPythonTest.test_public_job_runs_registered_python_once_and_keeps_verified_artifacts",
+    "test_star_product_python.StarProductPythonTest.test_public_job_policy_denial_never_dispatches_python",
+    "test_star_product_python.StarProductPythonTest.test_public_job_output_limit_keeps_finite_claim_unverified",
+    "test_star_product_replan_decision.StarReplanDecisionTest.test_reference_preset_rulings_cover_all_three_branches",
+    "test_star_product_verifier_compute.StarFullReferenceVerifierComputeTest.test_reference_step_verifier_executes_own_isolated_computation"
+  ],
+  "AC18": "incomplete",
+  "AC19": "incomplete: browser not rerun; detailed final zero-skip evidence unavailable"
+}
