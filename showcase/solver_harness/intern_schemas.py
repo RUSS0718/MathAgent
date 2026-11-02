@@ -13,6 +13,10 @@ def obj(properties, required=None):
 TEXT = {"type": "string"}
 TEXTS = {"type": "array", "items": TEXT}
 TARGET = {"oneOf": [{"type": "integer", "minimum": 1}, {"enum": [None]}]}
+# A live NEED_PLAN reply or an intermediate step report naturally states the
+# optional candidate as an explicit null ("no complete solution yet"); the
+# reply protocol accepts that empty value instead of failing the whole run.
+OPTIONAL_TEXT = {"oneOf": [TEXT, {"enum": [None]}]}
 TOOL = obj(
     {
         "tool": {"enum": ["polynomial_check", "python_math"]},
@@ -31,9 +35,22 @@ CLAIM = obj(
     },
     ["statement", "label"],
 )
+# Reviewer-classified outcome: the verifier explicitly rules what a review
+# established (or left unproven); the controller verifies the declaration.
+OUTCOME = obj(
+    {
+        "category": {"enum": ["Lemma", "Conjecture", "Computation", "Definition", "Answer"]},
+        "statement": TEXT,
+        "scope": TEXT,
+        "claim_indexes": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+        "receipt_ids": TEXTS,
+        "dependencies": TEXTS,
+    },
+    ["category", "statement", "scope"],
+)
 STEP = obj(
     {"argument": TEXT, "claims": {"type": "array", "items": CLAIM}, "blocked": {"type": "boolean"},
-     "solution_candidate": TEXT, "answer_completeness": {"enum": ["complete", "partial"]}},
+     "solution_candidate": OPTIONAL_TEXT, "answer_completeness": {"enum": ["complete", "partial"]}},
     ["argument", "claims", "blocked"],
 )
 SCHEMAS = {
@@ -43,7 +60,8 @@ SCHEMAS = {
             "worked": TEXTS,
             "failed": TEXTS,
             "candidates": TEXTS,
-            "solution_candidate": TEXT,
+            "solution_candidate": OPTIONAL_TEXT,
+            "tool_request": {"oneOf": [TOOL, {"enum": [None]}]},
         },
         ["assessment", "worked", "failed", "candidates"],
     ),
@@ -63,11 +81,18 @@ SCHEMAS = {
                 "assumptions": TEXTS,
                 "approach": TEXT,
             }),
+            "tool_request": {"oneOf": [TOOL, {"enum": [None]}]},
+            "classified_outcomes": {"type": "array", "items": OUTCOME},
         },
         ["goal_gate", "logic_gate", "verdict", "objection"],
     ),
     "whole_solution_verifier": obj(
-        {"verdict": {"enum": ["ACCEPT", "REJECT"]}, "reason": TEXT}, ["verdict"]
+        {
+            "verdict": {"enum": ["ACCEPT", "REJECT"]},
+            "reason": TEXT,
+            "tool_request": {"oneOf": [TOOL, {"enum": [None]}]},
+        },
+        ["verdict"],
     ),
     "final_generator": obj({"final_response": TEXT}),
     "meta": obj(

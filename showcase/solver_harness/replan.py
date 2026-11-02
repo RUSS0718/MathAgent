@@ -5,6 +5,23 @@ from copy import deepcopy
 from ..redaction import redact
 from .budget import remaining_model_calls
 from .plan import validate_plan
+from .traceback import transition_decision
+
+
+def replan_ruling(run, state):
+    """The single APPROVE_REPLAN ruling that authorizes this archive-and-replace.
+
+    Only the current transition's unconsumed Meta ruling grants execution
+    authority (Run, plan version, Plan Attempt, step and committing revision all
+    matching). A Guidance request never substitutes for the approval, so a stale
+    replan Guidance cannot override or synthesize a later decision.
+    """
+    decision = state.get("meta_decision")
+    if not isinstance(decision, dict) or decision.get("decision") != "APPROVE_REPLAN":
+        return None
+    if not transition_decision(run, state, decision):
+        return None
+    return decision
 
 
 def _commit(harness, run, kind, updates, **details):
@@ -39,9 +56,6 @@ def _stop(harness, run, reason):
 
 def _call(harness, run, port, request):
     state = run["state"]
-    guidance_task = state.get("pending_guidance_task")
-    if request.get("role") == "planner" and isinstance(guidance_task, str):
-        request["specific_task"] = guidance_task
     request = {
         "run_id": run["run_id"],
         "call_id": f"replan:{run['run_id']}:plan{state['plan_version']}:attempt{state['attempt_index']}:{run['state_revision']}",
@@ -86,18 +100,55 @@ def run_replan(harness, run, *, problem, model_port, config):
         raise ValueError("config.max_replans must be a non-negative integer")
     if state.get("replan_count", 0) >= limit:
         return _stop(harness, run, "replan_limit_reached")
-    guidance = state.get("meta_guidance_decision")
-    guided_replan = isinstance(guidance, dict) and guidance.get("action_type") == "replan"
-    decision = (
-        {
-            "reason_summary": guidance["rationale"],
-            "forbidden_directions": [],
-            "reusable_results": [],
-        }
-        if guided_replan
-        else state["meta_decision"]
-    )
+    decision = replan_ruling(run, state)
+    if decision is None:
+        # Expired, consumed or missing approval: record it and hand the decision
+        # back to Meta instead of silently archiving on a stale ruling.
+        return harness.commit_event(
+            run["run_id"],
+            expected_revision=run["state_revision"],
+            event={
+                "event_id": f"replan-unauthorized-{run['state_revision']}",
+                "type": "replan_unauthorized",
+                "reason": "missing_valid_replan_ruling",
+            },
+            state_updates={
+                "phase": "META_DECIDE",
+                "meta_interventions": [
+                    *state["meta_interventions"],
+                    {
+                        "trigger": "UNAUTHORIZED_REPLAN_TRANSITION",
+                        "plan_version": state["plan_version"],
+                        "attempt_index": state["attempt_index"],
+                        "step_id": state["current_step"],
+                    },
+                ],
+            },
+        )
     rescued, excluded = _reusable(state, decision)
+    # The same established result can be visible through both the accepted
+    # ledger and the classified ledger; a ruling rescues the outcome once.
+    unique = []
+    seen_ids = set()
+    for item in rescued:
+        key = item.get("result_id")
+        if isinstance(key, str):
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+        unique.append(item)
+    rescued = unique
+    # Cross-plan rescue of classified outcomes is controlled by this ruling:
+    # rescued entries stay valid in the classified ledger, and every entry the
+    # ruling did not select (including Conjectures) is marked invalidated so no
+    # stale outcome survives the archive.
+    ledger = [
+        item
+        if isinstance(item, dict) and isinstance(item.get("result_id"), str)
+        and item["result_id"] in seen_ids
+        else {**item, "invalidated": True}
+        for item in state.get("verified_results_ledger", [])
+    ]
     failure = {
         "kind": "replan",
         "plan_version": state["plan_version"],
@@ -110,6 +161,15 @@ def run_replan(harness, run, *, problem, model_port, config):
         "forbidden_directions": decision["forbidden_directions"],
     }
     version = state["plan_version"] + 1
+    # Record the consumption result on the ruling this archive executes; a consumed
+    # ruling can never authorize a later transition again, and recovery never
+    # re-archives an already-archived plan.
+    consumption = {
+        "event_type": "plan_archived",
+        "state_revision": run["state_revision"] + 1,
+        "plan_version": version,
+    }
+    ruling_revision = decision.get("decided_at_revision")
     run = _commit(
         harness,
         run,
@@ -127,13 +187,16 @@ def run_replan(harness, run, *, problem, model_port, config):
             "confirmed_failures_ledger": [*state["confirmed_failures_ledger"], failure],
             "accepted_results": rescued,
             "rescued_results": rescued,
+            "verified_results_ledger": ledger,
             "steps": {},
             "current_step": None,
+            "meta_decision": {**decision, "consumed": consumption},
         },
         archived_plan_version=state["plan_version"],
         archived_step_count=len(state["steps"]),
         invalidated_result_count=len(excluded),
         rescued_result_count=len(rescued),
+        **({"decision_revision": ruling_revision} if isinstance(ruling_revision, int) else {}),
     )
     calls = config.get("max_model_calls", 2)
     seconds = config.get("max_total_duration_seconds", 3600)
@@ -207,15 +270,10 @@ def run_replan(harness, run, *, problem, model_port, config):
             "phase": "STEP_EXECUTE",
             "plan": redact(plan),
             "current_step": plan["steps"][0]["step_id"],
-            **({"pending_guidance_task": None} if guided_replan else {}),
+            "pending_guidance_task": None,
         },
         plan_version=version,
-        **({
-            "action_type": "replan",
-            "failure_type": guidance.get("failure_type"),
-            "specific_task_consumed": True,
-            "role": "planner",
-        } if guided_replan else {}),
+        **({"decision_revision": ruling_revision} if isinstance(ruling_revision, int) else {}),
     )
 
 
@@ -350,7 +408,15 @@ def _research(harness, run, port, config, calls, seconds, forbidden_directions):
 
 
 def _reusable(state, decision=None):
-    pending = deepcopy(state["accepted_results"])
+    accepted = deepcopy(state["accepted_results"])
+    # Classified proven outcomes share the accepted ledger's rescue rules;
+    # Conjectures are open questions, never rescued as proven premises.
+    classified = [
+        deepcopy(item)
+        for item in state.get("verified_results_ledger", [])
+        if isinstance(item, dict) and item.get("category") != "Conjecture"
+    ]
+    pending = [*accepted, *classified]
     rescued = []
     valid_ids = set()
     old_steps = {step["step_id"] for step in state.get("plan", {}).get("steps", [])}

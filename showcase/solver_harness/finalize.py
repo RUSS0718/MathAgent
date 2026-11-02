@@ -3,8 +3,10 @@
 from collections.abc import Mapping
 from copy import deepcopy
 
+from ..final_evidence import artifact_identity
 from ..redaction import redact
 from .budget import budget_reason
+from .calls import CallInterrupted
 from .final_binding import review_record
 
 
@@ -29,7 +31,7 @@ def finish(harness, run, status, reason, candidate=""):
     return commit(harness, run, "finalization_completed", updates, reason=reason)
 
 
-def dispatch(harness, run, operation, request):
+def dispatch(harness, run, operation, request, _repair_attempt=0):
     state = run["state"]
     run = commit(
         harness,
@@ -38,24 +40,63 @@ def dispatch(harness, run, operation, request):
         {"counters": {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1}},
         role=request["role"],
     )
+    base_call_id = request.get("call_id") or f"{run['run_id']}:{request['role']}:{run['state_revision']}"
     request = {
         "run_id": run["run_id"],
-        "call_id": f"{run['run_id']}:{request['role']}:{run['state_revision']}",
         "allowed_tools": [],
         "tool_policy": {"allow": []},
         **request,
+        "call_id": base_call_id + (":repair-1" if _repair_attempt else ""),
     }
     if request["role"] in {"final_generator", "whole_solution_verifier"}:
         request["finalization_scope"] = True
 
     def invoke(prepared):
-        prepared = deepcopy(prepared)
-        prepared.update(allowed_tools=[], tool_policy={"allow": []})
+        if request["role"] == "final_generator":
+            prepared = deepcopy(prepared)
+            prepared.update(allowed_tools=[], tool_policy={"allow": []})
         return operation(prepared)
 
     try:
         reply = harness.dispatch(run, invoke, request)
         return run, redact(deepcopy(dict(reply)))
+    except CallInterrupted as exc:
+        from . import protocol_repair
+
+        failed = protocol_repair.interrupted_call(harness, run["run_id"], exc)
+        if (
+            _repair_attempt == 0
+            # The planner owns its bounded repair (plan_generation); this
+            # wrapper only repairs the roles with no other owner.
+            and request["role"] != "planner"
+            and failed is not None
+            and protocol_repair.repair_enabled(harness._config)
+            and protocol_repair.known_protocol_failure(failed)
+        ):
+            # One gated format repair: the note bumps the revision, so the
+            # recursive dispatch reserves again and answers under a fresh
+            # revision-derived call identity. A second failure re-raises.
+            latest = harness.get_run(run["run_id"])
+            noted = harness.commit_event(
+                latest["run_id"],
+                expected_revision=latest["state_revision"],
+                event={
+                    "event_id": f"finalization-parse-{request['role']}-{latest['state_revision']}",
+                    "type": "finalization_parse_failed",
+                    "role": request["role"],
+                    "summary": "Finalization reply failed the response protocol; "
+                               "one bounded repair follows",
+                },
+                state_updates={"status": "running"},
+            )
+            return dispatch(
+                harness, noted, operation,
+                {key: value for key, value in request.items()
+                 if key not in {"run_id", "allowed_tools", "tool_policy"}}
+                | {"repair_instruction": protocol_repair.REPAIR_INSTRUCTION},
+                _repair_attempt=1,
+            )
+        raise
     except Exception:
         return run, None
 
@@ -77,7 +118,23 @@ def valid_facts(state):
         if result.get("result_id")
     }
     known = set(accepted_steps)
-    pending = deepcopy(state.get("accepted_results", []))
+    # The classified ledger is authoritative for reviewer-established facts:
+    # its proven entries join the accepted facts under the same dependency and
+    # evidence filters, while Conjectures (evidence level "conjecture") and
+    # invalidated records never become proven premises. A rescued outcome can
+    # be visible through both ledgers; it is delivered once.
+    combined = [
+        *state.get("accepted_results", []),
+        *(item for item in state.get("verified_results_ledger", []) if isinstance(item, dict)),
+    ]
+    pending, seen_ids = [], set()
+    for fact in deepcopy(combined):
+        key = fact.get("result_id") if isinstance(fact, dict) else None
+        if isinstance(key, str):
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+        pending.append(fact)
     facts = []
     while pending:
         selected = []
@@ -106,6 +163,69 @@ def valid_facts(state):
     return facts
 
 
+def proof_basis(state):
+    """Complete reports of still-valid accepted steps plus their computation basis.
+
+    Final synthesis must integrate the accepted derivations themselves, not
+    only their one-line conclusions. Only reports recorded on live plan steps
+    can be delivered: an archived or invalidated derivation lives in the
+    failure records and its proof body never returns here. Each delivered
+    proof carries the controller-recorded review ruling, the challenge
+    history and the actually executed receipts (code input, real output,
+    sandbox source), so the final generator and the whole-solution reviewer
+    can check the candidate against the real computation basis. Every proof
+    carries the resolvable artifact identity of its original argument.
+    """
+    proofs = []
+    for step in state.get("plan", {}).get("steps", []):
+        record = state.get("steps", {}).get(step["step_id"])
+        if not isinstance(record, Mapping):
+            continue
+        verification = record.get("verification", {})
+        if (
+            verification.get("verdict") != "ACCEPT"
+            or verification.get("valid") is not True
+        ):
+            continue
+        report = record.get("report", {})
+        receipts = [
+            deepcopy(item)
+            for item in state.get("tool_receipts", [])
+            if isinstance(item, Mapping)
+            and item.get("step_id") == step["step_id"]
+            and item.get("executed") is True
+            and item.get("status") == "success"
+        ]
+        argument = report.get("argument", "")
+        proof = {
+            "step_id": step["step_id"],
+            "argument": argument,
+            "claims": [
+                {
+                    key: deepcopy(claim[key])
+                    for key in (
+                        "statement", "label", "verification_scope", "tool_evidence_refs"
+                    )
+                    if key in claim
+                }
+                for claim in report.get("claims", [])
+                if isinstance(claim, Mapping)
+            ],
+            "tool_receipts": receipts,
+            "review": {
+                key: verification[key]
+                for key in ("verdict", "goal_gate", "logic_gate")
+                if key in verification
+            },
+            "artifact": artifact_identity(argument if isinstance(argument, str) else ""),
+        }
+        history = record.get("challenge_history", [])
+        if history:
+            proof["challenge_history"] = deepcopy(history)
+        proofs.append(proof)
+    return proofs
+
+
 def run_finalization(harness, run, *, problem, model_port, verifier_port, config):
     features = config.get("features", {})
     if not features.get("final_generation") or run["state"]["phase"] != "FINAL_GENERATE":
@@ -131,6 +251,7 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
     # Reviewing the existing candidate spends no new candidate-generation slot.
     remaining = retries + 1 - len(current_attempts) + int(bool(pending_review))
     facts = valid_facts(state)
+    proofs = proof_basis(state)
     for _ in range(max(0, remaining)):
         reason = budget_reason(run["state"], config)
         if reason:
@@ -154,8 +275,10 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
                     "session_key": session,
                     "problem": problem,
                     "accepted_results": facts,
+                    "step_proofs": deepcopy(proofs),
                     "previous_review": previous_review,
-                    "instruction": "Synthesize a complete answer to the original problem from only the accepted facts. Return final_response.",
+                    "instruction": "Synthesize a complete answer to the original problem from "
+                    "only the accepted facts and the delivered step proofs. Return final_response.",
                 },
             )
             candidate = reply.get("final_response") if isinstance(reply, Mapping) else None
@@ -188,25 +311,46 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
         reason = budget_reason(run["state"], config)
         if reason:
             return finish(harness, run, "partial_budget_exhausted", reason, candidate)
-        run, review = dispatch(
-            harness,
-            run,
-            verifier_port.verify,
-            {
-                "role": "whole_solution_verifier",
-                "call_id": f"whole-review:{session}",
-                "session_key": f"whole_verify:{session}",
-                "problem": problem,
-                "solution_candidate": candidate,
-                "accepted_results": facts,
-                "review_criteria": [
-                    "original_problem_consistency",
-                    "completeness",
-                    "cross_step_logic",
-                    "output_format",
-                ],
-            },
-        )
+        base_request = {
+            "role": "whole_solution_verifier",
+            "call_id": f"whole-review:{session}",
+            "session_key": f"whole_verify:{session}",
+            "problem": problem,
+            "solution_candidate": candidate,
+            "accepted_results": facts,
+            "step_proofs": deepcopy(proofs),
+            "review_criteria": [
+                "original_problem_consistency",
+                "completeness",
+                "cross_step_logic",
+                "output_format",
+            ],
+        }
+        run, review = dispatch(harness, run, verifier_port.verify, base_request)
+        from .verifier_compute import continue_review, declared_request
+
+        if isinstance(review, Mapping) and declared_request(review) is not None:
+
+            def reserve_and_dispatch(current, _seq, _call_id, continuation):
+                return dispatch(harness, current, verifier_port.verify, continuation)
+
+            run, review, unfulfilled = continue_review(
+                harness,
+                run,
+                role="whole_solution_verifier",
+                step_id=None,
+                round_number=0,
+                attempt_index=state["attempt_index"],
+                base_call_id=f"whole-review:{session}",
+                base_request=base_request,
+                reply=review,
+                reserve_and_dispatch=reserve_and_dispatch,
+            )
+            if unfulfilled:
+                review = {
+                    "verdict": "UNAVAILABLE",
+                    "reason": "verifier_tool_request_unfulfilled",
+                }
         valid = (
             isinstance(review, Mapping)
             and isinstance(review.get("verdict"), str)
@@ -225,7 +369,7 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
              "whole_solution_reviews": [*run["state"].get("whole_solution_reviews", []),
                  review_record(run, candidate, attempt["review"]["verdict"],
                      call_id=f"whole-review:{session}",
-                     origin="final_generator", facts=facts)]},
+                     origin="final_generator", facts=facts, proofs=proofs)]},
             review=attempt["review"],
         )
         if not valid:

@@ -25,6 +25,7 @@ def decision_fields(event, state, invocations=()):
         "archived_plan_version", "archived_step_count", "invalidated_result_count",
         "rescued_result_count", "failure_type", "action_type", "use_pure_reasoning",
         "specific_task_consumed", "triggered_by", "counterexample_verdict",
+        "decision_revision", "classified_outcomes", "rejected_outcomes",
     ) if key in event}
     roles = {
         "step_reported": "reasoner",
@@ -46,6 +47,8 @@ def decision_fields(event, state, invocations=()):
     upgrade_reason = event.get("upgrade_reason")
     if upgrade_reason in {"round_limit_reached", "meta_escalation_limit_reached"}:
         fields["upgrade_reason"] = upgrade_reason
+    if event["type"] == "protocol_failure_unrepaired" and isinstance(event.get("error_category"), str):
+        fields["error_category"] = event["error_category"]
     if event["type"] == "step_reviewed" and event.get("verdict") == "CHALLENGE":
         objection = event.get("objection")
         if isinstance(objection, str) and objection.strip():

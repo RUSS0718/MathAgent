@@ -209,6 +209,9 @@ class PairedRunner:
                 hashlib.sha256(response.encode()).hexdigest() if isinstance(response, str) else None
             )
         state = result["state"] if result else {}
+        # Call-audit response references stay out of the shareable comparison report.
+        for record in (state.get("calls") or {}).values():
+            record.pop("response_excerpt", None)
         counter = state.get("counters", {}).get("model_calls")
         result_status = state.get("status")
         arm_status = (

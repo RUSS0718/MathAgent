@@ -123,6 +123,40 @@ def advance(harness, run, metadata, problem):
     )
 
 
+def protocol_failure_exit(harness, run, exc):
+    """End dispatch honestly after an unrepaired known protocol failure.
+
+    A fully received response that cannot satisfy the response protocol is a
+    known failure, never an unknown remote outcome: bounded repair either
+    already happened or has no owner here, so no further action is dispatched
+    and the original Run, ledger and deadline stay untouched.
+    """
+    from .calls import CallInterrupted
+
+    if not isinstance(exc, CallInterrupted):
+        return None
+    call = run["state"].get("calls", {}).get(getattr(exc, "call_id", None))
+    if call is None or call.get("status") != "protocol_failed" or run["state"]["phase"] == "TERMINAL":
+        return None
+    return harness.commit_event(
+        run["run_id"],
+        expected_revision=run["state_revision"],
+        event={
+            "event_id": f"protocol-failure-terminal-{run['state_revision']}",
+            "type": "protocol_failure_unrepaired",
+            "role": call.get("role"),
+            "error_category": call.get("error_category"),
+            "summary": "Complete response failed the response protocol; bounded recovery did not continue",
+        },
+        state_updates={
+            "phase": "TERMINAL",
+            "status": "partial_aborted",
+            "result_reason": "protocol_failure_unrepaired",
+            "final_response": "No verified answer is available: the model response failed the response protocol.",
+        },
+    )
+
+
 def advance_product(harness, run, problem):
     """Continue the existing phases under S3; never replay an interrupted action."""
     from ..run_control import check_control
@@ -139,8 +173,10 @@ def advance_product(harness, run, problem):
 
         try:
             run = advance(harness, run, {}, problem)
-        except (HardBudgetStop, CallInterrupted):
-            return harness.get_run(run["run_id"])
+        except (HardBudgetStop, CallInterrupted) as exc:
+            latest = harness.get_run(run["run_id"])
+            terminated = protocol_failure_exit(harness, latest, exc)
+            return latest if terminated is None else terminated
         if run["state_revision"] == revision:
             return run
     return run  # Explicitly incomplete; bridge never calls this a reviewed success.

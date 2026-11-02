@@ -10,7 +10,7 @@ from typing import Any
 
 from ..redaction import redact
 from ..storage import SQLiteStore
-from .controller import advance, run_supplied_plan_or_explore
+from .controller import advance, protocol_failure_exit, run_supplied_plan_or_explore
 from .explore import ModelPort
 from .harness_config import (
     SolverHarnessError,
@@ -97,7 +97,9 @@ class SolverHarness:
         except HardBudgetStop as exc:
             return run_best_effort(self, self.get_run(exc.run_id))
         except CallInterrupted as exc:
-            return self.get_run(exc.run_id)
+            run = self.get_run(exc.run_id)
+            terminated = protocol_failure_exit(self, run, exc)
+            return run if terminated is None else terminated
 
     def _solve(
         self,

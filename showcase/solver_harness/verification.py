@@ -110,28 +110,89 @@ def verify_step(
     )
     report = state["steps"][step_id]["report"]
     call_id = f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
+    request = {
+        "run_id": run["run_id"],
+        "call_id": call_id,
+        "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}"
+        + (f"-attempt-{attempt}" if attempt else ""),
+        "round": round_number,
+        "challenge_history": challenge_history,
+        "role": "step_verifier",
+        "problem": problem,
+        "step": step,
+        "report": report,
+        "current_step_index": index + 1,
+        "state_revision": reserved["state_revision"],
+    }
+
+    def reserve_and_dispatch(current, seq, continuation_call_id, continuation_request):
+        reserved = harness.commit_event(
+            current["run_id"],
+            expected_revision=current["state_revision"],
+            event={
+                "event_id": f"step-review-dispatched-{step_id}{suffix}-compute-{seq + 1}",
+                "type": "step_review_dispatched",
+                "step_id": step_id,
+                "role": "step_verifier",
+            },
+            state_updates={
+                "counters": {
+                    **current["state"]["counters"],
+                    "model_calls": current["state"]["counters"]["model_calls"] + 1,
+                },
+            },
+        )
+        reply = harness.dispatch(reserved, verifier_port.verify, continuation_request)
+        return harness.get_run(current["run_id"]), reply
+
     try:
         if pending:
             call_id, reply = pending
         else:
-            reply = harness.dispatch(
-                reserved,
-                verifier_port.verify,
-                {
-                    "run_id": run["run_id"],
-                    "call_id": call_id,
-                    "session_key": f"verify:{run['run_id']}:plan{plan['version']}:step{step_id}"
-                    + (f"-attempt-{attempt}" if attempt else ""),
-                    "round": round_number,
-                    "challenge_history": challenge_history,
-                    "role": "step_verifier",
-                    "problem": problem,
-                    "step": step,
-                    "report": report,
-                    "current_step_index": index + 1,
-                    "state_revision": reserved["state_revision"],
-                },
-            )
+            from . import protocol_repair
+
+            try:
+                reply = harness.dispatch(reserved, verifier_port.verify, request)
+            except CallInterrupted as exc:
+                failed = protocol_repair.interrupted_call(harness, run["run_id"], exc)
+                if (failed is None or not protocol_repair.repair_enabled(harness._config)
+                        or not protocol_repair.known_protocol_failure(failed)):
+                    raise
+                # One gated format repair with a fresh verifier identity; a
+                # second failure falls through to the honest invalid review.
+                latest = harness.get_run(run["run_id"])
+                noted = harness.commit_event(
+                    latest["run_id"],
+                    expected_revision=latest["state_revision"],
+                    event={
+                        "event_id": f"step-review-parse-{step_id}{suffix}-{latest['state_revision']}",
+                        "type": "step_review_parse_failed",
+                        "step_id": step_id,
+                        "role": "step_verifier",
+                        "summary": "Verifier reply failed the response protocol; "
+                                   "one bounded repair follows",
+                    },
+                    state_updates={"status": "running"},
+                )
+                reserved = harness.commit_event(
+                    noted["run_id"],
+                    expected_revision=noted["state_revision"],
+                    event={
+                        "event_id": f"step-review-dispatched-{step_id}{suffix}-repair-1",
+                        "type": "step_review_dispatched",
+                        "step_id": step_id,
+                        "role": "step_verifier",
+                    },
+                    state_updates={
+                        "counters": {
+                            **noted["state"]["counters"],
+                            "model_calls": noted["state"]["counters"]["model_calls"] + 1,
+                        },
+                    },
+                )
+                call_id = f"{call_id}:repair-1"
+                request = protocol_repair.repair_request(request)
+                reply = harness.dispatch(reserved, verifier_port.verify, request)
     except CallInterrupted:
         latest = harness.get_run(run["run_id"])
         call = latest["state"].get("calls", {}).get(call_id, {})
@@ -167,8 +228,26 @@ def verify_step(
         )
     except Exception:
         reply = None
+    from .verifier_compute import continue_review
+
+    reserved, reply, unfulfilled = continue_review(
+        harness,
+        reserved,
+        role="step_verifier",
+        step_id=step_id,
+        round_number=round_number,
+        attempt_index=attempt,
+        base_call_id=call_id,
+        base_request=request,
+        reply=reply,
+        reserve_and_dispatch=reserve_and_dispatch,
+    )
     verification = normalize_verdict(reply, index + 1)
-    if isinstance(reply, Mapping) and "answer_claim" in reply:
+    if unfulfilled:
+        # A computation the reviewer asked for never completed; its verdict is not
+        # an acceptance and must not promote any evidence.
+        verification.update(valid=False, reason="verifier_tool_request_unfulfilled")
+    if isinstance(reply, Mapping) and "answer_claim" in reply and not unfulfilled:
         from . import counterexample
 
         declared = counterexample.target(report, reply["answer_claim"])
@@ -209,6 +288,17 @@ def verify_step(
         directions = reply.get("forbidden_directions")
         if isinstance(directions, list) and all(isinstance(item, str) for item in directions):
             verification["forbidden_directions"] = directions
+    # Classifications are the reviewer's explicit ruling under any verdict; the
+    # controller verifies each declaration before anything reaches the ledger.
+    # An unfulfilled or invalid review never promotes evidence.
+    outcomes, rejections = [], []
+    if verification["valid"] and not unfulfilled:
+        from .classified import build_entries
+
+        outcomes, rejections = build_entries(
+            state, reply, step_id=step_id, report=report, review_call_id=call_id,
+            suffix=suffix, plan_version=plan["version"], attempt_index=attempt,
+        )
     accepted = verification["valid"] and verification["verdict"] == "ACCEPT"
     phase = "STEP_VERIFY"
     current_step = step_id
@@ -237,6 +327,11 @@ def verify_step(
             "TRACE_BACK": "TRACE_BACK",
             "PROPOSE_REPLAN": "META_DECIDE",
         }[verification["verdict"]]
+    # The classified ledger is the single authoritative record: proven entries
+    # reach final synthesis and rescue through its dependency-checked readers,
+    # while Conjectures stay confined there and never become proven premises.
+    from .classified import outcome_counts
+
     state_updates = {
         "phase": phase,
         "current_step": current_step,
@@ -249,18 +344,26 @@ def verify_step(
             },
         },
         "accepted_results": [*state["accepted_results"], *evidence],
+        "verified_results_ledger": [
+            *state.get("verified_results_ledger", []), *outcomes
+        ],
     }
     if not verification["valid"]:
         state_updates["status"] = "partial_aborted"
+    event = {
+        "event_id": f"step-reviewed-{step_id}{suffix}",
+        "type": "step_reviewed",
+        "step_id": step_id,
+        **verification,
+    }
+    if outcomes:
+        event["classified_outcomes"] = outcome_counts(outcomes)
+    if rejections:
+        event["rejected_outcomes"] = len(rejections)
     return harness.commit_event(
         run["run_id"],
         expected_revision=reserved["state_revision"],
-        event={
-            "event_id": f"step-reviewed-{step_id}{suffix}",
-            "type": "step_reviewed",
-            "step_id": step_id,
-            **verification,
-        },
+        event=event,
         state_updates=state_updates,
     )
 

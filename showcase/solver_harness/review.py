@@ -83,24 +83,43 @@ def review_solution(
         event={"event_id": "review-dispatched", "type": "solution_review_dispatched"},
         state_updates={"counters": counters},
     )
-    try:
-        reply = harness.dispatch(
-            reserved,
-            verifier_port.verify,
-            {
-                "run_id": run_id,
-                "call_id": f"{run_id}:whole-solution-review",
+    base_call_id = f"{run_id}:whole-solution-review"
+    request = {
+        "run_id": run_id,
+        "call_id": base_call_id,
+        "role": "whole_solution_verifier",
+        "session_key": f"whole-review:{run_id}:{reserved['state_revision']}",
+        "problem": problem,
+        "solution_candidate": candidate,
+        "state_revision": reserved["state_revision"],
+    }
+
+    def reserve_and_dispatch(current, seq, _continuation_call_id, continuation_request):
+        reserved = harness.commit_event(
+            current["run_id"],
+            expected_revision=current["state_revision"],
+            event={
+                "event_id": f"review-dispatched-compute-{seq + 1}",
+                "type": "solution_review_dispatched",
                 "role": "whole_solution_verifier",
-                "session_key": f"whole-review:{run_id}:{reserved['state_revision']}",
-                "problem": problem,
-                "solution_candidate": candidate,
-                "state_revision": reserved["state_revision"],
+            },
+            state_updates={
+                "counters": {
+                    **current["state"]["counters"],
+                    "model_calls": current["state"]["counters"]["model_calls"] + 1,
+                },
             },
         )
-    except Exception:
+        reply = harness.dispatch(reserved, verifier_port.verify, continuation_request)
+        return harness.get_run(current["run_id"]), reply
+
+    from . import protocol_repair
+    from .calls import CallInterrupted
+
+    def review_failed(current):
         return harness.commit_event(
-            run_id,
-            expected_revision=reserved["state_revision"],
+            current["run_id"],
+            expected_revision=current["state_revision"],
             event={
                 "event_id": "review-failed",
                 "type": "solution_review_failed",
@@ -112,14 +131,77 @@ def review_solution(
                 "final_response": "Solution review failed; no verified answer is available.",
             },
         )
+
+    try:
+        reply = harness.dispatch(reserved, verifier_port.verify, request)
+    except CallInterrupted as exc:
+        failed = protocol_repair.interrupted_call(harness, run_id, exc)
+        if (
+            failed is None
+            or not protocol_repair.repair_enabled(harness._config)
+            or not protocol_repair.known_protocol_failure(failed)
+        ):
+            raise
+        # One gated format repair with a fresh reviewer identity; a second
+        # failure re-raises and still ends dispatch honestly.
+        latest = harness.get_run(run_id)
+        noted = harness.commit_event(
+            run_id,
+            expected_revision=latest["state_revision"],
+            event={
+                "event_id": f"solution-review-parse-{latest['state_revision']}",
+                "type": "solution_review_parse_failed",
+                "role": "whole_solution_verifier",
+                "summary": "Whole-solution review reply failed the response "
+                           "protocol; one bounded repair follows",
+            },
+            state_updates={"status": "running"},
+        )
+        reserved = harness.commit_event(
+            run_id,
+            expected_revision=noted["state_revision"],
+            event={
+                "event_id": "review-dispatched-repair-1",
+                "type": "solution_review_dispatched",
+                "role": "whole_solution_verifier",
+            },
+            state_updates={
+                "counters": {
+                    **noted["state"]["counters"],
+                    "model_calls": noted["state"]["counters"]["model_calls"] + 1,
+                },
+            },
+        )
+        base_call_id = f"{base_call_id}:repair-1"
+        request = protocol_repair.repair_request(request)
+        reply = harness.dispatch(reserved, verifier_port.verify, request)
+    except Exception:
+        return review_failed(reserved)
+    from .verifier_compute import continue_review
+
+    run, reply, unfulfilled = continue_review(
+        harness,
+        reserved,
+        role="whole_solution_verifier",
+        step_id=None,
+        round_number=0,
+        attempt_index=run["state"]["attempt_index"],
+        base_call_id=base_call_id,
+        base_request=request,
+        reply=reply,
+        reserve_and_dispatch=reserve_and_dispatch,
+    )
+    if unfulfilled:
+        reply = {"verdict": "REJECT", "reason": "verifier_tool_request_unfulfilled"}
     accepted = (
         isinstance(reply, Mapping) and reply.get("verdict") == "ACCEPT" and bool(candidate.strip())
+        and not unfulfilled
     )
     next_phase = "TERMINAL" if accepted else "PLAN"
     updates = {"phase": next_phase}
     finding = state["exploration_findings"][-1]
-    record = review_record(reserved, candidate, "ACCEPT" if accepted else "REJECT",
-        call_id=f"{run_id}:whole-solution-review", origin="explore_polish",
+    record = review_record(run, candidate, "ACCEPT" if accepted else "REJECT",
+        call_id=base_call_id, origin="explore_polish",
         versions=[{"text": finding.get("original_solution_candidate", candidate)},
                   {"text": candidate}])
     updates["whole_solution_reviews"] = [*state.get("whole_solution_reviews", []), record]
@@ -127,7 +209,7 @@ def review_solution(
         updates.update(status="completed_llm_reviewed", final_response=candidate)
     return harness.commit_event(
         run_id,
-        expected_revision=reserved["state_revision"],
+        expected_revision=run["state_revision"],
         event={
             "event_id": "review-assessed",
             "type": "solution_review_assessed",
