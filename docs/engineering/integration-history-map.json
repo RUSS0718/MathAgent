@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "base": "700f42317df35aab6ae3f7bcda5193a4c88e17d0",
+  "original_tip": "7ebcfe013323bb23c543a7a05bcb6a78343494ca",
+  "archive_ref": "refs/tags/archive/showcase-star-20261102-pre-consolidation",
+  "original_commit_count": 355,
+  "consolidated_commit_count": 24,
+  "stages": [
+    {
+      "name": "Solver Harness",
+      "original_tip": "6c7a7685495912686a0dc3501a077be14f3c10e6",
+      "original_tree": "a2cb0f5da078554dc37f40336d8c3b317f8da15d",
+      "commits": {
+        "code": "f1a623ecddeb5cced447c8dbacabec6116838710",
+        "tests": "efeb3cd664a3d0924a9eeda607abd227a056e0ff",
+        "docs": "4660ef4e9b56b3f4370e3342c300a4983e48ed28"
+      },
+      "new_checkpoint": "4660ef4e9b56b3f4370e3342c300a4983e48ed28"
+    },
+    {
+      "name": "STAR SP-01..13",
+      "original_tip": "89e9ff5d4d9e514902cf33f463f4e9ff42f51588",
+      "original_tree": "c33ea6d1b1354dc70ec80ceb7dd296142c812513",
+      "commits": {
+        "code": "eb884bc7a9454931f5df84a4ee4b970745074279",
+        "tests": "71c0b923a263e5f6d59f3fbc868ff7339b79bfed",
+        "docs": "c16a87d000c070a22a9afc379f366a0ecdddec16"
+      },
+      "new_checkpoint": "c16a87d000c070a22a9afc379f366a0ecdddec16"
+    },
+    {
+      "name": "ALIGN 语义纠偏",
+      "original_tip": "b09dd05d5edd5a838d52fd65bd2f1d47734c67db",
+      "original_tree": "baab818a0ed16949a6c416384cf176dc6ad4fc06",
+      "commits": {
+        "code": "47f782b37e01fb65577587801c4011c5d330a876",
+        "tests": "df8af6ae17e06037b28d11f84bdcb13defb20360",
+        "docs": "6dce734f90383f905399bda709c0e2fff702700b"
+      },
+      "new_checkpoint": "6dce734f90383f905399bda709c0e2fff702700b"
+    },
+    {
+      "name": "协议与恢复维护",
+      "original_tip": "654c47224990d3ee45fe31836979191cc19ae7fb",
+      "original_tree": "6018e2aa04064c7d4b432b39c84e109c028d95c1",
+      "commits": {
+        "code": "5305f06109f7b599d0eab37d093019aee11acad7",
+        "tests": "0e625de18a09fe8431125ad2d24c45c26e22a84e",
+        "docs": "a06e119a5bf268a81d8dfd0413c98d62f548b49b"
+      },
+      "new_checkpoint": "a06e119a5bf268a81d8dfd0413c98d62f548b49b"
+    },
+    {
+      "name": "RB-01..08",
+      "original_tip": "fc6e9b4d489ae9e402fc3e97cfce0fe9e49f7762",
+      "original_tree": "51171b77a401140ced87a45d84175bcbfd8152bc",
+      "commits": {
+        "code": "f0a632156ce3e46476192a44c585fef506a11e7f",
+        "tests": "b970f395fffc5b56e483f0d9cc905e5a4952e5d0",
+        "docs": "535256878c539303a5543fe3e40a4f8946df3944"
+      },
+      "new_checkpoint": "535256878c539303a5543fe3e40a4f8946df3944"
+    },
+    {
+      "name": "非流式就绪与截止修复",
+      "original_tip": "1ecc96c593443785316e7af7154dea79cda5afab",
+      "original_tree": "2e4e895045b51bbe5b176a7349033a3be4849e12",
+      "commits": {
+        "code": "3d587961b544bf93e585995380a5a89d57d772a2",
+        "tests": "eb24c9d56258e0f9b556b4096c29f1ef955f9b03",
+        "docs": "ce9c559c5e4b9f283d0cc4012e6c26472daf1ba7"
+      },
+      "new_checkpoint": "ce9c559c5e4b9f283d0cc4012e6c26472daf1ba7"
+    },
+    {
+      "name": "CP-01..05",
+      "original_tip": "528236f05375eda7a99f6862e79e2837c580b1c1",
+      "original_tree": "753453a3a5fde99577da5a711f2c22841ae7c159",
+      "commits": {
+        "code": "a5b064b37fec5e86cc6bb2a10a4ec1af68ad1eb5",
+        "tests": "a70c1b9072077929306ef10296d6dfbfa66656c2",
+        "docs": "7138719e0415e96d60025503c36e89c27eedaf75"
+      },
+      "new_checkpoint": "7138719e0415e96d60025503c36e89c27eedaf75"
+    },
+    {
+      "name": "工程复盘改进",
+      "original_tip": "7ebcfe013323bb23c543a7a05bcb6a78343494ca",
+      "original_tree": "e86ad7a485d381104adf95a8160b4e7a7b383537",
+      "commits": {
+        "code": "895091914a0580233fbaf4706f65fd3007524fea",
+        "tests": "6d0a0ee74ea918263d6d8a810aa0b7d1b877649e"
+      }
+    }
+  ],
+  "final_checkpoint_locator": "git log -1 --format=%H -- docs/engineering/integration-history-map.json",
+  "extra_delivery_paths": [
+    "docs/engineering/integration-history-map.json",
+    "docs/engineering/integration-history.md",
+    "docs/evals/showcase-solver-v1.2-matrix.json",
+    "llm_client.py",
+    "tests/test_history_consolidation.py",
+    "tests/test_python_executor_docker.py"
+  ],
+  "ci_compatibility_note": "llm_client.py: formatting plus two equivalent isinstance union expressions required by pinned Ruff v0.11.10; normalized AST equivalence verified.",
+  "docker_fixture_note": "Positive fixed-image mathematical-environment probe uses the existing product default wall budget instead of the unrelated3s test fixture. Dedicated timeout, CPU, output, cancellation and cleanup cases retain their limits. Production executor unchanged."
+}

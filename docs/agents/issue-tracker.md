@@ -2,6 +2,14 @@
 
 Issues and specs for this project live in GitHub Issues at `RUSS0718/MathAgent`. Pass the repository explicitly with `gh -R RUSS0718/MathAgent` for every issue operation.
 
+## Read-only status check
+
+```powershell
+uv run python scripts/check_issues.py --repo RUSS0718/MathAgent 116 117 118 119 120
+```
+
+This credential-free entry point uses cache-busted public GET requests and emits one JSON summary. It accepts issue responses with `open` or `closed` state, rejects pull requests, and exits nonzero on invalid input, network errors, or malformed data. It never closes or edits issues. See [development gates](../engineering/development-gates.md) for the validation workflow.
+
 ## Conventions
 
 - Create: `gh issue create -R RUSS0718/MathAgent --title "..." --body "..."`.

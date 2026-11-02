@@ -151,6 +151,7 @@ v0.2 文档已归档为历史合同；v1.1 规格不覆盖这些 accepted ADR，
 - [前端统一验收合同](frontend/ui-unification-contract.md)、[验证记录](frontend/ui-verification.md)：实施范围、实际检查结果和证据限制。
 
 - [初始化蓝图](engineering-bootstrap-plan.md)、[Codespace 调研](research/codespace-bootstrap-landscape.md)
+- [工程门禁](engineering/development-gates.md)、[身份链导航](engineering/identity-navigation.md)：开发检查入口与身份、恢复、交付绑定的源码/测试导航。
 - [提交与分支规范](engineering/commit-convention.md)
 - [Issue tracker](agents/issue-tracker.md)、[状态标签](agents/triage-labels.md)、[领域文档约定](agents/domain.md)
 - [示例目录说明](../examples/README.md)、[比赛仓库调研](research/hackathon-winning-repo-landscape.md)

@@ -1,7 +1,9 @@
 {
   "schema_version": 1,
   "release_status": "engineering-preview",
-  "source_commit": "6c7a7685495912686a0dc3501a077be14f3c10e6",
+  "source_commit": "4660ef4e9b56b3f4370e3342c300a4983e48ed28",
+  "historical_source_commit": "6c7a7685495912686a0dc3501a077be14f3c10e6",
+  "source_commit_migration": {"kind": "tree_equivalent_history_consolidation", "mapping": "docs/engineering/integration-history-map.json"},
   "labels": [
     "scripted",
     "replay",
