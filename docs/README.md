@@ -99,6 +99,7 @@ SP-11 的[候选与零调用选择合同](engineering/star-product-sp11-contract
 - [v1.1 实现规格](https://github.com/RUSS0718/MathAgent/issues/32)：S1/S2 seam、验收合同、SC→AC 映射和 v1.1/v1.2 ticket 边界。
 - [v1.1 验收记录](evals/showcase-solver-harness-v1.1-acceptance.md)：记录 v1.1 离线验收结果、SC 归属与 engineering-preview 能力限制。
 - [SH21 Intern 真实调用记录](evals/showcase-solver-intern-live-sh21.md)：记录两次未执行工具的旧样本和一次有回执续接、但未完成整题审查的新探针；六次跨三题的历史门槛仍 unavailable。
+- [#123 Intern SSE 契约与故障覆盖](research/intern-sse-123.md)：记录官方 endpoint/payload 流式兼容规则、usage 与 task 状态分层、当前适配器默认及 #124 接入点；仅有离线/loopback 证据。
 - [SH22 配对报告工程合同](evals/showcase-solver-paired-report-sh22.md)：独立 Run、同条件校验、失败保留与离线恢复；一组真实 Skills 配对已完成，能力结论仍需更多样本。
 - [ADR-0013](adr/0013-solver-harness-boundary-and-shared-transaction.md)：Showcase 单一产品面、共享 SQLite 事务和版本标识决策。
 - 产品版本为 v1.1；包版本保持 `0.1.0`，前端版本保持 `0.2.0`，Profile 保持 `showcase_mvp`。
