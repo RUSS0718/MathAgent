@@ -8,6 +8,23 @@ from typing import Any
 
 _CHECKS = ("transport", "task", "usage", "coverage")
 _CHECK_STATUSES = {"PASS", "FAIL", "UNKNOWN", "NOT_RUN"}
+_STOP_REASONS = {
+    "source_or_config_change",
+    "hard_limit",
+    "ledger_or_binding_defect",
+    "unknown_transport",
+    "incomplete_or_unresolved_usage",
+    "job_failed_or_canceled",
+    "unknown_job_status",
+    "unknown_session",
+    "session_creation_unknown",
+    "request_digest_unavailable",
+    "request_digest_invalid",
+    "unknown_dispatch",
+    "resume_review_required",
+    "resume_action_ambiguous",
+    "unknown_resume",
+}
 _JOB_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z")
 _IDEMPOTENCY_KEY = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -198,7 +215,7 @@ def _overall_status(checks: Any) -> str:
     if not isinstance(checks, dict) or set(checks) != set(_CHECKS):
         return "UNKNOWN"
     statuses = [item.get("status") if isinstance(item, dict) else None for item in checks.values()]
-    if any(value not in _CHECK_STATUSES for value in statuses):
+    if any(not isinstance(value, str) or value not in _CHECK_STATUSES for value in statuses):
         return "UNKNOWN"
     for candidate in ("FAIL", "UNKNOWN", "NOT_RUN"):
         if candidate in statuses:

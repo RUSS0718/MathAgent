@@ -262,6 +262,13 @@ def prepare_run(root: Path, *, mismatch: str | None = None, not_run: bool = Fals
     manifest, digest, attempt, budget, semantics, lookup, job, report, evidence = (
         successful_fixture()
     )
+    status_usage = {
+        "logical_calls": 0 if not_run else 1,
+        "http_attempts": 0 if not_run else 1,
+        "tool_calls": 0,
+        "charged_tokens": 0 if not_run else 30,
+        "wall_seconds": 0.0 if not_run else 1.0,
+    }
     if mismatch == "budget_attempts":
         budget["http_attempts"] = 2
     if mismatch == "binding":
@@ -282,6 +289,19 @@ def prepare_run(root: Path, *, mismatch: str | None = None, not_run: bool = Fals
         attempt["usage"]["prompt_tokens"] = -1
     if mismatch == "invalid_wall_time":
         budget["wall_time_seconds"] = float("nan")
+    if mismatch == "duplicate_attempt":
+        duplicate = dict(attempt)
+        duplicate.update(attempt_id="attempt-2", attempt_index=2)
+        job["result"]["request_attempts"] = [attempt, duplicate]
+        report["report"]["request_attempts"] = [attempt, duplicate]
+        evidence["request_attempts"] = [attempt, duplicate]
+        budget.update(
+            logical_calls=1,
+            http_attempts=2,
+            provider_known={"prompt_tokens": 20, "completion_tokens": 40, "total_tokens": 60},
+            charged_tokens=60,
+        )
+        status_usage.update(http_attempts=2, charged_tokens=60)
     if mismatch == "lookup_status":
         lookup["status"] = "running"
     if mismatch == "status_snapshot":
@@ -295,6 +315,17 @@ def prepare_run(root: Path, *, mismatch: str | None = None, not_run: bool = Fals
         evidence["solver"]["transport_identity"] = lookup["transport_identity"]
     if mismatch == "attempt_solver_call_id":
         attempt["solver_call_id"] = "private prompt text"
+    if mismatch == "evidence_transport_identity":
+        evidence["solver"]["transport_identity"] = {
+            **lookup["transport_identity"],
+            "calls": [{**lookup["transport_identity"]["calls"][0], "transport": "stream"}],
+        }
+    if mismatch == "unconfirmed_dispatch":
+        attempt["dispatch_status"] = "reserved_dispatch_unconfirmed"
+    if mismatch == "secret_finish_reason":
+        attempt["finish_reason"] = "private credential text"
+    if mismatch == "malformed_review_findings":
+        evidence["verification"]["history"][-1]["findings"] = None
     (run_dir / "manifest.json").write_bytes(canonical_json(manifest))
     (run_dir / "manifest.sha256").write_text(digest + "\n", encoding="ascii")
     status = {
@@ -304,13 +335,7 @@ def prepare_run(root: Path, *, mismatch: str | None = None, not_run: bool = Fals
         "completed": 0 if not_run else 1,
         "total": 1,
         "completed_samples": [] if not_run else [0],
-        "usage": {
-            "logical_calls": 0 if not_run else 1,
-            "http_attempts": 0 if not_run else 1,
-            "tool_calls": 0,
-            "charged_tokens": 0 if not_run else 30,
-            "wall_seconds": 0.0 if not_run else 1.0,
-        },
+        "usage": status_usage,
         "run_records": []
         if not_run
         else [
@@ -323,7 +348,7 @@ def prepare_run(root: Path, *, mismatch: str | None = None, not_run: bool = Fals
                 "deadline_at": 9999999999,
             }
         ],
-        "stop_reason": None,
+        "stop_reason": {"private": "invalid"} if mismatch == "invalid_stop_reason" else None,
     }
     (run_dir / "status.json").write_text(json.dumps(status), encoding="utf-8")
     responses = {
@@ -477,6 +502,224 @@ class ExperimentVerifyCliTest(unittest.TestCase):
             saved = json.loads(archive.read_text(encoding="utf-8"))
             self.assertIsNone(saved["budget"]["wall_time_seconds"])
 
+    def test_verify_rejects_duplicate_or_unconfirmed_attempt_records(self):
+        for mismatch in ("duplicate_attempt", "unconfirmed_dispatch"):
+            with self.subTest(mismatch=mismatch), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                output_root, _, _, _, responses = prepare_run(root, mismatch=mismatch)
+                client = ReadOnlyShowcaseClient(responses)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    result = run(
+                        verify_args(root, output_root),
+                        experiment_context={"read_client": client},
+                    )
+
+                report = json.loads(output.getvalue())
+                self.assertEqual(1, result)
+                self.assertEqual("FAIL", report["status"])
+                self.assertEqual("FAIL", report["checks"]["usage"]["status"])
+
+    def test_verify_rejects_conflicting_transport_projection_in_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, _, _, _, responses = prepare_run(
+                root, mismatch="evidence_transport_identity"
+            )
+            client = ReadOnlyShowcaseClient(responses)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": client},
+                )
+
+            report = json.loads(output.getvalue())
+            self.assertEqual(1, result)
+            self.assertEqual("FAIL", report["checks"]["transport"]["status"])
+
+    def test_verify_redacts_untrusted_finish_reason(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, _, _, _, responses = prepare_run(root, mismatch="secret_finish_reason")
+            client = ReadOnlyShowcaseClient(responses)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": client},
+                )
+
+            archive = next((output_root / "batch-1" / "evidence").glob("*.json"))
+            self.assertNotIn("private credential text", archive.read_text(encoding="utf-8"))
+
+    def test_verify_handles_malformed_review_findings_without_crashing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, _, _, _, responses = prepare_run(
+                root, mismatch="malformed_review_findings"
+            )
+            client = ReadOnlyShowcaseClient(responses)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": client},
+                )
+
+            report = json.loads(output.getvalue())
+            self.assertEqual(1, result)
+            self.assertIn(report["checks"]["task"]["status"], {"FAIL", "UNKNOWN"})
+
+    def test_verify_sanitizes_malformed_stop_reason(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, _, _, _, responses = prepare_run(root, mismatch="invalid_stop_reason")
+            client = ReadOnlyShowcaseClient(responses)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": client},
+                )
+
+            report = json.loads(output.getvalue())
+            self.assertEqual(1, result)
+            self.assertIsNone(report["stop_reason"])
+            self.assertEqual("FAIL", report["status"])
+
+    def test_verify_does_not_replace_a_modified_evidence_archive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, run_dir, _, _, responses = prepare_run(root)
+            client = ReadOnlyShowcaseClient(responses)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    0,
+                    run(
+                        verify_args(root, output_root),
+                        experiment_context={"read_client": client},
+                    ),
+                )
+
+            archive = next((run_dir / "evidence").glob("*.json"))
+            archive.write_text('{"tampered":true}', encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": client},
+                )
+
+            self.assertEqual(1, result)
+            self.assertEqual('{"tampered":true}', archive.read_text(encoding="utf-8"))
+            self.assertEqual(
+                "FAIL", json.loads(output.getvalue())["checks"]["coverage"]["status"]
+            )
+
+    def test_verify_does_not_recreate_a_removed_evidence_archive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, run_dir, _, _, responses = prepare_run(root)
+            client = ReadOnlyShowcaseClient(responses)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    0,
+                    run(
+                        verify_args(root, output_root),
+                        experiment_context={"read_client": client},
+                    ),
+                )
+
+            evidence_dir = run_dir / "evidence"
+            for archive in evidence_dir.iterdir():
+                archive.unlink()
+            evidence_dir.rmdir()
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": client},
+                )
+
+            self.assertEqual(1, result)
+            self.assertFalse(evidence_dir.exists())
+            self.assertEqual(
+                "FAIL", json.loads(output.getvalue())["checks"]["coverage"]["status"]
+            )
+
+    def test_verify_detects_removed_archive_when_remote_evidence_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, run_dir, _, _, responses = prepare_run(root)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    0,
+                    run(
+                        verify_args(root, output_root),
+                        experiment_context={"read_client": ReadOnlyShowcaseClient(responses)},
+                    ),
+                )
+
+            evidence_dir = run_dir / "evidence"
+            for archive in evidence_dir.iterdir():
+                archive.unlink()
+            evidence_dir.rmdir()
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": ReadOnlyShowcaseClient({})},
+                )
+
+            report = json.loads(output.getvalue())
+            self.assertEqual(1, result)
+            self.assertEqual("FAIL", report["checks"]["coverage"]["status"])
+
+    def test_verify_does_not_export_untrusted_job_status(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, run_dir, _, _, responses = prepare_run(root)
+            responses["/api/agent/jobs/job-1"]["status"] = {"private": "credential text"}
+            client = ReadOnlyShowcaseClient(responses)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": client},
+                )
+
+            self.assertEqual(1, result)
+            archive = next((run_dir / "evidence").glob("*.json"))
+            archived = archive.read_text(encoding="utf-8")
+            self.assertNotIn("credential text", archived)
+            self.assertIn('"job_status":"unknown"', archived)
+
+    def test_export_rejects_unallowlisted_persisted_fields(self):
+        from showcase.experiment_verification import export_experiment_report
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, run_dir, _, _, _ = prepare_run(root)
+            report = {
+                "run_id": "batch-1",
+                "checks": {name: {"status": "PASS", "reason": "ok"}
+                           for name in ("transport", "task", "usage", "coverage")},
+                "status": "PASS",
+                "unexpected_secret": "must not export",
+            }
+            content = canonical_json(report)
+            (run_dir / "verification.json").write_bytes(content)
+            (run_dir / "verification.sha256").write_text(
+                hashlib.sha256(content).hexdigest(), encoding="ascii"
+            )
+            export_path = root / "report.json"
+            with self.assertRaisesRegex(ValueError, "experiment_verification_invalid"):
+                export_experiment_report(
+                    "batch-1", output_root=output_root, output=export_path
+                )
+            self.assertFalse(export_path.exists())
+
     def test_verify_reports_changed_final_artifact_binding_as_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -575,30 +818,23 @@ class ExperimentVerifyCliTest(unittest.TestCase):
                 self.assertEqual([], client.calls)
 
     def test_export_refuses_environment_file_destination(self):
-        from showcase.experiment_verification import export_experiment_report
-
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            output_root, run_dir, _, _, _ = prepare_run(root, not_run=True)
-            report = {
-                "run_id": "batch-1",
-                "checks": {
-                    name: {"status": "NOT_RUN", "reason": "sample_not_dispatched"}
-                    for name in ("transport", "task", "usage", "coverage")
-                },
-                "status": "NOT_RUN",
-            }
-            content = canonical_json(report)
-            (run_dir / "verification.json").write_bytes(content)
-            (run_dir / "verification.sha256").write_text(
-                hashlib.sha256(content).hexdigest(), encoding="ascii"
-            )
+            output_root, _, _, _, _ = prepare_run(root, not_run=True)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(1, run(verify_args(root, output_root), experiment_context={}))
 
             with self.assertRaisesRegex(ValueError, "experiment_export_path_invalid"):
-                export_experiment_report(
-                    "batch-1",
-                    output_root=output_root,
-                    output=root / ".env",
+                run(
+                    build_parser().parse_args(
+                        [
+                            "--base-url", "http://127.0.0.1:8090",
+                            "--cookie-file", str(root / "cookies.txt"),
+                            "experiment", "export", "--run-id", "batch-1",
+                            "--output-root", str(output_root), "--output", str(root / ".env"),
+                        ]
+                    ),
+                    experiment_context={},
                 )
             self.assertFalse((root / ".env").exists())
 

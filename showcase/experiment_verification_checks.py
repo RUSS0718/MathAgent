@@ -22,8 +22,10 @@ def _verify_job(
     lookup: dict[str, Any],
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any], dict[str, Any]]:
     """Cross-check public identities, actual applied settings, review, and usage."""
-    attempts = (job.get("result") or {}).get("request_attempts")
-    budget = (job.get("result") or {}).get("budget")
+    result = job.get("result")
+    result = result if isinstance(result, dict) else {}
+    attempts = result.get("request_attempts")
+    budget = result.get("budget")
     report_body = report.get("report")
     evidence_run = evidence.get("run")
     if (
@@ -32,15 +34,34 @@ def _verify_job(
         or not isinstance(report_body, dict)
     ):
         unknown = {name: _check("UNKNOWN", "job_report_incomplete") for name in _CHECKS}
-        return unknown, _safe_evidence(sample, record, job, report, evidence, attempts, budget), {}
+        return unknown, _safe_evidence(
+            sample,
+            record,
+            job,
+            report,
+            evidence,
+            attempts,
+            budget,
+            manifest["model"]["name"],
+            {item["call_id"] for item in manifest["transport"]["calls"]},
+        ), {}
 
     usage = _check_usage(manifest, record, attempts, budget, report_body, evidence, lookup)
     transport = _check_transport(manifest, attempts, lookup.get("transport_identity"))
+    evidence_solver = evidence.get("solver")
+    evidence_transport = (
+        evidence_solver.get("transport_identity") if isinstance(evidence_solver, dict) else None
+    )
+    if evidence_transport is not None and evidence_transport != lookup.get("transport_identity"):
+        transport = _check("FAIL", "transport_projection_mismatch")
     task = _check_task(manifest, record, job, report, report_body, evidence, attempts)
     job_status = job.get("status")
     report_status = report.get("status")
     if report.get("evidence_id") != record["job_id"]:
         task = _check("FAIL", "job_report_identity_mismatch")
+    elif not isinstance(job_status, str) or not isinstance(report_status, str):
+        if task["status"] != "FAIL":
+            task = _check("UNKNOWN", "job_status_unavailable")
     elif report_status != job_status and task["status"] != "FAIL":
         terminal_statuses = {"succeeded", "failed", "canceled"}
         if job_status in terminal_statuses and report_status in terminal_statuses:
@@ -72,8 +93,18 @@ def _verify_job(
         task = _check("FAIL", "applied_config_mismatch")
     elif applied["status"] != "PASS" and task["status"] == "PASS":
         task = _check("UNKNOWN", "applied_config_unavailable")
-    safe = _safe_evidence(sample, record, job, report, evidence, attempts, budget)
-    safe["applied_config"] = applied["config"]
+    safe = _safe_evidence(
+        sample,
+        record,
+        job,
+        report,
+        evidence,
+        attempts,
+        budget,
+        manifest["model"]["name"],
+        {item["call_id"] for item in manifest["transport"]["calls"]},
+    )
+    safe["applied_config"] = applied["config"] if applied["status"] == "PASS" else None
     return (
         {
             "transport": transport,
@@ -108,9 +139,17 @@ def _check_transport(
     if (
         any(not isinstance(value, str) for value in roles + attempt_roles)
         or any(not isinstance(value, str) for value in call_ids + attempt_call_ids)
-        or set(roles) != set(attempt_roles)
+    ):
+        return _check("FAIL", "transport_calls_mismatch")
+    call_roles = dict(zip(call_ids, roles, strict=True))
+    if (
+        set(roles) != set(attempt_roles)
         or len(call_ids) != len(set(call_ids))
         or set(call_ids) != set(attempt_call_ids)
+        or any(
+            item.get("role") != call_roles.get(item.get("solver_call_id"))
+            for item in attempts
+        )
     ):
         return _check("FAIL", "transport_calls_mismatch")
     allowed = {item["call_id"]: item for item in expected["calls"]}
@@ -119,23 +158,27 @@ def _check_transport(
         if frozen is None:
             return _check("FAIL", "transport_calls_mismatch")
         if expected["policy"] == "legacy":
+            evidence_kind = call.get("evidence_kind")
             if any(
                 call.get(key) != frozen.get(key)
                 for key in ("transport", "reason", "capability_limit")
-            ):
+            ) or (evidence_kind is not None and not isinstance(evidence_kind, str)):
                 return _check("FAIL", "legacy_transport_mismatch")
-            if call.get("evidence_kind") not in {None, "documented"}:
+            if evidence_kind not in {None, "documented"}:
                 return _check("FAIL", "legacy_transport_evidence_mismatch")
-        elif (
-            call.get("transport") != "stream"
-            or call.get("profile_fingerprint") != frozen.get("profile_fingerprint")
-            or call.get("evidence_kind") not in {"controlled_test", "provider_live"}
-            or (
-                manifest["evidence_kind"] == "provider_live"
-                and call.get("evidence_kind") != "provider_live"
-            )
-        ):
-            return _check("FAIL", "stream_transport_mismatch")
+        else:
+            evidence_kind = call.get("evidence_kind")
+            if (
+                call.get("transport") != "stream"
+                or call.get("profile_fingerprint") != frozen.get("profile_fingerprint")
+                or not isinstance(evidence_kind, str)
+                or evidence_kind not in {"controlled_test", "provider_live"}
+                or (
+                    manifest["evidence_kind"] == "provider_live"
+                    and evidence_kind != "provider_live"
+                )
+            ):
+                return _check("FAIL", "stream_transport_mismatch")
     return _check("PASS", "transport_matches_manifest")
 
 
@@ -149,9 +192,12 @@ def _check_task(
     attempts: list[Any],
 ) -> dict[str, Any]:
     """Require a succeeded Job and an audited whole-review artifact binding."""
-    if job.get("status") in {"failed", "canceled"}:
+    job_status = job.get("status")
+    if not isinstance(job_status, str):
+        return _check("UNKNOWN", "job_status_unavailable")
+    if job_status in {"failed", "canceled"}:
         return _check("FAIL", "job_failed_or_canceled")
-    if job.get("status") != "succeeded":
+    if job_status != "succeeded":
         return _check("UNKNOWN", "job_not_terminal")
     run = evidence.get("run")
     verification = evidence.get("verification")
@@ -167,9 +213,14 @@ def _check_task(
         return _check("UNKNOWN", "whole_review_unavailable")
     latest = history[-1]
     source = latest.get("source") if isinstance(latest, dict) else None
+    findings = latest.get("findings") if isinstance(latest, dict) else None
+    if not isinstance(findings, list) or any(not isinstance(item, str) for item in findings):
+        return _check("UNKNOWN", "whole_review_unavailable")
     answer = run.get("final_response")
     if not isinstance(answer, str) or not isinstance(source, dict):
         return _check("UNKNOWN", "final_artifact_unavailable")
+    if not isinstance(source.get("call_id"), str) or not source["call_id"]:
+        return _check("UNKNOWN", "whole_review_source_unavailable")
     from .final_evidence import artifact_identity
 
     artifact = artifact_identity(answer)
@@ -191,7 +242,8 @@ def _check_task(
     )
     accepted = (
         job.get("verification_mode") == manifest["model"]["verification_mode"]
-        and (job.get("result") or {}).get("solver_mode") == manifest["model"]["solver_mode"]
+        and isinstance(job.get("result"), dict)
+        and job["result"].get("solver_mode") == manifest["model"]["solver_mode"]
         and report.get("status") == "succeeded"
         and report.get("evidence_id") == record["job_id"]
         and run.get("run_id") == record["job_id"]
@@ -204,7 +256,7 @@ def _check_task(
         and report_body["checks"] == verification
         and latest.get("scope") == "whole_solution_llm_review"
         and latest.get("checker_version") == "star-whole-review-v1"
-        and "llm_whole_review_accepted" in latest.get("findings", [])
+        and "llm_whole_review_accepted" in findings
         and latest.get("artifact") == artifact
         and source.get("run_id") == record["job_id"]
         and source.get("candidate_version") == len(history)
@@ -236,6 +288,11 @@ def _check_usage(
         return _check("FAIL", "attempt_projection_mismatch")
     if any(not isinstance(item, dict) for item in attempts):
         return _check("FAIL", "attempt_projection_invalid")
+    attempt_ids = [item.get("attempt_id") for item in attempts]
+    if any(not isinstance(value, str) or not value for value in attempt_ids) or len(
+        attempt_ids
+    ) != len(set(attempt_ids)):
+        return _check("FAIL", "attempt_identity_mismatch")
     if budget.get("http_attempts") != len(attempts):
         return _check("FAIL", "attempt_count_mismatch")
     logical_ids = [item.get("logical_call_id") for item in attempts]
@@ -245,6 +302,59 @@ def _check_usage(
         or budget["logical_calls"] != len(set(logical_ids))
     ):
         return _check("FAIL", "logical_call_count_mismatch")
+    logical_call_ids: dict[str, str] = {}
+    solver_call_ids: dict[str, str] = {}
+    attempts_by_call: dict[str, list[dict[str, Any]]] = {}
+    for item in attempts:
+        logical_id = item["logical_call_id"]
+        solver_call_id = item.get("solver_call_id")
+        if not isinstance(solver_call_id, str) or not solver_call_id:
+            return _check("FAIL", "attempt_identity_mismatch")
+        if (
+            (logical_id in logical_call_ids and logical_call_ids[logical_id] != solver_call_id)
+            or (solver_call_id in solver_call_ids and solver_call_ids[solver_call_id] != logical_id)
+        ):
+            return _check("FAIL", "attempt_identity_mismatch")
+        logical_call_ids[logical_id] = solver_call_id
+        solver_call_ids[solver_call_id] = logical_id
+        attempts_by_call.setdefault(solver_call_id, []).append(item)
+    for group in attempts_by_call.values():
+        indexes = [item.get("attempt_index") for item in group]
+        if (
+            any(type(index) is not int or index < 1 for index in indexes)
+            or len(indexes) != len(set(indexes))
+            or sorted(indexes) != list(range(1, len(indexes) + 1))
+            or len(group) > manifest["model"]["retry"] + 1
+        ):
+            return _check("FAIL", "attempt_identity_mismatch")
+        dispatch = [item.get("dispatch_status") for item in group]
+        statuses = [item.get("status") for item in group]
+        if any(
+            not isinstance(value, str)
+            or value not in {"transport_observed", "not_submitted", "reserved_dispatch_unconfirmed"}
+            for value in dispatch
+        ):
+            return _check("FAIL", "dispatch_status_invalid")
+        if any(
+            not isinstance(value, str)
+            or value not in {"success", "error", "unknown", "not_submitted", "pending", "reserved"}
+            for value in statuses
+        ):
+            return _check("FAIL", "attempt_status_invalid")
+        if any(
+            (state == "success" and observed != "transport_observed")
+            or (
+                observed == "not_submitted"
+                and state not in {"not_submitted", "error"}
+            )
+            or (state == "not_submitted" and observed != "not_submitted")
+            for observed, state in zip(dispatch, statuses, strict=True)
+        ):
+            return _check("FAIL", "dispatch_status_mismatch")
+        if any(state not in {"error", "not_submitted"} for state in statuses[:-1]):
+            return _check("FAIL", "attempt_retry_order_mismatch")
+        if "reserved_dispatch_unconfirmed" in dispatch:
+            return _check("UNKNOWN", "dispatch_unconfirmed")
     provider_known = budget.get("provider_known")
     unknown_fields = budget.get("provider_unknown_fields")
     if not isinstance(provider_known, dict) or not isinstance(unknown_fields, dict):
