@@ -25,7 +25,8 @@ class StarProductPipeline:
 
     def __init__(self, database_path, *, adapter=None, evidence_kind="live", budget=None,
                  features=None, registry=None, hint_mode="none", full_enabled=False,
-                 full_features=None, full_budget=None, experiment_policy=None):
+                 full_features=None, full_budget=None, experiment_policy=None,
+                 transport_policy="legacy", stream_profiles=None):
         from .star_experiment_policy import ExperimentRunPolicy
 
         if experiment_policy is not None and not isinstance(experiment_policy, ExperimentRunPolicy):
@@ -37,6 +38,10 @@ class StarProductPipeline:
             raise ValueError("star_adapter_invalid")
         self.database_path = database_path
         self.adapter = adapter or InternModelAdapter(client_timeout=180, client_retry=3)
+        if transport_policy not in {"legacy", "stream_first"}:
+            raise ValueError("star_transport_policy_invalid")
+        self.transport_policy = transport_policy
+        self.stream_profiles = stream_profiles
         self.evidence_kind = evidence_kind
         if budget is not None and not isinstance(budget, RunBudgetLimits):
             raise ValueError("star_budget_invalid")
@@ -132,11 +137,15 @@ class StarProductPipeline:
             features["best_effort"] = True
         config = {**base, **({"hint_mode": "user_hint"} if solver_hint is not None else {}),
                   "features": features}
+        if self.transport_policy == "stream_first":
+            config["transport_policy"] = self.transport_policy
         port = InternModelPort(
             self.adapter,
             original_problem=problem,
             deadlines=deadlines,
             streaming=config["features"].get("stream_activity") is True,
+            transport_policy=self.transport_policy,
+            stream_profiles=self.stream_profiles,
         )
         if self.experiment_policy is not None:
             limits = current_budget().snapshot()["limits"]
@@ -165,6 +174,10 @@ class StarProductPipeline:
                                event_observer=observe) as harness:
                 existing = harness._state_store.get_run(run_id)
                 harness._product_recovery = existing is not None
+                if existing is not None:
+                    port.restore_transport_policy(
+                        run_id, existing["state"].get("transport_policy")
+                    )
                 from .solver_harness.budget import HardBudgetStop
                 from .solver_harness.calls import CallInterrupted
 

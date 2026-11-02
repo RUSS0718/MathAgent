@@ -26,7 +26,8 @@ def pending_call(run):
         return None
     record = max(calls.values(), key=lambda item: item["request_revision"])
     audit = {
-        "call_audit", "call_activity", "session_recorded", "call_retry_authorized", "session_started"
+        "call_audit", "call_activity", "session_recorded", "call_retry_authorized",
+        "session_started", "transport_selected", "transport_rejected",
     }
     if any(event["state_revision"] > record["request_revision"]
            and event["type"] not in audit for event in run["events"]):
@@ -50,9 +51,11 @@ def retry_parent_id(record):
     return record.get("retry_of_internal", record.get("retry_of"))
 
 
-def _save(harness, run, record, *, status=None, event_type="call_audit", event_fields=None):
+def _save(harness, run, record, *, status=None, event_type="call_audit", event_fields=None,
+          state_updates=None):
     latest = harness.get_run(run["run_id"])
     updates = {"calls": {**latest["state"].get("calls", {}), record["call_id"]: redact(record)}}
+    updates.update(state_updates or {})
     if status is not None and latest["state"]["phase"] != "TERMINAL":
         updates["status"] = status
     updated = harness.commit_event(
@@ -193,6 +196,52 @@ def dispatch(harness, run, operation, request, session_dispatch):
             }
         _save(harness, run, record)
         prepared = harness.prepare_request(run, prepared)
+
+        def observe_transport(decision, _request):
+            latest = harness.get_run(run["run_id"])
+            locked = latest["state"].get("transport_policy")
+            choice = {
+                "policy": decision.get("policy", "stream_first"),
+                "profile_set_fingerprint": decision.get("profile_set_fingerprint"),
+            }
+            mismatch = locked is not None and (
+                locked.get("policy") != choice["policy"]
+                or locked.get("profile_set_fingerprint") != choice["profile_set_fingerprint"]
+            )
+            selected = dict(decision)
+            record["transport_decision"] = redact(selected)
+            event_type = (
+                "transport_rejected"
+                if mismatch or selected.get("transport") == "reject"
+                else "transport_selected"
+            )
+            reason = "transport_policy_run_mismatch" if mismatch else decision.get("reason")
+            if mismatch:
+                selected.update(transport="reject", reason=reason, new_run_required=True)
+                record["transport_decision"] = redact(selected)
+                record.update(status="policy_rejected", error_category=reason)
+            if selected.get("transport") == "reject":
+                return not mismatch
+            state_updates = {}
+            if locked is None:
+                state_updates["transport_policy"] = choice
+            _save(
+                harness, run, record, event_type=event_type,
+                event_fields={
+                    "transport": selected.get("transport"),
+                    "transport_reason": selected.get("reason"),
+                    "transport_selection_reason": decision.get("reason") if mismatch else None,
+                    "transport_evidence_kind": decision.get("evidence_kind"),
+                    "transport_profile_fingerprint": decision.get("profile_fingerprint"),
+                    "transport_profile_set_fingerprint": decision.get("profile_set_fingerprint"),
+                    "transport_policy": choice["policy"],
+                    "new_run_required": selected.get("new_run_required") is True or mismatch,
+                },
+                state_updates=state_updates,
+            )
+            return not mismatch
+
+        prepared["transport_decision_observer"] = observe_transport
         if activity_enabled:
             def observe_activity(activity):
                 if not isinstance(activity, Mapping):
@@ -249,6 +298,38 @@ def dispatch(harness, run, operation, request, session_dispatch):
         try:
             response = _consume(operation(deepcopy(prepared)), partial, checkpoint)
         except Exception as exc:
+            if getattr(exc, "no_dispatch", False) is True:
+                decision = getattr(exc, "transport_decision", None) or {}
+                record.update(
+                    status="policy_rejected",
+                    error_category=getattr(exc, "category", "transport_policy_rejected"),
+                    transport=redact(decision),
+                )
+                latest = harness.get_run(run["run_id"])
+                locked = latest["state"].get("transport_policy")
+                state_updates = {}
+                if locked is None and decision.get("policy"):
+                    state_updates["transport_policy"] = {
+                        "policy": decision["policy"],
+                        "profile_set_fingerprint": decision.get("profile_set_fingerprint"),
+                    }
+                _save(
+                    harness,
+                    run,
+                    record,
+                    event_type="transport_rejected",
+                    event_fields={
+                        "transport": decision.get("transport"),
+                        "transport_reason": decision.get("reason"),
+                        "transport_evidence_kind": decision.get("evidence_kind"),
+                        "transport_profile_fingerprint": decision.get("profile_fingerprint"),
+                        "transport_profile_set_fingerprint": decision.get("profile_set_fingerprint"),
+                        "transport_policy": decision.get("policy"),
+                        "new_run_required": decision.get("new_run_required") is True,
+                    },
+                    state_updates=state_updates,
+                )
+                raise CallInterrupted(run["run_id"], record["call_id"]) from None
             if getattr(exc, "category", None) == "run_budget_exhausted":
                 from .budget import HardBudgetStop, stop
 
