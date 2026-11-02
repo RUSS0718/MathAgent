@@ -208,7 +208,10 @@
       "status": "covered",
       "tests": [
         "tests.test_solver_harness_explore.SolverHarnessExploreTest.test_exhausted_budget_returns_explicit_result_without_dispatch",
-        "tests.test_solver_harness_review_fixes.ReviewFixTest.test_tool_hard_budget_stops_verifier_and_enters_terminal_best_effort"
+        "tests.test_star_product_tool_ceiling.StarToolCeilingTest.test_last_allowed_tool_receipt_continues_through_complete_answer",
+        "tests.test_star_product_tool_ceiling.StarToolCeilingTest.test_zero_tool_ceiling_still_allows_a_reviewed_pure_reasoning_answer",
+        "tests.test_star_product_tool_ceiling.StarToolCeilingTest.test_extra_tool_is_denied_and_model_can_complete_without_it",
+        "tests.test_star_product_tool_ceiling.StarToolCeilingTest.test_model_ceiling_still_stops_continuation_after_successful_tool"
       ],
       "limitation": "离线公开合同用例；非live能力证据"
     },

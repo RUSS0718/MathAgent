@@ -544,7 +544,7 @@ upstream_code_defaults_as_observed:
 
 **MUST** 锁定具体 commit、核对这些配置在运行路径中的生效情况，并记录 README 与 `config.py` 的默认模型不一致。**MUST NOT** 把源码中的 3600 秒或模型 ID 误写为比赛官方上限，或声称自动再现论文全部运行条件。
 
-`competition_constrained`：从比赛运行时读取模型调用、时间和输出限制；在每次调用前扣减可用资源。当预算不足以完成一个完整 STAR 循环时，输出 `partial_budget_exhausted` 或不经最终审查的明确状态，**不得以相同 Profile 名称对外宣称完整 STAR 复现**。
+`competition_constrained`：从比赛运行时读取模型调用、时间和输出限制；在每次调用前扣减可用资源。模型、HTTP、token 和时间预算继续遵循既有准入与终止语义。工具额度只决定能否发起新的工具动作；额度用满只拒绝新工具动作，不因此停止仍获准的模型派发、回执续接、答案生成或整题审查。若其他预算阻断后续流程，输出 `partial_budget_exhausted` 或不经最终审查的明确状态，**不得以相同 Profile 名称对外宣称完整 STAR 复现**。
 
 ### 8.2 开关依赖校验
 
@@ -626,7 +626,7 @@ experiment:
 | AC-13 | 整题校验不通过 | 有界重试；最终状态不伪称 verified |
 | AC-14 | 模型/工具超时、网络异常 | 正确分类；部分结果保存；重试受限 |
 | AC-15 | 在归档与快照间强制中断 | 恢复不重复接受、不丢归档、不重复记账 |
-| AC-16 | 预算不足 | 不再派发；结果 JSON 合法；标明预算终止 |
+| AC-16 | 模型、HTTP、token 或时间硬限不足；或仅工具额度用满 | 前者不再派发模型请求并标明预算终止；后者只拒绝新工具动作，若其他硬限仍允许则继续回答与整题审查；结果 JSON 合法 |
 | AC-17 | 所有功能关闭 | 无额外工具与模型调用；单次路径可测试 |
 | AC-18 | 比赛默认入口回归 | 文件与调用合同保持；`final_response` 非空且 JSON 可序列化 |
 | AC-19 | Meta 请求直接执行代码或跨题读取 | 访问被拒；审计保留脱敏拒绝事件 |
@@ -970,7 +970,7 @@ def select_best_effort(snapshot: ProblemState) -> BestEffortDecision:
     return explain_selection(chosen, ranked, snapshot)
 ```
 
-**MUST** 在硬预算到达后拒绝一切新的模型调用和工具请求。软预算阈值只能在仍有真实剩余额度时安排整理；软阈值也不能突破硬上限。所有角色和子任务共享预算记账。
+**MUST** 保持模型调用、HTTP、token 和时间硬预算的既有准入与终止语义。工具额度只控制新的工具请求：额度为零或已用满时拒绝新工具请求；若既有模型、HTTP、token 和时间预算仍允许，继续纯推理、消费已完成的工具回执、生成答案和执行整题审查。被拒绝的工具请求不得产生成功计算证据，也不得伪造回执、重置累计计数或绕过 S3 账本。软预算阈值只能在仍有真实剩余额度时安排整理；软阈值不能突破硬上限。此次变更只分离工具额度与模型派发的停止条件。
 
 ### 15.3 证据与冲突
 
@@ -983,9 +983,9 @@ def select_best_effort(snapshot: ProblemState) -> BestEffortDecision:
 
 ### 15.4 状态与输出兼容
 
-- 原有 `RunStatus.partial_budget_exhausted` 保留。不要另建一套语义冲突的终态。
+- 原有 `RunStatus.partial_budget_exhausted` 保留，用于阻断 Run 继续的模型、HTTP、token 或时间硬限；工具额度用满本身不触发该终态。不要另建一套语义冲突的终态。
 - 增加 `best_effort.status` 与 `termination_reason`；其含义与 RunStatus 不同。
-- `final_response` 必须满足官方 JSON 合同。非空失败说明不是数学正确答案。
+- `final_response` 必须满足官方 JSON 合同。字段非空不等于答案正确或已通过整题审查；失败说明不是数学答案。
 - 官方适配器按当前 `AGENTS.md` 的允许字段生成结果，内部置信和理由放到 Evidence Pack。
 - `star_reference` 默认不使用此扩展；`star_best_effort` 或显式研究配置开启。`official` 不导入实验模块。
 
