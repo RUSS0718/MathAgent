@@ -15,7 +15,7 @@ def progress_summary(state):
             "reported": bool(stored.get("report")),
             **{key: review[key] for key in ("verdict", "valid", "goal_gate", "logic_gate")
                if key in review}})
-    return {"plan_version": state.get("plan_version"),
+    summary = {"plan_version": state.get("plan_version"),
         "attempt_index": state.get("attempt_index"), "steps": steps,
         "failures": [{key: item[key] for key in ("kind", "plan_version", "attempt_index")
                       if key in item} | {
@@ -32,3 +32,10 @@ def progress_summary(state):
             for item in state.get("verified_results_ledger", [])
             if isinstance(item, dict) and isinstance(item.get("category"), str)],
         "meta_decision": (state.get("meta_decision") or {}).get("decision")}
+    if "reasoner_checkpoints" in state:
+        summary["reasoner_checkpoints"] = [
+            {"round": item.get("round"), "status": item.get("status")}
+            for item in state.get("reasoner_checkpoints", [])
+            if isinstance(item, dict)
+        ]
+    return summary

@@ -119,7 +119,9 @@ class StarProductPipeline:
         if current_budget() is None or self.checkpointer is None:
             raise RuntimeError("star_requires_product_control")
         sink = emit or (lambda _event: None)
-        port = InternModelPort(self.adapter, original_problem=problem)
+        deadlines = ({"phase_deadline_at": self.experiment_policy.phase_deadline_at,
+                      "batch_deadline_at": self.experiment_policy.round_deadline_at}
+                     if self.experiment_policy is not None else None)
         base = self.full_config if solver_mode in FULL_MODES else self.config
         features = dict(base["features"])
         # SP-13 合同：reference 核心恰为 9 项；candidate_registry/best_effort 仅由
@@ -130,6 +132,12 @@ class StarProductPipeline:
             features["best_effort"] = True
         config = {**base, **({"hint_mode": "user_hint"} if solver_hint is not None else {}),
                   "features": features}
+        port = InternModelPort(
+            self.adapter,
+            original_problem=problem,
+            deadlines=deadlines,
+            streaming=config["features"].get("stream_activity") is True,
+        )
         if self.experiment_policy is not None:
             limits = current_budget().snapshot()["limits"]
             config.update(max_model_calls=limits["max_model_calls"],

@@ -26,12 +26,21 @@ def decision_fields(event, state, invocations=()):
         "rescued_result_count", "failure_type", "action_type", "use_pure_reasoning",
         "specific_task_consumed", "triggered_by", "counterexample_verdict",
         "decision_revision", "classified_outcomes", "rejected_outcomes",
+        "stream_metrics", "stream_activity", "checkpoint_status", "checkpoint_round",
     ) if key in event}
     roles = {
         "step_reported": "reasoner",
         "challenge_dispatched": "reasoner",
         "challenge_replied": "reasoner",
         "step_reviewed": "step_verifier",
+        "explore_assessed": "explore",
+        "exploration_polished": "explore",
+        "initial_plan_generated": "planner",
+        "plan_replaced": "planner",
+        "planner_checkpoint_yielded": "planner",
+        "final_candidate_generated": "final_generator",
+        "final_candidate_reviewed": "whole_solution_verifier",
+        "solution_review_assessed": "whole_solution_verifier",
         "meta_dispatched": "meta",
         "meta_decided": "meta",
         "meta_guidance_decided": "meta",
@@ -42,7 +51,7 @@ def decision_fields(event, state, invocations=()):
     }
     role = event.get("role") or roles.get(event["type"])
     if role in {"reasoner", "reason_noncoding", "explore", "planner", "researcher",
-                "step_verifier", "whole_solution_verifier", "meta", "controller"}:
+                "step_verifier", "final_generator", "whole_solution_verifier", "meta", "controller"}:
         fields["role"] = role
     upgrade_reason = event.get("upgrade_reason")
     if upgrade_reason in {"round_limit_reached", "meta_escalation_limit_reached"}:
@@ -86,6 +95,7 @@ def decision_fields(event, state, invocations=()):
         "reasoner": {"reasoner", "reason_noncoding"},
         "step_verifier": {"step_verifier"},
         "whole_solution_verifier": {"whole_solution_verifier"},
+        "final_generator": {"final_generator"},
         "explore": {"explore", "explore_polish"},
         "meta": {"meta", "meta_strategist"},
         "planner": {"planner"},
@@ -111,6 +121,24 @@ def decision_fields(event, state, invocations=()):
                 "bytes": stream["bytes"],
                 "status": stream["status"],
             }
+        calls = state.get("calls", {})
+        if isinstance(calls, Mapping):
+            call = next(
+                (item for item in reversed(list(calls.values()))
+                 if isinstance(item, Mapping) and item.get("role") in accepted_roles),
+                None,
+            )
+            activity = call.get("stream_metrics") if isinstance(call, Mapping) else None
+            activity = activity if isinstance(activity, Mapping) else {}
+            fields["stream_activity"] = {
+                key: (activity.get(key) if activity.get(key) is not None else "unavailable")
+                for key in (
+                    "dispatched_at", "response_headers_at", "first_event_at",
+                    "first_reasoning_at", "first_content_at", "last_activity_at",
+                    "completion_at", "event_count", "reasoning_chars", "content_bytes",
+                    "usage_known", "status",
+                )
+            }
         skills = invocation.get("active_skill_ids")
         if isinstance(skills, list) and all(isinstance(item, str) for item in skills):
             fields["active_skill_ids"] = skills
@@ -128,4 +156,8 @@ def decision_fields(event, state, invocations=()):
         fingerprint = invocation.get("prompt_fingerprint")
         if isinstance(fingerprint, str) and re.fullmatch(r"[0-9a-f]{64}", fingerprint):
             fields["prompt_fingerprint"] = fingerprint
+        for key in ("prompt_layers_fingerprint", "schema_fingerprint", "input_fingerprint"):
+            fingerprint = invocation.get(key)
+            if isinstance(fingerprint, str) and re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+                fields[key] = fingerprint
     return fields

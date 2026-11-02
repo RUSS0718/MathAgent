@@ -284,7 +284,8 @@ class SolverHarness:
             )
             and normalized_updates
             and not (
-                normalized_event["type"] == "call_audit" and set(normalized_updates) <= {"calls"}
+                normalized_event["type"] in {"call_audit", "call_activity"}
+                and set(normalized_updates) <= {"calls"}
             )
         ):
             raise SolverValidationError(
@@ -333,6 +334,8 @@ class SolverHarness:
         ):
             prepared["role_context"] = prepare_role_context(latest, prepared)
             prepared["state_revision"] = latest["state_revision"]
+        if self._config.get("features", {}).get("strict_completion") is True:
+            prepared["strict_completion"] = True
         tools = allowed_tool_ids(latest, request.get("role"), self._config, self._tool_port)
         prepared["allowed_tools"] = tools
         prepared["tool_policy"] = {"allow": tools}

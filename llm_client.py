@@ -44,8 +44,12 @@ def _not_submitted(error: BaseException | None) -> bool:
     """Only positive connection-establishment evidence permits automatic resend."""
     from urllib3.exceptions import NewConnectionError
 
+    from showcase.request_transport import DeadlineNotSubmitted
+
     # The current failure wins over stale exception-handler context. Only
     # explicit transport wrappers (reason/args) carry establishment evidence.
+    if isinstance(error, DeadlineNotSubmitted):
+        return True
     if isinstance(error, requests.ReadTimeout):
         return False
     seen = set()
@@ -168,7 +172,7 @@ class InternChatClient:
         _attempt_budget: Any = None,
     ) -> str:
         """Send a request; explicit reasoning_mode wins over thinking_mode and defaults."""
-        effective_timeout = self.timeout if timeout_seconds is None else int(timeout_seconds)
+        effective_timeout = self.timeout if timeout_seconds is None else (float(timeout_seconds) if _attempt_budget is not None else int(timeout_seconds))
         if effective_timeout <= 0:
             raise ValueError("timeout_seconds_must_be_positive")
         payload = {
@@ -216,11 +220,13 @@ class InternChatClient:
         self.last_response_metadata = None
         # Only the explicit metered product path opts into conservative retries.
         attempts_limit = min(self.retry, 3) if _attempt_budget is not None else self.retry
-        logical_deadline = time.monotonic() + effective_timeout
+        clock = time.monotonic
         if _attempt_budget is not None:
-            logical_deadline = min(
-                logical_deadline, time.monotonic() + _attempt_budget.remaining_seconds()
-            )
+            from showcase.deadline_clock import guarded_utc_clock
+            clock = guarded_utc_clock(time.time)
+        logical_deadline = clock() + effective_timeout
+        if _attempt_budget is not None:
+            logical_deadline = min(logical_deadline, _attempt_budget.absolute_deadline())
         for attempt in range(attempts_limit):
             attempt_started = time.perf_counter()
             attempt_state_lock = threading.RLock()
@@ -251,27 +257,37 @@ class InternChatClient:
             if _attempt_budget is not None:
                 from showcase.attempt_projection import MeteredAttemptEvent
 
+                request_event["deadline_at"] = logical_deadline
                 request_event = MeteredAttemptEvent(request_event)
                 request_event.state_lock = attempt_state_lock
                 estimate = len(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"))
                 attempt_timeout = min(
                     effective_timeout,
-                    max(0.001, logical_deadline - time.monotonic()),
+                    max(0.001, logical_deadline - clock()),
                     _attempt_budget.before_attempt(request_event, estimate),
                 )
                 request_event["effective_timeout_seconds"] = attempt_timeout
             response = None
             failure: BaseException | None = None
             late_response_settled = False
+            local_processing_timeout = False
             try:
                 request_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                 if _attempt_budget is not None:
                     from showcase.request_transport import response_events
 
+                    unparsed = object()
+
                     def settle_late(
-                        response, body, headers_seconds, completion_seconds, body_complete=True
+                        response, body, headers_seconds, completion_seconds, body_complete=True,
+                        *, parsed=unparsed,
                     ):
                         nonlocal late_response_settled
+                        if body_complete and parsed is unparsed:
+                            try:
+                                parsed = json.loads(body)
+                            except (TypeError, ValueError):
+                                parsed = None
                         with attempt_state_lock:
                             request_event.late_callback_received = True
                             if not body_complete:
@@ -279,10 +295,6 @@ class InternChatClient:
 
                                 refresh_attempt_projection(request_event)
                                 return
-                            try:
-                                parsed = json.loads(body)
-                            except (TypeError, ValueError):
-                                parsed = None
                             late_data = parsed if isinstance(parsed, Mapping) else {}
                             status_code = getattr(response, "status_code", None)
                             late_usage = provider_usage(late_data.get("usage"))
@@ -332,6 +344,11 @@ class InternChatClient:
                                     error_category="http_status",
                                     error_type="HTTPError",
                                 )
+                            elif (getattr(_attempt_budget, "strict_completion", False)
+                                  and late_choices == []):
+                                request_event.update(response_fields, status="error",
+                                                     error_category="missing_finish_reason",
+                                                     error_type="EmptyChoices")
                             elif not valid_completion_shape:
                                 request_event.update(
                                     response_fields,
@@ -339,6 +356,11 @@ class InternChatClient:
                                     error_category="invalid_response",
                                     error_type="ValueError",
                                 )
+                            elif (getattr(_attempt_budget, "strict_completion", False)
+                                  and response_fields["finish_reason"] is None):
+                                request_event.update(response_fields, status="error",
+                                                     error_category="missing_finish_reason",
+                                                     error_type="ChatClientError")
                             else:
                                 late_reasoning = late_message.get("reasoning_content")
                                 request_event.update(
@@ -357,11 +379,14 @@ class InternChatClient:
                                 )
                                 request_event.pop("error_category", None)
                                 request_event.pop("error_type", None)
-                            _attempt_budget.after_attempt(request_event)
-                            from showcase.attempt_projection import refresh_attempt_projection
-
-                            refresh_attempt_projection(request_event)
+                            late_event = dict(request_event)
                             late_response_settled = True
+                        from showcase.run_budget_late import settle_late_with_retry
+
+                        settle_late_with_retry(_attempt_budget, late_event)
+                        from showcase.attempt_projection import refresh_attempt_projection
+
+                        refresh_attempt_projection(request_event)
 
                     response_body = bytearray()
                     for kind, value in response_events(
@@ -369,6 +394,7 @@ class InternChatClient:
                         headers=headers,
                         data=request_data,
                         deadline=logical_deadline,
+                        clock=clock,
                         timeout=self.timeout,
                         loopback_only=self.loopback_only,
                         provider_endpoint_only=self.provider_endpoint_only,
@@ -385,7 +411,26 @@ class InternChatClient:
                             response_body.extend(value)
                         elif kind == "complete":
                             request_event["completion_seconds"] = time.perf_counter() - attempt_started
-                    data = json.loads(response_body)
+                    from showcase.processing_deadline import process_before_deadline
+
+                    def settle_processed(parsed, error):
+                        if error is not None and not isinstance(error, (TypeError, ValueError)):
+                            import logging
+
+                            logging.getLogger(__name__).warning(
+                                "late processing unresolved: run_id=%s attempt_id=%s",
+                                _attempt_budget.run_id, request_event.get("attempt_id"),
+                            )
+                            return  # Keep the original unknown reservation for review.
+                        settle_late(
+                            response, response_body, request_event.get("response_headers_seconds"),
+                            request_event.get("completion_seconds") or time.perf_counter() - attempt_started,
+                            parsed=parsed,
+                        )
+
+                    data = process_before_deadline(
+                        lambda: json.loads(response_body), logical_deadline, settle_processed, clock=clock
+                    )
                 else:
                     if self.loopback_only or self.provider_endpoint_only:
                         from showcase.request_transport import (
@@ -406,8 +451,13 @@ class InternChatClient:
                     data = response.json()
                 usage = provider_usage(data.get("usage"))
                 request_event.update(usage)
+                if (_attempt_budget is not None and getattr(_attempt_budget, "strict_completion", False)
+                        and data.get("choices") == []):
+                    raise ChatClientError("missing_finish_reason", "empty_choices")
                 choice = data["choices"][0]
                 finish_reason = safe_identifier(choice.get("finish_reason"))
+                if _attempt_budget is not None and getattr(_attempt_budget, "strict_completion", False) and finish_reason is None:
+                    raise ChatClientError("missing_finish_reason")
                 request_event.update(
                     status="success",
                     http_status=getattr(response, "status_code", None),
@@ -468,6 +518,9 @@ class InternChatClient:
                     }
                 )
                 self.latencies.append(time.perf_counter() - started)
+                if _attempt_budget is not None and clock() >= logical_deadline:
+                    local_processing_timeout = True
+                    raise requests.ReadTimeout("logical_deadline_exceeded_during_processing")
                 return content
             except requests.Timeout as exc:
                 last_category = "timeout"
@@ -503,7 +556,7 @@ class InternChatClient:
                 self._record_failure(last_category, exc)
             except Exception as exc:
                 failure = exc
-                last_category = "client_exception"
+                last_category = (getattr(exc, "category", None) or "client_exception") if _attempt_budget is not None else "client_exception"
                 self._record_failure(last_category, exc)
                 raise
             finally:
@@ -512,7 +565,7 @@ class InternChatClient:
                         request_event["duration_seconds"] = round(
                             time.perf_counter() - attempt_started, 3
                         )
-                    if failure is not None and not late_response_settled:
+                    if failure is not None and not late_response_settled and not local_processing_timeout:
                         failure_response = (
                             response if response is not None else getattr(failure, "response", None)
                         )
@@ -534,14 +587,19 @@ class InternChatClient:
                                 completion_tokens=0,
                                 total_tokens=0,
                             )
-                        _attempt_budget.after_attempt(request_event)
+                        if isinstance(failure, requests.ReadTimeout) and not _not_submitted(failure):
+                            from showcase.run_budget_late import settle_timeout_nonblocking
+
+                            settle_timeout_nonblocking(_attempt_budget, request_event)
+                        else:
+                            _attempt_budget.after_attempt(request_event)
                     self.request_diagnostics.append(request_event)
                     if _attempt_records is not None:
                         _attempt_records.append(request_event)
                     self._request_sequence += 1
             if _attempt_budget is not None:
                 delay = product_retry_delay(failure, response, attempt, _attempt_budget)
-                if delay is None or time.monotonic() + delay >= logical_deadline:
+                if delay is None or clock() + delay >= logical_deadline:
                     break
                 if attempt + 1 < attempts_limit:
                     time.sleep(delay)

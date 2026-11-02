@@ -1,6 +1,10 @@
 """Same-step objection replies with bounded verifier sessions."""
 
+from collections.abc import Mapping
+
+from . import reasoner_checkpoint
 from .budget import budget_reason
+from .finalize import finish
 from .step import _normalize_report, run_step
 from .traceback import apply_traceback, transition_decision
 from .verification import verify_step
@@ -39,6 +43,11 @@ def run_challenges(
         suffix = f"-attempt-{attempt}" if attempt else ""
         step_id = state["current_step"]
         record = state["steps"][step_id]
+        checkpoint_mode = reasoner_checkpoint.enabled(harness._config)
+        checkpoints = reasoner_checkpoint.current_checkpoints(state) if checkpoint_mode else []
+        parent_checkpoint = checkpoints[-1] if checkpoints else None
+        if checkpoint_mode and len(checkpoints) >= reasoner_checkpoint.MAX_CHECKPOINT_ROUNDS:
+            return finish(harness, run, "partial_aborted", "reasoner_checkpoint_round_limit")
         session = f"verify:{run['run_id']}:plan{state['plan_version']}:step{step_id}{suffix}"
         reason = budget_reason(state, {"max_model_calls": max_model_calls,
                                        "max_total_duration_seconds": max_runtime_seconds})
@@ -95,11 +104,15 @@ def run_challenges(
             },
             state_updates={"counters": counters},
         )
-        request = {
+        base_request = {
             "role": "reasoner",
             "run_id": run["run_id"],
             "problem": problem,
-            "call_id": f"{session}:reasoner:{number}",
+            "call_id": (
+                f"{run['run_id']}:reasoner:checkpoint:{state['plan_version']}:{step_id}:"
+                f"{len(checkpoints) + 1}:challenge-{number}{suffix}"
+                if checkpoint_mode else f"{session}:reasoner:{number}"
+            ),
             "session_key": session,
             "step": step,
             "report": record["report"],
@@ -108,6 +121,30 @@ def run_challenges(
             "challenge_history": record.get("challenge_history", []),
             "tool_policy": {"allow": []},
         }
+        request = base_request
+        if checkpoint_mode:
+            request = reasoner_checkpoint.request(
+                base_request,
+                call_id=base_request["call_id"],
+                round_number=len(checkpoints) + 1,
+                parent=parent_checkpoint,
+                objection=objection,
+                guidance=state.get("meta_guidance_decision"),
+            )
+            request.update({
+                "current_goal": step["objective"],
+                "valid_sources": [
+                    item for item in [
+                        *state.get("accepted_results", []),
+                        *state.get("verified_results_ledger", []),
+                    ]
+                    if isinstance(item, Mapping)
+                    and item.get("invalidated") is not True
+                    and item.get("status") not in {"INVALIDATED", "invalidated"}
+                ],
+                "open_obligations": list(parent_checkpoint.get("gaps", []))
+                if parent_checkpoint else [],
+            })
         if harness._config.get("features", {}).get("skills") is True:
             request["suspected_false_claim"] = True
         try:
@@ -118,7 +155,27 @@ def run_challenges(
             )
         except Exception:
             reply = {"blocked": True}
-        report = _normalize_report(reply, step)
+        checkpoint = None
+        if checkpoint_mode:
+            try:
+                checkpoint = reasoner_checkpoint.parse(reply)
+            except ValueError as exc:
+                return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", str(exc))
+            if checkpoint["objective"] != step["objective"]:
+                return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", "invalid_reasoner_checkpoint_objective")
+            if any(item.get("checkpoint_id") == checkpoint["checkpoint_id"]
+                   for item in checkpoints):
+                return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", "reasoner_checkpoint_no_progress")
+            if parent_checkpoint is not None and (
+                checkpoint["checkpoint_id"] == parent_checkpoint["checkpoint_id"]
+                or reasoner_checkpoint.same_draft(checkpoint, parent_checkpoint)
+            ):
+                return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", "reasoner_checkpoint_no_progress")
+            report = reasoner_checkpoint.to_report(checkpoint, step)
+            if checkpoint["status"] in {"BLOCKED", "FAILED"}:
+                report["blocked"] = True
+        else:
+            report = _normalize_report(reply, step)
         history = [
             *record.get("challenge_history", []),
             {
@@ -127,8 +184,21 @@ def run_challenges(
                 "objection": objection,
                 "reasoner_reply": report,
                 "verdict": None,
+                **({"checkpoint_id": checkpoint["checkpoint_id"]} if checkpoint else {}),
             },
         ]
+        checkpoint_record = None
+        if checkpoint is not None:
+            checkpoint_record = reasoner_checkpoint.record(
+                run,
+                checkpoint,
+                call_id=request["call_id"],
+                checkpoint_round=len(checkpoints) + 1,
+                plan_version=state["plan_version"],
+                attempt_index=attempt,
+                step_id=step_id,
+                parent=parent_checkpoint,
+            )
         run = harness.commit_event(
             run["run_id"],
             expected_revision=run["state_revision"],
@@ -146,8 +216,18 @@ def run_challenges(
                         **record,
                         "report": report,
                         "challenge_history": history,
+                        **({
+                            "checkpoint_status": checkpoint["status"],
+                            "checkpoint_round": len(checkpoints) + 1,
+                            "checkpoint_id": checkpoint["checkpoint_id"],
+                        } if checkpoint else {}),
                     },
                 },
+                **({
+                    "reasoner_checkpoints": [
+                        *state.get("reasoner_checkpoints", []), checkpoint_record
+                    ]
+                } if checkpoint_record else {}),
             },
         )
         run = verify_step(
@@ -161,7 +241,8 @@ def run_challenges(
         )
         updated = run["state"]["steps"][step_id]
         history[-1]["verdict"] = (
-            updated["verification"] if run["state"]["phase"] != "TERMINAL" else None
+            updated.get("checkpoint_verification", updated["verification"])
+            if run["state"]["phase"] != "TERMINAL" else None
         )
         run = harness.commit_event(
             run["run_id"],

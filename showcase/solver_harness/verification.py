@@ -73,6 +73,18 @@ def verify_step(
     plan = state["plan"]
     index = next(i for i, step in enumerate(plan["steps"]) if step["step_id"] == step_id)
     step = plan["steps"][index]
+    checkpoint_mode = harness._config.get("features", {}).get("reasoner_checkpoints") is True
+    checkpoint = next(
+        (
+            item for item in reversed(state.get("reasoner_checkpoints", []))
+            if item.get("checkpoint_id") == state["steps"].get(step_id, {}).get("checkpoint_id")
+            and item.get("plan_version") == state["plan_version"]
+            and item.get("step_id") == step_id
+        ),
+        None,
+    ) if checkpoint_mode else None
+    if checkpoint is not None:
+        suffix += f"-checkpoint-{checkpoint['checkpoint_id']}"
     counters = dict(state["counters"])
     from .budget import budget_reason
 
@@ -119,7 +131,10 @@ def verify_step(
         "challenge_history": challenge_history,
         "role": "step_verifier",
         "problem": problem,
-        "step": step,
+        "step": ({**step, "objective": checkpoint["objective"]}
+                 if checkpoint is not None else step),
+        **({"step_goal": step["objective"], "checkpoint": checkpoint}
+           if checkpoint is not None else {}),
         "report": report,
         "current_step_index": index + 1,
         "state_revision": reserved["state_revision"],
@@ -255,6 +270,8 @@ def verify_step(
                                   "the missing proof direction remains a Conjecture."
                 )}
     state = reserved["state"]
+    checkpoint_status = state["steps"].get(step_id, {}).get("checkpoint_status")
+    checkpoint_round = checkpoint.get("round") if checkpoint is not None else None
     verification["objection"] = (
         reply.get("objection", "")
         if isinstance(reply, Mapping) and isinstance(reply.get("objection", ""), str)
@@ -277,7 +294,24 @@ def verify_step(
             state, reply, step_id=step_id, report=report, review_call_id=call_id,
             suffix=suffix, plan_version=plan["version"], attempt_index=attempt,
         )
-    accepted = verification["valid"] and verification["verdict"] == "ACCEPT"
+    accepted = (
+        verification["valid"]
+        and verification["verdict"] == "ACCEPT"
+        and (not checkpoint_mode or checkpoint_status == "FINAL")
+    )
+    checkpoint_accepted = (
+        verification["valid"]
+        and verification["verdict"] == "ACCEPT"
+        and checkpoint_mode
+        and checkpoint_status != "FINAL"
+    )
+    checkpoint_review = dict(verification) if checkpoint_accepted else None
+    if checkpoint_accepted:
+        verification = {
+            **verification,
+            "valid": False,
+            "verdict": "CHECKPOINT_ACCEPTED",
+        }
     phase = "STEP_VERIFY"
     current_step = step_id
     evidence = []
@@ -299,6 +333,9 @@ def verify_step(
             }
             for statement in statements
         ]
+    elif checkpoint_accepted:
+        phase = "STEP_EXECUTE"
+        current_step = step_id
     elif verification["valid"]:
         phase = {
             "CHALLENGE": "CHALLENGE",
@@ -317,8 +354,10 @@ def verify_step(
             **state["steps"],
             step_id: {
                 **state["steps"][step_id],
-                "status": "ACCEPTED" if accepted else "VERIFYING",
+                "status": "ACCEPTED" if accepted else "CHECKPOINT_ACCEPTED" if checkpoint_accepted else "VERIFYING",
                 "verification": verification,
+                **({"checkpoint_verification": checkpoint_review}
+                   if checkpoint_review is not None else {}),
             },
         },
         "accepted_results": [*state["accepted_results"], *evidence],
@@ -326,13 +365,16 @@ def verify_step(
             *state.get("verified_results_ledger", []), *outcomes
         ],
     }
-    if not verification["valid"]:
+    if not verification["valid"] and not checkpoint_accepted:
         state_updates["status"] = "partial_aborted"
     event = {
         "event_id": f"step-reviewed-{step_id}{suffix}",
         "type": "step_reviewed",
         "step_id": step_id,
-        **verification,
+        **(checkpoint_review if checkpoint_review is not None else verification),
+        **({"checkpoint_status": checkpoint_status} if checkpoint_status is not None else {}),
+        **({"checkpoint_round": checkpoint_round} if checkpoint_round is not None else {}),
+        **({"checkpoint_id": checkpoint["checkpoint_id"]} if checkpoint is not None else {}),
     }
     if outcomes:
         event["classified_outcomes"] = outcome_counts(outcomes)

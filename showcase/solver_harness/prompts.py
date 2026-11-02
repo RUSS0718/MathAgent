@@ -34,7 +34,7 @@ def compose_request(run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[
             "state": projection,
         },
     ]
-    fingerprint = hashlib.sha256(
+    prompt_layers_fingerprint = hashlib.sha256(
         json.dumps(layers, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
     allowed = [] if role in {
@@ -45,7 +45,11 @@ def compose_request(run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[
         "state_revision": run["state_revision"],
         "active_skill_ids": ids,
         "prompt_layers": layers,
-        "prompt_fingerprint": fingerprint,
+        # This is intentionally distinct from the runtime fingerprint of the
+        # final InternModelPort messages.  The latter also includes the role
+        # instruction, response schema, and serialized request context.
+        "prompt_fingerprint": prompt_layers_fingerprint,
+        "prompt_layers_fingerprint": prompt_layers_fingerprint,
         "allowed_tools": allowed,
         "tool_policy": {"allow": allowed},
     }

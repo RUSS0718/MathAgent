@@ -1,5 +1,6 @@
 """Explicit Intern bridge; injected adapters remain fully offline-testable."""
 
+import hashlib
 import json
 import re
 import time
@@ -42,14 +43,23 @@ def _protocol_failure(category, record, text):
     return error
 
 
-def _request_metadata(request):
+def _request_metadata(request, deadlines=None, activity_observer=None):
     """Pure adapter metadata mapping for one invocation; no metering inside."""
-    return {
+    metadata = {
         "run_id": request.get("run_id"),
         "call_id": request.get("call_id"),
         "role": request["role"],
         "timeout_seconds": request.get("timeout_seconds"),
+        "phase_deadline_at": request.get("phase_deadline_at"),
+        "batch_deadline_at": request.get("batch_deadline_at"),
+        "strict_completion": request.get("strict_completion") is True,
     }
+    for name, limit in (deadlines or {}).items():
+        if limit is not None:
+            metadata[name] = min(metadata[name], limit) if metadata[name] is not None else limit
+    if callable(activity_observer):
+        metadata["activity_observer"] = activity_observer
+    return metadata
 
 
 def _invocation_record(request, model_id, *, stream=False):
@@ -65,7 +75,12 @@ def _invocation_record(request, model_id, *, stream=False):
         "role": request["role"],
         "state_revision": request.get("state_revision"),
         "active_skill_ids": request.get("active_skill_ids", []),
-        "prompt_fingerprint": request.get("prompt_fingerprint"),
+        "input_fingerprint": None,
+        "prompt_layers_fingerprint": request.get(
+            "prompt_layers_fingerprint", request.get("prompt_fingerprint")
+        ),
+        "prompt_fingerprint": None,
+        "schema_fingerprint": None,
         "requested_model": model_id,
         "returned_model": None,
         "finish_reason": None,
@@ -78,6 +93,25 @@ def _invocation_record(request, model_id, *, stream=False):
     if stream:
         record["stream"] = {"fragments": 0, "bytes": 0, "status": "streaming"}
     return record
+
+
+def _fingerprint(value):
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _actual_problem(request, fallback=None):
+    return request.get("problem", fallback)
+
+
+def _audit_fingerprints(request, schema, messages, *, fallback_problem=None):
+    original = _actual_problem(request, fallback_problem)
+    return {
+        "input_fingerprint": _fingerprint(original),
+        "prompt_fingerprint": _fingerprint(messages),
+        "schema_fingerprint": _fingerprint(schema),
+    }
 
 
 def _loads_known_escape_rescue(text):
@@ -107,9 +141,13 @@ def _loads_known_escape_rescue(text):
 class InternModelPort:
     """Reasoner/Verifier/Meta bridge, with no implicit live adapter creation."""
 
-    def __init__(self, adapter: InternModelAdapter | None = None, *, original_problem=None):
+    def __init__(self, adapter: InternModelAdapter | None = None, *, original_problem=None,
+                 deadlines=None, activity_observer=None, streaming=False):
         self.adapter = adapter
         self.original_problem = original_problem
+        self.deadlines = deadlines
+        self.activity_observer = activity_observer
+        self.streaming = streaming is True
         self.invocations = []
 
     def verify(self, request):
@@ -122,12 +160,22 @@ class InternModelPort:
             raise InternPortError("live_not_enabled")
         schema = response_schema(request)
         messages = self._messages(request, schema)
-        if callable(getattr(self.adapter, "stream_complete", None)):
-            return self._complete_stream(request, schema, messages)
+        fingerprints = _audit_fingerprints(
+            request, schema, messages, fallback_problem=self.original_problem
+        )
+        activity_observer = request.get("activity_observer")
+        if not callable(activity_observer):
+            activity_observer = self.activity_observer
+        if self.streaming and callable(getattr(self.adapter, "stream_complete", None)):
+            return self._complete_stream(request, schema, messages, activity_observer, fingerprints)
         started = time.monotonic()
         record = _invocation_record(request, self.adapter.model_id)
+        record.update(fingerprints)
         try:
-            response = self.adapter.complete(messages, metadata=_request_metadata(request))
+            response = self.adapter.complete(
+                messages,
+                metadata=_request_metadata(request, self.deadlines, activity_observer),
+            )
             record.update(
                 effective_model=response.model_id,
                 returned_model=response.returned_model,
@@ -165,7 +213,7 @@ class InternModelPort:
             record["duration_seconds"] = time.monotonic() - started
             self.invocations.append(redact(record))
 
-    def _complete_stream(self, request, schema, messages):
+    def _complete_stream(self, request, schema, messages, activity_observer=None, fingerprints=None):
         """Stream fragments through the caller's audit; strict schema gates the result.
 
         Each ``text_delta`` is yielded as it arrives so ``calls`` persists it before
@@ -174,11 +222,18 @@ class InternModelPort:
         """
         started = time.monotonic()
         record = _invocation_record(request, self.adapter.model_id, stream=True)
+        record.update(
+            fingerprints
+            or _audit_fingerprints(request, schema, messages, fallback_problem=self.original_problem)
+        )
         metrics = record["stream"]
 
         try:
             envelope = None
-            for chunk in self.adapter.stream_complete(messages, metadata=_request_metadata(request)):
+            for chunk in self.adapter.stream_complete(
+                messages,
+                metadata=_request_metadata(request, self.deadlines, activity_observer),
+            ):
                 if chunk.get("type") == "text_delta" and isinstance(chunk.get("text"), str):
                     metrics["fragments"] += 1
                     metrics["bytes"] += len(chunk["text"].encode("utf-8"))
@@ -225,7 +280,7 @@ class InternModelPort:
             self.invocations.append(redact(record))
 
     def _messages(self, request, schema):
-        original = request.get("problem", self.original_problem)
+        original = _actual_problem(request, self.original_problem)
         if not isinstance(original, str) or not original.strip():
             raise InternPortError("missing_original_problem")
         if self.original_problem is not None and original != self.original_problem:
@@ -250,6 +305,13 @@ class InternModelPort:
             "If a report already contains tool_receipts, review those actual inputs/outputs and continue the review; the runtime executed them, not you. "
             "A reviewer may propose at most one tool_request per reply while its verdict is still pending; judge only from recorded receipts, never from assumed outputs."
         )
+        if request.get("checkpoint_protocol"):
+            role_label = role.replace("_", " ").title()
+            instructions += (
+                f" This {role_label} call uses the checkpoint protocol: return only the checkpoint wrapper; "
+                "YIELD must retain open gaps, FINAL must have no gaps, and a checkpoint is a partial "
+                "handoff rather than completion of the whole Step."
+            )
         system = [{"role": "system", "content": instructions}]
         system.extend(
             {"role": "system", "content": json.dumps(layer, ensure_ascii=False)} for layer in layers
@@ -257,6 +319,10 @@ class InternModelPort:
         tools = {"polynomial_check": POLYNOMIAL_CHECK_SCHEMA, "python_math": PYTHON_MATH_SCHEMA}
         context = deepcopy(dict(request))
         context.pop("prompt_layers", None)
+        context.pop("prompt_layers_fingerprint", None)
+        context.pop("input_fingerprint", None)
+        context.pop("schema_fingerprint", None)
+        context.pop("activity_observer", None)
         context["original_problem"] = original
         context["tool_argument_schemas"] = {
             name: value for name, value in tools.items() if name in request.get("allowed_tools", [])

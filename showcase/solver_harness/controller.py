@@ -105,7 +105,12 @@ def advance(harness, run, metadata, problem):
     ):
         run = run_supplied_plan_or_explore(harness, run, problem, {"plan": run["state"]["plan"]})
     run = generate_initial_plan(
-        harness, run, problem=problem, model_port=harness._model_port, config=harness._config
+        harness,
+        run,
+        problem=problem,
+        model_port=harness._model_port,
+        config=harness._config,
+        metadata=metadata or {},
     )
     if (
         harness._model_port is not None
