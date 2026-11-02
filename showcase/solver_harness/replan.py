@@ -5,6 +5,7 @@ from copy import deepcopy
 from ..redaction import redact
 from .budget import remaining_model_calls
 from .plan import validate_plan
+from .results import stable_unique_results
 from .traceback import transition_decision
 
 
@@ -128,16 +129,9 @@ def run_replan(harness, run, *, problem, model_port, config):
     rescued, excluded = _reusable(state, decision)
     # The same established result can be visible through both the accepted
     # ledger and the classified ledger; a ruling rescues the outcome once.
-    unique = []
-    seen_ids = set()
-    for item in rescued:
-        key = item.get("result_id")
-        if isinstance(key, str):
-            if key in seen_ids:
-                continue
-            seen_ids.add(key)
-        unique.append(item)
-    rescued = unique
+    rescued = stable_unique_results(rescued)
+    seen_ids = {item["result_id"] for item in rescued
+                if isinstance(item.get("result_id"), str)}
     # Cross-plan rescue of classified outcomes is controlled by this ruling:
     # rescued entries stay valid in the classified ledger, and every entry the
     # ruling did not select (including Conjectures) is marked invalidated so no

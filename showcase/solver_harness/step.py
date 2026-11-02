@@ -99,44 +99,16 @@ def run_step(
             request,
         )
     except CallInterrupted as exc:
-        failed = protocol_repair.interrupted_call(harness, run["run_id"], exc)
-        if (
-            failed is None
-            or not protocol_repair.repair_enabled(harness._config)
-            or not protocol_repair.known_protocol_failure(failed)
-        ):
-            raise
-        # One gated format repair with a fresh reasoner identity; the
-        # note and reservation bill through the same counters and S3. A
-        # second failure propagates and still ends dispatch honestly.
-        latest = harness.get_run(run["run_id"])
-        noted = harness.commit_event(
-            latest["run_id"],
-            expected_revision=latest["state_revision"],
-            event={
+        reserved = protocol_repair.reserve_repair(
+            harness, run["run_id"], exc,
+            failure_event=lambda latest, failed: {
                 "event_id": f"reasoner-parse-{step_id}{suffix}-{latest['state_revision']}",
-                "type": "reasoner_parse_failed",
-                "step_id": step_id,
-                "role": "reasoner",
-                "summary": "Reasoner reply failed the response protocol; "
-                           "one bounded repair follows",
+                "type": "reasoner_parse_failed", "step_id": step_id, "role": "reasoner",
+                "summary": "Reasoner reply failed the response protocol; one bounded repair follows",
             },
-            state_updates={"status": "running"},
-        )
-        reserved = harness.commit_event(
-            noted["run_id"],
-            expected_revision=noted["state_revision"],
-            event={
+            dispatch_event={
                 "event_id": f"step-dispatched-{step_id}{suffix}-repair-1",
-                "type": "step_dispatched",
-                "step_id": step_id,
-                "role": "reasoner",
-            },
-            state_updates={
-                "counters": {
-                    **noted["state"]["counters"],
-                    "model_calls": noted["state"]["counters"]["model_calls"] + 1,
-                },
+                "type": "step_dispatched", "step_id": step_id, "role": "reasoner",
             },
         )
         reply = harness.dispatch(

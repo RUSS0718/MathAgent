@@ -39,6 +39,52 @@ def _load_local_env() -> None:
 _load_local_env()
 
 
+def _not_submitted(error: BaseException | None) -> bool:
+    """Only positive connection-establishment evidence permits automatic resend."""
+    from urllib3.exceptions import NewConnectionError
+
+    # The current failure wins over stale exception-handler context. Only
+    # explicit transport wrappers (reason/args) carry establishment evidence.
+    if isinstance(error, requests.ReadTimeout):
+        return False
+    seen = set()
+    pending = [error]
+    while pending:
+        item = pending.pop()
+        if not isinstance(item, BaseException) or id(item) in seen:
+            continue
+        seen.add(id(item))
+        if isinstance(item, (requests.ConnectTimeout, NewConnectionError)):
+            return True
+        if isinstance(item, requests.ReadTimeout):
+            return False
+        pending.append(getattr(item, "reason", None))
+        pending.extend(arg for arg in item.args if isinstance(arg, BaseException))
+    return False
+
+
+def product_retry_delay(failure, response, attempt_index, budget):
+    """Shared metered transport retry policy; None means unknown/terminal."""
+    import math
+    from email.utils import parsedate_to_datetime
+
+    delay = 2**attempt_index
+    safe = _not_submitted(failure)
+    if response is not None and response.status_code == 429:
+        value = response.headers.get("Retry-After", "")
+        try:
+            delay = float(value)
+        except (TypeError, ValueError):
+            try:
+                delay = parsedate_to_datetime(value).timestamp() - time.time()
+            except (TypeError, ValueError, OverflowError):
+                return None
+        safe = math.isfinite(delay) and delay >= 0
+    if not safe or delay >= budget.remaining_seconds():
+        return None
+    return delay
+
+
 class ChatClientError(RuntimeError):
     """A sanitized failure category suitable for trace and local reports."""
 
@@ -159,7 +205,9 @@ class InternChatClient:
         last_category = "request"
         started = time.perf_counter()
         self.last_response_metadata = None
-        for attempt in range(self.retry):
+        # Only the explicit metered product path opts into conservative retries.
+        attempts_limit = min(self.retry, 3) if _attempt_budget is not None else self.retry
+        for attempt in range(attempts_limit):
             attempt_started = time.perf_counter()
             request_event: dict[str, Any] = {
                 **request_metadata,
@@ -294,12 +342,21 @@ class InternChatClient:
                         ),
                     )
                 if _attempt_budget is not None:
+                    if _not_submitted(failure):
+                        request_event.update(status="not_submitted", prompt_tokens=0,
+                                             completion_tokens=0, total_tokens=0)
                     _attempt_budget.after_attempt(request_event)
                 self.request_diagnostics.append(request_event)
                 if _attempt_records is not None:
                     _attempt_records.append(dict(request_event))
                 self._request_sequence += 1
-            if attempt + 1 < self.retry:
+            if _attempt_budget is not None:
+                delay = product_retry_delay(failure, response, attempt, _attempt_budget)
+                if delay is None:
+                    break
+                if attempt + 1 < attempts_limit:
+                    time.sleep(delay)
+            elif attempt + 1 < attempts_limit:
                 time.sleep(2**attempt)
 
         raise ChatClientError(last_category, self.last_failure_type)

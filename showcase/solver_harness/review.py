@@ -135,45 +135,20 @@ def review_solution(
     try:
         reply = harness.dispatch(reserved, verifier_port.verify, request)
     except CallInterrupted as exc:
-        failed = protocol_repair.interrupted_call(harness, run_id, exc)
-        if (
-            failed is None
-            or not protocol_repair.repair_enabled(harness._config)
-            or not protocol_repair.known_protocol_failure(failed)
-        ):
-            raise
-        # One gated format repair with a fresh reviewer identity; a second
-        # failure re-raises and still ends dispatch honestly.
-        latest = harness.get_run(run_id)
-        noted = harness.commit_event(
-            run_id,
-            expected_revision=latest["state_revision"],
-            event={
+        reserved = protocol_repair.reserve_repair(
+            harness, run_id, exc,
+            failure_event=lambda latest, failed: {
                 "event_id": f"solution-review-parse-{latest['state_revision']}",
-                "type": "solution_review_parse_failed",
-                "role": "whole_solution_verifier",
-                "summary": "Whole-solution review reply failed the response "
-                           "protocol; one bounded repair follows",
+                "type": "solution_review_parse_failed", "role": "whole_solution_verifier",
+                "summary": "Whole-solution review reply failed the response protocol; one bounded repair follows",
             },
-            state_updates={"status": "running"},
-        )
-        reserved = harness.commit_event(
-            run_id,
-            expected_revision=noted["state_revision"],
-            event={
+            dispatch_event={
                 "event_id": "review-dispatched-repair-1",
-                "type": "solution_review_dispatched",
-                "role": "whole_solution_verifier",
-            },
-            state_updates={
-                "counters": {
-                    **noted["state"]["counters"],
-                    "model_calls": noted["state"]["counters"]["model_calls"] + 1,
-                },
+                "type": "solution_review_dispatched", "role": "whole_solution_verifier",
             },
         )
-        base_call_id = f"{base_call_id}:repair-1"
         request = protocol_repair.repair_request(request)
+        base_call_id = request["call_id"]
         reply = harness.dispatch(reserved, verifier_port.verify, request)
     except Exception:
         return review_failed(reserved)
