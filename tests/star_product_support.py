@@ -91,6 +91,20 @@ class StarJobFixture:
                 def raise_for_status(self):
                     pass
 
+                def close(self):
+                    pass
+
+                def iter_lines(self, decode_unicode=True):
+                    content = value.content if isinstance(value, RawProviderContent) else json.dumps(value)
+                    # Split even inside escape pairs; SSE framing must not alter text.
+                    for offset in range(0, len(content), 7):
+                        yield "data: " + json.dumps({"choices": [{"delta": {
+                            "content": content[offset:offset + 7]}}]})
+                    yield "data: " + json.dumps({"choices": [{"delta": {},
+                        "finish_reason": "stop"}], "model": "intern-s2",
+                        "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}})
+                    yield "data: [DONE]"
+
                 def json(self):
                     content = value.content if isinstance(value, RawProviderContent) else json.dumps(value)
                     return {"choices": [{"finish_reason": "stop", "message": {

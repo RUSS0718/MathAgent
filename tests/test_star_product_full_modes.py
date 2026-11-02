@@ -113,7 +113,8 @@ class StarFullModeTest(StarJobFixture, unittest.TestCase):
         result = self.terminal(job_id)["result"]
         self.assertEqual("star_reference", result["execution_mode"])
         expected = {**full_config(RunBudgetLimits(
-            max_model_calls=48, max_http_attempts=48, max_tool_calls=8)), "hint_mode": "none"}
+            max_model_calls=48, max_http_attempts=48, max_tool_calls=8)),
+            "hint_mode": "none", "tool_timeout_seconds": 20}
         self.assertEqual(set(CORE), set(expected["features"]))
         self.assertNotIn("candidate_registry", expected["features"])
         self.assertNotIn("best_effort", expected["features"])

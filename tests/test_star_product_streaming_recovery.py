@@ -117,6 +117,47 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         self.session = self.client.post("/api/new_chat", headers=self.headers()).get_json()["new_session_id"]
 
+    def test_stream_connect_timeout_retries_before_any_fragment(self):
+        self.open_stream(self.plan_for([SOLVED, POLISH, ACCEPT]),
+                         SHOWCASE_STAR_ADAPTER=InternStreamAdapter(InternChatClient(retry=3), max_tokens=256),
+                         SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8))
+        original = self.transport
+        calls = []
+        def connect(*args, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise requests.ConnectTimeout("not sent")
+            return original(*args, **kwargs)
+        with patch("showcase.adapters.requests.post", side_effect=connect):
+            job_id = self.create_job()
+            result = self.terminal(job_id)
+        self.assertEqual("succeeded", result["status"], result)
+        self.assertEqual(4, len(calls))
+        self.assertEqual(0, result["result"]["budget"]["reserved_tokens"])
+        self.assertEqual("1+1=2", result["result"]["final_response"])
+
+    def test_stream_429_retry_after_uses_same_budget_then_delivers(self):
+        self.open_stream(self.plan_for([SOLVED, POLISH, ACCEPT]),
+                         SHOWCASE_STAR_ADAPTER=InternStreamAdapter(InternChatClient(retry=3), max_tokens=256),
+                         SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8))
+        original = self.transport
+        calls = []
+        response = requests.Response()
+        import io
+        response.raw = io.BytesIO()
+        response.status_code = 429
+        response.headers["Retry-After"] = "0"
+        def limited(*args, **kwargs):
+            calls.append(kwargs)
+            return response if len(calls) == 1 else original(*args, **kwargs)
+        with patch("showcase.adapters.requests.post", side_effect=limited):
+            job_id = self.create_job()
+            result = self.terminal(job_id)
+        self.assertEqual("succeeded", result["status"], result)
+        self.assertEqual(4, len(calls))
+        self.assertEqual(4, result["result"]["budget"]["http_attempts"])
+        self.assertEqual("1+1=2", result["result"]["final_response"])
+
     def plan_for(self, replies):
         return [[*split_fragments(reply), {"type": "result"}] for reply in replies]
 

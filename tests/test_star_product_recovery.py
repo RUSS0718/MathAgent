@@ -47,6 +47,9 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
     def test_process_exit_after_recorded_verifier_response_reuses_it(self):
         self.assert_process_window("response")
 
+    def test_process_exit_after_completed_protocol_repair_reuses_response(self):
+        self.assert_process_window("repair_response")
+
     def test_process_exit_after_session_exchange_does_not_repeat_acceptance(self):
         self.assert_process_window("exchange")
 
@@ -200,7 +203,8 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
             self.assertEqual(71, process.returncode, process.stderr.decode(errors="replace"))
             job_id = (folder / "job_id").read_text()
             before = [json.loads(line) for line in (folder / "requests.jsonl").read_text().splitlines()]
-            self.assertEqual(5 if window in {"tool", "tool_unknown"} else 6, len(before))
+            self.assertEqual(7 if window == "repair_response" else
+                             5 if window in {"tool", "tool_unknown"} else 6, len(before))
             with patch.dict(os.environ, {"INTERN_API_KEY": "scripted-only"}), patch(
                     "llm_client.requests.post", side_effect=lambda *a, **kw: provider(folder, kw)):
                 app = create_app(config(folder))
@@ -232,15 +236,22 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
                     final = self.terminal(job_id)
                     self.assertEqual("succeeded", final["status"], final)
                     after = [json.loads(line) for line in (folder / "requests.jsonl").read_text().splitlines()]
-                    self.assertEqual(11 if window == "unknown" else 10, len(after))
+                    self.assertEqual(11 if window in {"unknown", "repair_response"} else 10, len(after))
+                    if window == "repair_response":
+                        repaired = [item for item in after if item.get("repair_instruction")]
+                        self.assertEqual(1, len(repaired))
+                        self.assertEqual("2", final["result"]["final_response"])
+                        self.assertEqual("same_artifact", self.report(job_id)["checks"]["binding"])
                     if window == "tool":
                         self.assertEqual("s2", after[5]["step"]["step_id"])
                         self.assertEqual("step_verifier", after[5]["role"])
                         self.assertEqual(1, final["result"]["budget"]["tool_calls"])
                     else:
-                        self.assertEqual("s2" if window == "unknown" else "s3", after[6]["step"]["step_id"])
+                        self.assertEqual("s2" if window in {"unknown", "repair_response"} else "s3",
+                                         after[6]["step"]["step_id"])
                     self.assertEqual(original["deadline_at"], final["result"]["budget"]["deadline_at"])
-                    self.assertEqual(11 if window == "unknown" else 10, final["result"]["budget"]["logical_calls"])
+                    self.assertEqual(11 if window in {"unknown", "repair_response"} else 10,
+                                     final["result"]["budget"]["logical_calls"])
                     if window == "unknown":
                         self.assertEqual(1, final["result"]["budget"]["unknown_attempts"])
                         self.assertEqual(original["reserved_tokens"], final["result"]["budget"]["reserved_tokens"])

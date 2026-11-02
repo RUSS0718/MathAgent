@@ -324,7 +324,12 @@ def provider(folder, request):
         def raise_for_status(self):
             pass
         def json(self):
-            return {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(value)}}],
+            broken = ((folder / "window").read_text() == "repair_response"
+                      and context.get("role") == "step_verifier"
+                      and context.get("step", {}).get("step_id") == "s2"
+                      and not context.get("repair_instruction"))
+            return {"choices": [{"finish_reason": "stop", "message": {
+                        "content": "not json" if broken else json.dumps(value)}}],
                     "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}}
     return Reply()
 
@@ -370,6 +375,14 @@ def main():
         original(store, job_id, event)
         log = folder / "requests.jsonl"
         last = json.loads(log.read_text(encoding="utf-8").splitlines()[-1]) if log.exists() else {}
+        if window == "repair_response":
+            if (event.get("solver_event_type") == "session_recorded"
+                    and last.get("role") == "step_verifier"
+                    and last.get("call_id", "").endswith(":repair-1")):
+                while not (folder / "job_id").exists():
+                    time.sleep(.01)
+                os._exit(71)
+            return
         if window == REPLAN_GUIDANCE_WINDOW:
             # Die after the replan Guidance commits, before the independent
             # ReplanDecision is consulted; resume must rule exactly once.
