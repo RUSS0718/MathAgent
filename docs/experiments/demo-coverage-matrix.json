@@ -172,7 +172,7 @@
         "showcase/tools.py",
         "showcase/python_executor.py",
         "showcase/solver_harness/tool_ports.py",
-        "showcase/solver_harness/explore_compute.py",
+        "showcase/solver_harness/explore.py",
         "showcase/solver_harness/verifier_compute.py"
       ],
       "trace": [
