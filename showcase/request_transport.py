@@ -1,0 +1,257 @@
+"""Bounded response reader for metered product model requests."""
+
+from __future__ import annotations
+
+import inspect
+import json
+import queue
+import threading
+import time
+from collections.abc import Callable, Iterator
+from typing import Any
+from urllib.parse import urlsplit
+
+import requests
+
+INTERN_S2_LIVE_ENDPOINT = "https://chat.intern-ai.org.cn/api/v1/chat/completions"
+
+_LateResponseCallback = (
+    Callable[[requests.Response, bytes, float | None, float], None]
+    | Callable[[requests.Response, bytes, float | None, float, bool], None]
+)
+
+
+def strict_loopback_post(url: str, **kwargs: Any) -> requests.Response:
+    """Post only to IPv4 loopback without environment proxies or redirects."""
+    target = urlsplit(url)
+    if ("proxies" in kwargs or target.scheme != "http" or target.hostname != "127.0.0.1"
+            or target.username is not None or target.password is not None):
+        raise ValueError("strict_loopback_url_required")
+    with requests.Session() as session:
+        session.trust_env = False
+        response = session.post(url, allow_redirects=False, **kwargs)
+        if 300 <= response.status_code < 400:
+            response.close()
+            raise requests.HTTPError("strict_loopback_redirect_rejected", response=response)
+        return response
+
+
+def strict_provider_post(url: str, **kwargs: Any) -> requests.Response:
+    """Post only to the registered Intern S2 endpoint without proxies or redirects."""
+    if (url != INTERN_S2_LIVE_ENDPOINT
+            or not set(kwargs).issubset({"data", "headers", "stream", "timeout", "verify"})
+            or kwargs.get("verify", True) is not True):
+        raise ValueError("strict_provider_endpoint_required")
+    with requests.Session() as session:
+        session.trust_env = False
+        response = session.post(url, allow_redirects=False, **kwargs)
+        if 300 <= response.status_code < 400:
+            response.close()
+            raise requests.HTTPError("strict_provider_redirect_rejected", response=response)
+        return response
+
+
+def _invoke_late_response(
+    callback: _LateResponseCallback,
+    response: requests.Response,
+    body: bytes,
+    response_headers_seconds: float | None,
+    total_seconds: float,
+    body_complete: bool,
+) -> None:
+    """Call either the legacy four-argument or current five-argument callback."""
+    arguments = (response, body, response_headers_seconds, total_seconds)
+    try:
+        signature = inspect.signature(callback)
+    except (TypeError, ValueError):
+        callback(*arguments, body_complete)
+        return
+    try:
+        signature.bind(*arguments, body_complete)
+    except TypeError:
+        if body_complete:
+            callback(*arguments)
+    else:
+        callback(*arguments, body_complete)
+
+
+class DeadlineNotSubmitted(requests.ReadTimeout):
+    """The local deadline expired before the transport started."""
+
+
+def response_events(
+    url: str,
+    *,
+    deadline: float,
+    clock: Callable[[], float] | None = None,
+    timeout: float,
+    loopback_only: bool = False,
+    provider_endpoint_only: bool = False,
+    on_late_response: _LateResponseCallback | None = None,
+    **request_kwargs: Any,
+) -> Iterator[tuple[str, Any]]:
+    """Yield response headers, body bytes and completion under an absolute deadline.
+
+    Requests performs blocking I/O, so a daemon reader thread feeds a bounded
+    queue while the caller enforces the deadline in the supplied clock domain. When the caller
+    reaches its deadline, it detaches while the reader may finish later to settle
+    response metadata. That local timeout never implies provider cancellation.
+    """
+    clock = time.monotonic if clock is None else clock
+    events: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=16)
+    canceled = threading.Event()
+    detached = threading.Event()
+    deadline_hit = False
+    started = time.perf_counter()
+
+    def publish(event: tuple[str, Any]) -> bool:
+        while not canceled.is_set() and not detached.is_set():
+            try:
+                events.put(event, timeout=0.05)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    response = None
+    response_headers_seconds = None
+    response_body = bytearray()
+    body_complete = False
+    reader_finished = False
+    late_callback_invoked = False
+    late_lock = threading.Lock()
+    dispatch_lock = threading.Lock()
+    dispatch_started = False
+
+    def settle_late(complete):
+        nonlocal late_callback_invoked
+        with late_lock:
+            if (on_late_response is None or response is None or late_callback_invoked
+                    or len(response_body) >= 8 * 1024 * 1024):
+                return
+            late_callback_invoked = True
+            body = bytes(response_body)
+        try:
+            _invoke_late_response(on_late_response, response, body, response_headers_seconds,
+                                  time.perf_counter() - started, complete)
+        except Exception:
+            pass
+
+    def read_response() -> None:
+        nonlocal response, response_headers_seconds, body_complete, reader_finished, dispatch_started
+        try:
+            if loopback_only and provider_endpoint_only:
+                raise ValueError("conflicting_transport_policy")
+            post = (
+                strict_loopback_post if loopback_only else
+                strict_provider_post if provider_endpoint_only else requests.post
+            )
+            with dispatch_lock:
+                if detached.is_set() or clock() >= deadline:
+                    raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
+                dispatch_started = True
+            if not loopback_only and not provider_endpoint_only:
+                request_kwargs["allow_redirects"] = False
+            # This narrows, but cannot eliminate, the post-check scheduling window.
+            # Once dispatch is committed the caller must retain an unconfirmed reservation.
+            if canceled.is_set() or detached.is_set() or clock() >= deadline:
+                return
+            response = post(url, timeout=timeout, stream=True, **request_kwargs)
+            status_code = getattr(response, "status_code", None)
+            if type(status_code) is int and 300 <= status_code < 400:
+                raise requests.HTTPError("metered_redirect_rejected", response=response)
+            response_headers_at = time.perf_counter()
+            response_headers_seconds = response_headers_at - started
+            publish(("headers", response))
+            if callable(getattr(response, "iter_content", None)):
+                body_chunks = response.iter_content(chunk_size=1)
+            else:
+                body_chunks = (bytes((byte,)) for byte in json.dumps(response.json()).encode())
+            for chunk in body_chunks:
+                if canceled.is_set():
+                    return
+                if chunk:
+                    if len(response_body) < 8 * 1024 * 1024:
+                        response_body.extend(chunk)
+                    if not detached.is_set():
+                        publish(("bytes", chunk))
+                if detached.is_set() and clock() >= deadline + timeout:
+                    settle_late(False)
+                    return
+            body_complete = True
+            if detached.is_set():
+                settle_late(body_complete)
+            else:
+                publish(("complete", None))
+        except Exception as exc:  # forwarded to the synchronous caller
+            if detached.is_set():
+                settle_late(body_complete)
+            publish(("error", exc))
+        finally:
+            with late_lock:
+                reader_finished = True
+                should_settle = detached.is_set()
+            if should_settle:
+                settle_late(body_complete)
+            if response is not None and callable(getattr(response, "close", None)):
+                try:
+                    response.close()
+                except Exception:
+                    pass
+
+    def detach_reader():
+        # A preempted reader must not hold the deadline caller at either gate.
+        # Contention leaves dispatch unconfirmed, never definitely unsubmitted.
+        detached.set()
+        acquired = dispatch_lock.acquire(blocking=False)
+        if acquired:
+            try:
+                not_submitted = not dispatch_started
+            finally:
+                dispatch_lock.release()
+        else:
+            not_submitted = False
+
+        def settle_if_finished():
+            with late_lock:
+                should_settle = reader_finished
+            if should_settle:
+                settle_late(body_complete)
+
+        if not not_submitted:
+            threading.Thread(target=settle_if_finished,
+                             name="showcase-late-settlement", daemon=True).start()
+        return not_submitted
+
+    if clock() >= deadline:
+        raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
+
+    worker = threading.Thread(
+        target=read_response,
+        name=f"showcase-http-reader-{threading.current_thread().name}",
+        daemon=True,
+    )
+    worker.start()
+    try:
+        while True:
+            remaining = deadline - clock()
+            if remaining <= 0:
+                deadline_hit = True
+                if detach_reader():
+                    raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
+                raise requests.ReadTimeout("logical_deadline_exceeded")
+            try:
+                kind, value = events.get(timeout=min(remaining, 0.05))
+            except queue.Empty:
+                continue
+            if kind == "error":
+                raise value
+            yield kind, value
+            if kind in {"complete", "error"}:
+                return
+    finally:
+        if not deadline_hit:
+            if clock() >= deadline:
+                detach_reader()
+            else:
+                canceled.set()

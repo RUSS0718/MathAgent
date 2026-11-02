@@ -11,6 +11,8 @@ from llm_response import public_attempt
 
 from .final_evidence import bind_verification
 from .redaction import redact
+from .run_budget import public_solver_call_id
+from .star_product_modes import STAR_MODES
 from .verification import VerificationResult
 
 
@@ -55,7 +57,9 @@ class EvidencePackExporter:
             "tools": [_tool_summary(result) for result in tool_results],
             "request_attempts": _attempts(snapshot),
             "budget": (snapshot.get("result") or {}).get("budget"),
+            "solver": {key: (snapshot.get("result") or {}).get(key) for key in ("solver_mode", "missing_capabilities", "evidence_kind", "solver")},
             "verification": verification_data,
+            "semantics": ((snapshot.get("result") or {}).get("solver") or {}).get("semantics"),
             "artifacts": [redact(artifact) for artifact in artifacts],
             "feature_status": {
                 "execution": "implemented",
@@ -87,12 +91,14 @@ class EvidencePackExporter:
             "answer": answer,
             "request_attempts": _attempts(snapshot),
             "budget": (snapshot.get("result") or {}).get("budget"),
+            "solver": {key: (snapshot.get("result") or {}).get(key) for key in ("solver_mode", "missing_capabilities", "evidence_kind", "solver")},
             "public_summary": summary,
             "stage": snapshot.get("stage"),
             "asset_refs": snapshot.get("asset_refs", []),
             "vision_status": snapshot.get("vision_status"),
             "tool_summaries": [_tool_summary(item) for item in tool_results],
             "checks": check,
+            "semantics": (result.get("solver") or {}).get("semantics"),
             "limitations": ["公开报告省略完整提示、隐藏推理、凭证和原始图片。"],
         })
 
@@ -124,7 +130,17 @@ def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
         "summary": event.get("summary", ""),
         "error_category": event.get("error_category"),
     }
-    for key in ("tool_call_id", "protocol", "tool_name"):
+    for key in (
+        "tool_call_id", "protocol", "tool_name", "solver_event_id", "solver_revision",
+        "solver_event_type", "role", "failure_type", "action_type", "use_pure_reasoning",
+        "specific_task_consumed", "triggered_by", "active_skill_ids", "skill_protocol_version",
+        "skill_protocols", "prompt_fingerprint", "prompt_layers_fingerprint",
+        "schema_fingerprint", "input_fingerprint", "stream_metrics", "stream_activity",
+        "trace_back_to", "from_step_index", "archived_step_count",
+        "invalidated_result_count", "rescued_result_count", "decision_revision",
+        "classified_outcomes", "rejected_outcomes", "semantics", "checkpoint_status",
+        "checkpoint_round",
+    ):
         if event.get(key) is not None:
             summary[key] = event[key]
     return summary
@@ -149,6 +165,8 @@ def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         "result_summary": result.get("result_summary", ""),
         "error_category": result.get("error_category"),
     }
+    if isinstance(result.get("receipt"), Mapping):
+        summary["receipt"] = redact(dict(result["receipt"]))
     value = result.get("value")
     if result.get("name") == "polynomial_check" and isinstance(value, Mapping):
         candidates = value.get('candidates', [])
@@ -172,7 +190,9 @@ def _multimodal_status(snapshot: Mapping[str, Any]) -> str:
 
 def _mode(snapshot: Mapping[str, Any]) -> str:
     value = snapshot.get("run_mode") or snapshot.get("execution_mode") or snapshot.get("mode")
-    return value if value in {"live", "fake", "replay", "experimental", "unavailable", "planned"} else "unavailable"
+    return value if value in {
+        "live", "fake", "replay", "experimental", "unavailable", "planned", *STAR_MODES,
+    } else "unavailable"
 
 
 def replay_evidence(pack: Mapping[str, Any]) -> dict[str, Any]:
@@ -192,4 +212,8 @@ __all__ = ["EvidencePackExporter", "replay_evidence"]
 def _attempts(snapshot):
     result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
     records = snapshot.get("request_attempts", result.get("request_attempts", []))
-    return [public_attempt(item, run_id=item.get("run_id"), role=item.get("role")) for item in records if isinstance(item, Mapping)]
+    return [{**public_attempt(item, run_id=item.get("run_id"), role=item.get("role")),
+             "solver_call_id": public_solver_call_id(
+                 item.get("run_id") or snapshot.get("run_id"), item.get("solver_call_id")
+             )}
+            for item in records if isinstance(item, Mapping)]

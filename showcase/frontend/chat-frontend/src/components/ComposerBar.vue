@@ -30,6 +30,7 @@ function handleKeydown(event: KeyboardEvent): void {
 
 <template>
   <form class="composer-shell" @submit.prevent="emit('submit')">
+    <slot name="mode"></slot>
     <div v-if="selectedFileName" class="file-chip"><UiIcon name="image" />{{ selectedFileName }}<UiButton icon-only variant="ghost" aria-label="移除题图" @click="emit('clearFile')"><UiIcon name="close" /></UiButton></div>
     <label class="sr-only" for="math-question">数学问题</label>
     <textarea id="math-question" :value="modelValue" :disabled="disabled" :placeholder="waiting ? '补充题目条件，继续当前运行' : '输入数学问题，Shift + Enter 换行'" @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)" @keydown="handleKeydown"></textarea>

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { resultSemanticsSchema } from './result-semantics.schemas.ts'
 
 export const decodedSseEventSchema = z.object({
   id: z.number().int().positive().nullable(),
@@ -85,6 +86,9 @@ export function decodeSseBlock(raw: RawSseBlock): DecodedSseEvent {
 }
 
 function validatePublicEvent(event: string, data: Record<string, unknown>, raw: RawSseBlock): void {
+  if (data.semantics !== undefined && !resultSemanticsSchema.safeParse(data.semantics).success) {
+    throw new SseProtocolError('SSE 结果语义字段不符合协议', raw)
+  }
   const requireString = (field: string) => {
     if (typeof data[field] !== 'string' || !data[field]) {
       throw new SseProtocolError('SSE 公共事件字段不符合协议', raw)

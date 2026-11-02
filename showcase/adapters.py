@@ -9,14 +9,21 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from functools import wraps
 from typing import Any, Protocol
 
+import requests
+
+from .attempt_projection import bind_attempt_projection
 from .graph import AgentDecision
 from .request_attempts import record_attempts
-from .run_budget import current_budget
+from .run_budget import current_budget, request_timeout, scoped_deadline
 from .run_control import controlled_action
 from .run_service import AgentResult, RunRequest
 from .tool_protocol import ToolProtocol, ToolRequest, parse_tool_requests
@@ -121,8 +128,10 @@ class InternModelAdapter:
         client_timeout: int | None = None,
         client_retry: int | None = None,
         thinking_mode: bool | None = None,
+        outbound_observer=None,
     ) -> None:
         self._client = client
+        self.outbound_observer = outbound_observer
         self.model_id = model_id or os.environ.get("INTERN_MODEL", "intern-s2")
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -152,27 +161,65 @@ class InternModelAdapter:
             kwargs["tools"] = [dict(tool) for tool in tools]
         if self.thinking_mode is not None and _accepts_keyword(client.chat, "thinking_mode"):
             kwargs["thinking_mode"] = self.thinking_mode
+        if _accepts_keyword(client.chat, "request_purpose"):
+            kwargs["request_purpose"] = (metadata or {}).get("purpose") or (metadata or {}).get("role", "model_response")
         try:
             transport = getattr(client, "chat_response", client.chat)
+            requested_timeout = request_timeout(metadata)
+            if requested_timeout is not None:
+                if not _accepts_keyword(transport, "timeout_seconds"):
+                    raise AdapterError("unsupported_timeout_transport")
+                configured = getattr(client, "timeout", self.client_timeout) or requested_timeout
+                kwargs["timeout_seconds"] = min(configured, requested_timeout)
             budget = current_budget()
             if budget is not None:
                 if not _accepts_keyword(client.chat, "_attempt_budget") or not _accepts_keyword(transport, "_attempt_budget"):
                     raise AdapterError("unsupported_budget_transport", "transport lacks attempt reservation")
-                call_budget = budget.model_call((metadata or {}).get("role"))
+                call_budget = budget.model_call((metadata or {}).get("role"),
+                                                solver_call_id=(metadata or {}).get("call_id"), deadline_at=scoped_deadline(metadata), strict_completion=(metadata or {}).get("strict_completion") is True)
                 kwargs["_attempt_budget"] = call_budget
+            if self.outbound_observer is not None:
+                self.outbound_observer(normalized)
             raw = transport(normalized, **kwargs)
         except Exception as exc:  # noqa: BLE001 - provider details stay out of events
-            attempts = record_attempts(getattr(exc, "attempts", ()), metadata)
+            source_attempts = tuple(getattr(exc, "attempts", ()))
+            attempts = record_attempts(source_attempts, metadata)
+            for source, projection in zip(source_attempts, attempts):
+                if isinstance(source, dict):
+                    bind_attempt_projection(source, projection)
             category = getattr(exc, "category", None) or (
                 "configuration" if type(exc).__name__ == "ChatClientError" else "adapter_error"
             )
             error = AdapterError(str(category), type(exc).__name__)
             error.request_attempts = attempts
             raise error from exc
-        text, usage = _extract_response(raw)
-        parsed = parse_tool_requests(
-            text, raw.get("tool_calls") if isinstance(raw, Mapping) else None
-        )
+        def normalize_response():
+            text, usage = _extract_response(raw)
+            parsed = parse_tool_requests(
+                text, raw.get("tool_calls") if isinstance(raw, Mapping) else None
+            )
+            return text, usage, parsed
+
+        if budget is None:
+            text, usage, parsed = normalize_response()
+        else:
+            from .processing_deadline import process_before_deadline
+            from .deadline_clock import guarded_utc_clock
+
+            source_attempts = raw.get("attempts", ()) if isinstance(raw, Mapping) else ()
+            absolute = source_attempts[-1].get("deadline_at") if source_attempts else None
+            deadline = call_budget.absolute_deadline()
+            if isinstance(absolute, (int, float)):
+                deadline = min(deadline, absolute)
+            try:
+                text, usage, parsed = process_before_deadline(
+                    normalize_response, deadline,
+                    lambda _result, _error: None, clock=guarded_utc_clock(time.time),
+                )
+            except requests.ReadTimeout as exc:
+                error = AdapterError("timeout", "local_processing_deadline")
+                error.request_attempts = record_attempts(source_attempts, metadata)
+                raise error from exc
         attempts = record_attempts(raw.get("attempts", ()), metadata) if isinstance(raw, Mapping) else ()
         return ModelResponse(
             text=text,
@@ -185,6 +232,10 @@ class InternModelAdapter:
             tool_protocol=parsed.protocol,
             tool_request_error=parsed.error_category,
         )
+
+    def ensure_configured(self) -> None:
+        """Raise ``AdapterError`` until a provider client can actually be built."""
+        self._get_client()
 
     def _get_client(self) -> Any:
         if self._client is not None:
@@ -202,6 +253,479 @@ class InternModelAdapter:
             category = getattr(exc, "category", None) or "configuration"
             raise AdapterError(str(category), type(exc).__name__) from exc
         return self._client
+
+
+class InternStreamAdapter(InternModelAdapter):
+    """Explicitly injected SSE-streaming variant; the default adapter stays non-streaming.
+
+    ``stream_complete`` yields ``text_delta`` fragments as they arrive on the wire
+    so the existing call audit persists each delta before the next provider
+    fragment is requested. Outbound metering reserves through the same persisted
+    run budget ledger as the non-streaming client path.
+    """
+
+    def stream_complete(self, messages, *, metadata=None):
+        """Yield provider fragments, then exactly one complete result envelope."""
+        from .stream_activity import notify
+
+        client = self._get_client()
+        if any(not isinstance(getattr(client, name, None), str) for name in ("api_base", "authorization")):
+            raise AdapterError("stream_transport_unavailable")
+        normalized = [_normalize_message(message) for message in messages]
+        model_id = getattr(client, "model", None) or self.model_id
+        thinking_mode = self.thinking_mode if self.thinking_mode is not None else getattr(client, "thinking_mode", None)
+        payload = {
+            "model": model_id, "messages": normalized, "stream": True,
+            "temperature": self.temperature, "max_tokens": self.max_tokens,
+        }
+        if thinking_mode is not None:
+            payload["thinking_mode"] = thinking_mode
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers = {"Content-Type": "application/json", "Authorization": client.authorization}
+        role = (metadata or {}).get("role")
+        attempt = {
+            "logical_call_id": uuid.uuid4().hex,
+            "attempt_id": uuid.uuid4().hex,
+            "attempt_index": 1,
+            "request_model_id": model_id,
+            "role": role,
+            "solver_call_id": (metadata or {}).get("call_id"),
+            "started_at_utc": datetime.now(UTC).isoformat(),
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "thinking_mode": thinking_mode,
+            "request_purpose": (metadata or {}).get("purpose") or role or "model_response",
+            "provider_stream": True,
+            "requests_stream": True,
+            "message_count": len(normalized),
+            "response_headers_seconds": None,
+            "first_byte_seconds": None,
+            "first_event_seconds": None,
+            "first_reasoning_seconds": None,
+            "first_content_seconds": None,
+            "completion_seconds": None,
+            "reasoning_chars": 0,
+            "content_bytes": 0,
+            "event_count": 0,
+            "status": "pending",
+        }
+        budget = current_budget()
+        call_budget = budget.model_call(role, solver_call_id=attempt["solver_call_id"], deadline_at=scoped_deadline(metadata), strict_completion=(metadata or {}).get("strict_completion") is True) if budget else None
+        configured = getattr(client, "timeout", self.client_timeout)
+        requested = request_timeout(metadata)
+        effective_timeout = configured or requested or 30
+        if requested is not None:
+            effective_timeout = min(configured or requested, requested)
+        attempts: list[dict[str, Any]] = []
+        response = None
+        clock = time.monotonic
+        if call_budget is not None:
+            from .deadline_clock import guarded_utc_clock
+            clock = guarded_utc_clock(time.time)
+        started = clock()
+        logical_deadline = started + effective_timeout
+        if call_budget is not None:
+            logical_deadline = min(logical_deadline, call_budget.absolute_deadline())
+        limit = min(getattr(client, "retry", 1), 3) if call_budget else 1
+        attempt.update(effective_timeout_seconds=effective_timeout,
+                       deadline_at=logical_deadline if call_budget is not None else
+                       time.time() + max(0, logical_deadline - clock()))
+        attempt["requests_timeout_seconds"] = configured or effective_timeout
+        attempt["retry_limit"] = limit
+        local_processing_timeout = False
+        timeout_attempts = None
+        late_state = None
+        result = None
+        activity_observer = (metadata or {}).get("activity_observer")
+        activity_status = None
+        try:
+            from llm_client import _not_submitted, product_retry_delay
+
+            from .request_transport import response_events
+            for index in range(limit):
+                attempt_started = time.perf_counter()
+                try:
+                    remaining = logical_deadline - clock()
+                    if remaining <= 0:
+                        raise requests.ReadTimeout("logical_deadline_exceeded")
+                    attempt_timeout = min(effective_timeout, remaining)
+                    if call_budget is not None:
+                        attempt_timeout = min(attempt_timeout, call_budget.before_attempt(attempt, len(body)))
+                    attempt["effective_timeout_seconds"] = attempt_timeout
+
+                    late_state = {"lock": threading.Lock(), "event": None}
+
+                    def settle_late(response, raw_body, headers_seconds, completion_seconds,
+                                    body_complete=True, late_snapshot=dict(attempt), late_state=late_state):
+                        late_attempt = dict(late_snapshot)
+                        late_usage = {}
+                        late_finish = None
+                        late_model = None
+                        late_reasoning_chars = 0
+                        late_content_bytes = 0
+                        late_event_count = 0
+                        late_done = False
+                        late_invalid = False
+                        for raw_line in raw_body.splitlines():
+                            line = raw_line.decode("utf-8", errors="replace").strip()
+                            if not line.startswith("data:"):
+                                continue
+                            late_event_count += 1
+                            if line[len("data:"):].strip() == "[DONE]":
+                                late_done = True
+                                continue
+                            try:
+                                late_chunk = json.loads(line[len("data:"):].strip())
+                            except ValueError:
+                                late_invalid = True
+                                continue
+                            choices = late_chunk.get("choices")
+                            choice = choices[0] if isinstance(choices, list) and choices else {}
+                            delta = choice.get("delta") if isinstance(choice, Mapping) else None
+                            if isinstance(delta, Mapping):
+                                reasoning = delta.get("reasoning_content")
+                                content = delta.get("content")
+                                if isinstance(reasoning, str):
+                                    late_reasoning_chars += len(reasoning)
+                                if isinstance(content, str):
+                                    late_content_bytes += len(content.encode("utf-8"))
+                            if isinstance(choice.get("finish_reason"), str):
+                                late_finish = choice["finish_reason"]
+                            if isinstance(late_chunk.get("model"), str):
+                                late_model = late_chunk["model"]
+                            if isinstance(late_chunk.get("usage"), Mapping):
+                                late_usage.update(late_chunk["usage"])
+                        http_success = type(response.status_code) is int and 200 <= response.status_code < 300
+                        strict = (metadata or {}).get("strict_completion") is True
+                        if not late_usage and not (body_complete or not http_success or late_invalid):
+                            return
+                        if not http_success:
+                            missing = "http_status"
+                        elif late_invalid:
+                            missing = "invalid_response"
+                        elif body_complete and not late_done:
+                            missing = "missing_stream_terminal" if strict else "connectivity"
+                        elif body_complete and strict and late_finish is None:
+                            missing = "missing_finish_reason"
+                        else:
+                            missing = None
+                        late_attempt.update(
+                            status="unknown" if not body_complete and http_success else "error" if missing else "success",
+                            error_category=missing if missing else None,
+                            http_status=response.status_code,
+                            response_headers_seconds=headers_seconds,
+                            completion_seconds=completion_seconds,
+                            response_model_id=late_model,
+                            finish_reason=late_finish,
+                            reasoning_chars=late_reasoning_chars,
+                            content_bytes=late_content_bytes,
+                            event_count=late_event_count,
+                            **{key: late_usage.get(key) for key in
+                               ("prompt_tokens", "completion_tokens", "total_tokens")},
+                        )
+                        if call_budget is not None:
+                            from .run_budget_late import settle_late_with_retry
+
+                            with late_state["lock"]:
+                                settle_late_with_retry(call_budget, late_attempt)
+                                late_state["event"] = late_attempt
+
+                    if self.outbound_observer is not None:
+                        self.outbound_observer(normalized)
+                    line_buffer = bytearray()
+                    parts: list[str] = []
+                    usage: dict[str, Any] = {}
+                    finish_reason = None
+                    saw_done = False
+
+                    def parse_line(raw_line, late_state=late_state):
+                        nonlocal finish_reason, model_id, saw_done
+                        line = raw_line.decode("utf-8", errors="replace").strip()
+                        if not line.startswith("data:"):
+                            return
+                        content = line[len("data:"):].strip()
+                        attempt["event_count"] += 1
+                        if attempt["first_event_seconds"] is None:
+                            attempt["first_event_seconds"] = time.perf_counter() - attempt_started
+                        notify(activity_observer, "event", event_count=attempt["event_count"])
+                        if content == "[DONE]":
+                            saw_done = True
+                            return
+                        try:
+                            if call_budget is None:
+                                chunk = json.loads(content)
+                            else:
+                                from .processing_deadline import process_before_deadline
+
+                                partial_snapshot = dict(attempt)
+
+                                def settle_partial(parsed, error):
+                                    if error is not None or not isinstance(parsed, Mapping):
+                                        return
+                                    known_usage = parsed.get("usage")
+                                    if not isinstance(known_usage, Mapping):
+                                        return
+                                    from .run_budget_late import settle_late_with_retry
+
+                                    with late_state["lock"]:
+                                        partial = dict(late_state["event"] or {
+                                            **partial_snapshot, "status": "unknown",
+                                            "error_category": "timeout",
+                                        })
+                                        partial.update({key: known_usage.get(key) for key in
+                                                        ("prompt_tokens", "completion_tokens", "total_tokens")})
+                                        settle_late_with_retry(call_budget, partial)
+
+                                try:
+                                    chunk = process_before_deadline(
+                                        lambda: json.loads(content), logical_deadline, settle_partial, clock=clock,
+                                    )
+                                except requests.ReadTimeout:
+                                    transport_events.close()
+                                    raise
+                        except ValueError as exc:
+                            raise AdapterError("invalid_response", "invalid_sse_chunk") from exc
+                        choices = chunk.get("choices")
+                        choice = choices[0] if isinstance(choices, list) and choices else {}
+                        delta = choice.get("delta") if isinstance(choice, Mapping) else None
+                        reasoning = delta.get("reasoning_content") if isinstance(delta, Mapping) else None
+                        piece = delta.get("content") if isinstance(delta, Mapping) else None
+                        if isinstance(reasoning, str) and reasoning:
+                            if attempt["first_reasoning_seconds"] is None:
+                                attempt["first_reasoning_seconds"] = time.perf_counter() - attempt_started
+                            attempt["reasoning_chars"] += len(reasoning)
+                            notify(activity_observer, "reasoning", event_count=attempt["event_count"], reasoning_chars=attempt["reasoning_chars"])
+                        if isinstance(piece, str) and piece:
+                            if attempt["first_content_seconds"] is None:
+                                attempt["first_content_seconds"] = time.perf_counter() - attempt_started
+                            parts.append(piece)
+                            attempt["content_bytes"] += len(piece.encode("utf-8"))
+                            notify(activity_observer, "content", event_count=attempt["event_count"], content_bytes=attempt["content_bytes"])
+                            yield_piece = {"type": "text_delta", "text": piece}
+                            pending_chunks.append(yield_piece)
+                        if isinstance(choice.get("finish_reason"), str):
+                            finish_reason = choice["finish_reason"]
+                        if isinstance(chunk.get("model"), str):
+                            model_id = chunk["model"]
+                        if isinstance(chunk.get("usage"), Mapping):
+                            usage.update(chunk["usage"])
+                            notify(activity_observer, "usage", event_count=attempt["event_count"], usage_known=True)
+
+                    pending_chunks = []
+                    stream_complete = False
+
+                    def check_processing_deadline():
+                        nonlocal local_processing_timeout
+                        if clock() < logical_deadline:
+                            return
+                        attempt.update({key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")})
+                        if stream_complete and saw_done and (not (metadata or {}).get("strict_completion") or finish_reason is not None):
+                            attempt.update(status="success", finish_reason=finish_reason, response_model_id=model_id)
+                            local_processing_timeout = True
+                        raise requests.ReadTimeout("logical_deadline_exceeded_during_processing")
+
+                    transport_events = response_events(
+                        client.api_base,
+                        headers=headers,
+                        data=body,
+                        deadline=logical_deadline,
+                        clock=clock,
+                        timeout=configured or effective_timeout,
+                        loopback_only=getattr(client, "loopback_only", False),
+                        provider_endpoint_only=getattr(client, "provider_endpoint_only", False),
+                        on_late_response=settle_late,
+                    )
+                    for kind, value in transport_events:
+                        if kind == "headers":
+                            response = value
+                            attempt["http_status"] = response.status_code
+                            attempt["response_headers_seconds"] = time.perf_counter() - attempt_started
+                            notify(activity_observer, "response_headers")
+                            response.raise_for_status()
+                        elif kind == "bytes":
+                            if attempt["first_byte_seconds"] is None:
+                                attempt["first_byte_seconds"] = time.perf_counter() - attempt_started
+                            line_buffer.extend(value)
+                            while b"\n" in line_buffer:
+                                line, _, remainder = line_buffer.partition(b"\n")
+                                line_buffer = bytearray(remainder)
+                                parse_line(line)
+                                check_processing_deadline()
+                                for delta_chunk in pending_chunks:
+                                    yield delta_chunk
+                                    check_processing_deadline()
+                                pending_chunks.clear()
+                        elif kind == "complete":
+                            stream_complete = True
+                            attempt["completion_seconds"] = time.perf_counter() - attempt_started
+                    if line_buffer:
+                        parse_line(line_buffer)
+                        check_processing_deadline()
+                        for delta_chunk in pending_chunks:
+                            yield delta_chunk
+                            check_processing_deadline()
+                    check_processing_deadline()
+                    if (metadata or {}).get("strict_completion") is True and stream_complete and (not saw_done or finish_reason is None):
+                        attempt.update({key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")})
+                        raise AdapterError("missing_stream_terminal" if not saw_done else "missing_finish_reason")
+                    if not stream_complete or not saw_done:
+                        raise requests.ConnectionError("incomplete_stream")
+                    break
+                except requests.RequestException as failure:
+                    if response is None and getattr(failure, "response", None) is not None:
+                        response = failure.response
+                        attempt["http_status"] = getattr(response, "status_code", None)
+                    delay = product_retry_delay(failure, response, index, call_budget) if call_budget else None
+                    if call_budget and _not_submitted(failure):
+                        attempt.update(status="not_submitted", prompt_tokens=0,
+                                       completion_tokens=0, total_tokens=0)
+                    elif not local_processing_timeout:
+                        attempt.update(status="error")
+                    if delay is None or index + 1 >= limit:
+                        raise
+                    attempt.update(error_category=_request_failure_category(failure),
+                                   error_type=type(failure).__name__,
+                                   http_status=getattr(response, "status_code", None),
+                                   duration_seconds=round(time.perf_counter() - attempt_started, 3))
+                    attempts.append(dict(attempt))
+                    call_budget.after_attempt(attempt)
+                    response = None
+                    if clock() + delay >= logical_deadline:
+                        raise
+                    time.sleep(delay)
+                    attempt = {**attempt, "attempt_id": uuid.uuid4().hex,
+                               "attempt_index": index + 2, "status": "pending",
+                               "started_at_utc": datetime.now(UTC).isoformat()}
+                    for key in (
+                        "response_headers_seconds", "first_byte_seconds", "first_event_seconds",
+                        "first_reasoning_seconds", "first_content_seconds", "completion_seconds",
+                    ):
+                        attempt[key] = None
+                    attempt.update(event_count=0, reasoning_chars=0, content_bytes=0)
+                    for key in ("prompt_tokens", "completion_tokens", "total_tokens",
+                                "error_category", "error_type", "http_status"):
+                        attempt.pop(key, None)
+                    attempt["effective_timeout_seconds"] = min(effective_timeout, logical_deadline - clock())
+            attempt.update(status="success", http_status=getattr(response, "status_code", None))
+            attempt.update(
+                finish_reason=finish_reason,
+                response_model_id=model_id,
+                **{key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")},
+            )
+            attempt["duration_seconds"] = round(time.perf_counter() - attempt_started, 3)
+            attempts.append(dict(attempt))
+            activity_status = "completed"
+            notify(activity_observer, "completion", event_count=attempt["event_count"], reasoning_chars=attempt["reasoning_chars"], content_bytes=attempt["content_bytes"], usage_known=bool(usage))
+            def assemble_result():
+                projection_metadata = {**(metadata or {}), "run_id": call_budget.run_id} if call_budget else metadata
+                return {
+                    "type": "result",
+                    "text": "".join(parts),
+                    "usage": usage,
+                    "finish_reason": finish_reason,
+                    "model": model_id,
+                    "attempts": record_attempts(attempts, projection_metadata),
+                }
+
+            if call_budget is None:
+                result = assemble_result()
+            else:
+                from .processing_deadline import process_before_deadline
+                from .request_attempts import publish_attempts
+
+                try:
+                    result = process_before_deadline(
+                        assemble_result, logical_deadline, lambda _result, _error: None, clock=clock
+                    )
+                except requests.ReadTimeout:
+                    from llm_response import public_attempt
+
+                    local_processing_timeout = True
+                    timeout_attempts = (public_attempt(attempt, run_id=call_budget.run_id,
+                                                       role=(metadata or {}).get("role")),)
+                    publish_attempts(timeout_attempts)
+                    raise
+                publish_attempts(result["attempts"])
+            check_processing_deadline()
+            yield result
+        except AdapterError as exc:
+            activity_status = "unknown"
+            notify(activity_observer, "unknown")
+            attempt.update(status="error", error_category=exc.category, error_type=type(exc).__name__)
+            attempt["duration_seconds"] = round(time.perf_counter() - attempt_started, 3)
+            attempts.append(dict(attempt))
+            exc.request_attempts = record_attempts(attempts, metadata)
+            raise
+        except Exception as exc:  # noqa: BLE001 - provider details stay out of events
+            category = _request_failure_category(exc)
+            activity_status = "deadline" if category == "timeout" else "disconnect" if category == "connectivity" else "unknown"
+            notify(activity_observer, activity_status)
+            from llm_client import _not_submitted
+            from llm_response import public_attempt
+            if not local_processing_timeout:
+                attempt.update(status="not_submitted" if _not_submitted(exc) else "error",
+                               error_category=category, error_type=type(exc).__name__)
+            attempt["duration_seconds"] = round(time.perf_counter() - attempt_started, 3)
+            if attempts and attempts[-1].get("attempt_id") == attempt.get("attempt_id"):
+                attempts[-1] = dict(attempt)
+            else:
+                attempts.append(dict(attempt))
+            error = AdapterError(category, type(exc).__name__)
+            if timeout_attempts is not None:
+                error.request_attempts = timeout_attempts
+            elif local_processing_timeout or clock() >= logical_deadline:
+                # Deadline ownership belongs to the caller. A late response
+                # may still be assembling its public attempt in a daemon
+                # worker, so do not wait for that work before failing the Job.
+                error.request_attempts = (public_attempt(
+                    attempt, run_id=call_budget.run_id if call_budget else None,
+                    role=(metadata or {}).get("role")),)
+            elif result is not None:
+                error.request_attempts = result["attempts"]
+            else:
+                error.request_attempts = record_attempts(attempts, metadata)
+            raise error from exc
+        finally:
+            if activity_status is None:
+                notify(activity_observer, "cancel")
+            attempt["duration_seconds"] = round(time.perf_counter() - attempt_started, 3)
+            if not attempts:
+                attempts.append(dict(attempt))
+            if call_budget is not None:
+                # Never wait for a late settlement: if it owns the gate, it will
+                # either persist its evidence or leave the original reservation.
+                if late_state is None:
+                    call_budget.after_attempt(attempt)
+                elif late_state["lock"].acquire(blocking=False):
+                    try:
+                        if late_state["event"] is None:
+                            if (attempt.get("error_category") == "timeout"
+                                    and attempt.get("status") != "not_submitted") or local_processing_timeout:
+                                from .run_budget_late import settle_timeout_nonblocking
+
+                                settle_timeout_nonblocking(call_budget, attempt)
+                            else:
+                                call_budget.after_attempt(attempt)
+                    finally:
+                        late_state["lock"].release()
+
+
+def _request_failure_category(exc: BaseException) -> str:
+    if isinstance(exc, requests.Timeout):
+        return "timeout"
+    if isinstance(exc, requests.exceptions.ProxyError):
+        return "proxy"
+    if isinstance(exc, requests.exceptions.SSLError):
+        return "tls"
+    if isinstance(exc, requests.ConnectionError):
+        return "connectivity"
+    if isinstance(exc, requests.exceptions.ChunkedEncodingError):
+        return "connectivity"
+    if isinstance(exc, requests.HTTPError):
+        return "http_status"
+    if isinstance(exc, requests.RequestException):
+        return "request"
+    return "adapter_error"
 
 
 class InternAgentAdapter:
@@ -470,6 +994,7 @@ __all__ = [
     "InternAgentAdapter",
     "InternChatModel",
     "InternModelAdapter",
+    "InternStreamAdapter",
     "ModelResponse",
     "ModelContinuationTransport",
     "ToolRequest",

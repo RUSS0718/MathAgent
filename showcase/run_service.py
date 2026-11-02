@@ -13,6 +13,7 @@ from typing import Any, Protocol
 from .final_evidence import bind_verification, checked_verification
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
 from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, execute_graph
+from .star_product_modes import STAR_MODES
 from .storage import SQLiteStore
 from .verification import LightweightVerificationHook
 
@@ -244,9 +245,12 @@ class RunService:
     def resume_run(self, run_id: str) -> dict[str, Any]:
         """Continue a recoverable graph state from the latest SQLite checkpoint."""
 
+        snapshot = self._require_run(run_id)
+        result = snapshot.get("result") or {}
+        if result.get("solver_mode") in STAR_MODES:
+            raise RunResumeUnavailable()
         if self._execution_loop is None:
             raise RunResumeUnavailable()
-        snapshot = self._require_run(run_id)
         checkpoint = self._store.get_checkpoint(run_id)
         if checkpoint is None:
             raise RunResumeUnavailable()
@@ -306,11 +310,18 @@ class RunService:
         snapshot = self._store.get_run(run_id)
         if snapshot is None:
             raise RunNotFoundError(run_id)
-        budget = self._budget_ledger.snapshot(run_id)
-        if budget is not None and not (snapshot.get("result") or {}).get("budget"):
-            snapshot["result"] = {**(snapshot.get("result") or {}), "budget": budget}
+        result = snapshot.get("result") or {}
+        if result.get("solver_mode") in STAR_MODES:
+            from .star_product_projection import current_solver
+
+            result.pop("retry_call", None)
+            result["solver"] = current_solver(self._store._connection, run_id)
         attempts = [event["attempt"] for event in self._store.get_events(run_id) if event.get("type") == "request_attempt"]
-        attempts = list({item["attempt_id"]: item for item in [*attempts, *self._budget_ledger.attempts(run_id)]}.values())
+        budget, ledger_attempts = self._budget_ledger.view(run_id)
+        if budget is not None and (result.get("solver_mode") in STAR_MODES
+                                   or not result.get("budget")):
+            snapshot["result"] = {**result, "budget": budget}
+        attempts = list({item["attempt_id"]: item for item in [*attempts, *ledger_attempts]}.values())
         if attempts:
             snapshot["result"] = {**(snapshot.get("result") or {}), "request_attempts": attempts}
         return self._copy_snapshot(snapshot)

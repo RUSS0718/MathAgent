@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import threading
 import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -39,6 +40,56 @@ def _load_local_env() -> None:
 _load_local_env()
 
 
+def _not_submitted(error: BaseException | None) -> bool:
+    """Only positive connection-establishment evidence permits automatic resend."""
+    from urllib3.exceptions import NewConnectionError
+
+    from showcase.request_transport import DeadlineNotSubmitted
+
+    # The current failure wins over stale exception-handler context. Only
+    # explicit transport wrappers (reason/args) carry establishment evidence.
+    if isinstance(error, DeadlineNotSubmitted):
+        return True
+    if isinstance(error, requests.ReadTimeout):
+        return False
+    seen = set()
+    pending = [error]
+    while pending:
+        item = pending.pop()
+        if not isinstance(item, BaseException) or id(item) in seen:
+            continue
+        seen.add(id(item))
+        if isinstance(item, requests.ConnectTimeout | NewConnectionError):
+            return True
+        if isinstance(item, requests.ReadTimeout):
+            return False
+        pending.append(getattr(item, "reason", None))
+        pending.extend(arg for arg in item.args if isinstance(arg, BaseException))
+    return False
+
+
+def product_retry_delay(failure, response, attempt_index, budget):
+    """Shared metered transport retry policy; None means unknown/terminal."""
+    import math
+    from email.utils import parsedate_to_datetime
+
+    delay = 2**attempt_index
+    safe = _not_submitted(failure)
+    if response is not None and response.status_code == 429:
+        value = response.headers.get("Retry-After", "")
+        try:
+            delay = float(value)
+        except (TypeError, ValueError):
+            try:
+                delay = parsedate_to_datetime(value).timestamp() - time.time()
+            except (TypeError, ValueError, OverflowError):
+                return None
+        safe = math.isfinite(delay) and delay >= 0
+    if not safe or delay >= budget.remaining_seconds():
+        return None
+    return delay
+
+
 class ChatClientError(RuntimeError):
     """A sanitized failure category suitable for trace and local reports."""
 
@@ -56,6 +107,8 @@ class InternChatClient:
         timeout: int | None = None,
         retry: int | None = None,
         thinking_mode: bool | None = None,
+        loopback_only: bool = False,
+        provider_endpoint_only: bool = False,
     ) -> None:
         raw_api_key = os.environ.get("INTERN_API_KEY")
         if not raw_api_key:
@@ -64,6 +117,10 @@ class InternChatClient:
             raw_api_key if raw_api_key.startswith("Bearer ") else f"Bearer {raw_api_key}"
         )
         self.api_base = os.environ.get("INTERN_API_BASE", DEFAULT_API_BASE)
+        self.loopback_only = loopback_only
+        self.provider_endpoint_only = provider_endpoint_only
+        if loopback_only and provider_endpoint_only:
+            raise ValueError("conflicting_transport_policy")
         self.model = os.environ.get("INTERN_MODEL", DEFAULT_MODEL)
         # Explicit kwarg wins over the env switch so experiments can pin the
         # thinking switch per arm without touching process env.
@@ -106,6 +163,7 @@ class InternChatClient:
         *,
         reasoning_mode: ReasoningMode = "inherit",
         thinking_mode: bool | None = None,
+        request_purpose: str = "model_response",
         tools: list[dict[str, Any]] | None = None,
         timeout_seconds: int | None = None,
         _attempt_records: list[dict[str, Any]] | None = None,
@@ -114,7 +172,11 @@ class InternChatClient:
         _attempt_budget: Any = None,
     ) -> str:
         """Send a request; explicit reasoning_mode wins over thinking_mode and defaults."""
-        effective_timeout = self.timeout if timeout_seconds is None else int(timeout_seconds)
+        effective_timeout = (
+            self.timeout
+            if timeout_seconds is None
+            else (float(timeout_seconds) if _attempt_budget is not None else int(timeout_seconds))
+        )
         if effective_timeout <= 0:
             raise ValueError("timeout_seconds_must_be_positive")
         payload = {
@@ -152,6 +214,7 @@ class InternChatClient:
             "max_tokens": max_tokens,
             "timeout_seconds": effective_timeout,
             "attempts_configured": self.retry,
+            "request_purpose": request_purpose,
             "message_count": len(messages),
             "message_roles": [str(message.get("role", "")) for message in messages],
             "messages_sha256": hashlib.sha256(message_bytes).hexdigest(),
@@ -159,35 +222,278 @@ class InternChatClient:
         last_category = "request"
         started = time.perf_counter()
         self.last_response_metadata = None
-        for attempt in range(self.retry):
+        # Only the explicit metered product path opts into conservative retries.
+        attempts_limit = min(self.retry, 3) if _attempt_budget is not None else self.retry
+        clock = time.monotonic
+        if _attempt_budget is not None:
+            from showcase.deadline_clock import guarded_utc_clock
+
+            clock = guarded_utc_clock(time.time)
+        logical_deadline = clock() + effective_timeout
+        if _attempt_budget is not None:
+            logical_deadline = min(logical_deadline, _attempt_budget.absolute_deadline())
+        for attempt in range(attempts_limit):
             attempt_started = time.perf_counter()
-            request_event: dict[str, Any] = {
+            attempt_state_lock = threading.RLock()
+            request_event = {
                 **request_metadata,
                 "request_sequence": self._request_sequence,
                 "attempt_id": uuid4().hex,
                 "attempt_index": attempt + 1,
                 "started_at_utc": datetime.now(UTC).isoformat(),
+                "request_purpose": request_purpose,
+                "effective_timeout_seconds": effective_timeout,
+                "requests_timeout_seconds": self.timeout,
+                "provider_stream": False,
+                "requests_stream": _attempt_budget is not None,
+                "event_count": None,
+                "content_bytes": None,
+                "reasoning_chars": None,
+                "retry_limit": attempts_limit,
+                "response_headers_seconds": None,
+                "first_byte_seconds": None,
+                "first_event_seconds": None,
+                "first_reasoning_seconds": None,
+                "first_content_seconds": None,
+                "completion_seconds": None,
                 "status": "pending",
             }
             attempt_timeout = effective_timeout
             if _attempt_budget is not None:
+                from showcase.attempt_projection import MeteredAttemptEvent
+
+                request_event["deadline_at"] = logical_deadline
+                request_event = MeteredAttemptEvent(request_event)
+                request_event.state_lock = attempt_state_lock
                 estimate = len(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"))
                 attempt_timeout = min(
-                    effective_timeout, _attempt_budget.before_attempt(request_event, estimate)
+                    effective_timeout,
+                    max(0.001, logical_deadline - clock()),
+                    _attempt_budget.before_attempt(request_event, estimate),
                 )
+                request_event["effective_timeout_seconds"] = attempt_timeout
             response = None
             failure: BaseException | None = None
+            late_response_settled = False
+            local_processing_timeout = False
             try:
-                response = requests.post(
-                    self.api_base,
-                    headers=headers,
-                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                    timeout=attempt_timeout,
-                )
-                response.raise_for_status()
-                data = response.json()
+                request_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                if _attempt_budget is not None:
+                    from showcase.request_transport import response_events
+
+                    unparsed = object()
+
+                    def settle_late(
+                        response,
+                        body,
+                        headers_seconds,
+                        completion_seconds,
+                        body_complete=True,
+                        *,
+                        parsed=unparsed,
+                    ):
+                        nonlocal late_response_settled
+                        if body_complete and parsed is unparsed:
+                            try:
+                                parsed = json.loads(body)
+                            except (TypeError, ValueError):
+                                parsed = None
+                        with attempt_state_lock:
+                            request_event.late_callback_received = True
+                            if not body_complete:
+                                from showcase.attempt_projection import refresh_attempt_projection
+
+                                refresh_attempt_projection(request_event)
+                                return
+                            late_data = parsed if isinstance(parsed, Mapping) else {}
+                            status_code = getattr(response, "status_code", None)
+                            late_usage = provider_usage(late_data.get("usage"))
+                            late_choices = late_data.get("choices")
+                            late_choice = (
+                                late_choices[0]
+                                if isinstance(late_choices, list)
+                                and late_choices
+                                and isinstance(late_choices[0], Mapping)
+                                else {}
+                            )
+                            late_message = late_choice.get("message")
+                            late_content = (
+                                late_message.get("content")
+                                if isinstance(late_message, Mapping)
+                                else None
+                            )
+                            valid_completion_shape = (
+                                isinstance(late_data, Mapping)
+                                and isinstance(late_choices, list)
+                                and bool(late_choices)
+                                and isinstance(late_choice, Mapping)
+                                and isinstance(late_message, Mapping)
+                                and (late_content is None or isinstance(late_content, str))
+                            )
+                            http_success = type(status_code) is int and 200 <= status_code < 300
+                            response_fields = {
+                                "http_status": status_code,
+                                "response_id": late_data.get("id"),
+                                "response_model_id": late_data.get("model"),
+                                "finish_reason": safe_identifier(late_choice.get("finish_reason")),
+                                "response_headers_seconds": headers_seconds,
+                                "completion_seconds": completion_seconds,
+                                "duration_seconds": round(completion_seconds, 3),
+                                "first_reasoning_seconds": None,
+                                "first_content_seconds": None,
+                                **late_usage,
+                            }
+                            if not http_success:
+                                request_event.update(
+                                    response_fields,
+                                    status="error",
+                                    error_category="http_status",
+                                    error_type="HTTPError",
+                                )
+                            elif (
+                                getattr(_attempt_budget, "strict_completion", False)
+                                and late_choices == []
+                            ):
+                                request_event.update(
+                                    response_fields,
+                                    status="error",
+                                    error_category="missing_finish_reason",
+                                    error_type="EmptyChoices",
+                                )
+                            elif not valid_completion_shape:
+                                request_event.update(
+                                    response_fields,
+                                    status="error",
+                                    error_category="invalid_response",
+                                    error_type="ValueError",
+                                )
+                            elif (
+                                getattr(_attempt_budget, "strict_completion", False)
+                                and response_fields["finish_reason"] is None
+                            ):
+                                request_event.update(
+                                    response_fields,
+                                    status="error",
+                                    error_category="missing_finish_reason",
+                                    error_type="ChatClientError",
+                                )
+                            else:
+                                late_reasoning = late_message.get("reasoning_content")
+                                request_event.update(
+                                    response_fields,
+                                    status="success",
+                                    reasoning_chars=(
+                                        len(late_reasoning)
+                                        if isinstance(late_reasoning, str)
+                                        else 0
+                                    ),
+                                    content_bytes=(
+                                        len(late_content.encode("utf-8"))
+                                        if isinstance(late_content, str)
+                                        else 0
+                                    ),
+                                )
+                                request_event.pop("error_category", None)
+                                request_event.pop("error_type", None)
+                            late_event = dict(request_event)
+                            late_response_settled = True
+                        from showcase.run_budget_late import settle_late_with_retry
+
+                        settle_late_with_retry(_attempt_budget, late_event)
+                        from showcase.attempt_projection import refresh_attempt_projection
+
+                        refresh_attempt_projection(request_event)
+
+                    response_body = bytearray()
+                    for kind, value in response_events(
+                        self.api_base,
+                        headers=headers,
+                        data=request_data,
+                        deadline=logical_deadline,
+                        clock=clock,
+                        timeout=self.timeout,
+                        loopback_only=self.loopback_only,
+                        provider_endpoint_only=self.provider_endpoint_only,
+                        on_late_response=settle_late,
+                    ):
+                        if kind == "headers":
+                            response = value
+                            request_event["http_status"] = response.status_code
+                            request_event["response_headers_seconds"] = (
+                                time.perf_counter() - attempt_started
+                            )
+                            response.raise_for_status()
+                        elif kind == "bytes":
+                            if request_event["first_byte_seconds"] is None:
+                                request_event["first_byte_seconds"] = (
+                                    time.perf_counter() - attempt_started
+                                )
+                            response_body.extend(value)
+                        elif kind == "complete":
+                            request_event["completion_seconds"] = (
+                                time.perf_counter() - attempt_started
+                            )
+                    from showcase.processing_deadline import process_before_deadline
+
+                    def settle_processed(parsed, error):
+                        if error is not None and not isinstance(error, TypeError | ValueError):
+                            import logging
+
+                            logging.getLogger(__name__).warning(
+                                "late processing unresolved: run_id=%s attempt_id=%s",
+                                _attempt_budget.run_id,
+                                request_event.get("attempt_id"),
+                            )
+                            return  # Keep the original unknown reservation for review.
+                        settle_late(
+                            response,
+                            response_body,
+                            request_event.get("response_headers_seconds"),
+                            request_event.get("completion_seconds")
+                            or time.perf_counter() - attempt_started,
+                            parsed=parsed,
+                        )
+
+                    data = process_before_deadline(
+                        lambda: json.loads(response_body),
+                        logical_deadline,
+                        settle_processed,
+                        clock=clock,
+                    )
+                else:
+                    if self.loopback_only or self.provider_endpoint_only:
+                        from showcase.request_transport import (
+                            strict_loopback_post,
+                            strict_provider_post,
+                        )
+
+                        post = strict_loopback_post if self.loopback_only else strict_provider_post
+                    else:
+                        post = requests.post
+                    response = post(
+                        self.api_base,
+                        headers=headers,
+                        data=request_data,
+                        timeout=attempt_timeout,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                usage = provider_usage(data.get("usage"))
+                request_event.update(usage)
+                if (
+                    _attempt_budget is not None
+                    and getattr(_attempt_budget, "strict_completion", False)
+                    and data.get("choices") == []
+                ):
+                    raise ChatClientError("missing_finish_reason", "empty_choices")
                 choice = data["choices"][0]
                 finish_reason = safe_identifier(choice.get("finish_reason"))
+                if (
+                    _attempt_budget is not None
+                    and getattr(_attempt_budget, "strict_completion", False)
+                    and finish_reason is None
+                ):
+                    raise ChatClientError("missing_finish_reason")
                 request_event.update(
                     status="success",
                     http_status=getattr(response, "status_code", None),
@@ -198,8 +504,6 @@ class InternChatClient:
                     finish_reason=finish_reason,
                 )
                 self.finish_reasons.append(finish_reason)
-                usage = provider_usage(data.get("usage"))
-                request_event.update(usage)
                 completion_tokens = usage["completion_tokens"]
                 self.completion_tokens.append(completion_tokens)
                 message = choice["message"]
@@ -218,6 +522,13 @@ class InternChatClient:
                 reasoning_content = (
                     message.get("reasoning_content") if isinstance(message, Mapping) else None
                 )
+                if _attempt_budget is not None:
+                    request_event["reasoning_chars"] = (
+                        len(reasoning_content) if isinstance(reasoning_content, str) else 0
+                    )
+                    request_event["content_bytes"] = (
+                        len(content.encode("utf-8")) if isinstance(content, str) else 0
+                    )
                 response_metadata = {
                     "has_reasoning_content": bool(
                         isinstance(reasoning_content, str) and reasoning_content
@@ -243,6 +554,9 @@ class InternChatClient:
                     }
                 )
                 self.latencies.append(time.perf_counter() - started)
+                if _attempt_budget is not None and clock() >= logical_deadline:
+                    local_processing_timeout = True
+                    raise requests.ReadTimeout("logical_deadline_exceeded_during_processing")
                 return content
             except requests.Timeout as exc:
                 last_category = "timeout"
@@ -264,6 +578,10 @@ class InternChatClient:
                 last_category = "http_status"
                 failure = exc
                 self._record_failure(last_category, exc)
+            except requests.exceptions.ChunkedEncodingError as exc:
+                last_category = "connectivity" if _attempt_budget is not None else "request"
+                failure = exc
+                self._record_failure(last_category, exc)
             except (KeyError, IndexError, AttributeError, TypeError, ValueError) as exc:
                 last_category = "invalid_response"
                 failure = exc
@@ -274,32 +592,64 @@ class InternChatClient:
                 self._record_failure(last_category, exc)
             except Exception as exc:
                 failure = exc
-                last_category = "client_exception"
+                last_category = (
+                    (getattr(exc, "category", None) or "client_exception")
+                    if _attempt_budget is not None
+                    else "client_exception"
+                )
                 self._record_failure(last_category, exc)
                 raise
             finally:
-                request_event["duration_seconds"] = round(time.perf_counter() - attempt_started, 3)
-                if failure is not None:
-                    failure_response = (
-                        response if response is not None else getattr(failure, "response", None)
-                    )
-                    request_event.update(
-                        status="error",
-                        error_category=last_category,
-                        error_type=type(failure).__name__,
-                        http_status=(
-                            getattr(failure_response, "status_code", None)
-                            if failure_response is not None
-                            else None
-                        ),
-                    )
-                if _attempt_budget is not None:
-                    _attempt_budget.after_attempt(request_event)
-                self.request_diagnostics.append(request_event)
-                if _attempt_records is not None:
-                    _attempt_records.append(dict(request_event))
-                self._request_sequence += 1
-            if attempt + 1 < self.retry:
+                with attempt_state_lock:
+                    if not late_response_settled:
+                        request_event["duration_seconds"] = round(
+                            time.perf_counter() - attempt_started, 3
+                        )
+                    if (
+                        failure is not None
+                        and not late_response_settled
+                        and not local_processing_timeout
+                    ):
+                        failure_response = (
+                            response if response is not None else getattr(failure, "response", None)
+                        )
+                        request_event.update(
+                            status="error",
+                            error_category=last_category,
+                            error_type=type(failure).__name__,
+                            http_status=(
+                                getattr(failure_response, "status_code", None)
+                                if failure_response is not None
+                                else None
+                            ),
+                        )
+                    if _attempt_budget is not None and not late_response_settled:
+                        if _not_submitted(failure):
+                            request_event.update(
+                                status="not_submitted",
+                                prompt_tokens=0,
+                                completion_tokens=0,
+                                total_tokens=0,
+                            )
+                        if isinstance(failure, requests.ReadTimeout) and not _not_submitted(
+                            failure
+                        ):
+                            from showcase.run_budget_late import settle_timeout_nonblocking
+
+                            settle_timeout_nonblocking(_attempt_budget, request_event)
+                        else:
+                            _attempt_budget.after_attempt(request_event)
+                    self.request_diagnostics.append(request_event)
+                    if _attempt_records is not None:
+                        _attempt_records.append(request_event)
+                    self._request_sequence += 1
+            if _attempt_budget is not None:
+                delay = product_retry_delay(failure, response, attempt, _attempt_budget)
+                if delay is None or clock() + delay >= logical_deadline:
+                    break
+                if attempt + 1 < attempts_limit:
+                    time.sleep(delay)
+            elif attempt + 1 < attempts_limit:
                 time.sleep(2**attempt)
 
         raise ChatClientError(last_category, self.last_failure_type)

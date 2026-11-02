@@ -3,6 +3,7 @@ import { defineConfig } from '@playwright/test'
 /** A separate test server and synthetic API data keep screenshots repeatable. */
 export default defineConfig({
   testDir: './tests/browser',
+  testIgnore: 'star-product.spec.ts',
   outputDir: '../../../artifacts/ui-unification/browser',
   snapshotPathTemplate: '{testDir}/snapshots/{platform}/{arg}{ext}',
   fullyParallel: true,

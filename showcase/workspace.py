@@ -26,6 +26,8 @@ from .redaction import redact
 from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, freeze_budget
 from .run_checkpoints import RunCheckpointSaver
 from .run_control import RunControl, RunStopped, bind_control
+from .star_product_hints import migrate_hints, validate_hint
+from .star_product_modes import STAR_MODES
 
 ACTIVE_JOB_STATUSES = ("queued", "running", "waiting_input")
 TERMINAL_JOB_STATUSES = ("succeeded", "failed", "canceled")
@@ -129,6 +131,7 @@ class WorkspaceStore:
             self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN verification_mode TEXT NOT NULL DEFAULT 'auto'")
         if "input_user_file_id" not in columns:
             self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN input_user_file_id TEXT")
+        migrate_hints(self._connection, columns)
         self._connection.commit()
 
     def create_session(self, user_id: str, title: str = "新对话") -> str:
@@ -212,6 +215,8 @@ class WorkspaceStore:
         execution_mode: str = "fake",
         verification_mode: str = "auto",
         input_user_file_id: str | None = None,
+        solver_identity: Mapping[str, Any] | None = None,
+        solver_hint: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Durably accept one Job and its user message before returning."""
 
@@ -241,12 +246,14 @@ class WorkspaceStore:
                 self._connection.execute(
                     "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,input_user_file_id,verification_mode,idempotency_key,request_digest,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (job_id, session_id, user_id, problem, "queued", _json({"execution_mode": execution_mode}), None, input_user_file_id, verification_mode, idempotency_key, request_digest, now, now),
+                    (job_id, session_id, user_id, problem, "queued", _json({"execution_mode": execution_mode, **(solver_identity or {})}), None, input_user_file_id, verification_mode, idempotency_key, request_digest, now, now),
                 )
                 self._connection.execute(
                     "INSERT INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
                     (session_id, "user", problem, job_id, now),
                 )
+                if solver_hint is not None:
+                    self._connection.execute("UPDATE workspace_jobs SET solver_hint=? WHERE job_id=?", (solver_hint, job_id))
                 self._insert_run(job_id, problem, now, execution_mode)
                 self._insert_event(
                     job_id,
@@ -270,6 +277,11 @@ class WorkspaceStore:
         assert row is not None
         return self._job_payload(row), False
 
+    def job_identity(self, job_id: str) -> dict[str, Any]:
+        with self._lock:
+            row = self._connection.execute("SELECT result_json FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+        return _loads(row[0]) if row else {}
+
     def start_job(self, job_id: str, *, execution_mode: str = "fake") -> bool:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
@@ -280,7 +292,7 @@ class WorkspaceStore:
                     return False
                 now = _utc_now()
                 self._connection.execute("UPDATE workspace_jobs SET status='running',updated_at=? WHERE job_id=?", (now, job_id))
-                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "RUNNING", now, execution_mode=execution_mode, asset_refs=self._asset_refs(job_id))), now, job_id))
+                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "RUNNING", now, execution_mode=execution_mode, result=self.job_identity(job_id), asset_refs=self._asset_refs(job_id))), now, job_id))
                 self._insert_event(
                     job_id,
                     "running",
@@ -365,7 +377,7 @@ class WorkspaceStore:
             self._insert_event(job_id, "interrupt", {"type": "interrupt", "job_id": job_id, "status": "waiting_input"})
             self._connection.commit()
 
-    def control_job(self, *, user_id: str, job_id: str, operation: str, idempotency_key: str, request_digest: str) -> tuple[dict[str, Any], bool]:
+    def control_job(self, *, user_id: str, job_id: str, operation: str, idempotency_key: str, request_digest: str, retry_call=None) -> tuple[dict[str, Any], bool]:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
@@ -390,13 +402,21 @@ class WorkspaceStore:
                         now = _utc_now()
                         freeze_budget(self._connection, job_id)
                         self._connection.execute("UPDATE workspace_jobs SET status='canceled',updated_at=? WHERE job_id=?", (now, job_id))
-                        self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "CANCELED", now, execution_mode=(_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable"), asset_refs=self._asset_refs(job_id))), now, job_id))
+                        self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "CANCELED", now, execution_mode=(_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable"), result=self.job_identity(job_id), asset_refs=self._asset_refs(job_id))), now, job_id))
                         self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled", "scope": "future_dispatch", "remote_request": "cannot_revoke"})
                     result = {"success": True, "job_id": job_id, "status": "canceled"}
                 else:
-                    if status != "waiting_input":
+                    from .star_product_recovery import authorize_resume
+
+                    star_resume = authorize_resume(self._connection, row, retry_call)
+                    if status != "waiting_input" and not star_resume:
                         raise WorkspaceError("job_not_resumable", status=409)
                     now = _utc_now()
+                    if star_resume:
+                        self._connection.execute(
+                            "UPDATE run_budgets SET ledger_json=json_remove(ledger_json,'$.ended_at') WHERE run_id=?",
+                            (job_id,),
+                        )
                     self._connection.execute("UPDATE workspace_jobs SET status='queued',updated_at=? WHERE job_id=?", (now, job_id))
                     self._insert_event(job_id, "resumed", {"type": "resumed", "job_id": job_id, "status": "queued"})
                     result = {"success": True, "job_id": job_id, "status": "queued"}
@@ -420,7 +440,7 @@ class WorkspaceStore:
                     continue
                 now = _utc_now()
                 self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code='needs_review',updated_at=? WHERE job_id=?", (now, job_id))
-                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, execution_mode=(_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable"), error={"category": "needs_review"}, asset_refs=self._asset_refs(job_id))), now, job_id))
+                self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, execution_mode=(_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable"), result=self.job_identity(job_id), error={"category": "needs_review"}, asset_refs=self._asset_refs(job_id))), now, job_id))
                 self._insert_event(job_id, "needs_review", {"type": "needs_review", "job_id": job_id, "status": "failed", "reason": "process_restart"})
             self._connection.commit()
             if checkpointer is not None:
@@ -440,7 +460,7 @@ class WorkspaceStore:
             stored = self._connection.execute('SELECT result_json FROM workspace_jobs WHERE job_id=?', (job_id,)).fetchone()
             execution_mode = (_loads(stored['result_json']) if stored['result_json'] else {}).get('execution_mode', 'unavailable')
             freeze_budget(self._connection, job_id)
-            self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "FAILED", now, execution_mode=execution_mode, error={"category": code}, asset_refs=self._asset_refs(job_id))), now, job_id))
+            self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "FAILED", now, execution_mode=execution_mode, result=self.job_identity(job_id), error={"category": code}, asset_refs=self._asset_refs(job_id))), now, job_id))
             self._insert_event(
                 job_id,
                 "timeout" if code == "run_deadline_exhausted" else "error",
@@ -463,6 +483,10 @@ class WorkspaceStore:
             if row is None:
                 raise WorkspaceError("job_not_found", status=404)
             if row["status"] in TERMINAL_JOB_STATUSES and event.get("type") not in {"request_attempt", "tool_call_result"}:
+                return
+            from .star_product_projection import project_solver_event
+
+            if not project_solver_event(self._connection, job_id, event):
                 return
             payload = redact(dict(event))
             payload.setdefault("job_id", job_id)
@@ -493,6 +517,7 @@ class WorkspaceStore:
             if isinstance(state.get("verification"), Mapping)
             else {"status": "unknown"},
         }
+        result.update({key: state[key] for key in ("solver_mode", "preset_version", "missing_capabilities", "evidence_kind", "solver") if key in state})
         result["verification"] = bind_verification(result["final_response"], result["verification"])
         error = state.get("error") if isinstance(state.get("error"), Mapping) else None
         error_code = str(error.get("category")) if error else None
@@ -566,6 +591,12 @@ class WorkspaceStore:
         with self._lock:
             row = self._connection.execute("SELECT verification_mode FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
         return str(row["verification_mode"]) if row is not None else "auto"
+
+    def solver_hint(self, job_id: str) -> str | None:
+        """Read the private execution hint without adding it to the Job DTO."""
+        with self._lock:
+            row = self._connection.execute("SELECT solver_hint FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+        return str(row["solver_hint"]) if row is not None and row["solver_hint"] is not None else None
 
     def active_jobs(self, user_id: str, session_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
@@ -665,7 +696,7 @@ class WorkspaceStore:
     def _insert_run(self, job_id: str, problem: str, now: str, execution_mode: str) -> None:
         self._connection.execute(
             "INSERT OR IGNORE INTO runs(run_id,snapshot_json,created_at,updated_at) VALUES(?,?,?,?)",
-            (job_id, _json(_run_snapshot(job_id, "QUEUED", now, execution_mode=execution_mode, input_text=problem, asset_refs=self._asset_refs(job_id))), now, now),
+            (job_id, _json(_run_snapshot(job_id, "QUEUED", now, execution_mode=execution_mode, result=self.job_identity(job_id), input_text=problem, asset_refs=self._asset_refs(job_id))), now, now),
         )
 
     def _asset_refs(self, job_id: str) -> list[dict[str, Any]]:
@@ -685,6 +716,7 @@ class WorkspaceStore:
         }
         if include_result and row["result_json"]:
             payload["result"] = _loads(row["result_json"])
+            payload["result"].pop("retry_call", None)
         if row["error_code"]:
             payload["error"] = row["error_code"]
         return payload
@@ -703,6 +735,7 @@ class WorkspaceService:
         worker_enabled: bool = True,
         waiting_input_marker: str = "",
         pipeline: Any | None = None,
+        star_pipeline: Any | None = None,
     ) -> None:
         self.store = WorkspaceStore(database_path, connection=connection)
         self.execution_mode = execution_mode
@@ -710,14 +743,17 @@ class WorkspaceService:
         self.worker_enabled = worker_enabled
         self.waiting_input_marker = waiting_input_marker
         self.pipeline = pipeline
-        self.budget_ledger = (
-            RunBudgetLedger(self.store._connection, self.store._lock)
-            if pipeline is None or str(database_path) == ":memory:" else RunBudgetLedger(database_path=database_path)
+        self.star_pipeline = star_pipeline
+        self.budget_ledger = RunBudgetLedger(
+            self.store._connection, connection_lock=self.store._lock
         )
         self.checkpointer = None
-        if pipeline is not None and hasattr(pipeline, "checkpointer"):
+        if (pipeline is not None and hasattr(pipeline, "checkpointer")) or star_pipeline is not None:
             self.checkpointer = RunCheckpointSaver(database_path)
-            pipeline.checkpointer = self.checkpointer
+            if pipeline is not None:
+                pipeline.checkpointer = self.checkpointer
+            if star_pipeline is not None:
+                star_pipeline.checkpointer = self.checkpointer
         self._waiting_input_jobs: set[str] = set()
         self.store.recover_incomplete_jobs(self.checkpointer)
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="showcase-job")
@@ -750,7 +786,15 @@ class WorkspaceService:
         input_user_file_id: Any = None,
         verification_mode: str = "auto",
         budget_limits: RunBudgetLimits | None = None,
+        solver_mode: str = "legacy",
+        solver_options: Any = None,
+        solver_hint: Any = None,
     ) -> tuple[dict[str, Any], bool]:
+        from .star_product_modes import validate_mode
+
+        identity = validate_mode(solver_mode, enabled=self.star_pipeline is not None, verification_mode=verification_mode, options=solver_options, pipeline=self.star_pipeline)
+        validate_hint(solver_hint, solver_mode)
+        selected = self.star_pipeline if solver_mode in STAR_MODES else self.pipeline
         if web_search_enabled:
             raise WorkspaceError("capability_unavailable", status=503)
         if input_user_file_id is not None and (not isinstance(input_user_file_id, str) or not input_user_file_id):
@@ -759,14 +803,19 @@ class WorkspaceService:
             raise WorkspaceError("verification_mode_invalid", status=400)
         if not _is_uuid_v4(idempotency_key):
             raise WorkspaceError("idempotency_key_invalid", status=400)
-        digest = _request_digest(session_id, problem, web_search_enabled, input_user_file_id, verification_mode)
+        request_parts = (session_id, problem, web_search_enabled, input_user_file_id, verification_mode)
+        digest = _request_digest(*request_parts) if solver_mode == "legacy" else _request_digest(*request_parts, solver_mode)
+        if solver_hint is not None:
+            digest = _request_digest(digest, solver_hint)
         payload, existing = self.store.create_job(
             user_id=user_id,
             session_id=session_id,
             problem=problem,
             idempotency_key=idempotency_key,
             request_digest=digest,
-            execution_mode=getattr(self.pipeline, "execution_mode", self.execution_mode),
+            execution_mode=solver_mode if solver_mode in STAR_MODES else getattr(selected, "execution_mode", self.execution_mode),
+            solver_identity={**identity, "evidence_kind": getattr(selected, "evidence_kind", self.execution_mode)},
+            solver_hint=solver_hint,
             verification_mode=verification_mode,
             input_user_file_id=input_user_file_id,
         )
@@ -776,12 +825,12 @@ class WorkspaceService:
             self._submit(payload["job_id"])
         return payload, existing
 
-    def resume_job(self, *, user_id: str, job_id: str, idempotency_key: str, answer: str = "") -> tuple[dict[str, Any], bool]:
+    def resume_job(self, *, user_id: str, job_id: str, idempotency_key: str, answer: str = "", retry_call=None) -> tuple[dict[str, Any], bool]:
         if not _is_uuid_v4(idempotency_key):
             raise WorkspaceError("idempotency_key_invalid", status=400)
-        digest = _request_digest("resume", job_id, answer)
+        digest = _request_digest("resume", job_id, answer, retry_call)
         result, existing = self.store.control_job(
-            user_id=user_id, job_id=job_id, operation="resume", idempotency_key=idempotency_key, request_digest=digest
+            user_id=user_id, job_id=job_id, operation="resume", idempotency_key=idempotency_key, request_digest=digest, retry_call=retry_call
         )
         if not existing:
             with self._submit_lock:
@@ -809,7 +858,10 @@ class WorkspaceService:
 
     def _execute(self, job_id: str) -> None:
         try:
-            if not self.store.start_job(job_id, execution_mode=getattr(self.pipeline, "execution_mode", self.execution_mode)):
+            identity = self.store.job_identity(job_id)
+            pipeline = self.star_pipeline if identity.get("solver_mode") in STAR_MODES else self.pipeline
+            execution_mode = identity.get("execution_mode", self.execution_mode)
+            if not self.store.start_job(job_id, execution_mode=execution_mode):
                 return
             # Keep the worker asynchronous even for the deterministic adapter so
             # the HTTP contract never waits for execution.
@@ -817,18 +869,23 @@ class WorkspaceService:
             if self.execution_mode == "fake" and self.budget_ledger.snapshot(job_id) is not None:
                 budget = self.budget_ledger.ensure(job_id, RunBudgetLimits())
                 RunControl(self.store, job_id, budget).check()
-            if self.execution_mode == "live":
-                if self.pipeline is None:
+            if self.execution_mode == "live" or execution_mode in STAR_MODES:
+                if pipeline is None:
                     self.store.fail_job(job_id, "unavailable", execution_mode="live")
                     return
-                limits = getattr(self.pipeline, "budget", RunBudgetLimits())
-                with bind_budget(self.budget_ledger.ensure(job_id, limits)) as budget, bind_control(RunControl(self.store, job_id, budget, self.checkpointer)) as control:
+                limits = (pipeline.budget_for_mode(identity.get("solver_mode"))
+                          if execution_mode in STAR_MODES else getattr(pipeline, "budget", RunBudgetLimits()))
+                deadline = getattr(getattr(pipeline, "experiment_policy", None), "deadline_at", None)
+                with bind_budget(self.budget_ledger.ensure(job_id, limits, deadline_at=deadline)) as budget, bind_control(RunControl(self.store, job_id, budget, self.checkpointer)) as control:
                     control.check()
-                    state = self.pipeline.run(
+                    state = pipeline.run(
                         job_id,
                         self._problem(job_id),
                         verification_mode=self.store.verification_mode(job_id),
                         emit=lambda event: self.store.append_event(job_id, event),
+                        **({"solver_hint": self.store.solver_hint(job_id),
+                            "retry_call": identity.get("retry_call"),
+                            "solver_mode": identity.get("solver_mode")} if execution_mode in STAR_MODES else {}),
                     )
                 self.store.finish_live_job(job_id, state)
                 if self.checkpointer is not None and state.get("status") != "WAITING_INPUT":
@@ -848,7 +905,11 @@ class WorkspaceService:
                 self.store.fail_job(job_id, "needs_review")
             else:
                 self.store.complete_job(job_id, "Fake Agent completed a deterministic showcase run.", "fake adapter")
-        except RunStopped:
+        except RunStopped as exc:
+            if exc.category == "run_deadline_exhausted":
+                self.store.fail_job(job_id, exc.category)
+                if self.checkpointer is not None:
+                    self.checkpointer.stop(job_id, "FAILED", exc.category)
             return
         except Exception:
             self.store.fail_job(job_id, "job_execution_failed", execution_mode=self.execution_mode)
@@ -856,16 +917,12 @@ class WorkspaceService:
                 self.checkpointer.stop(job_id, "FAILED", "job_execution_failed")
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
-        payload = self.store.get_job(job_id, user_id)
-        if self.budget_ledger is not None:
-            budget = self.budget_ledger.snapshot(job_id)
-            if budget is not None and not (payload.get("result") or {}).get("budget"):
-                payload["result"] = {**(payload.get("result") or {}), "budget": budget}
-        attempts = [event["data"]["attempt"] for event in self.store.events(job_id, user_id) if event["event"] == "request_attempt"]
-        attempts = list({item["attempt_id"]: item for item in [*attempts, *self.budget_ledger.attempts(job_id)]}.values())
-        if attempts:
-            payload["result"] = {**(payload.get("result") or {}), "request_attempts": attempts}
-        return payload
+        # File-backed STAR reads deliberately leave the writer connection and
+        # in-process lock to job_read_snapshot; that independent read-only
+        # connection is required by the non-blocking public snapshot contract.
+        from .job_read_snapshot import read_job
+
+        return read_job(self, job_id, user_id)
 
     def _problem(self, job_id: str) -> str:
         return self.store.problem(job_id)

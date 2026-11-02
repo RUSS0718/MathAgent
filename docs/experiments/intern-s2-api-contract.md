@@ -1,6 +1,6 @@
 # Intern S2 API 接入与短探测合同
 
-**状态：proposed；核查日期：2026-10-21；本文件的 probes 均未执行。** 依据公开官方资料和仓库源码，只提出协议，不证明服务对当前账号可用，不构成实验效果结论。
+**状态：proposed；核查日期：2026-10-27；本文件的 probes 均未执行。** 依据公开官方资料和仓库源码，只提出协议，不证明服务对当前账号可用，不构成实验效果结论。
 
 ## 目标与边界
 
@@ -19,11 +19,13 @@
 | 思考与长度 | 服务字段 `thinking_mode` 为布尔值，默认开启，工具密集场景建议保持开启；Chat `max_tokens` 默认 0 会自适应最大长度 [S1, S2] | 每次显式设有限 `max_tokens`；内部 thought 是否计入该上限、是否有独立限额及其计费口径均未知 |
 | 工具 / 流式 | `tools`、`tool_choice` 有文档；工具结果需对应 `tool_call_id`；tools 当前不支持流式 [S2] | 原生工具回路用非流式；先做本地确定性工具；模型返回参数不等于已经执行 |
 | 结构化输出 / 内部信号 | 未找到严格 JSON Schema、`response_format`、logprobs、seed 保证的托管服务说明 [S2] | 分别探测并本地校验；JSON prompt 不等于约束解码；不把 token 熵设为必需输入 |
-| 响应与计量 | Chat 文档列出结束原因和思考标识，但未明确承诺 usage、`reasoning_content` 字段 [S2] | 检查字段存在性；`missing usage != 0`。单次有字段也不证明完整内部 thought 已计量 |
+| 响应与计量 | Chat 文档的流式请求及响应示例展示 `stream=true`、增量 `choices` 和 `[DONE]`，但示例未展示 `usage`，参数表也未列 `include_usage`；文档化 `thinking_mode`，但未明确承诺它与流式组合的服务行为，也未说明 `reasoning_content` 计量 [S2] | 检查字段存在性；`missing usage != 0`。单次有字段也不证明完整内部 thought 已计量 |
 | 超时 / 限流 | Chat 文档写明 120 秒未完成会截断；默认每用户 30 请求/分钟；错误说明涉及 RPM/TPM [S2] | 实际服务行为待核实；TPM、并发上限未知。客户端超时与服务端截断分开记录 |
 | 额度 / 缓存 | 官方确认一定额度免费 API，可申请提高 [S4]；未查到固定金额单价、确切免费 token 数或托管缓存合同 | 先确认账号额度；价格留空。无缓存计量证据时，重复前缀按再次输入预算 |
 
-另有 **Messages API**：`POST https://chat.intern-ai.org.cn/v1/messages`，使用 `x-api-key`；文档要求 `max_tokens` 为 1–32000，`system` 独立，响应可含 `thinking`，并明确 `usage.input_tokens/output_tokens` [S3]。它与 Chat 不是同一请求协议，不能仅替换 URL；详细工具兼容性及 thought 计量仍待核实。官方 Claude Code 接入建议单次输出不超过 8K，这是建议而非 Chat 硬上限 [S6]。本批不切换协议。
+另有 **Messages API**：`POST https://chat.intern-ai.org.cn/v1/messages`，使用 `x-api-key`；文档要求 `max_tokens` 为 1–32000，`system` 独立，响应可含 `thinking`，并明确非流式 `usage.input_tokens/output_tokens` [S3]。它与 Chat 不是同一请求协议，不能仅替换 URL。
+
+**2026-10-27，#96 流式接口核对：** Intern 官方 Chat Completions 文档明确提供 `stream=true` 和增量响应示例，也文档化 `intern-s2` 的 `thinking_mode`；因此不能据此称流式传输本身不可行。文档说明工具调用不支持流式，且 Chat 流式示例未给出 `usage` 或 `include_usage`；思考参数和流式参数虽都在文档中，但其组合行为没有单独承诺 [S2]。Messages API 则展示 `message_delta.usage.output_tokens`，而 `message_start` 示例没有 usage，流式事件示例没有 `input_tokens`；参数表未定义 `thinking_mode`。非流式 Messages 响应示例有 `input_tokens` 与 `output_tokens`，不能据此保证流式输入计量 [S3]。仓库的 `InternStreamAdapter` 仍基于显式选择的 Chat Completions SSE 路径；本轮不把它作为架构闭环或非流式实验的必要条件，也没有取得修复后的 provider live 证据。适配器只有在响应实际包含相应 usage 字段时才能结算；缺失字段仍须保留预算预留。流式保持可选且 #96 保持开放。若未来单独验收或比较 Messages 与 Chat 路径，须独立注册，并验证 thinking 行为及逐次 usage；不能把两种 API 的差异只归因于传输方式。离线范围与状态见 [#96 非流式主路径验收记录](../evals/star-stream-usage-96.md)。
 
 ## 最多 8 次短 probe
 

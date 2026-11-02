@@ -47,6 +47,8 @@ def public_attempt(
 ) -> dict[str, Any]:
     source = event.get("usage") if isinstance(event.get("usage"), Mapping) else event
     usage = {key: _count(source.get(key)) for key in USAGE_FIELDS}
+    status = event.get("status")
+    dispatch_status = "not_submitted" if status == "not_submitted" else event.get("dispatch_status")
     return {
         "attempt_id": safe_identifier(event.get("attempt_id")),
         "logical_call_id": safe_identifier(event.get("logical_call_id")),
@@ -55,7 +57,7 @@ def public_attempt(
         "action": safe_identifier(role),
         "attempt_index": _count(event.get("attempt_index")),
         "started_at_utc": event.get("started_at_utc") if isinstance(event.get("started_at_utc"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}T[0-9:.]+(?:Z|[+-]\d{2}:\d{2})", event["started_at_utc"]) else None,
-        "dispatch_status": event.get("dispatch_status") if event.get("dispatch_status") in {"reserved_dispatch_unconfirmed", "transport_observed"} else None,
+        "dispatch_status": dispatch_status if dispatch_status in {"reserved_dispatch_unconfirmed", "transport_observed", "not_submitted"} else None,
         "requested_model": safe_identifier(
             event.get("request_model_id", event.get("requested_model"))
         ),
@@ -66,7 +68,7 @@ def public_attempt(
             event.get("response_id", event.get("provider_request_id"))
         ),
         "finish_reason": safe_identifier(event.get("finish_reason")),
-        "status": event.get("status") if event.get("status") in {"success", "error"} else "unknown",
+        "status": "error" if status == "not_submitted" else status if status in {"success", "error"} else "unknown",
         "http_status": _count(event.get("http_status")),
         "duration_seconds": _duration(event.get("duration_seconds")),
         "error_category": safe_identifier(event.get("error_category")),
@@ -87,7 +89,30 @@ def public_attempt(
         "thinking_mode": event.get("thinking_mode")
         if type(event.get("thinking_mode")) is bool
         else None,
+        "temperature": event.get("temperature")
+        if type(event.get("temperature")) in {int, float} and math.isfinite(event.get("temperature"))
+        else None,
         "max_tokens": _count(event.get("max_tokens")),
+        "request_purpose": safe_identifier(event.get("request_purpose")),
+        "effective_timeout_seconds": _duration(event.get("effective_timeout_seconds")),
+        "deadline_at": _duration(event.get("deadline_at")),
+        "requests_timeout_seconds": _duration(event.get("requests_timeout_seconds")),
+        "retry_limit": _count(event.get("retry_limit")),
+        "response_headers_seconds": _duration(event.get("response_headers_seconds")),
+        "first_byte_seconds": _duration(event.get("first_byte_seconds")),
+        "first_event_seconds": _duration(event.get("first_event_seconds")),
+        "first_reasoning_seconds": _duration(event.get("first_reasoning_seconds")),
+        "first_content_seconds": _duration(event.get("first_content_seconds")),
+        "completion_seconds": _duration(event.get("completion_seconds")),
+        "reasoning_chars": _count(event.get("reasoning_chars")),
+        "content_bytes": _count(event.get("content_bytes")),
+        "event_count": _count(event.get("event_count")),
+        "provider_stream": event.get("provider_stream")
+        if type(event.get("provider_stream")) is bool
+        else None,
+        "requests_stream": event.get("requests_stream")
+        if type(event.get("requests_stream")) is bool
+        else None,
         "cost": None,
     }
 

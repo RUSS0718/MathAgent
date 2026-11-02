@@ -1,0 +1,189 @@
+{
+  "date": "2026-10-26",
+  "timezone": "Asia/Shanghai",
+  "spec": 87,
+  "issue": 95,
+  "residual_issue": 96,
+  "integration_branch": "showcase-star-robustness",
+  "engineering_status": "engineering-preview",
+  "live_status": "incomplete",
+  "tested_source": {
+    "revision": "a10481d4aaf6f61e419eb2abe095a8206faadb4c",
+    "source_sha256": "b262c978b2c7172d3dbb2af763d1ccba9a8a5636cf8d0a46034564848a3911f9"
+  },
+  "offline_runtime_revision": "598cb73f33562deb6b3d1f21441214c2bbcd1f59",
+  "offline_scope": "Same product runtime; two changed test files covered by current full product release.",
+  "checks": [
+    {
+      "log": "offline-final-verified.log",
+      "exit_code": 0,
+      "sha256": "9381d79a51ce12da6e16ef24ad18f9a2e039f66926cc965fd055e94c424b6f2e",
+      "terminal_marker": "repository_check=PASS"
+    },
+    {
+      "log": "release-final-resumed.log",
+      "exit_code": 0,
+      "sha256": "c55433be9d84d8997ba697bb9881858b3564c4fc46d839cf1cb6109ee622eab1",
+      "terminal_marker": "showcase_release=PASS"
+    },
+    {
+      "log": "npm-ci-final.log",
+      "exit_code": 0,
+      "sha256": "c805e92f4826ad01450febc8f9deab505d811655fe32225c87de8108c13f8258",
+      "terminal_marker": "added 66 packages"
+    },
+    {
+      "log": "npm-audit-final.log",
+      "exit_code": 0,
+      "sha256": "6d8c5c8f3d7684adb070417bd608d01ae90aa3dc26a65af03ffda4955f38d9a3",
+      "terminal_marker": "found 0 vulnerabilities"
+    },
+    {
+      "log": "frontend-check-final.log",
+      "exit_code": 0,
+      "sha256": "76813b9b9851555222207fac2ecd779371cbe7994e9c1902c80a7e83f8d469f3",
+      "terminal_marker": "pass 27"
+    },
+    {
+      "log": "browser-general-final.log",
+      "exit_code": 0,
+      "sha256": "17c5c31376299a3d1f89c66a9a76dccb1ccc36385c0f25e409d56b527a0e6264",
+      "terminal_marker": "54 passed"
+    },
+    {
+      "log": "browser-product-frozen.log",
+      "exit_code": 0,
+      "sha256": "ecf93aefeadaf9dd74319a693d86d3ad3f3af586b567c571b63d39b417f40a18",
+      "terminal_marker": "12 passed"
+    }
+  ],
+  "reviews": {
+    "review-standards-followup.md": "c71dd1b72bb0fa124cf941a3b425d6a1a9d915e6964a570ce646b29cccd7bbbe",
+    "review-spec-final.md": "c1ff960fd5a3ee6b2eda5707e1b6492818656255c51d1012460bab3039377827",
+    "review-gate-fix.md": "755c3df308d4ff82f85bc01a1713552fb8ca12260867289e0fc9adbae86e76a1"
+  },
+  "qualification": {
+    "source": {
+      "revision": "a10481d4aaf6f61e419eb2abe095a8206faadb4c",
+      "source_sha256": "b262c978b2c7172d3dbb2af763d1ccba9a8a5636cf8d0a46034564848a3911f9"
+    },
+    "tests": 107,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "mutations": 5,
+    "evidence_kind": "live"
+  },
+  "original_round": {
+    "stop_reason": "e1_gate_failed",
+    "executed_runs": 2,
+    "E1_executed": 2,
+    "E1_unexecuted": 2,
+    "E2_executed": 0,
+    "E2_unexecuted": 6,
+    "usage": {
+      "charged_tokens": 33821,
+      "cost": null,
+      "http_attempts": 5,
+      "known_tokens": 4967,
+      "local_input_estimate": 34059,
+      "logical_calls": 5,
+      "reserved_tokens": 28854,
+      "tool_calls": 0,
+      "unknown_attempts": 2,
+      "unknown_tool_calls": 0,
+      "unresolved_attempts": 0
+    },
+    "preflights": 4,
+    "wall_time_seconds": 333.10899999999674,
+    "natural_nonfastpath": false,
+    "mechanisms": {
+      "live_challenge": "not_covered",
+      "live_replan": "not_covered",
+      "live_traceback": "not_covered"
+    }
+  },
+  "user_authorized_retry": {
+    "kind": "single-stream-diagnostic-retry",
+    "executed_runs": 1,
+    "status": "failed",
+    "e1_gate": false,
+    "delivery_wall_time_seconds": 40.75,
+    "budget": {
+      "charged_tokens": 29193,
+      "cost": null,
+      "deadline_at": 1793020407.6907372,
+      "ended_at": 1793020148.38564,
+      "estimate_source": "local_utf8_bytes",
+      "http_attempts": 2,
+      "limits": {
+        "max_http_attempts": 8,
+        "max_model_calls": 6,
+        "max_runtime_seconds": 300,
+        "max_tokens": 32768,
+        "max_tool_calls": 1
+      },
+      "local_input_estimate": 12809,
+      "logical_calls": 2,
+      "provider_known": {
+        "completion_tokens": null,
+        "prompt_tokens": null,
+        "total_tokens": null
+      },
+      "provider_unknown_fields": {
+        "completion_tokens": 2,
+        "prompt_tokens": 2,
+        "total_tokens": 2
+      },
+      "reserved_tokens": 29193,
+      "started_at": 1793020110.377127,
+      "tool_calls": 0,
+      "tool_wall_time_seconds": 0,
+      "unknown_attempts": 2,
+      "unknown_tool_calls": 0,
+      "unresolved_attempts": 0,
+      "wall_time_seconds": 38.0085129737854
+    },
+    "original_round_unchanged": true,
+    "counts_toward_original_E1": false
+  },
+  "combined_disclosure": {
+    "real_http_requests": 7,
+    "problem_tool_calls": 0,
+    "environment_probe_calls": 6,
+    "known_token_subtotal": 4967,
+    "reserved_tokens": 58047,
+    "cost": null
+  },
+  "formal_verification": "not_verified",
+  "issue_states": {
+    "88..94": "closed",
+    "95": "open",
+    "87": "open",
+    "80": "open",
+    "70": "unchanged",
+    "96": "open"
+  },
+  "limitations": [
+    "A script exit code of zero is not mathematical or E1 acceptance.",
+    "Missing streaming provider usage is reserved, never counted as zero.",
+    "AI mathematical review is independent of Intern S2 but is not human certification.",
+    "The one full-suite skip is a release recursion guard; applicable Docker tests ran.",
+    "The publication changes only documentation after the tested source; it does not claim new runtime testing."
+  ],
+  "external_artifact_sha256": {
+    "release-gates.json": "a9896a07b4b86b723bb1d8cb821e80dfe34796b96659c28c72f98d1a43ad0d94",
+    "qualification.json": "f349ec8fcd8ff964f0b1c18d716f49f82e28028082cf11c6eba8bd5406b1806b",
+    "live-round-1/result.json": "516e11fb8dfd539987b00cde31e41ce0bc578a01707e604a4b246341e4ebb937",
+    "live-round-1/hashes.json": "d2c1ba7637801872b8d06769d6a5a10eb46cdee4f26055185fc6fed8e3b712b7",
+    "stream-retry-1/registration.json": "b6c047d52122b55597f2c6a7d245ed4e4322f501f96cbfab989232b99e74855b",
+    "stream-retry-1/qualification.json": "81cae9e74899acdc5a3bde9d6f35d769f4428efb04bca70a12c55384a0ff4648",
+    "stream-retry-1/result.json": "8d6d574d3efe57c2d4acae9816b3c5cad2875fab493d345ce47b875e674f7691",
+    "stream-retry-1/hashes.json": "0378f97ffdc1f8f050824698fa1c52c6a1c5be0b38907521255401c46bbfb0a4",
+    "live-summary.json": "be754de0a64dc82f6b5a240aaaa4dff56fe0115e9d585d679cc0d79987391d33",
+    "offline-final.log": "0bed110746d598bb5a99ec559d651c442cb2984a3c8057977b2a82e1cf65ecd3",
+    "release-final.log": "df6292f989f13e052f151f565b4cedf61eba3cf751f16a694a411294f5338719",
+    "release-final-verified.log": "6fe79b5170c9a5b355d25164869c111a6fcfa773f4c939d6e97fe86510dce784",
+    "release-final-complete.log": "89bcce6de3dadfe3a1b1f77b9b3e1fae933a104fb51d3b0b6f23337a7847a533"
+  }
+}

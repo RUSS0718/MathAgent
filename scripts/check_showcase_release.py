@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -14,6 +15,11 @@ REPLAY = ROOT / "docs" / "replay" / "showcase-replay-v0.1.json"
 EVIDENCE_JSON = ROOT / "docs" / "evals" / "v0.2-release-evidence.json"
 EVIDENCE_MD = ROOT / "docs" / "evals" / "v0.2-release-evidence.md"
 BASELINE = ROOT / "BASELINE.json"
+STAR_ACCEPTANCE_TESTS = (
+    "tests.test_star_product_explore_compute.StarExploreComputeTest",
+    "tests.test_star_product_protocol_failure.StarProtocolFailureTest",
+    "tests.test_star_product_protocol_failure.StarProtocolFenceTest",
+)
 sys.path.insert(0, str(ROOT))
 
 from showcase.redaction import sensitive_markers  # noqa: E402
@@ -80,23 +86,42 @@ def check_release_evidence() -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--require-reference",
+        action="store_true",
+        help="fail when the selected full Reference tests are skipped or missing",
+    )
+    args = parser.parse_args()
+    test_command = [sys.executable, "scripts/run_unittest_report.py"]
+    if args.require_reference:
+        test_command.append("--require-reference")
+    test_command.extend(STAR_ACCEPTANCE_TESTS)
+    if args.require_reference:
+        test_command.extend([
+            "tests.test_star_product_full_modes.StarFullModeTest",
+            "tests.test_star_rb06_recovery",
+        ])
     checks = [
         [sys.executable, "scripts/check_workspace.py", "--offline"],
-        [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
+        [sys.executable, "scripts/check_solver_release.py", "--matrix-only"],
+        test_command,
         [sys.executable, "demo_server.py", "--help"],
         [sys.executable, "showcase_server.py", "--help"],
     ]
     for command in checks:
         environment = os.environ.copy()
-        if command[1:4] == ["-m", "unittest", "discover"]:
-            environment["SHOWCASE_RELEASE_GATE"] = "1"
         completed = subprocess.run(
             command, cwd=ROOT, capture_output=True, text=True, check=False, env=environment
         )
+        if command == test_command:
+            print(completed.stdout, end="")
+            print(completed.stderr, end="")
         if completed.returncode != 0:
             print(f"showcase_release=FAIL command={' '.join(command)}")
-            print(completed.stdout)
-            print(completed.stderr)
+            if command != test_command:
+                print(completed.stdout)
+                print(completed.stderr)
             return completed.returncode or 1
     try:
         check_baseline()

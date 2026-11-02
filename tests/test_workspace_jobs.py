@@ -123,6 +123,5 @@ class WorkspaceJobsContractTest(unittest.TestCase):
         self.assertEqual(503, unavailable.status_code)
         self.assertEqual("capability_unavailable", unavailable.get_json()["code"])
 
-
 if __name__ == "__main__":
     unittest.main()
