@@ -121,6 +121,7 @@
 | 有意平台适配 | 原 `agent_runner.py` 调 Copilot CLI，使用可恢复会话及工作目录文件 | Intern S2/API、共享 SQLite、LangGraph、Workbench；由 SP-02/03/07/08 验收真实动作和身份 |
 | 有意加强 | 上游代码执行经过 CLI/工作目录及 URL deny；不是本项目要求的 Docker OS 限制 | SP-09 使用经验证的隔离环境、硬输出上限、内容可核验产物；不可用则拒绝完整模式 |
 | 论文/源码与严格验收冲突 | `orchestrator_solve.py:481–487` 在整题 Verifier 调用失败时仍接受 solution；§3.5 要求最终审核 | 不复制失效开放行为。SP-10 必须在失败/拒绝时标明未审查或未通过，不标 verified |
+| 有意适配：统一 ReplanDecision 审批边界（spec #70，ALIGN-03 #73） | 固定上游 `orchestrator_execution.py:362-386`（固定 commit `5f2a86b`）把 Guidance 诊断期的 `action_type=replan` 短路为 APPROVE_REPLAN，不再调用 `decide_replan`，注释明言是避免重复 Meta 调用（"the persistent meta session has the same context either way"） | 本项目选择更明确的审批边界（STAR Core §11.3 "action_type 不能代替 MetaDecision"）：Guidance replan 一律进入独立 ReplanDecision，仅当前转换的有效 APPROVE_REPLAN 归档换计划并携带本次禁止方向与救援成果。这是有意适配，不宣称该差异本身证明论文错误 |
 | 原标签与证据范围差异 | 论文 §3.4 将执行 Python 结果视为 grounded；上游 easy-verify 以代码回执支持审查 | 仅支持实际检查的 claim/scope；不能升级整题形式化证明（SC-027/AC-44） |
 | 恢复要求加强 | 上游 state.json 与 PROBLEM_STATE.md 是分开写入的文件；文件存在不能证明原子接受/记账 | ADR-0014 跨状态提交合同由 SP-08 验证；当前公共 Job 尚无 STAR 接受步骤，风险门槛 blocked |
 | 项目新增 | SC-039..043、AC-34..44 是 Best-Effort 项目扩展 | 单独模式、零调用终止选择、候选不可变历史；不得归功于原 STAR |

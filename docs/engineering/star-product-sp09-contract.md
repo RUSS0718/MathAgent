@@ -6,7 +6,7 @@ Issue [#65](https://github.com/RUSS0718/MathAgent/issues/65) 承接父 spec [#56
 
 - 只有可信 server config 提供本地镜像的完整 `sha256:<64 hex>` ID 时，STAR runtime 才注册容器 Python。Flask app 可从环境变量 `SHOWCASE_STAR_PYTHON_IMAGE_ID` 读取该 ID；Workbench 请求不能选择镜像、路径或 Docker 参数。`SHOWCASE_STAR_ENABLED` 仍须显式开启。
 - 运行前通过本地 `docker image inspect` 核对 image ID、`docker-python-v1` policy、Python 版本、基础镜像 digest 和数学库标签。缺镜像、daemon 不可用或标签不符时 fail closed，不拉取镜像、不退回宿主 Python。未配置时不注册 `python_math`，旧 AST 模式不变。
-- 容器使用 `network=none`、只读 root、非 root UID、无 capabilities、no-new-privileges、256 MiB memory/swap、0.5 CPU、32 PIDs、CPU 2/3 秒软硬限制、文件大小上限、无执行权限的独立 `/tmp`，没有 bind mount。Python source 通过 stdin 提供；没有 shell 插值。
+- 容器使用 `network=none`、只读 root、非 root UID、无 capabilities、no-new-privileges、256 MiB memory/swap、0.5 CPU、32 PIDs、CPU 2/3 秒软硬限制（ALIGN-10 #80 实测校准为 10/15 秒：live 批次中自然数学脚本含 sympy 导入与上万状态 DP 普遍超 3 秒 CPU，全部化为 unknown 超时；上游预算 600 秒，20 秒墙钟/15 秒 CPU 仍远低于并保留硬上限。原始值见本合同 git 历史）、文件大小上限、无执行权限的独立 `/tmp`，没有 bind mount。Python source 通过 stdin 提供；没有 shell 插值。
 - Docker CLI stdout 和 stderr 由容器外二进制 drain 线程共用总字节上限。超过、超时或取消时终止并移除实际容器；只有检查并确认清理后才报告 `cleanup_verified`。清理状态未知时保留 `unknown_outcome`，不猜测零退出码。
 - 每个 Registry 调用以 canonical JSON 保存实际 arguments（`{"code": "..."}`），并分别保存 Python source、stdout、stderr 和执行 receipt。SHA-256 内容引用归属同一 Run；下载路由先检查登录和 Job 所有权，再核验 digest。Job、报告和 SSE 只投影脱敏摘要与引用，不带代码或原始输出。
 - `easy-verify` 仅在真实成功 receipt 与预期有限计算匹配后标记 `verified`，范围为 `finite_computation`。未执行、拒绝、输出越界、非零退出、超时、取消、unknown、损坏或缺失引用都不能提升该标签；有限计算不代表完整证明。

@@ -16,8 +16,14 @@
 - **完整 STAR 参考模式（STAR Reference）**：按完整 STAR Core 行为合同组织数学任务的求解模式，各机制按适用条件参与执行并保留可审查结果；项目的 Best-Effort 扩展独立验收。该名称不代表复现论文成绩或证明数学正确性。
 - **Solver Run**：Solver Harness 的一次隔离执行，拥有独立的 `run_id`、状态版本和事件记录；与产品 Run 共用数据库，但状态存在独立表中。
 - **Plan Attempt**：同一 Solver Run 内一次可被回退或重规划替换的计划尝试；它也是 Reasoner 会话的隔离边界。
+- **ReplanDecision**：`Guidance.action_type=replan` 之后进入的独立审批裁决；只有当前转换的有效 `APPROVE_REPLAN` 才归档换计划并传入本次禁止方向与救援成果，Guidance 请求本身不取得执行权（ALIGN-03）。
 - **Candidate**：可被最终选择的完整答案版本；候选不是已证定理，必须保留来源、证据和失效状态。
 - **Best-Effort Finalization**：预算耗尽后仅根据已持久化候选和证据选择答案的过程；它不新增模型或工具调用。
 - **State Revision**：Solver Run 状态快照的单调版本号，用于拒绝基于过期快照的写入。
 - **STAR AC**：STAR Core 实施规格中的验收编号；引用时写作 `STAR AC-06`，不得与 v0.2 或 Solver Harness 的同号用例混用。
 - **v0.2 AC**：v0.2 Release Evidence 中的验收编号；引用时写作 `v0.2 AC-06`，例如真实 Intern 工具闭环。
+- **已知协议失败（Known Protocol Failure）**：提供方完整返回（finish_reason 与用量已知）但 JSON/schema 校验失败的响应；调用审计记录为 `protocol_failed` 并保留 finish_reason、已知用量与脱敏响应引用，可在剩余预算内以独立新调用身份有界修复或明确终止，不属于未知远端结果。
+- **未知远端结果（Unknown Outcome）**：网络中断、未完成流或在途进程退出导致请求结果不可证实的状态；调用保持 `unknown_outcome` 并进入 needs_review，零自动重发，只有用户显式选择后才以新调用身份重试，且保留未知预留与原 deadline。
+- **Verifier 计算续接（Verifier Compute Continuation）**：审查者通过回复协议提出 `tool_request`、运行时经既有 Registry 与隔离执行器实际执行、真实回执进入相同审查会话续接的机制；未完成或被拒绝的请求不得解析为接受裁决或证据升级，请求次数有界且全部计入原 Run 账本。
+- **探索计算续接（Explore Compute Continuation）**：Explore 通过回复协议提出受控 `tool_request`、运行时经既有 Registry 与隔离执行器实际执行、真实回执以 `explore-tool:` 身份进入相同探索会话续接的机制；计算产出与来源随探索发现进入后续探索与 Planner 实际请求，探索发现始终保持 `unverified_exploration` 身份、不得进入已证引理账本，未完成或重复的请求不得解析为探索结论，请求次数有界且全部计入原 Run 账本。
+- **分类成果（Classified Outcome）**：Verifier 在步骤裁决回复中明确裁定的 Lemma、Conjecture、Computation、Definition 或 Answer；控制器核验分类、报告来源、真实工具回执与依赖后原子追加权威账本（`verified_results_ledger`）。部分成果的成立与整步是否推进无关；Conjecture 的证据等级为 `conjecture`，永不进入已证前提；失效按来源与依赖闭包就地标记，救援由当前裁决控制。
