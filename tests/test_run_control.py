@@ -111,13 +111,13 @@ class RunControlContractTest(unittest.TestCase):
             time.sleep(0.01)
         self.fail(job)
 
-    def wait_attempt_audit(self, job_id):
+    def wait_attempt_audit(self, job_id, predicate=None):
         for _ in range(300):
             report = self.client.get(f"/api/agent/jobs/{job_id}/report").get_json()["report"]
-            if report["request_attempts"]:
+            if report["request_attempts"] and (predicate is None or predicate(report)):
                 return report
             time.sleep(0.01)
-        self.fail("request attempt audit not persisted")
+        self.fail("request attempt audit did not reach expected state")
 
     def test_cancel_inflight_stops_dispatch_and_preserves_unknown_budget(self):
         job_id = self.create_job()
@@ -341,7 +341,11 @@ class RunControlContractTest(unittest.TestCase):
         self.assertTrue(self.entered.wait(2))
         self.client.post(f"/api/agent/jobs/{job_id}/cancel", json={}, headers=self.headers())
         self.release.set()
-        report = self.wait_attempt_audit(job_id)
+        report = self.wait_attempt_audit(
+            job_id,
+            lambda report: report["budget"]["provider_known"]["total_tokens"] == 10
+            and report["budget"]["reserved_tokens"] == 0,
+        )
         self.assertEqual(10, report["budget"]["provider_known"]["total_tokens"])
         self.assertEqual(0, report["budget"]["reserved_tokens"])
         self.assertEqual(1, self.post.call_count)
