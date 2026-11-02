@@ -8,9 +8,21 @@
 
 ## 当前 ALIGN 状态
 
+最新 RB08 工程门禁、真实实验失败及逐项 ROB-AC 边界见 [RB08 发布与真实实验记录](evals/star-rb08-release.md)。冻结源码 a10481d 的发布检查、前端、54项通用及12项产品浏览器检查通过；真实原E1执行2/4后停止，E2未执行。用户授权的一次独立流式复测仍未完成整题审查，新缺陷为 [#96](https://github.com/RUSS0718/MathAgent/issues/96)。#95/#87/#80保持开放，整体为engineering-preview。下方维护版本的测试数字属于历史记录。
+
 spec #70（ALIGN-01..ALIGN-10，#71..#80）承接 #56 的语义偏移修复与重新验收：裁决消费与新动作身份、独立 ReplanDecision、Verifier/Explore 受控计算、分类账本与证明传递、协议失败与 unknown 分离、跨流程恢复，最终来源复核与发布判断见 [ALIGN-10 来源映射](evals/star-product-align10-source-mapping.md) 与 [ALIGN-10 发布记录](evals/star-product-align10-release.md)。记录区分 scripted/故障注入/live/replay 证据；真实非 Explore 快通道闭环尚未取得，历史工单关闭不升级为完整能力结论。
 
-当前维护 #81–#86、后续 #82 及最终证据边界见发布记录顶部；#80 的 ALIGN-AC-18 仍未通过，#70 不自动关闭。当前 47dc522 发布检查 PASS，但完整 AC-19 的浏览器与最终零 skip 详证未覆盖，AC-18 仍未通过；离线同树 648 项中 618 通过、30 跳过，不沿用历史计数。详见发布记录与[脱敏证据摘要](evals/star-maintenance-evidence-summary.json)。
+历史维护 #81–#86、后续 #82 及当时证据边界见发布记录顶部。当时47dc522发布检查PASS，AC-19浏览器与最终零skip详证未覆盖；离线同树648项中618通过、30跳过。这些是历史数字，不能替代上方RB08最终门禁。详见发布记录与[脱敏证据摘要](evals/star-maintenance-evidence-summary.json)。
+
+RB-01 的仓库公共离线入口与证据边界见 [交付来源与离线复评 API](engineering/star-rb01-offline-acceptance.md)。该接口不派发模型或工具，历史重判不自动升级 #80 验收。
+
+RB-03 的增量 `answer_claim.claim_type`、旧声明兼容、短题完整交付和受控测试边界见 [短题完整交付与证明义务合同](engineering/star-rb03-proof-obligations.md)。三调用受控测试不替代 RB-08 的真实模型验收。
+
+RB-04 的增量执行、传输、整题审查、文本绑定和未形式化验证字段及 legacy 兼容见 [产品结果语义合同](engineering/star-rb04-result-semantics.md)。受控公共测试和前端渲染测试不替代 RB-08 的最终发布门禁。
+
+RB-06 的零付费公共故障、真实隔离、进程恢复及五类旁路入口见 [E3 故障与恢复验收](engineering/star-rb06-e3-acceptance.md)。受控机制不标为 live 自然触发，skip 不计通过。
+
+RB-07 的冻结题单、独立评分、双层硬预算和认证公共 Job 串行入口见 [固定实验协调器](engineering/star-rb07-experiment-coordinator.md)。受控矩阵不替代 RB-08 的真实模型与最终发布验收。
 
 ## 历史 SP 集成语境
 
