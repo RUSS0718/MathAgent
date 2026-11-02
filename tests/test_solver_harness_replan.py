@@ -69,6 +69,30 @@ class ReplanTest(unittest.TestCase):
             ["safe"], [r["result_id"] for r in planner.requests[0]["accepted_results"]]
         )
 
+    def test_reuse_rejects_ambiguous_invalidated_source_but_keeps_exact_safe_id(self):
+        safe = {"result_id": "safe", "source": "shared", "statement": "safe",
+                "dependencies": [], "evidence_level": "tool_verified"}
+        results = [safe, {**safe, "result_id": "ambiguous", "source": "next",
+                          "dependencies": ["shared"]},
+                   {**safe, "result_id": "exact", "source": "last",
+                    "dependencies": ["safe"]}]
+        planner = ScriptedModelPort([{**PLAN, "version": 2}])
+        store = SQLiteStore(":memory:")
+        with SolverHarness(store=store, config={"max_model_calls": 2}) as harness:
+            self.seed(harness)
+            run = harness.get_run("r")
+            harness.commit_event("r", expected_revision=run["state_revision"],
+                                 event={"event_id": "invalid-history", "type": "fixture_loaded"},
+                                 state_updates={"accepted_results": results,
+                                                "failure_records": [{"invalidated_results": [
+                                                    {**safe, "result_id": "bad", "statement": "bad"}]}]})
+        with SolverHarness(store=store, model_port=planner, meta_port=ScriptedModelPort([DECISION]),
+                           config={"max_model_calls": 2}) as harness:
+            result = harness.solve("prove", {"run_id": "r"})
+            self.assertEqual(result, harness.get_run("r"))
+        self.assertEqual(["safe", "exact"],
+                         [r["result_id"] for r in planner.requests[0]["accepted_results"]])
+
     def run_case(self, config, replies):
         store = SQLiteStore(":memory:")
         with SolverHarness(store=store, config=config) as seed:

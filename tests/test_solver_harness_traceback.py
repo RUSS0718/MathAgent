@@ -112,6 +112,8 @@ class TracebackTest(unittest.TestCase):
                     event={"event_id": "fixtures", "type": "fixture_loaded"},
                     state_updates={
                         "accepted_results": [
+                            {"statement": "orphan invalid", "dependencies": [],
+                             "evidence_level": "candidate"},
                             {
                                 "result_id": "r1",
                                 "source": "s1",
@@ -163,8 +165,8 @@ class TracebackTest(unittest.TestCase):
         self.assertEqual(["safe"], [r["result_id"] for r in state["accepted_results"]])
         failure = state["failure_records"][0]
         self.assertEqual(
-            ["r1", "r2", "r3", "missing", "unknown"],
-            [r["result_id"] for r in failure["invalidated_results"]],
+            [None, "r1", "r2", "r3", "missing", "unknown"],
+            [r.get("result_id") for r in failure["invalidated_results"]],
         )
         self.assertEqual("tool_verified", failure["rescued_results"][0]["evidence_level"])
         self.assertEqual("STEP_EXECUTE", state["phase"])

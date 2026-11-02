@@ -78,9 +78,12 @@ class SolverHarnessVerificationTest(unittest.TestCase):
                         result, harness.solve("计算", {"run_id": "gates", "plan": plan})
                     )
                 state = result["state"]
-                self.assertEqual("running", state["status"])
+                # Invalid Gate data stops the Job instead of leaving the Solver as running.
+                self.assertEqual("running" if accepted else "partial_aborted", state["status"])
                 self.assertIsNone(state["finalization_reason"])
                 self.assertEqual("s2" if accepted else "s1", state["current_step"])
+                if not accepted:
+                    self.assertEqual("STEP_VERIFY", state["phase"])
                 self.assertEqual(
                     "ACCEPTED" if accepted else "VERIFYING", state["steps"]["s1"]["status"]
                 )
