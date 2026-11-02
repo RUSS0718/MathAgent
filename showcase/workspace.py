@@ -587,6 +587,37 @@ class WorkspaceStore:
         payload["last_event_id"] = self.last_event_id(job_id, user_id)
         return payload
 
+    def get_job_by_idempotency_key(
+        self, *, user_id: str, idempotency_key: str, request_digest: str
+    ) -> dict[str, Any]:
+        from .experiment_transport_projection import project_transport_identity
+
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM workspace_jobs WHERE user_id=? AND idempotency_key=?",
+                (user_id, idempotency_key),
+            ).fetchall()
+        if not rows:
+            raise WorkspaceError("job_not_found", status=404)
+        if len(rows) != 1:
+            raise WorkspaceError("idempotency_lookup_ambiguous", status=409)
+        row = rows[0]
+        if row["request_digest"] != request_digest:
+            raise WorkspaceError("idempotency_conflict", status=409)
+        with self._lock:
+            state_row = self._connection.execute(
+                "SELECT state_json FROM solver_states WHERE run_id=?", (row["job_id"],)
+            ).fetchone()
+            try:
+                state = json.loads(state_row["state_json"]) if state_row is not None else None
+            except (TypeError, ValueError):
+                state = None
+            transport_identity = project_transport_identity(state, row["job_id"])
+        payload = self._job_payload(row)
+        payload["request_digest"] = row["request_digest"]
+        payload["transport_identity"] = transport_identity
+        return payload
+
     def verification_mode(self, job_id: str) -> str:
         with self._lock:
             row = self._connection.execute("SELECT verification_mode FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
@@ -786,6 +817,7 @@ class WorkspaceService:
         input_user_file_id: Any = None,
         verification_mode: str = "auto",
         budget_limits: RunBudgetLimits | None = None,
+        deadline_at: float | None = None,
         solver_mode: str = "legacy",
         solver_options: Any = None,
         solver_hint: Any = None,
@@ -803,10 +835,19 @@ class WorkspaceService:
             raise WorkspaceError("verification_mode_invalid", status=400)
         if not _is_uuid_v4(idempotency_key):
             raise WorkspaceError("idempotency_key_invalid", status=400)
-        request_parts = (session_id, problem, web_search_enabled, input_user_file_id, verification_mode)
-        digest = _request_digest(*request_parts) if solver_mode == "legacy" else _request_digest(*request_parts, solver_mode)
-        if solver_hint is not None:
-            digest = _request_digest(digest, solver_hint)
+        if budget_limits is not None and deadline_at is not None and deadline_at > time.time() + budget_limits.max_runtime_seconds:
+            raise WorkspaceError("run_budget_deadline_invalid", status=400)
+        digest = workspace_job_request_digest(
+            session_id=session_id,
+            message=problem,
+            web_search_enabled=web_search_enabled,
+            input_user_file_id=input_user_file_id,
+            verification_mode=verification_mode,
+            solver_mode=solver_mode,
+            solver_hint=solver_hint,
+            budget_limits=budget_limits,
+            deadline_at=deadline_at,
+        )
         payload, existing = self.store.create_job(
             user_id=user_id,
             session_id=session_id,
@@ -820,7 +861,23 @@ class WorkspaceService:
             input_user_file_id=input_user_file_id,
         )
         if budget_limits is not None:
-            self.budget_ledger.ensure(payload["job_id"], budget_limits)
+            self.budget_ledger.ensure(
+                payload["job_id"], budget_limits, deadline_at=deadline_at
+            )
+            snapshot = self.budget_ledger.snapshot(payload["job_id"])
+            expected_limits = {
+                "max_model_calls": budget_limits.max_model_calls,
+                "max_http_attempts": budget_limits.max_http_attempts,
+                "max_tool_calls": budget_limits.max_tool_calls,
+                "max_tokens": budget_limits.max_tokens,
+                "max_runtime_seconds": budget_limits.max_runtime_seconds,
+            }
+            if (
+                snapshot is None
+                or snapshot["limits"] != expected_limits
+                or (deadline_at is not None and snapshot["deadline_at"] != deadline_at)
+            ):
+                raise WorkspaceError("run_budget_binding_mismatch", status=409)
         if not existing:
             self._submit(payload["job_id"])
         return payload, existing
@@ -927,6 +984,17 @@ class WorkspaceService:
     def _problem(self, job_id: str) -> str:
         return self.store.problem(job_id)
 
+    def get_job_by_idempotency_key(
+        self, *, user_id: str, idempotency_key: str, request_digest: str
+    ) -> dict[str, Any]:
+        job = self.store.get_job_by_idempotency_key(
+            user_id=user_id,
+            idempotency_key=idempotency_key,
+            request_digest=request_digest,
+        )
+        job["budget"] = self.budget_ledger.snapshot(job["job_id"])
+        return job
+
     def active_jobs(self, user_id: str, session_id: str | None = None) -> list[dict[str, Any]]:
         payloads = self.store.active_jobs(user_id, session_id)
         for payload in payloads:
@@ -1003,6 +1071,44 @@ def _request_digest(*args: Any) -> str:
     else:
         payload = {"operation": list(args)}
     return hashlib.sha256(_json(payload).encode("utf-8")).hexdigest()
+
+
+def workspace_job_request_digest(
+    *,
+    session_id: str,
+    message: str,
+    web_search_enabled: bool = False,
+    input_user_file_id: Any = None,
+    verification_mode: str = "auto",
+    solver_mode: str = "legacy",
+    solver_hint: str | None = None,
+    budget_limits: RunBudgetLimits | None = None,
+    deadline_at: float | None = None,
+) -> str:
+    """Fingerprint the exact public Job request, including any frozen budget."""
+    request_parts = (session_id, message, web_search_enabled, input_user_file_id, verification_mode)
+    digest = (
+        _request_digest(*request_parts)
+        if solver_mode == "legacy"
+        else _request_digest(*request_parts, solver_mode)
+    )
+    if solver_hint is not None:
+        digest = _request_digest(digest, solver_hint)
+    if budget_limits is not None or deadline_at is not None:
+        digest = _request_digest(
+            digest,
+            {
+                "budget_limits": None if budget_limits is None else {
+                    "max_model_calls": budget_limits.max_model_calls,
+                    "max_http_attempts": budget_limits.max_http_attempts,
+                    "max_tool_calls": budget_limits.max_tool_calls,
+                    "max_tokens": budget_limits.max_tokens,
+                    "max_runtime_seconds": budget_limits.max_runtime_seconds,
+                },
+                "deadline_at": deadline_at,
+            },
+        )
+    return digest
 
 
 def _is_uuid_v4(value: str) -> bool:

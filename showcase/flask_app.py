@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import uuid
 from collections.abc import Mapping
@@ -29,6 +30,7 @@ from .final_evidence import checked_verification
 from .loopback import AuthSession, LoopbackStore
 from .polynomial import PolynomialChecker
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
+from .run_budget import RunBudgetLimits
 from .run_service import (
     RunNotFoundError,
     RunResumeUnavailable,
@@ -348,6 +350,28 @@ def create_app(
                 return _json_error("capability_unavailable", 503)
             if file_id not in app.extensions["showcase_files"]:
                 return _json_error("file_not_found", 404)
+        budget_limits = None
+        deadline_at = payload.get("deadline_at")
+        raw_limits = payload.get("budget_limits")
+        if raw_limits is not None:
+            expected_limit_keys = {
+                "max_model_calls", "max_http_attempts", "max_tool_calls",
+                "max_tokens", "max_runtime_seconds",
+            }
+            if not isinstance(raw_limits, dict) or set(raw_limits) != expected_limit_keys:
+                return _json_error("run_budget_invalid", 400)
+            try:
+                budget_limits = RunBudgetLimits(**raw_limits)
+            except (TypeError, ValueError):
+                return _json_error("run_budget_invalid", 400)
+            if (
+                type(deadline_at) not in {int, float}
+                or not math.isfinite(deadline_at)
+                or deadline_at <= 0
+            ):
+                return _json_error("run_budget_deadline_invalid", 400)
+        elif deadline_at is not None:
+            return _json_error("run_budget_invalid", 400)
         idempotency_key = request.headers.get("Idempotency-Key", "")
         try:
             job, existing = workspace_service.create_job(
@@ -358,6 +382,8 @@ def create_app(
                 web_search_enabled=payload.get("web_search_enabled", False) is True,
                 input_user_file_id=file_id,
                 verification_mode=payload.get("verification_mode", "auto"),
+                budget_limits=budget_limits,
+                deadline_at=deadline_at,
                 solver_mode=payload.get("solver_mode", "legacy"),
                 solver_options=payload.get("solver_options"),
                 solver_hint=payload.get("solver_hint"),
@@ -366,6 +392,31 @@ def create_app(
             return _workspace_error(exc)
         status = 200 if existing else 202
         return jsonify({"success": True, "job_id": job["job_id"], "status": job["status"], "existing": existing}), status
+
+    @app.get("/api/agent/jobs/by-idempotency")
+    def get_job_by_idempotency_key() -> tuple[Response, int] | Response:
+        session = _require_auth(g.auth_session)
+        idempotency_key = request.headers.get("Idempotency-Key", "")
+        request_digest = request.headers.get("X-Request-Digest", "")
+        try:
+            if uuid.UUID(idempotency_key).version != 4:
+                raise ValueError
+        except (AttributeError, TypeError, ValueError):
+            return _json_error("idempotency_key_invalid", 400)
+        if (
+            len(request_digest) != 64
+            or any(character not in "0123456789abcdef" for character in request_digest)
+        ):
+            return _json_error("request_digest_invalid", 400)
+        try:
+            result = workspace_service.get_job_by_idempotency_key(
+                user_id=session.user_id,
+                idempotency_key=idempotency_key,
+                request_digest=request_digest,
+            )
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+        return jsonify(result)
 
     @app.get("/api/agent/jobs/<job_id>/artifacts/<digest>")
     def tool_artifact(job_id, digest):

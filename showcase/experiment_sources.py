@@ -4,9 +4,65 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path, PureWindowsPath
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
+
+from .experiment_manifest import canonical_json
+
+_APPLIED_MODEL_KEYS = {
+    "name", "thinking_mode", "temperature", "max_output_tokens",
+    "request_timeout_seconds", "retry", "solver_mode", "verification_mode",
+}
+
+
+class FileAppliedModelConfig:
+    """Read a strict, credential-free snapshot of already applied model settings."""
+
+    def __init__(self, path: str | Path) -> None:
+        value = _read_control_json(path, "experiment_model_config_invalid")
+        if not isinstance(value, dict) or set(value) != {"schema_version", "model"}:
+            raise ValueError("experiment_model_config_invalid")
+        model = value.get("model")
+        if (
+            value.get("schema_version") != 1
+            or not isinstance(model, dict)
+            or set(model) != _APPLIED_MODEL_KEYS
+            or not isinstance(model.get("name"), str)
+            or type(model.get("thinking_mode")) is not bool
+            or type(model.get("temperature")) not in {int, float}
+            or not math.isfinite(model["temperature"])
+            or type(model.get("max_output_tokens")) is not int
+            or type(model.get("request_timeout_seconds")) not in {int, float}
+            or not math.isfinite(model["request_timeout_seconds"])
+            or type(model.get("retry")) is not int
+            or not isinstance(model.get("solver_mode"), str)
+            or not isinstance(model.get("verification_mode"), str)
+        ):
+            raise ValueError("experiment_model_config_invalid")
+        self._model = dict(model)
+
+    def config(self) -> Mapping[str, Any]:
+        return dict(self._model)
+
+    def fingerprint(self) -> str:
+        return hashlib.sha256(canonical_json(self._model)).hexdigest()
+
+
+def load_sample_map(path: str | Path) -> dict[str, dict[str, str]]:
+    """Load only opaque sample IDs mapped to two relative file references."""
+    value = _read_control_json(path, "experiment_sample_map_invalid")
+    if not isinstance(value, dict) or any(
+        not isinstance(sample_id, str)
+        or not isinstance(paths, dict)
+        or set(paths) != {"input", "text"}
+        or any(not isinstance(relative, str) or not relative for relative in paths.values())
+        for sample_id, paths in value.items()
+    ):
+        raise ValueError("experiment_sample_map_invalid")
+    return value
 
 class ModelConfigAdapter(Protocol):
     """Pure seam exposing already trusted, applied model settings."""
@@ -42,30 +98,47 @@ class FileSampleHashResolver:
         self.source_map = dict(source_map)
 
     def hashes(self, sample: dict[str, Any]) -> dict[str, str]:
+        return {
+            f"{kind}_sha256": hashlib.sha256(self._read(sample, kind)).hexdigest()
+            for kind in ("input", "text")
+        }
+
+    def read_text(self, sample: dict[str, Any]) -> str:
+        """Read the mapped text only after both frozen sample hashes still match."""
+        input_bytes = self._read(sample, "input")
+        text_bytes = self._read(sample, "text")
+        if (
+            hashlib.sha256(input_bytes).hexdigest() != sample.get("input_sha256")
+            or hashlib.sha256(text_bytes).hexdigest() != sample.get("text_sha256")
+        ):
+            raise ValueError("experiment_sample_hash_mismatch")
+        try:
+            return text_bytes.decode("utf-8", errors="strict")
+        except UnicodeError:
+            raise ValueError("experiment_sample_source_invalid") from None
+
+    def _read(self, sample: dict[str, Any], kind: str) -> bytes:
         reference = sample.get("source_ref")
         paths = self.source_map.get(reference)
         if not isinstance(paths, Mapping) or set(paths) != {"input", "text"}:
             raise ValueError("experiment_sample_source_invalid")
-        hashes = {}
-        for kind in ("input", "text"):
-            relative = paths[kind]
-            if not isinstance(relative, str) or not relative:
-                raise ValueError("experiment_sample_source_invalid")
-            parts = relative.replace("\\", "/").split("/")
-            if _unsafe_relative_sample_ref(relative, parts):
-                raise ValueError("experiment_sample_source_invalid")
-            try:
-                candidate = self.root.joinpath(*parts)
-                resolved = candidate.resolve(strict=True)
-                resolved.relative_to(self.root)
-                if _sensitive_sample_path(resolved.relative_to(self.root).parts) or not resolved.is_file():
-                    raise ValueError
-                content = resolved.read_bytes()
-                content.decode("utf-8", errors="strict")
-            except (OSError, RuntimeError, UnicodeError, ValueError):
-                raise ValueError("experiment_sample_source_invalid") from None
-            hashes[f"{kind}_sha256"] = hashlib.sha256(content).hexdigest()
-        return hashes
+        relative = paths[kind]
+        if not isinstance(relative, str) or not relative:
+            raise ValueError("experiment_sample_source_invalid")
+        parts = relative.replace("\\", "/").split("/")
+        if _unsafe_relative_sample_ref(relative, parts):
+            raise ValueError("experiment_sample_source_invalid")
+        try:
+            candidate = self.root.joinpath(*parts)
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(self.root)
+            if _sensitive_sample_path(resolved.relative_to(self.root).parts) or not resolved.is_file():
+                raise ValueError
+            content = resolved.read_bytes()
+            content.decode("utf-8", errors="strict")
+            return content
+        except (OSError, RuntimeError, UnicodeError, ValueError):
+            raise ValueError("experiment_sample_source_invalid") from None
 
 
 def source_identity(root: str | Path | None = None) -> dict[str, Any]:
@@ -124,26 +197,68 @@ def _unsafe_relative_sample_ref(relative: str, parts: list[str]) -> bool:
     )
 
 
-def _sensitive_sample_path(parts: Any) -> bool:
-    normalized = [str(part).replace("\\", "/").casefold() for part in parts]
-    return (
-        normalized == ["tests", "test.md"]
-        or any(
-            part.startswith(".env")
-            or part in {
-                ".git",
-                ".venv",
-                "venv",
-                "artifacts",
-                "raw",
-                "node_modules",
-                "__pycache__",
-                ".local",
-                ".scratch",
-            }
-            for part in normalized
-        )
+def is_sensitive_path(path: Any) -> bool:
+    """Reject reserved and generated paths before any caller-controlled file read."""
+    raw_parts = (
+        list(path)
+        if isinstance(path, (list, tuple))
+        else str(path).replace("\\", "/").split("/")
     )
+    normalized = []
+    for value in raw_parts:
+        part = str(value).replace("\\", "/").casefold()
+        for component in part.split("/"):
+            if component in {"", "."}:
+                continue
+            if component == "..":
+                if normalized and normalized[-1] != "..":
+                    normalized.pop()
+                else:
+                    normalized.append(component)
+                continue
+            normalized.append(component)
+    return (
+        len(normalized) >= 2
+        and normalized[-2:] == ["tests", "test.md"]
+    ) or any(
+        part.startswith(".env")
+        or part in {
+            ".git",
+            ".venv",
+            "venv",
+            "artifacts",
+            "raw",
+            "node_modules",
+            "__pycache__",
+            ".local",
+            ".scratch",
+        }
+        for part in normalized
+    )
+
+
+def _sensitive_sample_path(parts: Any) -> bool:
+    return is_sensitive_path(parts)
+
+
+def _read_control_json(path: str | Path, error_code: str) -> Any:
+    try:
+        resolved = Path(path).resolve(strict=True)
+        if _sensitive_sample_path(resolved.parts) or not resolved.is_file():
+            raise ValueError
+
+        def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError
+                result[key] = value
+            return result
+
+        with resolved.open("r", encoding="utf-8") as stream:
+            return json.load(stream, object_pairs_hook=unique_object)
+    except (OSError, RuntimeError, UnicodeError, ValueError, json.JSONDecodeError):
+        raise ValueError(error_code) from None
 
 
 def _git(root: Path, *arguments: str) -> bytes:

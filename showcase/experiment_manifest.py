@@ -12,6 +12,9 @@ from urllib.parse import urlsplit
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
 _REVISION = re.compile(r"[0-9a-f]{40,64}\Z")
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z")
+_EXECUTABLE_EVIDENCE_KINDS = frozenset(
+    {"loopback", "scripted", "fault_injection", "provider_live"}
+)
 _MANIFEST_KEYS = {
     "schema_version",
     "manifest_id",
@@ -76,6 +79,10 @@ def canonical_json(value: Any) -> bytes:
 
 def manifest_digest(manifest: dict[str, Any]) -> str:
     return hashlib.sha256(canonical_json(manifest)).hexdigest()
+
+
+def is_executable_evidence_kind(value: Any) -> bool:
+    return isinstance(value, str) and value in _EXECUTABLE_EVIDENCE_KINDS
 
 
 def validate_manifest(manifest: Any) -> dict[str, Any]:

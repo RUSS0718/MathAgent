@@ -6,6 +6,7 @@ import argparse
 import http.cookiejar
 import json
 import os
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -15,6 +16,13 @@ from urllib.parse import urlencode
 from urllib.request import Request, build_opener
 
 from .campaign_cli import add_campaign_parser, run_campaign
+from .experiment_cli import (
+    add_experiment_parser,
+    confirm_cli_invocation,
+    execute_experiment_command,
+)
+
+_SAFE_EXPERIMENT_ERROR = re.compile(r"experiment_[a-z0-9_]{1,80}\Z")
 
 
 class CliError(RuntimeError):
@@ -123,6 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=1_200.0)
     subparsers = parser.add_subparsers(dest="command", required=True)
     add_campaign_parser(subparsers)
+    add_experiment_parser(subparsers)
 
     subparsers.add_parser("health")
     subparsers.add_parser("capabilities")
@@ -172,7 +181,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run(args: argparse.Namespace) -> int:
+def run(
+    args: argparse.Namespace,
+    *,
+    experiment_context: dict[str, Any] | None = None,
+) -> int:
+    if args.command == "experiment":
+        result, status = execute_experiment_command(args, context=experiment_context)
+        _print(result)
+        return status
     client = ShowcaseClient(args.base_url, args.cookie_file, args.timeout)
     if args.command == "health":
         _print(client.request("GET", "/health"))
@@ -333,9 +350,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        return run(args)
+        experiment_context = None
+        if args.command == "experiment" and args.action in {"run", "resume"}:
+            experiment_context = {"authorization": confirm_cli_invocation(args)}
+        return run(args, experiment_context=experiment_context)
     except (CliError, OSError) as exc:
         code = exc.code if isinstance(exc, CliError) else type(exc).__name__
+        print(json.dumps({"error": code}, ensure_ascii=False), file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        candidate = str(exc)
+        code = (
+            candidate
+            if args.command == "experiment" and _SAFE_EXPERIMENT_ERROR.fullmatch(candidate)
+            else "experiment_invalid"
+        )
         print(json.dumps({"error": code}, ensure_ascii=False), file=sys.stderr)
         return 1
 
