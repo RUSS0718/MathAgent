@@ -7,6 +7,10 @@ from typing import Any
 
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
 _CALL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z")
+_LEGACY_CAPABILITY_LIMITS = {
+    "provider_profile_unverified": "verified_stream_profiles_empty",
+    "provider_native_tools_unsupported_with_stream": "native_tools_require_nonstream",
+}
 
 
 def project_transport_identity(state: Any, job_id: str) -> dict[str, Any] | None:
@@ -52,10 +56,15 @@ def project_transport_identity(state: Any, job_id: str) -> dict[str, Any] | None
                 or evidence_kind not in {"controlled_test", "provider_live"}
             ):
                 return None
-        elif transport not in {"nonstream", "legacy"}:
-            return None
-        elif evidence_kind not in {None, "documented"}:
-            return None
+        else:
+            capability_limit = _LEGACY_CAPABILITY_LIMITS.get(decision.get("reason"))
+            if (
+                transport not in {"nonstream", "legacy"}
+                or evidence_kind not in {None, "documented"}
+                or capability_limit is None
+                or decision.get("capability_limit") not in {None, capability_limit}
+            ):
+                return None
 
         entry = {
             "call_id": opaque_call_id,
@@ -68,7 +77,7 @@ def project_transport_identity(state: Any, job_id: str) -> dict[str, Any] | None
             entry["profile_fingerprint"] = profile
         else:
             entry["reason"] = decision.get("reason")
-            entry["capability_limit"] = decision.get("capability_limit")
+            entry["capability_limit"] = capability_limit
         projected.append(entry)
         seen_call_ids.add(opaque_call_id)
 

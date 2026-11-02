@@ -248,12 +248,24 @@ class PublicExperimentJobAdapter:
                 }:
                     return False
             else:
-                if call.get("policy") != "legacy" or call.get("transport") not in {
-                    "legacy",
-                    "nonstream",
+                if set(call) != {
+                    "call_id",
+                    "role",
+                    "policy",
+                    "transport",
+                    "evidence_kind",
+                    "reason",
+                    "capability_limit",
                 }:
                     return False
-                if call.get("evidence_kind") not in {None, "documented"}:
+                if (
+                    call.get("policy") != "legacy"
+                    or call.get("transport") != expected_call["transport"]
+                    or call.get("reason") != expected_call["reason"]
+                    or call.get("capability_limit")
+                    != expected_call["capability_limit"]
+                    or call.get("evidence_kind") not in {None, "documented"}
+                ):
                     return False
             seen_call_ids.add(call["call_id"])
         return True

@@ -393,6 +393,98 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
         observation = adapter.wait_for_job(job_id, deadline_at)
         self.assertFalse(observation["transport_known"])
 
+    def test_legacy_transport_wait_requires_manifested_fallback_reason(self):
+        from showcase.experiment_transport import ExperimentTransportAdapter
+        from showcase.experiment_transport_projection import project_transport_identity
+        from showcase.stream_preference import profile_set_fingerprint
+
+        limits = {
+            "max_model_calls": 2,
+            "max_http_attempts": 3,
+            "max_tool_calls": 1,
+            "max_tokens": 4096,
+            "max_runtime_seconds": 60,
+        }
+        deadline_at = time.time() + 30
+        digest = "a" * 64
+        key = str(uuid.uuid4())
+        manifest_transport = {
+            "policy": "legacy",
+            "transport": "nonstream",
+            "profile_set_fingerprint": profile_set_fingerprint(()),
+            "calls": [
+                {
+                    "call_id": "explore",
+                    "transport": "nonstream",
+                    "reason": "provider_profile_unverified",
+                    "capability_limit": "verified_stream_profiles_empty",
+                }
+            ],
+        }
+        state = {
+            "run_id": "legacy-job",
+            "transport_policy": {
+                "policy": "legacy",
+                "profile_set_fingerprint": manifest_transport["profile_set_fingerprint"],
+            },
+            "calls": {
+                "private-internal-call": {
+                    "role": "explore",
+                    "transport_decision": {
+                        "policy": "legacy",
+                        "profile_set_fingerprint": manifest_transport["profile_set_fingerprint"],
+                        "transport": "nonstream",
+                        "evidence_kind": "documented",
+                        "reason": "provider_native_tools_unsupported_with_stream",
+                    },
+                }
+            },
+        }
+        record = {
+            "job_id": "legacy-job",
+            "request_digest": digest,
+            "status": "succeeded",
+            "budget": {
+                "limits": limits,
+                "deadline_at": deadline_at,
+                "unknown_attempts": 0,
+                "unresolved_attempts": 0,
+                "unknown_tool_calls": 0,
+            },
+            "transport_identity": project_transport_identity(state, "legacy-job"),
+        }
+
+        class ApiClient:
+            def bootstrap(self):
+                pass
+
+            def request(self, _method, _path, *, headers):
+                self.asserted_headers = headers
+                return record
+
+        adapter = PublicExperimentJobAdapter(
+            ApiClient(),
+            {"run_limits": limits, "transport": manifest_transport},
+            model_config=None,
+            sample_resolver=None,
+            transport_adapter=ExperimentTransportAdapter(profiles=()),
+        )
+        adapter.find_by_idempotency_key(key, digest)
+        observation = adapter.wait_for_job("legacy-job", deadline_at)
+
+        self.assertFalse(observation["transport_known"])
+        self.assertIsNone(observation["transport"])
+
+        manifest_transport["calls"][0].update(
+            reason="provider_native_tools_unsupported_with_stream",
+            capability_limit="native_tools_require_nonstream",
+        )
+        adapter.manifest["transport"] = manifest_transport
+        observation = adapter.wait_for_job("legacy-job", deadline_at)
+
+        self.assertTrue(observation["transport_known"])
+        self.assertEqual(manifest_transport, observation["transport"])
+
 
 if __name__ == "__main__":
     unittest.main()
