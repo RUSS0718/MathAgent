@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
-import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
+from scripts import check_showcase_release
 from showcase.replay import load_replay, write_sample_replay
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,17 +47,63 @@ class ReplayReleaseTest(unittest.TestCase):
             self.assertEqual(written["run"]["run_id"], loaded["run"]["run_id"])
 
     def test_release_gate_is_credential_free(self):
-        if os.environ.get("SHOWCASE_RELEASE_GATE") == "1":
-            self.skipTest("release gate is already running")
-        result = subprocess.run(
-            [sys.executable, "scripts/check_showcase_release.py"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
+        completed = unittest.mock.Mock(returncode=0, stdout="", stderr="")
+        output = StringIO()
+        with (
+            patch.object(check_showcase_release.subprocess, "run", return_value=completed) as run,
+            patch.object(check_showcase_release, "check_baseline") as baseline,
+            patch.object(check_showcase_release, "check_release_evidence") as evidence,
+            patch("sys.argv", ["check_showcase_release.py"]),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(0, check_showcase_release.main())
+        self.assertIn("showcase_release=PASS", output.getvalue())
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(
+            [check_showcase_release.sys.executable, "scripts/check_workspace.py", "--offline"],
+            commands,
         )
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertIn("showcase_release=PASS", result.stdout)
+        test_commands = [command for command in commands if "scripts/run_unittest_report.py" in command]
+        self.assertEqual(1, len(test_commands))
+        self.assertEqual(
+            set(check_showcase_release.STAR_ACCEPTANCE_TESTS),
+            set(test_commands[0][2:]),
+        )
+        self.assertIn(
+            [
+                check_showcase_release.sys.executable,
+                "scripts/check_solver_release.py",
+                "--matrix-only",
+            ],
+            commands,
+        )
+        self.assertFalse(
+            any(
+                "scripts/check_solver_release.py" in command
+                and "--matrix-only" not in command
+                for command in commands
+            )
+        )
+        baseline.assert_called_once()
+        evidence.assert_called_once()
+
+    def test_release_gate_strict_mode_passes_flag_to_test_runner(self):
+        completed = unittest.mock.Mock(returncode=0, stdout="", stderr="")
+        with (
+            patch.object(check_showcase_release.subprocess, "run", return_value=completed) as run,
+            patch.object(check_showcase_release, "check_baseline"),
+            patch.object(check_showcase_release, "check_release_evidence"),
+            patch("sys.argv", ["check_showcase_release.py", "--require-reference"]),
+            redirect_stdout(StringIO()),
+        ):
+            self.assertEqual(0, check_showcase_release.main())
+        command = next(
+            call.args[0]
+            for call in run.call_args_list
+            if "scripts/run_unittest_report.py" in call.args[0]
+        )
+        self.assertIn("--require-reference", command)
+        self.assertIn("tests.test_star_rb06_recovery", command)
 
 
 if __name__ == "__main__":

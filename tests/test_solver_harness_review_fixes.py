@@ -13,7 +13,7 @@ PLAN = {"version": 1, "steps": [{"step_id": "s1", "title": "compute", "objective
 
 
 class ReviewFixTest(unittest.TestCase):
-    def test_tool_hard_budget_stops_verifier_and_enters_terminal_best_effort(self):
+    def test_tool_ceiling_allows_verifier_to_review_success_or_denial(self):
         for limit in (0, 1):
             with self.subTest(limit=limit):
                 model = ScriptedModelPort(
@@ -50,13 +50,15 @@ class ReviewFixTest(unittest.TestCase):
                     tool_port=tool,
                 ) as harness:
                     result = harness.solve("2+2", {"plan": PLAN})
-                self.assertEqual([], verifier.requests)
-                self.assertEqual("TERMINAL", result["state"]["phase"])
-                self.assertEqual("partial_budget_exhausted", result["state"]["status"])
+                self.assertEqual(1, len(verifier.requests))
+                self.assertEqual("FINAL_GENERATE", result["state"]["phase"])
+                self.assertEqual("ACCEPTED", result["state"]["steps"]["s1"]["status"])
                 self.assertEqual(limit, len(tool.requests))
-                self.assertEqual(
-                    "tool_call_budget_exhausted", result["state"]["budget"]["exhaustion_reason"]
-                )
+                receipt = verifier.requests[0]["report"]["tool_receipts"][0]
+                self.assertEqual(bool(limit), receipt["executed"])
+                self.assertEqual("success" if limit else "not_executed", receipt["status"])
+                if not limit:
+                    self.assertEqual("tool_call_budget_exhausted", receipt["reason"])
 
     def test_intern_meta_delegation_uses_tasks_schema(self):
         import json

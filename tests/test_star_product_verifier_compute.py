@@ -157,7 +157,7 @@ class StarVerifierComputeTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(2, receipt["output"])
         self.assertEqual(1, self.report(job_id)["budget"]["tool_calls"])
 
-    def test_tool_budget_exhaustion_stops_further_verifier_dispatch(self):
+    def test_tool_ceiling_allows_verifier_continuation_and_answer(self):
         executed = []
         registry = ToolRegistry()
         registry.register("polynomial_check", lambda args: executed.append(args) or 2)
@@ -169,18 +169,19 @@ class StarVerifierComputeTest(StarJobFixture, unittest.TestCase):
             SHOWCASE_STAR_REGISTRY=registry)
         job_id = self.create_job()
         job = self.terminal(job_id)
-        self.assertEqual("failed", job["status"], job)
-        self.assertEqual("partial_budget_exhausted", job["result"]["solver"]["status"])
-        self.assertIn("Hard budget exhausted", job["result"]["final_response"])
+        self.assertEqual("succeeded", job["status"], job)
+        self.assertEqual("1+1=2", job["result"]["final_response"])
         self.assertEqual(1, len(executed))
         self.assertEqual(1, self.report(job_id)["budget"]["tool_calls"])
         reviews = [context for context in self.outbound if context["role"] == "step_verifier"]
-        self.assertEqual(1, len(reviews), [c["role"] for c in self.outbound])
+        self.assertEqual(2, len(reviews), [c["role"] for c in self.outbound])
+        self.assertEqual([], reviews[1]["allowed_tools"])
+        self.assertEqual("same_artifact", self.report(job_id)["semantics"]["binding"])
         public = job["result"]["tool_results"]
         self.assertEqual(["success"], [item["status"] for item in public])
         reviewed = [event for event in self.solver_events(job_id)
                     if event[0] == "step_reviewed"]
-        self.assertEqual([], reviewed, self.solver_events(job_id))
+        self.assertEqual(1, len(reviewed), self.solver_events(job_id))
 
     def test_cancel_during_verifier_tool_prevents_continuation(self):
         import threading

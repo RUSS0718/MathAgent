@@ -365,14 +365,19 @@ class StarAlignChainRecoveryTest(unittest.TestCase):
                                                 json={}, headers=self.headers())
                     self.assertEqual(202, response.status_code, response.get_json())
                     job = self.wait_terminal(job_id)
-                    # The resumed leg re-ran the computation it should have reused;
-                    # the duplicate burned the shared tool budget and the run that
-                    # resumes cleanly with the gate active instead ends exhausted.
+                    # The resumed leg re-ran a computation it should have reused.
+                    # The duplicate is observable even though tool quota no longer
+                    # prevents later answer generation and whole-solution review.
                     self.assertEqual(2, len(tool_runs(folder)))
-                    self.assertEqual("failed", job["status"], job)
-                    self.assertEqual("partial_budget_exhausted",
-                                     job["result"]["solver"]["status"])
-                    self.assertEqual(sent, requests_logged(folder))
+                    self.assertEqual("succeeded", job["status"], job)
+                    self.assertEqual("1+1=2 CHAIN-ANSWER",
+                                     job["result"]["final_response"])
+                    self.assertEqual(2, job["result"]["budget"]["tool_calls"])
+                    self.assertEqual("accepted",
+                                     job["result"]["solver"]["semantics"]["whole_review"])
+                    resumed_requests = requests_logged(folder)
+                    self.assertEqual(sent, resumed_requests[:len(sent)])
+                    self.assertGreater(len(resumed_requests), len(sent))
 
     def test_expired_original_deadline_refuses_resumed_compute_continuation(self):
         """ALIGN-AC-07: after the deadline passes, resume is refused and the
