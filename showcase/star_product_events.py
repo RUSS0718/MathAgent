@@ -27,6 +27,10 @@ def decision_fields(event, state, invocations=()):
         "specific_task_consumed", "triggered_by", "counterexample_verdict",
         "decision_revision", "classified_outcomes", "rejected_outcomes",
         "stream_metrics", "stream_activity", "checkpoint_status", "checkpoint_round",
+        "transport", "transport_reason", "transport_selection_reason",
+        "transport_evidence_kind", "transport_profile_fingerprint",
+        "transport_profile_set_fingerprint",
+        "transport_policy", "new_run_required",
     ) if key in event}
     roles = {
         "step_reported": "reasoner",

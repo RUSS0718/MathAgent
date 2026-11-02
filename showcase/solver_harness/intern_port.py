@@ -11,6 +11,7 @@ from llm_response import provider_usage
 
 from ..adapters import AdapterError, InternModelAdapter
 from ..redaction import redact
+from ..stream_preference import profile_set_fingerprint, select_transport
 from ..tool_schemas import POLYNOMIAL_CHECK_SCHEMA, PYTHON_MATH_SCHEMA, schema_error
 from .intern_schemas import response_schema
 from .roles import definition
@@ -19,8 +20,10 @@ from .roles import definition
 class InternPortError(RuntimeError):
     """A recorded transmission or strict structured-response failure."""
 
-    def __init__(self, category):
+    def __init__(self, category, *, no_dispatch=False, transport_decision=None):
         self.category = category
+        self.no_dispatch = no_dispatch is True
+        self.transport_decision = transport_decision
         super().__init__(category)
 
 
@@ -142,18 +145,31 @@ class InternModelPort:
     """Reasoner/Verifier/Meta bridge, with no implicit live adapter creation."""
 
     def __init__(self, adapter: InternModelAdapter | None = None, *, original_problem=None,
-                 deadlines=None, activity_observer=None, streaming=False):
+                 deadlines=None, activity_observer=None, streaming=False,
+                 transport_policy="legacy", stream_profiles=None,
+                 transport_choice_observer=None):
         self.adapter = adapter
         self.original_problem = original_problem
         self.deadlines = deadlines
         self.activity_observer = activity_observer
         self.streaming = streaming is True
+        if transport_policy not in {"legacy", "stream_first"}:
+            raise ValueError("star_transport_policy_invalid")
+        self.transport_policy = transport_policy
+        self.stream_profiles = stream_profiles
+        self.transport_choice_observer = transport_choice_observer
+        self._run_transport_choices = {}
         self.invocations = []
 
     def verify(self, request):
         if request.get("role") not in {"step_verifier", "whole_solution_verifier"}:
             raise InternPortError("invalid_verifier_role")
         return self.complete(request)
+
+    def restore_transport_policy(self, run_id, choice):
+        """Restore the persisted Run choice before resuming its next call."""
+        if isinstance(choice, Mapping):
+            self._run_transport_choices[run_id] = dict(choice)
 
     def complete(self, request):
         if self.adapter is None:
@@ -163,19 +179,59 @@ class InternModelPort:
         fingerprints = _audit_fingerprints(
             request, schema, messages, fallback_problem=self.original_problem
         )
+        run_id = request.get("run_id")
+        locked = self._run_transport_choices.get(run_id)
         activity_observer = request.get("activity_observer")
         if not callable(activity_observer):
             activity_observer = self.activity_observer
-        if self.streaming and callable(getattr(self.adapter, "stream_complete", None)):
-            return self._complete_stream(request, schema, messages, activity_observer, fingerprints)
+        provider_tools = request.get("provider_tools", request.get("tools", ()))
+        if not isinstance(provider_tools, (list, tuple)):
+            raise InternPortError("invalid_provider_tools")
+        decision = None
+        if self.transport_policy == "stream_first":
+            profile_set_id = profile_set_fingerprint(self.stream_profiles)
+            if locked is not None and (
+                locked.get("policy") != self.transport_policy
+                or locked.get("profile_set_fingerprint") != profile_set_id
+            ):
+                self._raise_transport_rejection(
+                    request,
+                    {"transport": "reject",
+                     "reason": "transport_policy_run_mismatch",
+                     "evidence_kind": "persisted_run_choice", "new_run_required": True,
+                     "policy": self.transport_policy,
+                     "profile_set_fingerprint": profile_set_id},
+                    fingerprints,
+                )
+            decision = select_transport(
+                self.adapter,
+                messages,
+                policy=self.transport_policy,
+                native_tools=bool(provider_tools),
+                profiles=self.stream_profiles,
+                schema_fingerprint=fingerprints["schema_fingerprint"],
+            )
+            self._authorize_transport(request, decision, fingerprints)
+        streaming = decision["transport"] == "stream" if decision else self.streaming
+        if streaming and callable(getattr(self.adapter, "stream_complete", None)):
+            if decision is None:
+                decision = {"transport": "stream", "reason": "legacy_stream_activity",
+                            "evidence_kind": "controlled"}
+            return self._complete_stream(
+                request, schema, messages, activity_observer, fingerprints, decision
+            )
         started = time.monotonic()
         record = _invocation_record(request, self.adapter.model_id)
         record.update(fingerprints)
+        if decision is not None:
+            record["transport"] = dict(decision)
         try:
-            response = self.adapter.complete(
-                messages,
-                metadata=_request_metadata(request, self.deadlines, activity_observer),
-            )
+            adapter_kwargs = {
+                "metadata": _request_metadata(request, self.deadlines, activity_observer),
+            }
+            if provider_tools:
+                adapter_kwargs["tools"] = provider_tools
+            response = self.adapter.complete(messages, **adapter_kwargs)
             record.update(
                 effective_model=response.model_id,
                 returned_model=response.returned_model,
@@ -213,7 +269,9 @@ class InternModelPort:
             record["duration_seconds"] = time.monotonic() - started
             self.invocations.append(redact(record))
 
-    def _complete_stream(self, request, schema, messages, activity_observer=None, fingerprints=None):
+    def _complete_stream(
+        self, request, schema, messages, activity_observer=None, fingerprints=None, decision=None
+    ):
         """Stream fragments through the caller's audit; strict schema gates the result.
 
         Each ``text_delta`` is yielded as it arrives so ``calls`` persists it before
@@ -222,6 +280,8 @@ class InternModelPort:
         """
         started = time.monotonic()
         record = _invocation_record(request, self.adapter.model_id, stream=True)
+        if decision is not None:
+            record["transport"] = dict(decision)
         record.update(
             fingerprints
             or _audit_fingerprints(request, schema, messages, fallback_problem=self.original_problem)
@@ -323,8 +383,44 @@ class InternModelPort:
         context.pop("input_fingerprint", None)
         context.pop("schema_fingerprint", None)
         context.pop("activity_observer", None)
+        context.pop("transport_decision_observer", None)
         context["original_problem"] = original
         context["tool_argument_schemas"] = {
             name: value for name, value in tools.items() if name in request.get("allowed_tools", [])
         }
         return system + [{"role": "user", "content": json.dumps(context, ensure_ascii=False)}]
+
+    def _authorize_transport(self, request, decision, fingerprints):
+        """Persist and freeze this Run's transport choice before any HTTP call."""
+        observer = request.get("transport_decision_observer")
+        if not callable(observer):
+            observer = self.transport_choice_observer
+        accepted = observer(decision, request) if callable(observer) else True
+        run_id = request.get("run_id")
+        transport = decision["transport"]
+        locked = self._run_transport_choices.get(run_id)
+        choice = {
+            "policy": self.transport_policy,
+            "profile_set_fingerprint": decision.get("profile_set_fingerprint"),
+        }
+        if accepted is False or (locked is not None and locked != choice):
+            rejected = {
+                **decision,
+                "transport": "reject",
+                "reason": "transport_policy_run_mismatch",
+                "new_run_required": True,
+            }
+            self._raise_transport_rejection(request, rejected, fingerprints)
+        if transport == "reject":
+            self._raise_transport_rejection(request, decision, fingerprints)
+        if run_id is not None:
+            self._run_transport_choices.setdefault(run_id, choice)
+
+    def _raise_transport_rejection(self, request, decision, fingerprints):
+        record = _invocation_record(request, self.adapter.model_id)
+        record.update(fingerprints, transport=dict(decision), status="policy_rejected",
+                      error_category=decision["reason"])
+        self.invocations.append(redact(record))
+        raise InternPortError(
+            decision["reason"], no_dispatch=True, transport_decision=decision
+        )
