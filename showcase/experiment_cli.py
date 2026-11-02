@@ -49,26 +49,56 @@ def add_experiment_parser(subparsers: Any) -> None:
     status.add_argument("--run-id", required=True)
     status.add_argument("--output-root", type=Path, default=Path("artifacts/experiments"))
 
+    verify = actions.add_parser("verify")
+    verify.add_argument("--run-id", required=True)
+    verify.add_argument("--output-root", type=Path, default=Path("artifacts/experiments"))
+
+    export = actions.add_parser("export")
+    export.add_argument("--run-id", required=True)
+    export.add_argument("--output-root", type=Path, default=Path("artifacts/experiments"))
+    export.add_argument("--output", type=Path, required=True)
+
 
 def execute_experiment_command(
     args: argparse.Namespace,
     *,
     context: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], int]:
+    dependencies = dict(context or {})
     from .experiment_runner import load_manifest, preflight_manifest, read_status
-    from .experiment_sources import (
-        FileAppliedModelConfig,
-        FileSampleHashResolver,
-        load_sample_map,
-        source_identity,
-    )
+    from .experiment_samples import FileSampleHashResolver, load_sample_map
+    from .experiment_sources import FileAppliedModelConfig, source_identity
     from .experiment_transport import ExperimentTransportAdapter
 
     if args.action == "status":
         return read_status(args.run_id, output_root=args.output_root), 0
 
+    if args.action == "verify":
+        from .experiment_verification import verify_experiment_run
+
+        status = read_status(args.run_id, output_root=args.output_root)
+        records = status.get("run_records")
+        client = dependencies.get("read_client")
+        if records and client is None:
+            client = _create_read_client(args)
+        result = verify_experiment_run(
+            args.run_id,
+            output_root=args.output_root,
+            read_client=client,
+        )
+        return result, 0 if result["status"] == "PASS" else 1
+
+    if args.action == "export":
+        from .experiment_verification import export_experiment_report
+
+        result = export_experiment_report(
+            args.run_id,
+            output_root=args.output_root,
+            output=args.output,
+        )
+        return result, 0 if result["status"] == "PASS" else 1
+
     manifest = load_manifest(args.manifest) if args.action != "resume" else None
-    dependencies = dict(context or {})
     dependencies.setdefault("current_source", source_identity())
     dependencies.setdefault("transport_adapter", ExperimentTransportAdapter())
     if "trusted_model_config" not in dependencies:
@@ -166,3 +196,12 @@ def _create_public_job_adapter(
         dependencies["sample_resolver"],
         dependencies["transport_adapter"],
     )
+
+
+def _create_read_client(args: argparse.Namespace) -> Any:
+    """Bootstrap the existing authenticated client for read-only evidence GETs."""
+    from .cli import ShowcaseClient
+
+    client = ShowcaseClient(args.base_url, args.cookie_file, args.timeout)
+    client.bootstrap()
+    return client
