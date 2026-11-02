@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "release_status": "engineering-preview",
-  "source_commit": "c37220b66558346213c392ea58820e19d9cb6a53",
+  "source_commit": "6c7a7685495912686a0dc3501a077be14f3c10e6",
   "labels": [
     "scripted",
     "replay",
@@ -12,13 +12,33 @@
     "status": "needs_review",
     "legacy_v02_ac06": "unavailable",
     "live_release": "blocked",
-    "model_calls": 8,
-    "tool_calls": 0,
+    "model_calls": 20,
+    "tool_calls": 3,
     "evidence": "docs/evals/showcase-solver-intern-live-sh21.md",
-    "probe_count": 2,
-    "provider_tokens": 12790,
-    "release_block_reason": "两个真实探针均未执行工具；SH22未执行真实配对，不能关闭live依赖",
-    "paired_status": "needs_review"
+    "probe_count": 3,
+    "provider_tokens": 30268,
+    "legacy_v02_run_count": 5,
+    "legacy_v02_distinct_problem_count": 1,
+    "release_block_reason": "历史v0.2 AC-06要求三道计算题各运行两次；当前仅五次同题Run，六次跨三题门槛未满足",
+    "paired_status": "completed",
+    "paired_gate_status": "needs_review",
+    "paired_runs": 1,
+    "paired_model_calls": 8,
+    "paired_tool_calls": 2,
+    "paired_provider_tokens": 11688,
+    "paired_evidence": "artifacts/sh23-release/solver-pair-live-skills-v1/report.json",
+    "latest_authorized_round": {
+      "http_attempts_limit": 18,
+      "http_attempts_actual": 12,
+      "tool_calls_limit": 6,
+      "tool_calls_actual": 3,
+      "provider_tokens_limit": 196608,
+      "provider_tokens_actual": 17478,
+      "runtime_seconds_limit": 540,
+      "runtime_seconds_actual": 46.182,
+      "automatic_retries": 0,
+      "currency_cost": null
+    }
   },
   "star_ac": {
     "AC-01": {
@@ -901,12 +921,12 @@
     "SC-019": {
       "owner": "SH-21",
       "issue": 53,
-      "evidence_mode": "scripted",
+      "evidence_mode": "live",
       "status": "needs_review",
       "tests": [
         "tests.test_solver_harness_intern.InternPortTest.test_original_problem_context_and_provider_metadata_survive_port"
       ],
-      "limitation": "SH21真实调用存在但工具闭环未成立；不声称live通过"
+      "limitation": "新探针与两条真实配对臂观察到工具执行和回执续接；历史v0.2六次三题门槛仍未满足，不声称能力提升"
     },
     "SC-022": {
       "owner": "SH-22",
@@ -933,13 +953,13 @@
     "SC-026": {
       "owner": "SH-22",
       "issue": 54,
-      "evidence_mode": "scripted",
+      "evidence_mode": "live",
       "status": "covered",
       "tests": [
         "tests.test_solver_harness_paired.PairedRunTest.test_pair_uses_independent_runs_and_recovers_exact_report_without_dispatch",
         "tests.test_solver_harness_paired.PairedRunTest.test_common_budget_permission_and_observable_model_mismatch_reject_before_dispatch"
       ],
-      "limitation": "最终责任归属；前置实现见父规格#32"
+      "limitation": "一组真实Skills配对已完成；单样本只记录工程与成本来源，不推断数学提升"
     },
     "SC-001": {
       "owner": "SH-23",
@@ -989,12 +1009,12 @@
   },
   "verification": {
     "date": "2026-10-23",
-    "code_commit": "c37220b66558346213c392ea58820e19d9cb6a53",
+    "code_commit": "6c7a7685495912686a0dc3501a077be14f3c10e6",
     "offline": {
       "command": "uv run python scripts/check.py --offline",
       "status": "PASS",
-      "tests": 340,
-      "seconds": 199.013,
+      "tests": 343,
+      "seconds": 184.772,
       "skipped": 0
     },
     "product_release": {
@@ -1018,10 +1038,10 @@
     "ruff": "PASS",
     "git_diff_check": "PASS",
     "logs": {
-      "live-gate.log": "41374132c6836c2c34a968909217866521ada0ea49e6c927fe623dea0a23479d",
-      "offline.log": "867ba5d176fa4940e55d00efe25ad6aa79e95b50620240089d18ab408a3569b4",
-      "product-release.log": "4daf8e28a40c1fa01555cbbc6cde91459dd08f90cea5dc3f2a56696b445851c9",
-      "solver-gate.log": "9c6937104f4a8b67b1d9dac7cd84c094f6856984ca2f664dbadb3dfad37338db"
+      "live-gate-final.log": "605c355cac6961a4a75f84560f7558ac9a4556757331c32c248ff4116200cde7",
+      "offline-final.log": "ba4808cb165062caa73843356c8af80d477879bbe6cbd25d123a4308d8a7c104",
+      "product-release-final.log": "4daf8e28a40c1fa01555cbbc6cde91459dd08f90cea5dc3f2a56696b445851c9",
+      "solver-gate-final.log": "4a9bbeccc96677a1d5a97157375d859147321ad8b05941a1bb1ef5899c856ba0"
     }
   }
 }

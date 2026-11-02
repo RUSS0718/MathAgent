@@ -2,7 +2,7 @@
 
 **日期：** 2026-10-23（Asia/Shanghai）  
 **关联：** [SH21 #53](https://github.com/RUSS0718/MathAgent/issues/53)、父规格 [#32](https://github.com/RUSS0718/MathAgent/issues/32)  
-**结论：** `needs_review`。两次真实样本均未执行工具，`v0.2 AC-06` 仍为 `unavailable`。本记录不关闭任务，也不声明数学能力提升。
+**结论：** `needs_review`。旧的两次真实样本均未执行工具；新授权探针执行了工具并由 Verifier 收到回执，但整题审查未完成。历史 `v0.2 AC-06` 要求三道题各运行两次，目前仍为 `unavailable`。本记录不声明数学能力提升。
 
 ## 实现边界
 
@@ -22,10 +22,11 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `a1491b1a814d414fa4f502fd4b499c0a` | 6 | 2 | 180 秒 | 5 | 0 | 8767 | `needs_review` |
 | `eb2475142ada44bab1358fff5dabc582` | 4 | 1 | 120 秒 | 3 | 0 | 4023 | `needs_review`、`failed_runtime` |
+| `solver-intern-22e6d7ff9335467d9b1575aae83b657f` | 6 | 2 | 180 秒 | 4 | 1 | 5790 | `needs_review`、`partial_aborted` |
 
-两次合计使用 8 次逻辑调用、8 次物理 HTTP attempt、0 次工具执行和 12790 provider tokens。没有发生 HTTP 重试。成本未知。每次 provider finish reason 都是 `stop`，没有 `length` 样本。
+旧两次样本合计 8 次逻辑调用、8 次物理 HTTP attempt、0 次工具执行和 12790 provider tokens。新探针另使用 4 次逻辑调用和 HTTP attempt、1 次工具执行、5790 provider tokens。三次探针合计 12 次调用、1 次工具执行和 18580 provider tokens。没有发生 HTTP 重试；成本未知。
 
-两次真实样本均开启 `skills`、`persistent_sessions`、`local_code_tool`、`final_generation`、`final_solution_review`，均未开启 `stream_recovery`。这是实际运行条件。后续代码已默认在显式 probe 中开启 `stream_recovery`，但没有用修订后的代码再调用真实服务。
+旧两次真实样本均开启 `skills`、`persistent_sessions`、`local_code_tool`、`final_generation`、`final_solution_review`，均未开启 `stream_recovery`。新授权探针使用修订后的代码，并显式开启 `stream_recovery`；它的真实运行结果单独记录如下。
 
 ## 两次失败与后续离线修订
 
@@ -33,7 +34,9 @@
 
 随后加强协议：待执行工具请求必须标为 `easy-verify`，可合并候选，未知完整工具输出时省略 `expected_output`。第二份报告确实生成了 `easy-verify` 的候选代回请求，但给其他断言添加 `tool_request:null`，违反当时的可选对象 schema。port 拒绝整份报告。Verifier 和 Meta 随后调用，runner 最后以 `failed_runtime` 停止，仍未执行工具。
 
-最后仅进行离线修订：schema 显式允许可选 `tool_request:null`，不改变标签、不修改模型给出的工具参数。新增开启 `stream_recovery` 的错误测试，证明不可解析角色输出停在 `interrupted` 并保留 call audit，不再归一化成空报告。修订后的代码没有第三次真实调用；本轮授权预算已经停止。
+最后先进行离线修订：schema 显式允许可选 `tool_request:null`，不改变标签、不修改模型给出的工具参数。随后获准的一次新探针中，模型请求的 `polynomial_check` 在本地 Registry 执行成功，step Verifier 的真实请求记录包含对应 receipt ID；工具输出的候选检查结果为 pass。receipt 的 `assertion_matched` 为 false，因为模型没有给出与结果逐字匹配的 `expected_output`，因此该 claim 没有升级为 `verified`。Verifier 后续接受了推理报告，但整题最终以 `final_review_retries_exhausted` 结束，Run 状态为 `partial_aborted`。这份证据证明真实调用、工具执行和回执续接，不证明完整求解流程通过。
+
+新探针使用显式上限：6 次逻辑调用 / HTTP attempt、2 次工具调用、65536 tokens、180 秒；每次请求最多 1024 输出 tokens、30 秒、一次物理 attempt。实际使用 4 次 HTTP、1 次工具、5790 provider tokens，运行预算计时 18.51 秒；未知结果为 0，费用为 `null`。
 
 离线集成测试另有注入客户端生成工具请求、真实本地 polynomial registry 执行、回执进入 Verifier、最终生成与整题审查的路径。该测试证明工程连接，不能替代真实 Intern 工具闭环证据。
 
@@ -51,11 +54,12 @@ uv run python scripts/run_solver_intern_live.py --live --env-file '<本地 .env 
 uv run python scripts/run_solver_intern_live.py --live --followup --env-file '<本地 .env 的绝对路径>'
 ```
 
-当前脚本保留同样的预算入口，并新增 `stream_recovery` 与 nullable schema 修订；重放这些命令会产生新运行，不会重现旧模型输出。本记录不是额外真实调用的授权。
+当前脚本保留显式预算入口，并开启 `stream_recovery` 与 nullable schema。每次重新运行都会创建新 Run；未知调用不会自动重试。此次新授权共执行一次探针和一组配对实验，配对证据见 [SH22 记录](showcase-solver-paired-report-sh22.md)。
 
 | Run ID | 被忽略的证据文件 | SHA-256 |
 | --- | --- | --- |
 | `solver-intern-a1491b1a814d414fa4f502fd4b499c0a` | `artifacts/solver-intern-a1491b1a814d414fa4f502fd4b499c0a/evidence.json` | `f176185e2f062da1e34d35c6a0520c2ff57f969f21380072b000dd83d0e3f975` |
 | `solver-intern-eb2475142ada44bab1358fff5dabc582` | `artifacts/solver-intern-eb2475142ada44bab1358fff5dabc582/evidence.json` | `12878ee9142902c1f906d30f9ffae72c0bd31b7368b4ef0abaf8debcda91ce93` |
+| `solver-intern-22e6d7ff9335467d9b1575aae83b657f` | `artifacts/solver-intern-22e6d7ff9335467d9b1575aae83b657f/evidence.json` | `80fb7b2cd4b78b4d0d15d810d499ae40c2339456185c8f7831563c2aa4a98675` |
 
 各目录还包含 `run.json`、`solver.sqlite3` 与 `budget.sqlite3`。证据不含凭证或完整输入 prompt。运行产物不提交 Git。

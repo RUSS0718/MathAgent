@@ -6,6 +6,28 @@
 
 ## 先读哪些文档
 
+当前完整 STAR 产品集成由 [spec #56](https://github.com/RUSS0718/MathAgent/issues/56) 及 SP-01..SP-13（#57..#69）承载，承接 #23 基础设施与 #32 求解机制；当前从 [SP-01 #57](https://github.com/RUSS0718/MathAgent/issues/57) 的来源审计和风险验证开始。状态职责和恢复合同见 [ADR-0014](adr/0014-star-product-state-and-recovery.md)，范围形成过程见 [访谈记录](experiments/star-completion-interview.md)。新 spec 尚未完成；历史工单关闭不表示 Workbench 已贯通完整 STAR。
+
+本次执行记录见 [产品集成执行合同](engineering/star-product-execution.md)。SP-01 已形成 [固定来源与全量验收映射](experiments/star-product-source-audit.md) 和 [风险报告](experiments/star-product-risk-sp01.md)：公共旧流程恢复有实测证据，但 STAR 接受步骤恢复尚未验证，Docker 原型输出限制存在已复现旁路。完整模式门槛仍未通过；SP-02 明确受限纵切的实现边界见 [合同](engineering/star-product-sp02-contract.md) 与 [实际验收记录](evals/star-product-sp02.md)；完整模式仍拒绝启动。
+
+SP-03 的[共享账本与控制合同](engineering/star-product-sp03-contract.md)及[公共故障验证记录](evals/star-product-sp03.md)记录模型、重试、工具和研究的同一S3准入，取消/截止的数学事务栅栏及迟到用量；不替代后续恢复、生成Python隔离和MetaGuidance切换验收。
+
+SP-04 的[产品集成验收合同](engineering/star-product-sp04-contract.md)和[产品路径验收记录](evals/star-product-sp04.md)覆盖Explore路由、合法Plan与双Gate的Job路径，并记录hint来源和隐私边界。验收使用fault-injection回复，不代表live模型效果；Python工具与执行产物另见SP-09验收。
+
+SP-05 的[连续Challenge合同](engineering/star-product-sp05-contract.md)和[产品验收记录](evals/star-product-sp05.md)覆盖三轮双方历史、最新状态、单次接受、有界Meta及非法裁决拒绝，并记录界面异议/角色/用量。证据为fault-injection；恢复、最终文本绑定和live仍由后续责任票验收。
+
+SP-06 的[回退与重规划合同](engineering/star-product-sp06-contract.md)及[产品验收记录](evals/star-product-sp06.md)覆盖同一 Job 的区间归档、依赖失效、合法救援、非法目标拒绝，以及 Meta 裁定的新计划实际执行；包含能识别失效事实复活的旁路探针。证据为 fault-injection，完整 reference 与 live 验收仍未完成。
+
+SP-07 的[记忆、Skill 与局部指导合同](engineering/star-product-sp07-contract.md)及[公共产品验收记录](evals/star-product-sp07.md)覆盖七类协议的实际注入、受限工具故障指导、纯推理权限栅栏、三种局部恢复动作、多任务研究采纳与跨 Run 隔离。未知远端请求保持待复核；证据为 scripted/fault-injection，不代表 live 效果。
+
+SP-08 的[安全恢复合同](engineering/star-product-sp08-contract.md)与[公共验收记录](evals/star-product-sp08.md)覆盖真实进程退出后的同一 Job 续算、已接受步骤与响应/工具回执复用、显式新身份重试、旧未知预留和原 deadline，以及并发/取消/只读反例。证据为 fault-injection；完整模式和 live 门槛仍由后续责任票验收。
+
+SP-09 的[受控 Python 合同](engineering/star-product-sp09-contract.md)与[公共 Job 和 Docker 验收记录](evals/star-product-sp09.md)记录默认关闭的固定镜像 ID Registry 接线、S3 单次工具动作、外部 stdout/stderr 总量限制和授权产物下载。纯推理与受控工具故障的 MetaGuidance 见 SP-07 验收；完整 reference 继续拒绝启动。
+
+SP-10 的[整题审查与交付绑定合同](engineering/star-product-sp10-contract.md)和[公共验收记录](evals/star-product-sp10.md)覆盖实际整题 Verifier、文本身份/版本/来源、改写降级、伪造引用拒绝、并发追加及回退/重规划后的合法救援绑定。证据为 scripted/fault-injection；LLM 审查不等于完整数学证明，真实验收仍由 SP-13 负责。
+
+SP-11 的[候选与零调用选择合同](engineering/star-product-sp11-contract.md)及[公共验收记录](evals/star-product-sp11.md)记录受限 BestEffort 显式入口、候选全版本、依赖/反证排除、硬预算纯选择、S4 选择绑定与持久快照 replay。证据为 fault-injection/replay；完整模式和前端全生命周期仍受 SP-12/13 门禁约束。
+
 | 当前任务 | 阅读顺序 | 读完应能判断 |
 | --- | --- | --- |
 | 了解 v0.1 做到了什么 | [能力基线](evals/v0.1-capability-baseline.md) → [开发完成记录](https://github.com/RUSS0718/MathAgent/issues/1#issuecomment-6209639217) → 下方 v0.1 文档链 | 工程完成、真实模型连接与数学效果各有什么证据 |
@@ -42,8 +64,8 @@
 
 - [v1.1 实现规格](https://github.com/RUSS0718/MathAgent/issues/32)：S1/S2 seam、验收合同、SC→AC 映射和 v1.1/v1.2 ticket 边界。
 - [v1.1 验收记录](evals/showcase-solver-harness-v1.1-acceptance.md)：记录 v1.1 离线验收结果、SC 归属与 engineering-preview 能力限制。
-- [SH21 Intern 真实调用记录](evals/showcase-solver-intern-live-sh21.md)：两次真实样本均未形成工具闭环，AC-06 仍为 unavailable；包含确切预算、失败原因与本地证据哈希。
-- [SH22 配对报告工程合同](evals/showcase-solver-paired-report-sh22.md)：独立 Run、同条件校验、失败保留与离线恢复；真实配对证据仍为 needs_review。
+- [SH21 Intern 真实调用记录](evals/showcase-solver-intern-live-sh21.md)：记录两次未执行工具的旧样本和一次有回执续接、但未完成整题审查的新探针；六次跨三题的历史门槛仍 unavailable。
+- [SH22 配对报告工程合同](evals/showcase-solver-paired-report-sh22.md)：独立 Run、同条件校验、失败保留与离线恢复；一组真实 Skills 配对已完成，能力结论仍需更多样本。
 - [ADR-0013](adr/0013-solver-harness-boundary-and-shared-transaction.md)：Showcase 单一产品面、共享 SQLite 事务和版本标识决策。
 - 产品版本为 v1.1；包版本保持 `0.1.0`，前端版本保持 `0.2.0`，Profile 保持 `showcase_mvp`。
 - v1.1 继承 v0.2 的 `engineering-preview` 状态；`v0.2 AC-06` 真实 Intern 工具闭环延期到 v1.2。

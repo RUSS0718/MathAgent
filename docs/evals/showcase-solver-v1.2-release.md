@@ -6,7 +6,7 @@
 
 `scripted` 是脚本模型或模拟传输的离线工程证据；`replay` 是快照重放；`live` 是真实服务请求；`unavailable` 是所需能力没有充分证据。真实本地有限计算执行不等于真实模型工具选择，也不等于形式化证明。
 
-[SH21 两次真实探针](showcase-solver-intern-live-sh21.md)共8次模型调用、0次工具执行，状态 needs_review；历史 v0.2 AC-06 真实 Intern 工具闭环仍为 unavailable。它与 STAR AC-06 的标签证据边界是不同验收项。[SH22 配对工程合同](showcase-solver-paired-report-sh22.md)和[SH20 零调用重放](showcase-solver-result-replay-sh20.md)不能替代 live 证据。本任务不再进行真实调用。
+[SH21 三次真实探针累计12次调用、1次工具执行；SH22 另有一组已完成的真实 Skills 配对，累计8次调用、2次工具执行。两组证据均来自同一道公开题，货币费用未知。历史 v0.2 AC-06 要求三道计算题各运行两次；当前只有五次同题 Run，因此仍为 unavailable，完整 live 发布继续阻塞。它与 STAR AC-06 的标签证据边界是不同验收项。[SH22 配对工程合同](showcase-solver-paired-report-sh22.md)记录真实配对回执及未升级为 `verified` 的限制；[SH20 零调用重放](showcase-solver-result-replay-sh20.md)仍为离线证据。
 
 发布命令：`uv run python scripts/check_solver_release.py` 检查矩阵、文档链接、官方基线与离线范围；`--matrix-only` 仅检查归属和测试引用；`--require-live` 必须阻塞。工程门禁通过也不授权修改官方入口或合入 main。
 
@@ -26,17 +26,17 @@
 
 ## 最终执行结果
 
-2026-10-23 在托管工作树 `feat/showcase-solver-release` 执行，最终代码集成基点为 `c37220b66558346213c392ea58820e19d9cb6a53`。下表是实际运行结果，未调用真实模型。
+2026-10-23 首轮离线门禁在 `c37220b66558346213c392ea58820e19d9cb6a53` 执行；随后对 live 报告和工具计数门禁作了小幅修订，并在 `6c7a7685495912686a0dc3501a077be14f3c10e6` 重新运行全量检查。最终 343 项测试的结果列在下表。本记录另补充获批的一次真实探针与一组配对运行；预算和结果列在机器矩阵与 SH21/SH22 记录中。
 
 | 命令 / 检查 | 实际结果 |
 | --- | --- |
-| `uv run python scripts/check.py --offline` | PASS；340 项测试，199.013 秒，无跳过；workspace、公开接缝和 Demo/Showcase --help 均通过，repository_check=PASS |
+| `uv run python scripts/check.py --offline` | PASS；343 项测试，184.772 秒，无跳过；workspace、公开接缝和 Demo/Showcase --help 均通过，repository_check=PASS |
 | `uv run python scripts/check_showcase_release.py` | PASS；showcase_release=PASS，包含 Solver 工程门禁 |
 | `uv run python scripts/check_solver_release.py` | PASS；44 AC / 43 SC，66 个映射测试实际执行通过，无 skip/expectedFailure |
-| `uv run python scripts/check_solver_release.py --require-live` | 预期 exit 1；live_release=BLOCKED，needs_review，历史 v0.2 AC-06 unavailable，tools=0 |
+| `uv run python scripts/check_solver_release.py --require-live` | 预期 exit 1；live_release=BLOCKED，needs_review，历史 v0.2 AC-06 unavailable，累计 tools=3 |
 | Ruff、`git diff --check`、文档本地链接 | PASS |
 | 官方11个冻结文件 hash、导入隔离、非空 JSON 返回合同 | PASS；相对 6d90e51 的官方4个范围无差异 |
 
-标准与规格双轴审查发现的预算、研究 schema/超时、路由、计划修复、门禁绕过和润色候选绑定问题均已有公开回归并修复。v1.2 新路由采用显式开关，不改变冻结的默认官方路径。SC-019 保留 needs_review 表示真实 Intern 工具闭环和 live 能力依赖没有通过，而非把脚本适配测试当成真实能力证据。
+标准与规格双轴审查发现的预算、研究 schema/超时、路由、计划修复、门禁绕过和润色候选绑定问题均已有公开回归并修复。v1.2 新路由采用显式开关，不改变冻结的默认官方路径。SC-019 保留 `needs_review`，历史 v0.2 AC-06 继续 `unavailable`，因为六次跨三题的 live 门槛尚未满足；真实配对成功不替代该门槛。
 
 日志保存在被忽略的 `artifacts/sh23-release/`，已复制到主工作区同路径。机器记录保存各日志 SHA-256；日志不提交。发布矩阵是当前的唯一最终归属和实际结果入口；历史 v1.1 记录仅供追溯。上述工程通过不等于授权正式发布或合入 main。
