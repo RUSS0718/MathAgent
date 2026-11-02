@@ -194,11 +194,8 @@ class ExperimentManifestTest(unittest.TestCase):
 class ExperimentSourceIdentityTest(unittest.TestCase):
     def test_all_file_readers_reject_reserved_path_before_open(self) -> None:
         from showcase.experiment_runner import load_manifest
-        from showcase.experiment_sources import (
-            FileAppliedModelConfig,
-            is_sensitive_path,
-            load_sample_map,
-        )
+        from showcase.experiment_samples import load_sample_map
+        from showcase.experiment_sources import FileAppliedModelConfig, is_sensitive_path
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -286,7 +283,8 @@ class ExperimentRegistrationTest(unittest.TestCase):
     def test_preflight_rejects_unapproved_execution_evidence_kinds(self) -> None:
         from showcase.experiment_manifest import manifest_digest
         from showcase.experiment_runner import preflight_manifest
-        from showcase.experiment_sources import FileSampleHashResolver, StaticModelConfigAdapter
+        from showcase.experiment_samples import FileSampleHashResolver
+        from showcase.experiment_sources import StaticModelConfigAdapter
 
         source = {
             "revision": "a" * 40,
@@ -321,7 +319,8 @@ class ExperimentRegistrationTest(unittest.TestCase):
     def test_provider_live_preflight_requires_manifest_authorization(self) -> None:
         from showcase.experiment_manifest import manifest_digest
         from showcase.experiment_runner import preflight_manifest
-        from showcase.experiment_sources import FileSampleHashResolver, StaticModelConfigAdapter
+        from showcase.experiment_samples import FileSampleHashResolver
+        from showcase.experiment_sources import StaticModelConfigAdapter
 
         source = {
             "revision": "a" * 40,
@@ -364,7 +363,8 @@ class ExperimentRegistrationTest(unittest.TestCase):
     def test_registration_is_immutable_and_status_is_machine_readable(self) -> None:
         from showcase.experiment_manifest import manifest_digest
         from showcase.experiment_runner import preflight_manifest, read_status, register_run
-        from showcase.experiment_sources import FileSampleHashResolver, StaticModelConfigAdapter
+        from showcase.experiment_samples import FileSampleHashResolver
+        from showcase.experiment_sources import StaticModelConfigAdapter
 
         source = {
             "revision": "a" * 40,
@@ -463,7 +463,8 @@ class ExperimentRegistrationTest(unittest.TestCase):
     def test_preflight_fails_when_trusted_model_or_sample_hashes_differ(self) -> None:
         from showcase.experiment_manifest import manifest_digest
         from showcase.experiment_runner import preflight_manifest
-        from showcase.experiment_sources import FileSampleHashResolver, StaticModelConfigAdapter
+        from showcase.experiment_samples import FileSampleHashResolver
+        from showcase.experiment_sources import StaticModelConfigAdapter
 
         source = {
             "revision": "a" * 40,
@@ -522,7 +523,7 @@ class ExperimentRegistrationTest(unittest.TestCase):
         self.assertEqual(0, result["dispatch_count"])
 
     def test_sample_resolver_rejects_sensitive_paths_and_symlinks_outside_root(self) -> None:
-        from showcase.experiment_sources import FileSampleHashResolver
+        from showcase.experiment_samples import FileSampleHashResolver
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "data"
@@ -785,7 +786,8 @@ class ExperimentCliTest(unittest.TestCase):
     def test_preflight_cli_checks_injected_trusted_inputs_without_remote_client(self) -> None:
         from showcase.cli import build_parser, run
         from showcase.experiment_manifest import manifest_digest
-        from showcase.experiment_sources import FileSampleHashResolver, StaticModelConfigAdapter
+        from showcase.experiment_samples import FileSampleHashResolver
+        from showcase.experiment_sources import StaticModelConfigAdapter
 
         source = {
             "revision": "a" * 40,

@@ -300,6 +300,42 @@
       }
     },
     {
+      "id": "experiment_registration_verify_export",
+      "source": "Project engineering extension; redacted independent verification is not proof of mathematical correctness.",
+      "code": [
+        "showcase/experiment_manifest.py",
+        "showcase/experiment_sources.py",
+        "showcase/experiment_samples.py",
+        "showcase/experiment_cli.py",
+        "showcase/experiment_runner.py",
+        "showcase/experiment_verification.py",
+        "showcase/experiment_verification_checks.py",
+        "showcase/experiment_verification_reporting.py",
+        "showcase/experiment_verification_state.py"
+      ],
+      "trace": [
+        "frozen manifest and sample identities",
+        "read-only public Job/Run reconciliation",
+        "transport/task/usage/coverage status",
+        "allowlisted redacted report export"
+      ],
+      "offline": {
+        "status": "COVERED",
+        "refs": [
+          "tests/test_showcase_experiment_cli.py",
+          "tests/test_showcase_experiment_execution.py",
+          "tests/test_showcase_experiment_verify.py"
+        ],
+        "note": "Scripted public-API fixtures cover PASS, FAIL, UNKNOWN, and NOT_RUN. This does not establish provider-live readiness."
+      },
+      "historical_live": {
+        "status": "NOT_COVERED"
+      },
+      "cli_provider_live": {
+        "status": "NOT_RUN"
+      }
+    },
+    {
       "id": "experiment_cli_single_factor_pair",
       "source": "Project engineering extension; P1 §4.3 is literature context, not implementation attribution.",
       "existing_code_candidates": [

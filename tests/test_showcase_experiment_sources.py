@@ -10,16 +10,14 @@ from unittest.mock import patch
 
 class ExperimentSourcesTest(unittest.TestCase):
     def test_source_module_exports_pure_config_and_sample_adapters(self) -> None:
-        from showcase.experiment_sources import (
-            FileSampleHashResolver,
-            ModelConfigAdapter,
-            StaticModelConfigAdapter,
-        )
+        from showcase.experiment_samples import FileSampleHashResolver
+        from showcase.experiment_sources import ModelConfigAdapter, StaticModelConfigAdapter
 
         applied = {"model": "test-model"}
         adapter = StaticModelConfigAdapter(applied)
         self.assertTrue(callable(adapter.config))
         self.assertEqual("showcase.experiment_sources", ModelConfigAdapter.__module__)
+        self.assertEqual("showcase.experiment_samples", FileSampleHashResolver.__module__)
         snapshot = adapter.config()
         snapshot["model"] = "changed"
         self.assertEqual({"model": "test-model"}, adapter.config())
@@ -67,7 +65,7 @@ class ExperimentSourcesTest(unittest.TestCase):
             self.assertEqual([], result["dirty_paths"])
 
     def test_sample_path_rejection_does_not_read_or_echo_source(self) -> None:
-        from showcase.experiment_sources import FileSampleHashResolver
+        from showcase.experiment_samples import FileSampleHashResolver
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "samples"

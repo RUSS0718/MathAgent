@@ -67,7 +67,8 @@ PR #121 合并记录报告：固定源码上的 1,071 项 unittest 零失败、�
 | Trace-Back、Meta 指导与重规划 | P1 §3.4、附录 B.5 | traceback.py、meta.py、replan.py、ReplanDecision；事件记录版本与裁决摘要 | COVERED：受控分支和故障注入测试 | NOT_COVERED：已有 live 记录未自然触发这些机制 |
 | S3 预算、停止、取消与安全恢复 | P1 附录 A、B.5；强恢复合同为项目扩展 | showcase/run_budget.py、Job 控制、Solver checkpoint；attempt、reservation、deadline 和终态投影 | COVERED：公共 Job、进程退出、unknown、预算与迟到结算测试 | NOT_RUN：本票未验证真实 provider 在途请求的取消或恢复语义 |
 | S4 最终文本身份、审查和 Evidence | P1 §3.5；哈希身份绑定为项目扩展 | showcase/final_evidence.py、solver_harness/final_binding.py；artifact hash、review scope、binding 状态 | COVERED：改写失效、并发追加与公共报告合同 | NOT_RUN：#127 需要新 CLI Run 上真实整题审查和同文本绑定证据 |
-| 登记 CLI、只读核验、导出与单因素配对 | 项目工程扩展；与论文的组件消融实验设计相关（P1 §4.3） | 现有 showcase_cli.py 没有后续票要求的实验 manifest preflight/run/status/verify/export 命令 | NOT_COVERED：#125/#126/#128 尚未实现 | NOT_RUN：新 CLI 尚无 provider-live 批次 |
+| 实验登记、只读核验与导出 | 项目工程扩展；独立报告与脱敏为工程合同 | `showcase/experiment_cli.py`、`experiment_runner.py`、`experiment_verification.py` 及其检查/报告模块 | COVERED：#125/#126 的 frozen manifest 与 verify/export CLI 合同；见对应测试 | NOT_RUN：新 CLI 尚无 provider-live 批次 |
+| 单因素配对 | 项目工程扩展；P1 §4.3 仅作研究背景 | 既有 `showcase/solver_harness/paired.py` 与条件校验仍未接入 frozen manifest CLI | NOT_COVERED：#128 尚未实现 | NOT_RUN：#127 readiness 尚无 provider-live 通过记录 |
 
 逐项测试文件、状态值和阻断票以 [demo-coverage-matrix.json](demo-coverage-matrix.json) 为机器读取入口。未来运行报告必须新增实际证据引用和状态，不得覆盖本页列出的历史事实。
 

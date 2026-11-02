@@ -7,7 +7,7 @@ import json
 import math
 import subprocess
 from collections.abc import Mapping
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Any, Protocol
 
 from .experiment_manifest import canonical_json
@@ -51,19 +51,6 @@ class FileAppliedModelConfig:
         return hashlib.sha256(canonical_json(self._model)).hexdigest()
 
 
-def load_sample_map(path: str | Path) -> dict[str, dict[str, str]]:
-    """Load only opaque sample IDs mapped to two relative file references."""
-    value = _read_control_json(path, "experiment_sample_map_invalid")
-    if not isinstance(value, dict) or any(
-        not isinstance(sample_id, str)
-        or not isinstance(paths, dict)
-        or set(paths) != {"input", "text"}
-        or any(not isinstance(relative, str) or not relative for relative in paths.values())
-        for sample_id, paths in value.items()
-    ):
-        raise ValueError("experiment_sample_map_invalid")
-    return value
-
 class ModelConfigAdapter(Protocol):
     """Pure seam exposing already trusted, applied model settings."""
 
@@ -78,67 +65,6 @@ class StaticModelConfigAdapter:
 
     def config(self) -> Mapping[str, Any]:
         return dict(self._config)
-
-
-class FileSampleHashResolver:
-    """Resolve opaque sample refs through a fixed map and hash files inside one root."""
-
-    def __init__(self, data_root: str | Path, source_map: Mapping[str, Mapping[str, str]]) -> None:
-        try:
-            root = Path(data_root).resolve(strict=True)
-        except (OSError, RuntimeError):
-            raise ValueError("experiment_sample_source_invalid") from None
-        if (
-            not root.is_dir()
-            or _sensitive_sample_path(root.parts)
-            or not isinstance(source_map, Mapping)
-        ):
-            raise ValueError("experiment_sample_source_invalid")
-        self.root = root
-        self.source_map = dict(source_map)
-
-    def hashes(self, sample: dict[str, Any]) -> dict[str, str]:
-        return {
-            f"{kind}_sha256": hashlib.sha256(self._read(sample, kind)).hexdigest()
-            for kind in ("input", "text")
-        }
-
-    def read_text(self, sample: dict[str, Any]) -> str:
-        """Read the mapped text only after both frozen sample hashes still match."""
-        input_bytes = self._read(sample, "input")
-        text_bytes = self._read(sample, "text")
-        if (
-            hashlib.sha256(input_bytes).hexdigest() != sample.get("input_sha256")
-            or hashlib.sha256(text_bytes).hexdigest() != sample.get("text_sha256")
-        ):
-            raise ValueError("experiment_sample_hash_mismatch")
-        try:
-            return text_bytes.decode("utf-8", errors="strict")
-        except UnicodeError:
-            raise ValueError("experiment_sample_source_invalid") from None
-
-    def _read(self, sample: dict[str, Any], kind: str) -> bytes:
-        reference = sample.get("source_ref")
-        paths = self.source_map.get(reference)
-        if not isinstance(paths, Mapping) or set(paths) != {"input", "text"}:
-            raise ValueError("experiment_sample_source_invalid")
-        relative = paths[kind]
-        if not isinstance(relative, str) or not relative:
-            raise ValueError("experiment_sample_source_invalid")
-        parts = relative.replace("\\", "/").split("/")
-        if _unsafe_relative_sample_ref(relative, parts):
-            raise ValueError("experiment_sample_source_invalid")
-        try:
-            candidate = self.root.joinpath(*parts)
-            resolved = candidate.resolve(strict=True)
-            resolved.relative_to(self.root)
-            if _sensitive_sample_path(resolved.relative_to(self.root).parts) or not resolved.is_file():
-                raise ValueError
-            content = resolved.read_bytes()
-            content.decode("utf-8", errors="strict")
-            return content
-        except (OSError, RuntimeError, UnicodeError, ValueError):
-            raise ValueError("experiment_sample_source_invalid") from None
 
 
 def source_identity(root: str | Path | None = None) -> dict[str, Any]:
@@ -185,18 +111,6 @@ def source_identity(root: str | Path | None = None) -> dict[str, Any]:
     }
 
 
-def _unsafe_relative_sample_ref(relative: str, parts: list[str]) -> bool:
-    return (
-        Path(relative).is_absolute()
-        or PureWindowsPath(relative).is_absolute()
-        or bool(PureWindowsPath(relative).drive)
-        or ":" in relative
-        or ".." in parts
-        or "\\" in relative
-        or _sensitive_sample_path(parts)
-    )
-
-
 def is_sensitive_path(path: Any) -> bool:
     """Reject reserved and generated paths before any caller-controlled file read."""
     raw_parts = (
@@ -237,14 +151,10 @@ def is_sensitive_path(path: Any) -> bool:
     )
 
 
-def _sensitive_sample_path(parts: Any) -> bool:
-    return is_sensitive_path(parts)
-
-
 def _read_control_json(path: str | Path, error_code: str) -> Any:
     try:
         resolved = Path(path).resolve(strict=True)
-        if _sensitive_sample_path(resolved.parts) or not resolved.is_file():
+        if is_sensitive_path(resolved.parts) or not resolved.is_file():
             raise ValueError
 
         def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
