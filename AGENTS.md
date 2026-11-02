@@ -4,6 +4,8 @@
 
 理解版本状态、查找开发阶段 / 能力验收材料或规划下一版本时，先读 [文档索引](docs/README.md)。索引区分 accepted 设计、开发完成记录、能力证据和早期路线图；当前能力不能仅从旧 PRD 或 GAP 推断。
 
+身份、恢复或交付绑定相关修改先读 [身份链导航](docs/engineering/identity-navigation.md)；运行快速、完整或发布检查先读 [工程门禁](docs/engineering/development-gates.md)。
+
 ## 评分目标
 
 客观评测的答案正确性占 60%。本分支的新增工程模块默认关闭，不能改变根目录 `user_agent.ReasoningAgent` 的官方评测路径。主观评测占 40%，分为：
