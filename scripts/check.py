@@ -29,8 +29,18 @@ def _run(command: list[str]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run the credential-free MathAgent repository checks")
-    parser.add_argument("--offline", action="store_true", help="keep the workspace check credential-free")
+    parser = argparse.ArgumentParser(
+        description="Run the credential-free MathAgent repository checks"
+    )
+    parser.add_argument(
+        "--offline", action="store_true", help="keep the workspace check credential-free"
+    )
+    parser.add_argument(
+        "--report-dir",
+        type=Path,
+        default=ROOT / "artifacts/repository-check",
+        help="write the unittest summary and complete diagnostics here",
+    )
     args = parser.parse_args()
 
     workspace = [sys.executable, "scripts/check_workspace.py"]
@@ -38,7 +48,16 @@ def main() -> int:
         workspace.append("--offline")
     _run(workspace)
     _run([sys.executable, "scripts/check_test_seams.py"])
-    _run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"])
+    _run(
+        [
+            sys.executable,
+            "scripts/run_unittest_report.py",
+            "--summary-json",
+            str(args.report_dir / "tests.json"),
+            "--diagnostics",
+            str(args.report_dir / "diagnostics.log"),
+        ]
+    )
     for probe in MUTATION_PROBES:
         _run([sys.executable, "-m", probe])
     _run([sys.executable, "demo_server.py", "--help"])

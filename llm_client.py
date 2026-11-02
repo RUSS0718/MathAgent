@@ -59,7 +59,7 @@ def _not_submitted(error: BaseException | None) -> bool:
         if not isinstance(item, BaseException) or id(item) in seen:
             continue
         seen.add(id(item))
-        if isinstance(item, (requests.ConnectTimeout, NewConnectionError)):
+        if isinstance(item, requests.ConnectTimeout | NewConnectionError):
             return True
         if isinstance(item, requests.ReadTimeout):
             return False
@@ -172,7 +172,11 @@ class InternChatClient:
         _attempt_budget: Any = None,
     ) -> str:
         """Send a request; explicit reasoning_mode wins over thinking_mode and defaults."""
-        effective_timeout = self.timeout if timeout_seconds is None else (float(timeout_seconds) if _attempt_budget is not None else int(timeout_seconds))
+        effective_timeout = (
+            self.timeout
+            if timeout_seconds is None
+            else (float(timeout_seconds) if _attempt_budget is not None else int(timeout_seconds))
+        )
         if effective_timeout <= 0:
             raise ValueError("timeout_seconds_must_be_positive")
         payload = {
@@ -223,6 +227,7 @@ class InternChatClient:
         clock = time.monotonic
         if _attempt_budget is not None:
             from showcase.deadline_clock import guarded_utc_clock
+
             clock = guarded_utc_clock(time.time)
         logical_deadline = clock() + effective_timeout
         if _attempt_budget is not None:
@@ -279,8 +284,13 @@ class InternChatClient:
                     unparsed = object()
 
                     def settle_late(
-                        response, body, headers_seconds, completion_seconds, body_complete=True,
-                        *, parsed=unparsed,
+                        response,
+                        body,
+                        headers_seconds,
+                        completion_seconds,
+                        body_complete=True,
+                        *,
+                        parsed=unparsed,
                     ):
                         nonlocal late_response_settled
                         if body_complete and parsed is unparsed:
@@ -320,16 +330,12 @@ class InternChatClient:
                                 and isinstance(late_message, Mapping)
                                 and (late_content is None or isinstance(late_content, str))
                             )
-                            http_success = (
-                                type(status_code) is int and 200 <= status_code < 300
-                            )
+                            http_success = type(status_code) is int and 200 <= status_code < 300
                             response_fields = {
                                 "http_status": status_code,
                                 "response_id": late_data.get("id"),
                                 "response_model_id": late_data.get("model"),
-                                "finish_reason": safe_identifier(
-                                    late_choice.get("finish_reason")
-                                ),
+                                "finish_reason": safe_identifier(late_choice.get("finish_reason")),
                                 "response_headers_seconds": headers_seconds,
                                 "completion_seconds": completion_seconds,
                                 "duration_seconds": round(completion_seconds, 3),
@@ -344,11 +350,16 @@ class InternChatClient:
                                     error_category="http_status",
                                     error_type="HTTPError",
                                 )
-                            elif (getattr(_attempt_budget, "strict_completion", False)
-                                  and late_choices == []):
-                                request_event.update(response_fields, status="error",
-                                                     error_category="missing_finish_reason",
-                                                     error_type="EmptyChoices")
+                            elif (
+                                getattr(_attempt_budget, "strict_completion", False)
+                                and late_choices == []
+                            ):
+                                request_event.update(
+                                    response_fields,
+                                    status="error",
+                                    error_category="missing_finish_reason",
+                                    error_type="EmptyChoices",
+                                )
                             elif not valid_completion_shape:
                                 request_event.update(
                                     response_fields,
@@ -356,11 +367,16 @@ class InternChatClient:
                                     error_category="invalid_response",
                                     error_type="ValueError",
                                 )
-                            elif (getattr(_attempt_budget, "strict_completion", False)
-                                  and response_fields["finish_reason"] is None):
-                                request_event.update(response_fields, status="error",
-                                                     error_category="missing_finish_reason",
-                                                     error_type="ChatClientError")
+                            elif (
+                                getattr(_attempt_budget, "strict_completion", False)
+                                and response_fields["finish_reason"] is None
+                            ):
+                                request_event.update(
+                                    response_fields,
+                                    status="error",
+                                    error_category="missing_finish_reason",
+                                    error_type="ChatClientError",
+                                )
                             else:
                                 late_reasoning = late_message.get("reasoning_content")
                                 request_event.update(
@@ -403,33 +419,46 @@ class InternChatClient:
                         if kind == "headers":
                             response = value
                             request_event["http_status"] = response.status_code
-                            request_event["response_headers_seconds"] = time.perf_counter() - attempt_started
+                            request_event["response_headers_seconds"] = (
+                                time.perf_counter() - attempt_started
+                            )
                             response.raise_for_status()
                         elif kind == "bytes":
                             if request_event["first_byte_seconds"] is None:
-                                request_event["first_byte_seconds"] = time.perf_counter() - attempt_started
+                                request_event["first_byte_seconds"] = (
+                                    time.perf_counter() - attempt_started
+                                )
                             response_body.extend(value)
                         elif kind == "complete":
-                            request_event["completion_seconds"] = time.perf_counter() - attempt_started
+                            request_event["completion_seconds"] = (
+                                time.perf_counter() - attempt_started
+                            )
                     from showcase.processing_deadline import process_before_deadline
 
                     def settle_processed(parsed, error):
-                        if error is not None and not isinstance(error, (TypeError, ValueError)):
+                        if error is not None and not isinstance(error, TypeError | ValueError):
                             import logging
 
                             logging.getLogger(__name__).warning(
                                 "late processing unresolved: run_id=%s attempt_id=%s",
-                                _attempt_budget.run_id, request_event.get("attempt_id"),
+                                _attempt_budget.run_id,
+                                request_event.get("attempt_id"),
                             )
                             return  # Keep the original unknown reservation for review.
                         settle_late(
-                            response, response_body, request_event.get("response_headers_seconds"),
-                            request_event.get("completion_seconds") or time.perf_counter() - attempt_started,
+                            response,
+                            response_body,
+                            request_event.get("response_headers_seconds"),
+                            request_event.get("completion_seconds")
+                            or time.perf_counter() - attempt_started,
                             parsed=parsed,
                         )
 
                     data = process_before_deadline(
-                        lambda: json.loads(response_body), logical_deadline, settle_processed, clock=clock
+                        lambda: json.loads(response_body),
+                        logical_deadline,
+                        settle_processed,
+                        clock=clock,
                     )
                 else:
                     if self.loopback_only or self.provider_endpoint_only:
@@ -451,12 +480,19 @@ class InternChatClient:
                     data = response.json()
                 usage = provider_usage(data.get("usage"))
                 request_event.update(usage)
-                if (_attempt_budget is not None and getattr(_attempt_budget, "strict_completion", False)
-                        and data.get("choices") == []):
+                if (
+                    _attempt_budget is not None
+                    and getattr(_attempt_budget, "strict_completion", False)
+                    and data.get("choices") == []
+                ):
                     raise ChatClientError("missing_finish_reason", "empty_choices")
                 choice = data["choices"][0]
                 finish_reason = safe_identifier(choice.get("finish_reason"))
-                if _attempt_budget is not None and getattr(_attempt_budget, "strict_completion", False) and finish_reason is None:
+                if (
+                    _attempt_budget is not None
+                    and getattr(_attempt_budget, "strict_completion", False)
+                    and finish_reason is None
+                ):
                     raise ChatClientError("missing_finish_reason")
                 request_event.update(
                     status="success",
@@ -556,7 +592,11 @@ class InternChatClient:
                 self._record_failure(last_category, exc)
             except Exception as exc:
                 failure = exc
-                last_category = (getattr(exc, "category", None) or "client_exception") if _attempt_budget is not None else "client_exception"
+                last_category = (
+                    (getattr(exc, "category", None) or "client_exception")
+                    if _attempt_budget is not None
+                    else "client_exception"
+                )
                 self._record_failure(last_category, exc)
                 raise
             finally:
@@ -565,7 +605,11 @@ class InternChatClient:
                         request_event["duration_seconds"] = round(
                             time.perf_counter() - attempt_started, 3
                         )
-                    if failure is not None and not late_response_settled and not local_processing_timeout:
+                    if (
+                        failure is not None
+                        and not late_response_settled
+                        and not local_processing_timeout
+                    ):
                         failure_response = (
                             response if response is not None else getattr(failure, "response", None)
                         )
@@ -587,7 +631,9 @@ class InternChatClient:
                                 completion_tokens=0,
                                 total_tokens=0,
                             )
-                        if isinstance(failure, requests.ReadTimeout) and not _not_submitted(failure):
+                        if isinstance(failure, requests.ReadTimeout) and not _not_submitted(
+                            failure
+                        ):
                             from showcase.run_budget_late import settle_timeout_nonblocking
 
                             settle_timeout_nonblocking(_attempt_budget, request_event)
