@@ -160,6 +160,7 @@ v0.2 文档已归档为历史合同；v1.1 规格不覆盖这些 accepted ADR，
 ## Intern S2 五方向实验计划
 
 - [实验开发入口](experiments/README.md)：总计划、固定 develop 审计、Intern S2 合同及五组 PRD、技术规格和 ADR。
+- [#122 Demo 覆盖矩阵与 CLI readiness 合同](experiments/demo-coverage-122.md)：Showcase 当前证据及 #124–#128 的实现与验收边界。
 - [实际 setup 状态](experiments/setup-status.md)：只记录已执行检查；proposed 文档、离线合同与 live 能力分开标记。
 - [S4 最终答案 Evidence 合同](experiments/s4-final-evidence.md)：文本身份、检查范围、追加历史和离线验收接缝；不代表数学证明或能力提升。
 - [S5 同题配对 Runner 合同](experiments/s5-paired-runner.md)：批次入口、独立子 Run、预算与不可变归档；离线 180 项测试及本地门禁通过，托管 CI 待核对，不代表策略效果。

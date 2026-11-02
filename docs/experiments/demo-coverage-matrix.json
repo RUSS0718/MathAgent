@@ -1,0 +1,383 @@
+{
+  "schema_version": 1,
+  "ticket": 122,
+  "updated": "2026-11-02",
+  "basis": {
+    "integration_branch": "feat(setup)-流式与CLI实验组件设置",
+    "integration_merge": "775d00e3cdcadb6cb6aeca07a1b59093103370d4",
+    "pr121_head": "4e9997dfaca9a4b5a98c67947af0a8e24b0e59f1",
+    "paper": "arXiv:2605.19338v1",
+    "upstream_commit": "5f2a86b5f4cf870be1b1d517c2d33c6932b01b7d"
+  },
+  "source_status": [
+    "VERIFIED",
+    "SOURCE_UNVERIFIED"
+  ],
+  "evidence_status": [
+    "COVERED",
+    "FAILED",
+    "NOT_RUN",
+    "NOT_COVERED"
+  ],
+  "sources": [
+    {
+      "id": "P1",
+      "status": "VERIFIED",
+      "ref": "https://arxiv.org/html/2605.19338v1"
+    },
+    {
+      "id": "P2",
+      "status": "VERIFIED",
+      "ref": "https://proceedings.mlr.press/v306/ospanov26a.html"
+    },
+    {
+      "id": "P3",
+      "status": "SOURCE_UNVERIFIED",
+      "ref": "https://arxiv.org/abs/2506.15707v2"
+    },
+    {
+      "id": "P4",
+      "status": "VERIFIED",
+      "ref": "https://aclanthology.org/2026.acl-long.1114/"
+    },
+    {
+      "id": "U1",
+      "status": "VERIFIED",
+      "ref": "https://raw.githubusercontent.com/Julius-Woo/STAR-PolyaMath/5f2a86b5f4cf870be1b1d517c2d33c6932b01b7d/src/orchestrator_mixins/orchestrator_solve.py"
+    },
+    {
+      "id": "U1-tree",
+      "status": "SOURCE_UNVERIFIED",
+      "ref": "https://github.com/Julius-Woo/STAR-PolyaMath/tree/5f2a86b5f4cf870be1b1d517c2d33c6932b01b7d"
+    },
+    {
+      "id": "PR121",
+      "status": "VERIFIED",
+      "head": "4e9997dfaca9a4b5a98c67947af0a8e24b0e59f1",
+      "merge": "775d00e3cdcadb6cb6aeca07a1b59093103370d4",
+      "ref": "https://github.com/RUSS0718/MathAgent/pull/121"
+    },
+    {
+      "id": "contest-proposal",
+      "status": "SOURCE_UNVERIFIED",
+      "ref": "Full competition proposal not present; use caller-provided AGENTS.md excerpt only."
+    }
+  ],
+  "readiness": {
+    "provider_live": "NOT_RUN",
+    "blocks": [
+      "#127 provider-live readiness conclusion",
+      "#128 provider-live paired comparison conclusion"
+    ],
+    "reason": "No provider-live batch has run through the new frozen-manifest CLI acceptance; historical outcomes do not substitute."
+  },
+  "capabilities": [
+    {
+      "id": "official_boundary",
+      "source": "Project boundary; no paper attribution.",
+      "code": [
+        "user_agent.py",
+        "implementations/",
+        "BASELINE.json",
+        "scripts/check_showcase_release.py"
+      ],
+      "trace": [
+        "release gate and official import/baseline checks"
+      ],
+      "offline": {
+        "status": "COVERED",
+        "refs": [
+          "https://github.com/RUSS0718/MathAgent/pull/121"
+        ]
+      },
+      "historical_live": {
+        "status": "NOT_RUN"
+      },
+      "cli_provider_live": {
+        "status": "NOT_RUN"
+      }
+    },
+    {
+      "id": "simple_path_final_delivery",
+      "source": "P1 §3.2, §3.5; S4 artifact binding is a project extension.",
+      "code": [
+        "showcase/solver_harness/star_routing.py",
+        "showcase/solver_harness/finalize.py",
+        "showcase/solver_harness/final_binding.py",
+        "showcase/final_evidence.py"
+      ],
+      "trace": [
+        "public Job/Run report",
+        "redacted event timeline",
+        "artifact hash, review scope, binding status"
+      ],
+      "offline": {
+        "status": "COVERED",
+        "refs": [
+          "tests/test_solver_harness_star_routing.py",
+          "tests/test_star_product_jobs.py",
+          "tests/test_star_product_final_binding.py",
+          "tests/test_final_evidence.py"
+        ]
+      },
+      "historical_live": {
+        "status": "NOT_COVERED",
+        "refs": [
+          "docs/evals/star-product-sp13-release.md",
+          "docs/evals/star-readiness-97-status.md"
+        ],
+        "note": "SP-13 records earlier simple successes; #97 later lacks complete reviewed and bound delivery."
+      },
+      "cli_provider_live": {
+        "status": "NOT_RUN"
+      }
+    },
+    {
+      "id": "planning_steps_verification_challenge",
+      "source": "P1 §3.3–§3.4.",
+      "code": [
+        "showcase/solver_harness/planning.py",
+        "showcase/solver_harness/step.py",
+        "showcase/solver_harness/verification.py",
+        "showcase/solver_harness/challenge.py"
+      ],
+      "trace": [
+        "public Job stages/events",
+        "step verdict and evidence summaries"
+      ],
+      "offline": {
+        "status": "COVERED",
+        "refs": [
+          "tests/test_star_product_planning.py",
+          "tests/test_star_product_gates.py",
+          "tests/test_star_product_challenge.py"
+        ]
+      },
+      "historical_live": {
+        "status": "NOT_COVERED",
+        "refs": [
+          "docs/evals/star-rb08-release.md",
+          "docs/evals/star-readiness-97-status.md"
+        ],
+        "note": "Natural non-fast-path acceptance and Challenge trigger remain uncovered."
+      },
+      "cli_provider_live": {
+        "status": "NOT_RUN"
+      }
+    },
+    {
+      "id": "tool_execution_receipt",
+      "source": "P1 Appendix A, B.4; isolation and receipt accounting are project adaptations.",
+      "code": [
+        "showcase/tools.py",
+        "showcase/python_executor.py",
+        "showcase/solver_harness/tool_ports.py",
+        "showcase/solver_harness/explore.py",
+        "showcase/solver_harness/verifier_compute.py"
+      ],
+      "trace": [
+        "registered tool/status",
+        "redacted receipt",
+        "S3 tool reservation and settlement"
+      ],
+      "offline": {
+        "status": "COVERED",
+        "refs": [
+          "tests/test_python_executor_docker.py",
+          "tests/test_star_product_tools.py",
+          "tests/test_star_product_explore_compute.py",
+          "tests/test_star_product_verifier_compute.py"
+        ]
+      },
+      "historical_live": {
+        "status": "NOT_COVERED",
+        "refs": [
+          "docs/evals/star-rb08-release.md",
+          "docs/evals/star-readiness-97-status.md"
+        ],
+        "note": "No passing natural multistep provider-to-tool-to-receipt-to-delivery chain is recorded."
+      },
+      "cli_provider_live": {
+        "status": "NOT_RUN"
+      }
+    },
+    {
+      "id": "traceback_meta_replan",
+      "source": "P1 §3.4, Appendix B.5; approval semantics follow project contract.",
+      "code": [
+        "showcase/solver_harness/traceback.py",
+        "showcase/solver_harness/meta.py",
+        "showcase/solver_harness/replan.py"
+      ],
+      "trace": [
+        "plan revision",
+        "approval status",
+        "archived plan identity"
+      ],
+      "offline": {
+        "status": "COVERED",
+        "refs": [
+          "tests/test_star_product_recovery.py",
+          "tests/test_star_product_replan_decision.py"
+        ]
+      },
+      "historical_live": {
+        "status": "NOT_COVERED",
+        "refs": [
+          "docs/evals/star-rb08-release.md",
+          "docs/evals/star-product-align10-release.md"
+        ],
+        "note": "Natural live Trace-Back and Replan remain uncovered."
+      },
+      "cli_provider_live": {
+        "status": "NOT_RUN"
+      }
+    },
+    {
+      "id": "s3_budget_stop_recovery",
+      "source": "P1 Appendix A, B.5; shared ledger and safe recovery are project extensions.",
+      "code": [
+        "showcase/run_budget.py",
+        "showcase/star_product_recovery.py",
+        "showcase/solver_harness/storage.py",
+        "showcase/solver_harness/controller.py"
+      ],
+      "trace": [
+        "attempt/reservation",
+        "deadline and stop reason",
+        "Job/Run recovery projection"
+      ],
+      "offline": {
+        "status": "COVERED",
+        "refs": [
+          "tests/test_star_product_recovery.py",
+          "tests/test_star_product_align_recovery.py",
+          "tests/test_star_product_streaming_recovery.py",
+          "tests/test_star_late_durable_98.py"
+        ]
+      },
+      "historical_live": {
+        "status": "NOT_COVERED",
+        "refs": [
+          "docs/evals/star-readiness-97-status.md"
+        ],
+        "note": "Historical timeout/unknown is not evidence of safe live resume."
+      },
+      "cli_provider_live": {
+        "status": "NOT_RUN"
+      }
+    },
+    {
+      "id": "s4_artifact_binding",
+      "source": "P1 §3.5; exact artifact identity/invalidation are project extensions.",
+      "code": [
+        "showcase/final_evidence.py",
+        "showcase/solver_harness/final_binding.py",
+        "showcase/star_result_semantics.py"
+      ],
+      "trace": [
+        "artifact hash",
+        "whole-review scope/status",
+        "binding status in report/Evidence"
+      ],
+      "offline": {
+        "status": "COVERED",
+        "refs": [
+          "tests/test_final_evidence.py",
+          "tests/test_star_product_final_binding.py",
+          "docs/experiments/s4-final-evidence.md"
+        ]
+      },
+      "historical_live": {
+        "status": "NOT_COVERED",
+        "refs": [
+          "docs/evals/star-readiness-97-status.md"
+        ],
+        "latest_attempt": "FAILED"
+      },
+      "cli_provider_live": {
+        "status": "NOT_RUN"
+      }
+    },
+    {
+      "id": "experiment_cli_single_factor_pair",
+      "source": "Project engineering extension; P1 §4.3 is literature context, not implementation attribution.",
+      "existing_code_candidates": [
+        "showcase/cli.py",
+        "showcase/campaign_cli.py",
+        "showcase/solver_harness/paired.py",
+        "showcase/solver_harness/paired_conditions.py"
+      ],
+      "trace": [
+        "manifest/source hash",
+        "PID/created time/phase/completion/stop/log tail",
+        "public Job/Run plus S3/S4 reconciliation",
+        "redacted export"
+      ],
+      "offline": {
+        "status": "NOT_COVERED",
+        "refs": [
+          "showcase/cli.py"
+        ],
+        "note": "Existing CLI/pair primitives do not implement the dependent-ticket contract."
+      },
+      "historical_live": {
+        "status": "NOT_COVERED",
+        "refs": [
+          "docs/evals/showcase-solver-paired-report-sh22.md"
+        ],
+        "note": "Historical Skills pair is not evidence for the new frozen-manifest public-Job CLI."
+      },
+      "cli_provider_live": {
+        "status": "NOT_RUN"
+      },
+      "reuse": "Public Job, S3/S4 and paired condition validation; do not replace the CLI flow with direct SolverHarness execution."
+    }
+  ],
+  "dependent_tickets": [
+    {
+      "ticket": 123,
+      "depends_on": [],
+      "scope": "Audit Intern SSE/tools/usage and loopback failure cases; retain #96 identity."
+    },
+    {
+      "ticket": 124,
+      "depends_on": [
+        122,
+        123
+      ],
+      "scope": "Streaming-first compatible calls; explicit limits; no silent fallback."
+    },
+    {
+      "ticket": 125,
+      "depends_on": [
+        122,
+        123,
+        124
+      ],
+      "scope": "Manifest preflight, serial run, status and safe resume."
+    },
+    {
+      "ticket": 126,
+      "depends_on": [
+        125
+      ],
+      "scope": "Independent verify and redacted export."
+    },
+    {
+      "ticket": 127,
+      "depends_on": [
+        124,
+        126
+      ],
+      "scope": "Simple and natural multistep Demo readiness."
+    },
+    {
+      "ticket": 128,
+      "depends_on": [
+        127
+      ],
+      "scope": "Single-factor paired execution after readiness passes."
+    }
+  ]
+}

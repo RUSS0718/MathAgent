@@ -65,6 +65,11 @@ class RawProviderContent:
 
 
 class StarJobFixture:
+    def setUp(self):
+        """Configure the scripted client before test arguments construct adapters."""
+        super().setUp()
+        self.enterContext(patch.dict(os.environ, {"INTERN_API_KEY": "scripted-only"}))
+
     def open_star(self, replies, *, retry=1, stream_chunk_size=7, **config):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
