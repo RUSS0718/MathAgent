@@ -5,6 +5,7 @@ from copy import deepcopy
 
 from ..redaction import redact
 from .budget import budget_reason
+from .final_binding import review_record
 
 
 def commit(harness, run, kind, updates, **details):
@@ -92,7 +93,8 @@ def valid_facts(state):
                 and fact["statement"].strip()
                 and isinstance(dependencies, list)
                 and all(d in known for d in dependencies)
-                and (fact.get("source") in accepted_steps or fact.get("result_id"))
+                and (fact.get("source") in accepted_steps or fact.get("result_id")
+                     or fact in state.get("rescued_results", []))
             ):
                 facts.append(fact)
                 if fact.get("result_id"):
@@ -120,47 +122,62 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
     if isinstance(retries, bool) or not isinstance(retries, int) or not 0 <= retries <= 20:
         raise ValueError("config.max_final_solution_retries must be 0..20")
     attempts = deepcopy(state.get("final_solution_attempts", []))
-    previous_review = None
+    current_attempts = [attempt for attempt in attempts
+                        if attempt["plan_version"] == state["plan_version"]
+                        and attempt["attempt_index"] == state["attempt_index"]]
+    previous_review = current_attempts[-1].get("review") if current_attempts else None
+    pending_review = (getattr(harness, "_product_recovery", False)
+                      and current_attempts and current_attempts[-1].get("review") is None)
+    # Reviewing the existing candidate spends no new candidate-generation slot.
+    remaining = retries + 1 - len(current_attempts) + int(bool(pending_review))
     facts = valid_facts(state)
-    for number in range(retries + 1):
+    for _ in range(max(0, remaining)):
         reason = budget_reason(run["state"], config)
         if reason:
             return finish(harness, run, "partial_budget_exhausted", reason)
         if model_port is None:
             return finish(harness, run, "partial_aborted", "final_generator_unavailable")
-        session = f"final:{run['run_id']}:plan{state['plan_version']}:attempt{state['attempt_index']}:candidate{len(attempts)}"
-        run, reply = dispatch(
-            harness,
-            run,
-            model_port.complete,
-            {
-                "role": "final_generator",
-                "session_key": session,
-                "problem": problem,
+        pending_review = (getattr(harness, "_product_recovery", False)
+                          and current_attempts and current_attempts[-1].get("review") is None)
+        if pending_review:
+            attempt = current_attempts[-1]
+            candidate = attempt["candidate"]
+            session = attempt["session_key"]
+        else:
+            session = f"final:{run['run_id']}:plan{state['plan_version']}:attempt{state['attempt_index']}:candidate{len(attempts)}"
+            run, reply = dispatch(
+                harness,
+                run,
+                model_port.complete,
+                {
+                    "role": "final_generator",
+                    "session_key": session,
+                    "problem": problem,
+                    "accepted_results": facts,
+                    "previous_review": previous_review,
+                    "instruction": "Synthesize a complete answer to the original problem from only the accepted facts. Return final_response.",
+                },
+            )
+            candidate = reply.get("final_response") if isinstance(reply, Mapping) else None
+            if not isinstance(candidate, str) or not candidate.strip():
+                return finish(harness, run, "partial_aborted", "invalid_final_candidate")
+            attempt = {
+                "attempt": len(attempts),
+                "plan_version": state["plan_version"],
+                "attempt_index": state["attempt_index"],
+                "candidate": candidate,
                 "accepted_results": facts,
-                "previous_review": previous_review,
-                "instruction": "Synthesize a complete answer to the original problem from only the accepted facts. Return final_response.",
-            },
-        )
-        candidate = reply.get("final_response") if isinstance(reply, Mapping) else None
-        if not isinstance(candidate, str) or not candidate.strip():
-            return finish(harness, run, "partial_aborted", "invalid_final_candidate")
-        attempt = {
-            "attempt": len(attempts),
-            "plan_version": state["plan_version"],
-            "attempt_index": state["attempt_index"],
-            "candidate": candidate,
-            "accepted_results": facts,
-            "review": None,
-            "session_key": session,
-        }
-        attempts.append(attempt)
-        run = commit(
-            harness,
-            run,
-            "final_candidate_generated",
-            {"final_solution_attempts": attempts, "phase": "FINAL_GENERATE"},
-        )
+                "review": None,
+                "session_key": session,
+            }
+            attempts.append(attempt)
+            current_attempts.append(attempt)
+            run = commit(
+                harness,
+                run,
+                "final_candidate_generated",
+                {"final_solution_attempts": attempts, "phase": "FINAL_GENERATE"},
+            )
         if not features.get("final_solution_review") or verifier_port is None:
             reason = (
                 "final_review_disabled"
@@ -177,6 +194,7 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
             verifier_port.verify,
             {
                 "role": "whole_solution_verifier",
+                "call_id": f"whole-review:{session}",
                 "session_key": f"whole_verify:{session}",
                 "problem": problem,
                 "solution_candidate": candidate,
@@ -203,7 +221,11 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
             harness,
             run,
             "final_candidate_reviewed",
-            {"final_solution_attempts": attempts},
+            {"final_solution_attempts": attempts,
+             "whole_solution_reviews": [*run["state"].get("whole_solution_reviews", []),
+                 review_record(run, candidate, attempt["review"]["verdict"],
+                     call_id=f"whole-review:{session}",
+                     origin="final_generator", facts=facts)]},
             review=attempt["review"],
         )
         if not valid:

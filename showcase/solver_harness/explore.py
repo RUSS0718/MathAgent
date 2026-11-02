@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 from typing import Any, Protocol, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -84,14 +83,10 @@ def run_exploration(
         revision = latest["state_revision"]
         counters = dict(latest["state"].get("counters", {}))
         model_calls = counters.get("model_calls", 0)
-        elapsed = (
-            datetime.now(UTC) - datetime.fromisoformat(latest["state"]["created_at"])
-        ).total_seconds()
-        reason = None
-        if elapsed >= max_runtime_seconds:
-            reason = "runtime_budget_exhausted"
-        elif model_calls >= state["max_model_calls"]:
-            reason = "model_call_budget_exhausted"
+        from .budget import budget_reason
+
+        reason = budget_reason(latest["state"], {"max_model_calls": state["max_model_calls"],
+                                               "max_total_duration_seconds": max_runtime_seconds})
         if reason is not None:
             exhausted = harness.commit_event(
                 state["run_id"],
@@ -138,6 +133,9 @@ def run_exploration(
             "problem": state["problem"],
             "state_revision": current["state_revision"],
         }
+        guidance_task = current["state"].get("pending_guidance_task")
+        if isinstance(guidance_task, str) and guidance_task.strip():
+            request["specific_task"] = guidance_task
         return {"reply": harness.dispatch(current, state["model_port"].complete, request)}
 
     def persist_assessment(state: _ExploreGraphState) -> dict[str, Any]:

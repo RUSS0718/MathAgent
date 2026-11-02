@@ -1,7 +1,6 @@
 """Tool-free, persistent Meta diagnostics; only the controller commits decisions."""
 
 from copy import deepcopy
-from datetime import UTC, datetime
 
 from ..redaction import redact
 from .explore import ModelPort, ScriptedModelPort
@@ -66,6 +65,31 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
     state = run["state"]
     guidance = metadata.get("meta_guidance")
     trigger = metadata.get("meta_trigger")
+    challenge_meta_decisions = {"CONTINUE", "TRACE_BACK", "APPROVE_REPLAN", "ABORT"}
+    upgrade_decided = any(
+        item.get("meta_trigger", item.get("trigger")) == "challenge_round_limit"
+        and item.get("plan_version") == state["plan_version"]
+        and item.get("attempt_index") == state["attempt_index"]
+        and item.get("step_id") == state["current_step"]
+        and item.get("decision") in challenge_meta_decisions
+        for item in state.get("meta_interventions", [])
+    )
+    upgrade = None
+    if not upgrade_decided:
+        upgrade = next(
+            (
+                item
+                for item in reversed(state.get("meta_interventions", []))
+                if item.get("meta_trigger", item.get("trigger")) == "challenge_round_limit"
+                and item.get("plan_version") == state["plan_version"]
+                and item.get("attempt_index") == state["attempt_index"]
+                and item.get("step_id") == state["current_step"]
+                and item.get("decision") not in challenge_meta_decisions
+            ),
+            None,
+        )
+    if trigger is None and upgrade is not None:
+        trigger = upgrade.get("meta_trigger", "challenge_round_limit")
     if guidance is None and trigger is None and state["phase"] != "META_DECIDE":
         return run
     if guidance is not None:
@@ -75,13 +99,11 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
             "stuck",
         }:
             raise ValueError("invalid_meta_failure_type")
-    elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
-    if state["counters"]["model_calls"] >= max_model_calls or elapsed >= max_runtime_seconds:
-        reason = (
-            "runtime_budget_exhausted"
-            if elapsed >= max_runtime_seconds
-            else "model_call_budget_exhausted"
-        )
+    from .budget import budget_reason
+
+    reason = budget_reason(state, {"max_model_calls": max_model_calls,
+                                   "max_total_duration_seconds": max_runtime_seconds})
+    if reason:
         return harness.commit_event(
             run["run_id"],
             expected_revision=run["state_revision"],
@@ -113,11 +135,18 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         "failures": redact(deepcopy(state["failure_records"])),
         "budget": {"max_model_calls": max_model_calls, **state["counters"]},
     }
+    if isinstance(metadata.get("tool_failure"), str):
+        request["tool_failure"] = metadata["tool_failure"]
     revision = run["state_revision"]
     run = harness.commit_event(
         run["run_id"],
         expected_revision=revision,
-        event={"event_id": f"meta-dispatched-{revision}", "type": "meta_dispatched"},
+        event={
+            "event_id": f"meta-dispatched-{revision}",
+            "type": "meta_dispatched",
+            "role": "meta",
+            **({"upgrade_reason": "round_limit_reached"} if upgrade is not None else {}),
+        },
         state_updates={
             "counters": {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1}
         },
@@ -138,6 +167,14 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
             if target > current_index:
                 raise ValueError("invalid_trace_back_target")
     except Exception:
+        updates = {}
+        if upgrade is not None:
+            updates = {
+                "phase": "TERMINAL",
+                "status": "partial_aborted",
+                "result_reason": "invalid_challenge_meta_decision",
+                "final_response": "Meta returned an invalid challenge decision; no further action was taken.",
+            }
         return harness.commit_event(
             run["run_id"],
             expected_revision=run["state_revision"],
@@ -145,7 +182,10 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
                 "event_id": f"meta-invalid-{revision}",
                 "type": "meta_invalid",
                 "reason": "invalid_or_failed_response",
+                "role": "meta",
+                **({"upgrade_reason": "round_limit_reached"} if upgrade is not None else {}),
             },
+            state_updates=updates,
         )
     history.extend(
         [
@@ -160,17 +200,41 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         "APPROVE_REPLAN": "REPLAN",
         "ABORT": "TERMINAL",
         "trace_back": "TRACE_BACK",
-        "replan": "META_DECIDE",
+        "replan": "REPLAN",
         "explore_more": "EXPLORE",
         "retry_different_method": "STEP_EXECUTE",
     }[action]
     updates = {
         "phase": phase,
         "meta_history": history,
-        "meta_decision": decision,
         "session_refs": {**state["session_refs"], "meta": session},
-        "meta_interventions": [*state["meta_interventions"], {"session_key": session, **decision}],
+        "meta_interventions": [
+            *state["meta_interventions"],
+            {
+                **({"kind": "guidance", "failure_type": guidance["failure_type"],
+                    "step_id": state["current_step"], "plan_version": state["plan_version"],
+                    "attempt_index": state["attempt_index"]}
+                   if guidance is not None else {}),
+                "session_key": session,
+                **({
+                    "trigger": trigger,
+                    "meta_trigger": trigger,
+                    "upgrade_reason": "round_limit_reached",
+                    "step_id": state["current_step"],
+                    "plan_version": state["plan_version"],
+                    "attempt_index": state["attempt_index"],
+                } if upgrade is not None else {}),
+                **decision,
+            },
+        ],
     }
+    if guidance is None:
+        updates["meta_decision"] = decision
+    else:
+        updates["meta_guidance_decision"] = decision
+        updates["pending_guidance_task"] = decision["specific_task"]
+        if decision["action_type"] in {"retry_different_method", "explore_more"}:
+            updates["attempt_index"] = state["attempt_index"] + 1
     if action == "ABORT":
         updates.update(
             status="partial_aborted", final_response="Run aborted: " + decision["reason_summary"]
@@ -179,13 +243,20 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         updates.update(tool_policy={"allow": []}, reasoning_mode="reason_noncoding")
     if target is not None:
         updates["trace_back_to"] = target
+    guidance_event = guidance is not None
     return harness.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],
         event={
-            "event_id": f"meta-decided-{revision}",
-            "type": "meta_decided",
-            "decision": decision,
+            "event_id": f"meta-guidance-decided-{revision}" if guidance_event else f"meta-decided-{revision}",
+            "type": "meta_guidance_decided" if guidance_event else "meta_decided",
+            **({
+                "failure_type": guidance["failure_type"],
+                "action_type": decision["action_type"],
+                "use_pure_reasoning": decision["use_pure_reasoning"],
+            } if guidance_event else {"decision": decision}),
+            **({"trigger": trigger, "upgrade_reason": "round_limit_reached", "role": "meta"} if upgrade is not None else {}),
+            **({"role": "meta"} if guidance_event else {}),
         },
         state_updates=updates,
     )

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from typing import Any
 
 from .explore import ModelPort, _HarnessOperations
@@ -27,15 +26,17 @@ def run_step(
     )
     step_id = step["step_id"]
     attempt = state["attempt_index"]
+    previous = state["steps"].get(step_id, {})
+    challenge_history = previous.get("challenge_history", [])
     suffix = f"-attempt-{attempt}" if attempt else ""
+    if challenge_history:
+        suffix += f"-challenge-continuation-{len(challenge_history)}"
     session = f"reasoner:{run['run_id']}:plan{plan['version']}:attempt{attempt}"
     counters = dict(state["counters"])
-    elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
-    reason = None
-    if elapsed >= max_runtime_seconds:
-        reason = "runtime_budget_exhausted"
-    elif counters["model_calls"] >= max_model_calls:
-        reason = "model_call_budget_exhausted"
+    from .budget import budget_reason
+
+    reason = budget_reason(state, {"max_model_calls": max_model_calls,
+                                   "max_total_duration_seconds": max_runtime_seconds})
     if reason is not None:
         return harness.commit_event(
             run["run_id"],
@@ -70,26 +71,54 @@ def run_step(
         },
     )
     try:
+        request = {
+            "run_id": run["run_id"],
+            "call_id": f"{run['run_id']}:reasoner:{plan['version']}:{step_id}{suffix}",
+            "session_key": session,
+            "failure_records": state["failure_records"],
+            "rescued_results": state.get("rescued_results", []),
+            "role": "reasoner",
+            "problem": problem,
+            "step": dict(step),
+            "state_revision": reserved["state_revision"],
+            "tool_policy": {"allow": []},
+        }
+        guidance_task = state.get("pending_guidance_task")
+        guidance = state.get("meta_guidance_decision")
+        if isinstance(guidance_task, str) and guidance_task.strip():
+            request["specific_task"] = guidance_task
+        if challenge_history:
+            request["challenge_history"] = challenge_history
+            request["objection"] = previous.get("verification", {}).get("objection", "")
         reply = harness.dispatch(
             reserved,
             model_port.complete,
-            {
-                "run_id": run["run_id"],
-                "call_id": f"{run['run_id']}:reasoner:{plan['version']}:{step_id}{suffix}",
-                "session_key": session,
-                "failure_records": state["failure_records"],
-                "rescued_results": state.get("rescued_results", []),
-                "role": "reasoner",
-                "problem": problem,
-                "step": dict(step),
-                "state_revision": reserved["state_revision"],
-                "tool_policy": {"allow": []},
-            },
+            request,
         )
     except Exception:
         reply = {"blocked": True}
     report = _normalize_report(reply, step)
-    return harness.commit_event(
+    updates = {
+        "phase": "STEP_VERIFY",
+        "steps": {
+            **state["steps"],
+            step_id: {**previous, "status": "VERIFYING", "report": report},
+        },
+    }
+    action_type = guidance.get("action_type") if isinstance(guidance, Mapping) else None
+    failure_type = next(
+        (
+            item.get("failure_type")
+            for item in reversed(state.get("meta_interventions", []))
+            if item.get("kind") == "guidance"
+            and item.get("plan_version") == state["plan_version"]
+            and item.get("step_id") == step_id
+        ),
+        None,
+    )
+    if request.get("specific_task"):
+        updates["pending_guidance_task"] = None
+    run = harness.commit_event(
         run["run_id"],
         expected_revision=reserved["state_revision"],
         event={
@@ -97,11 +126,22 @@ def run_step(
             "type": "step_reported",
             "step_id": step_id,
         },
-        state_updates={
-            "phase": "STEP_VERIFY",
-            "steps": {**state["steps"], step_id: {"status": "VERIFYING", "report": report}},
-        },
+        state_updates=updates,
     )
+    if request.get("specific_task"):
+        run = harness.commit_event(
+            run["run_id"],
+            expected_revision=run["state_revision"],
+            event={
+                "event_id": f"meta-guidance-applied-{run['state_revision']}",
+                "type": "meta_guidance_applied",
+                "step_id": step_id,
+                "failure_type": failure_type,
+                "action_type": action_type,
+                "specific_task_consumed": True,
+            },
+        )
+    return run
 
 
 def _normalize_report(reply: Any, step: Mapping[str, Any]) -> dict[str, Any]:

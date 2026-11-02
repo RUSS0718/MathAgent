@@ -4,7 +4,6 @@ import hashlib
 import json
 from collections.abc import Mapping
 from copy import deepcopy
-from datetime import UTC, datetime
 
 from ..redaction import redact
 
@@ -14,6 +13,30 @@ class CallInterrupted(BaseException):
 
     def __init__(self, run_id):
         self.run_id = run_id
+
+
+def pending_call(run):
+    """Return the audited action whose owning math commit has not happened."""
+    calls = run["state"].get("calls", {})
+    if not calls:
+        return None
+    record = max(calls.values(), key=lambda item: item["request_revision"])
+    audit = {"call_audit", "session_recorded", "call_retry_authorized", "session_started"}
+    if any(event["state_revision"] > record["request_revision"]
+           and event["type"] not in audit for event in run["events"]):
+        return None
+    return record
+
+
+def latest_retry_id(calls, call_id):
+    """Resolve an immutable retry lineage without changing the original call."""
+    for _ in range(len(calls)):
+        successor = next((item for item in calls.values()
+                          if item.get("retry_of") == call_id), None)
+        if successor is None:
+            break
+        call_id = successor["call_id"]
+    return call_id
 
 
 def _save(harness, run, record, *, status=None):
@@ -61,6 +84,21 @@ def _consume(value, partial, checkpoint):
 
 
 def dispatch(harness, run, operation, request, session_dispatch):
+    if getattr(harness, "_product_recovery", False):
+        pending = pending_call(run)
+        if pending is not None:
+            if pending["role"] != request["role"]:
+                raise ValueError("recovery action owner mismatch")
+            request = {**deepcopy(pending["request"]), "problem": request.get("problem")}
+    retry = run["state"].get("authorized_retry")
+    calls = run["state"].get("calls", {})
+    current_id = latest_retry_id(calls, request.get("call_id"))
+    if current_id != request.get("call_id"):
+        record = calls[current_id]
+        request = {**request, "call_id": current_id, "retry_of": record["retry_of"]}
+    if retry and current_id == retry["call_id"]:
+        request = {**request, "call_id": retry["new_call_id"], "retry_of": retry["call_id"]}
+
     def invoke(prepared):
         call_id = prepared.get("call_id")
         if not isinstance(call_id, str) or not call_id.strip():
@@ -122,6 +160,15 @@ def dispatch(harness, run, operation, request, session_dispatch):
         try:
             response = _consume(operation(deepcopy(prepared)), partial, checkpoint)
         except Exception as exc:
+            if getattr(exc, "category", None) == "run_budget_exhausted":
+                from .budget import HardBudgetStop, stop
+
+                attempts = getattr(exc, "request_attempts", [])
+                record.update(status="unknown_outcome" if attempts else "budget_rejected",
+                              error_category="run_budget_exhausted")
+                _save(harness, run, record)
+                stop(harness, run, "shared_admission_budget_exhausted")
+                raise HardBudgetStop(run["run_id"]) from None
             partial.append(str(getattr(exc, "partial_text", "")))
             record.update(
                 status="tool_error" if getattr(exc, "tool_error", False) else "unknown_outcome",
@@ -150,7 +197,9 @@ def dispatch(harness, run, operation, request, session_dispatch):
         _save(harness, run, record)
         return response
 
-    return session_dispatch(harness, run, invoke, request)
+    result = session_dispatch(harness, run, invoke, request)
+    harness._product_recovery = False
+    return result
 
 
 def retry_call(harness, run, problem, decision):
@@ -170,10 +219,12 @@ def retry_call(harness, run, problem, decision):
     state = run["state"]
     if state["phase"] == "TERMINAL":
         return run
-    elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
-    if elapsed >= harness._config.get("max_total_duration_seconds", 3600):
+    from .budget import budget_reason
+
+    reason = budget_reason(state, harness._config)
+    if reason == "runtime_budget_exhausted":
         raise ValueError("retry runtime budget exhausted")
-    if state["counters"]["model_calls"] >= harness._config.get("max_model_calls", 2):
+    if reason:
         raise ValueError("retry model call budget exhausted")
     role = old["role"]
     from .roles import role_operation

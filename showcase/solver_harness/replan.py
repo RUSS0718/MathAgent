@@ -3,6 +3,7 @@
 from copy import deepcopy
 
 from ..redaction import redact
+from .budget import remaining_model_calls
 from .plan import validate_plan
 
 
@@ -38,6 +39,9 @@ def _stop(harness, run, reason):
 
 def _call(harness, run, port, request):
     state = run["state"]
+    guidance_task = state.get("pending_guidance_task")
+    if request.get("role") == "planner" and isinstance(guidance_task, str):
+        request["specific_task"] = guidance_task
     request = {
         "run_id": run["run_id"],
         "call_id": f"replan:{run['run_id']}:plan{state['plan_version']}:attempt{state['attempt_index']}:{run['state_revision']}",
@@ -82,8 +86,18 @@ def run_replan(harness, run, *, problem, model_port, config):
         raise ValueError("config.max_replans must be a non-negative integer")
     if state.get("replan_count", 0) >= limit:
         return _stop(harness, run, "replan_limit_reached")
-    decision = state["meta_decision"]
-    rescued, excluded = _reusable(state)
+    guidance = state.get("meta_guidance_decision")
+    guided_replan = isinstance(guidance, dict) and guidance.get("action_type") == "replan"
+    decision = (
+        {
+            "reason_summary": guidance["rationale"],
+            "forbidden_directions": [],
+            "reusable_results": [],
+        }
+        if guided_replan
+        else state["meta_decision"]
+    )
+    rescued, excluded = _reusable(state, decision)
     failure = {
         "kind": "replan",
         "plan_version": state["plan_version"],
@@ -116,6 +130,10 @@ def run_replan(harness, run, *, problem, model_port, config):
             "steps": {},
             "current_step": None,
         },
+        archived_plan_version=state["plan_version"],
+        archived_step_count=len(state["steps"]),
+        invalidated_result_count=len(excluded),
+        rescued_result_count=len(rescued),
     )
     calls = config.get("max_model_calls", 2)
     seconds = config.get("max_total_duration_seconds", 3600)
@@ -123,7 +141,10 @@ def run_replan(harness, run, *, problem, model_port, config):
     if config.get("features", {}).get(
         "reexplore_after_replan", config.get("reexplore_after_replan", False)
     ):
-        run, findings = _research(harness, run, model_port, config, calls, seconds)
+        run, findings = _research(
+            harness, run, model_port, config, calls, seconds,
+            decision.get("forbidden_directions", []),
+        )
     reason = _budget(run["state"], calls, seconds)
     if reason:
         return _stop(harness, run, reason)
@@ -186,16 +207,24 @@ def run_replan(harness, run, *, problem, model_port, config):
             "phase": "STEP_EXECUTE",
             "plan": redact(plan),
             "current_step": plan["steps"][0]["step_id"],
+            **({"pending_guidance_task": None} if guided_replan else {}),
         },
+        plan_version=version,
+        **({
+            "action_type": "replan",
+            "failure_type": guidance.get("failure_type"),
+            "specific_task_consumed": True,
+            "role": "planner",
+        } if guided_replan else {}),
     )
 
 
-def _research(harness, run, port, config, calls, seconds):
+def _research(harness, run, port, config, calls, seconds, forbidden_directions):
     limit = config.get("max_reexploration_tasks", 2)
     if isinstance(limit, bool) or not isinstance(limit, int) or not 0 <= limit <= 8:
         raise ValueError("config.max_reexploration_tasks must be 0..8")
     # Reserve at least one global call for Planner; research is optional.
-    if calls - run["state"]["counters"]["model_calls"] <= 1 or _budget(
+    if remaining_model_calls(run["state"], {"max_model_calls": calls}) <= 1 or _budget(
         run["state"], calls, seconds
     ):
         return _commit(
@@ -210,7 +239,7 @@ def _research(harness, run, port, config, calls, seconds):
             "action": "delegate_research_task",
             "session_key": f"meta:{run['run_id']}",
             "max_tasks": limit,
-            "forbidden_directions": run["state"]["meta_decision"]["forbidden_directions"],
+            "forbidden_directions": forbidden_directions,
         },
     )
     tasks = reply.get("tasks", [])
@@ -228,7 +257,7 @@ def _research(harness, run, port, config, calls, seconds):
         timeout = task.get("timeout_seconds", 60)
         if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 300:
             continue
-        if calls - run["state"]["counters"]["model_calls"] <= 1 or _budget(
+        if remaining_model_calls(run["state"], {"max_model_calls": calls}) <= 1 or _budget(
             run["state"], calls, seconds
         ):
             break
@@ -320,24 +349,43 @@ def _research(harness, run, port, config, calls, seconds):
     ), findings
 
 
-def _reusable(state):
+def _reusable(state, decision=None):
     pending = deepcopy(state["accepted_results"])
     rescued = []
     valid_ids = set()
     old_steps = {step["step_id"] for step in state.get("plan", {}).get("steps", [])}
+    selected = (decision or {}).get("reusable_results", [])
+    invalidated = [result for failure in state.get("failure_records", [])
+                   for result in failure.get("invalidated_results", [])]
+    invalid_refs = {value for result in invalidated
+                    for value in (result.get("result_id"), result.get("source")) if value}
     while pending:
         found = []
         for result in pending:
             dependencies = result.get("dependencies")
             if (
-                result.get("source") not in old_steps
+                (result.get("source") not in old_steps
+                 or result.get("result_id") in selected
+                 or result.get("statement") in selected)
+                and result.get("valid", True)
+                and not result.get("invalidated", False)
+                and result.get("status") not in {"INVALIDATED", "invalidated"}
+                and not any(
+                    (result.get("result_id") and result.get("result_id") == item.get("result_id"))
+                    or (result.get("statement") == item.get("statement")
+                        and result.get("source") == item.get("source"))
+                    for item in invalidated
+                )
                 and result.get("evidence_level") in {"llm_reviewed", "tool_verified"}
                 and isinstance(dependencies, list)
+                and not invalid_refs.intersection(dependencies)
                 and all(dependency in valid_ids for dependency in dependencies)
             ):
                 rescued.append(result)
                 if result.get("result_id"):
                     valid_ids.add(result["result_id"])
+                if result.get("source"):
+                    valid_ids.add(result["source"])
                 found.append(result)
         if not found:
             break

@@ -20,7 +20,7 @@ PROTOCOLS = {
         "input": "objective, report/candidate, accepted evidence",
         "output": "goal_gate, logic_gate, verdict, objection, retained_results",
         "permissions": ["read_state", "read_ledger"],
-        "instructions": "Check Goal Gate YES/PARTIAL/NO before Logic Gate PASS/FAIL/UNCERTAIN. Step verdict is ACCEPT, CHALLENGE, TRACE_BACK or PROPOSE_REPLAN; ACCEPT requires YES and PASS. TRACE_BACK supplies a legal step index. State a specific objection and evidence refs for retained results. Whole-solution verdict is ACCEPT or REJECT and requires all goals and proof obligations.",
+        "instructions": "Check Goal Gate YES/PARTIAL/NO before Logic Gate PASS/FAIL/UNCERTAIN. Step verdict is ACCEPT, CHALLENGE, TRACE_BACK or PROPOSE_REPLAN; ACCEPT requires YES and PASS. TRACE_BACK supplies a legal step index. State a specific objection and evidence refs for retained results. For step review of an answer-bearing, sharp, optimal, extremal or necessary-and-sufficient claim, declare answer_claim with its zero-based claim_index, both_directions_proved, assumptions and approach. If either direction is missing, set both_directions_proved=false: the controller must run independent noncoding falsification before acceptance. NOT_FOUND cannot promote the missing direction from Conjecture to Lemma. Whole-solution verdict is ACCEPT or REJECT and requires all goals and proof obligations.",
     },
     "verification-tag-protocol": {
         "trigger": "reasoner report or verifier review",

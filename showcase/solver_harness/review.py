@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from .explore import _HarnessOperations
+from .final_binding import review_record
 
 
 class VerifierPort(Protocol):
@@ -55,12 +55,10 @@ def review_solution(
             },
         )
     counters = dict(state["counters"])
-    elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()
-    reason = None
-    if elapsed >= max_runtime_seconds:
-        reason = "runtime_budget_exhausted"
-    elif counters["model_calls"] >= max_model_calls:
-        reason = "model_call_budget_exhausted"
+    from .budget import budget_reason
+
+    reason = budget_reason(state, {"max_model_calls": max_model_calls,
+                                   "max_total_duration_seconds": max_runtime_seconds})
     if reason is not None:
         return harness.commit_event(
             run_id,
@@ -119,6 +117,12 @@ def review_solution(
     )
     next_phase = "TERMINAL" if accepted else "PLAN"
     updates = {"phase": next_phase}
+    finding = state["exploration_findings"][-1]
+    record = review_record(reserved, candidate, "ACCEPT" if accepted else "REJECT",
+        call_id=f"{run_id}:whole-solution-review", origin="explore_polish",
+        versions=[{"text": finding.get("original_solution_candidate", candidate)},
+                  {"text": candidate}])
+    updates["whole_solution_reviews"] = [*state.get("whole_solution_reviews", []), record]
     if accepted:
         updates.update(status="completed_llm_reviewed", final_response=candidate)
     return harness.commit_event(

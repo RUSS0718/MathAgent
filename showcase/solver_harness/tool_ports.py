@@ -36,6 +36,8 @@ class RegistryToolPort:
 
     def __init__(self, registry):
         self._registry = registry
+        self.owns_execution_limits = hasattr(registry, "container_python_executor")
+        self.source = "docker_isolated" if self.owns_execution_limits else "local_precheck"
         self.registered_tools = frozenset(
             item["name"]
             for item in registry.describe()
@@ -44,9 +46,37 @@ class RegistryToolPort:
 
     def execute(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         # The registry also applies its own tool schema, profile and subprocess limits.
-        result = self._registry.invoke(
-            request["tool"], request["arguments"], tool_call_id=request["call_id"]
-        )
+        from ..container_tool import tool_request
+
+        with tool_request(request):
+            result = self._registry.invoke(
+                request["tool"], request["arguments"], tool_call_id=request["call_id"]
+            )
+        if request["tool"] == "python_math" and self.owns_execution_limits and isinstance(result.value, Mapping):
+            from ..tool_artifacts import ToolArtifactError
+
+            try:
+                store = self._registry.container_python_executor.artifacts
+                required = ("stdout_ref", "stderr_ref", "receipt_ref")
+                if result.value.get("executed"):
+                    required = ("code_ref", "input_ref", *required)
+                for key in required:
+                    store.verify(result.value[key], run_id=request["run_id"], call_id=request["call_id"])
+                for key in ("code_ref", "input_ref"):
+                    if result.value.get(key) is not None:
+                        store.verify(result.value[key], run_id=request["run_id"], call_id=request["call_id"])
+            except (KeyError, ToolArtifactError):
+                executed = result.value.get("executed") is True
+                status = "unknown_outcome" if executed else result.value.get("status")
+                if status not in {"unknown_outcome", "unavailable", "rejected"}:
+                    status = "tool_error"
+                return {"status": status, "exit_code": None, "output": None,
+                    "error": "artifact_integrity_failed", "executed": executed,
+                    "unknown_outcome": executed}
+            return {**result.value, "output": result.value.get("stdout", ""), "error": result.error_category}
+        if request["tool"] == "python_math" and self.owns_execution_limits:
+            return {"status": "rejected" if result.status == "rejected" else "tool_error",
+                "output": None, "exit_code": None, "error": result.error_category, "executed": False}
         status = (
             "success"
             if result.status == "success"

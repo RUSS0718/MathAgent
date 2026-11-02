@@ -5,6 +5,13 @@ from .explore import run_exploration
 from .finalize import commit, dispatch, finish
 from .review import review_solution
 
+MAX_HINT_CHARS = 2000
+
+
+def is_valid_hint(hint):
+    """Return whether a hint is nonblank text within the shared size bound."""
+    return isinstance(hint, str) and bool(hint.strip()) and len(hint) <= MAX_HINT_CHARS
+
 
 def prepare_hint(harness, run, problem, metadata):
     if run["state"].get("hint_prepared"):
@@ -15,7 +22,7 @@ def prepare_hint(harness, run, problem, metadata):
     hint = None
     if mode == "user_hint":
         hint = (metadata or {}).get("user_hint")
-        if not isinstance(hint, str) or not hint.strip():
+        if not is_valid_hint(hint):
             raise ValueError("user_hint_required")
     elif mode == "meta_auto":
         reason = budget_reason(run["state"], harness._config)
@@ -35,7 +42,7 @@ def prepare_hint(harness, run, problem, metadata):
             },
         )
         hint = reply.get("hint") if isinstance(reply, dict) else None
-        if not isinstance(hint, str) or not hint.strip():
+        if not is_valid_hint(hint):
             return finish(harness, run, "partial_aborted", "invalid_preplan_hint")
     return commit(
         harness,
@@ -49,15 +56,20 @@ def explore(harness, run, problem):
     config = harness._config
     limit = min(2, config.get("max_explore_rounds", 2))
     for number in range(1, limit + 1):
-        run = run_exploration(
-            harness,
-            run,
-            problem=problem,
-            model_port=harness._model_port,
-            max_model_calls=config.get("max_model_calls", 2),
-            max_explore_rounds=number,
-            max_runtime_seconds=config.get("max_total_duration_seconds", 3600),
-        )
+        recovering_review = (getattr(harness, "_product_recovery", False)
+                             and run["state"]["phase"] == "EXPLORE_REVIEW")
+        if recovering_review:
+            number = run["state"]["exploration_findings"][-1]["round"]
+        else:
+            run = run_exploration(
+                harness,
+                run,
+                problem=problem,
+                model_port=harness._model_port,
+                max_model_calls=config.get("max_model_calls", 2),
+                max_explore_rounds=number,
+                max_runtime_seconds=config.get("max_total_duration_seconds", 3600),
+            )
         if run["state"]["phase"] == "TERMINAL":
             return run
         finding = run["state"]["exploration_findings"][-1]
@@ -84,7 +96,8 @@ def explore(harness, run, problem):
                 return finish(harness, run, "partial_aborted", "PARSE_ERROR")
             findings = [
                 *run["state"]["exploration_findings"][:-1],
-                {**finding, "solution_candidate": candidate},
+                {**finding, "solution_candidate": candidate,
+                 "original_solution_candidate": finding.get("solution_candidate", "")},
             ]
             run = commit(harness, run, "exploration_polished", {"exploration_findings": findings})
             return review_solution(

@@ -36,6 +36,7 @@ from .run_service import (
     RunValidationError,
 )
 from .server import create_live_pipeline, create_live_service
+from .star_product_modes import STAR_MODES
 from .verification import LightweightVerificationHook
 from .workspace import WorkspaceError, WorkspaceService
 
@@ -73,7 +74,7 @@ def create_app(
 
     storage_root, resolved_database = _storage_paths(app.config, database_path)
     service_database = getattr(getattr(service, '_store', None), 'database_path', ':memory:')
-    if service is not None and ((service_database == ':memory:' and app.config.get('SHOWCASE_LIVE_PIPELINE') is not None) or (service_database != ':memory:' and Path(service_database).resolve() != resolved_database.resolve())):
+    if service is not None and ((service_database == ':memory:' and (app.config.get('SHOWCASE_LIVE_PIPELINE') is not None or app.config.get('SHOWCASE_STAR_ENABLED') is True)) or (service_database != ':memory:' and Path(service_database).resolve() != resolved_database.resolve())):
         raise ValueError('service_database_mismatch')
     storage_root.mkdir(parents=True, exist_ok=True)
     (storage_root / "attachments").mkdir(exist_ok=True)
@@ -81,6 +82,13 @@ def create_app(
     app.config["SHOWCASE_DATA_DIR"] = str(storage_root)
     app.config["SHOWCASE_DATABASE_PATH"] = str(resolved_database)
 
+    if app.config["SHOWCASE_MODE"] not in {"fake", "live"}:
+        raise ValueError("showcase_mode_invalid")
+    from .star_product_modes import capabilities as star_capabilities
+    from .star_product_runtime import create_star_product_pipeline
+
+    star_pipeline = create_star_product_pipeline(
+        resolved_database, storage_root=storage_root, config=app.config)
     loopback_store = LoopbackStore(resolved_database)
     live_pipeline = app.config.get("SHOWCASE_LIVE_PIPELINE")
     if service is None:
@@ -99,6 +107,7 @@ def create_app(
         worker_enabled=bool(app.config.get("SHOWCASE_WORKER_ENABLED", True)),
         waiting_input_marker=str(app.config.get("SHOWCASE_WAITING_INPUT_MARKER", "")),
         pipeline=live_pipeline,
+        star_pipeline=star_pipeline,
     )
     app.extensions["loopback_store"] = loopback_store
     app.extensions["showcase_run_service"] = service
@@ -199,6 +208,7 @@ def create_app(
                 "profile": profile,
                 "jobs": {"enabled": True, "status": "available"},
                 "sse": {"enabled": True, "status": "available"},
+                "solver_modes": star_capabilities(star_pipeline is not None, star_pipeline),
                 "verification_mode": VERIFICATION_MODES,
                 "files": {"upload": upload},
                 "execution": {
@@ -348,11 +358,34 @@ def create_app(
                 web_search_enabled=payload.get("web_search_enabled", False) is True,
                 input_user_file_id=file_id,
                 verification_mode=payload.get("verification_mode", "auto"),
+                solver_mode=payload.get("solver_mode", "legacy"),
+                solver_options=payload.get("solver_options"),
+                solver_hint=payload.get("solver_hint"),
             )
         except WorkspaceError as exc:
             return _workspace_error(exc)
         status = 200 if existing else 202
         return jsonify({"success": True, "job_id": job["job_id"], "status": job["status"], "existing": existing}), status
+
+    @app.get("/api/agent/jobs/<job_id>/artifacts/<digest>")
+    def tool_artifact(job_id, digest):
+        from .tool_artifacts import ToolArtifactError
+
+        session = _require_auth(g.auth_session)
+        try:
+            workspace_service.get_job(job_id, session.user_id)
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+        executor = getattr(getattr(star_pipeline, "registry", None), "container_python_executor", None)
+        if executor is None:
+            return _json_error("artifact_unavailable", 404)
+        try:
+            content = executor.artifacts.read(job_id, digest)
+        except ToolArtifactError as exc:
+            return _json_error(str(exc), 404 if str(exc) == "artifact_not_found" else 409)
+        return Response(content, content_type="application/octet-stream", headers={
+            "Content-Disposition": "attachment; filename=" + digest,
+            "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
 
     @app.get("/api/agent/jobs/active")
     def active_jobs() -> Response | tuple[Response, int]:
@@ -430,6 +463,7 @@ def create_app(
                 job_id=job_id,
                 idempotency_key=request.headers.get("Idempotency-Key", ""),
                 answer=str(payload.get("answer", "")),
+                retry_call=payload.get("retry_call"),
             )
             return jsonify({**result, "existing": existing}), 200 if existing else 202
         except WorkspaceError as exc:
@@ -545,6 +579,25 @@ def create_app(
         pack = app.extensions["showcase_evidence_exporter"].export(snapshot, events=events, tool_results=tool_results)
         return jsonify(replay_evidence(pack))
 
+    @app.get("/api/agent/jobs/<job_id>/candidate-replay")
+    def replay_job_candidates(job_id: str) -> Response | tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        try:
+            job = workspace_service.get_job(job_id, session.user_id)
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+        if (job.get("result") or {}).get("solver_mode") not in STAR_MODES:
+            return _json_error("star_replay_unavailable", 409)
+        from .star_product_candidates import replay_candidates
+        from .star_product_projection import persisted_solver
+
+        with workspace_service.store._lock:
+            persisted = persisted_solver(workspace_service.store._connection, job_id)
+        if persisted is None:
+            return _json_error("star_replay_unavailable", 409)
+        run, _ = persisted
+        return jsonify(replay_candidates(run))
+
     @app.get("/api/agent/jobs/<job_id>/report")
     def get_job_report(job_id: str) -> Response | tuple[Response, int]:
         session = _require_auth(g.auth_session)
@@ -589,7 +642,7 @@ def create_app(
         if job.get("verification_mode") == "required" and not tool_results:
             verification["findings"] = ["needs_review", "tool_evidence_missing"]
         report = app.extensions["showcase_evidence_exporter"].report(snapshot, tool_results=tool_results, verification=verification)
-        return jsonify({"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": snapshot["execution_mode"], "report": report})
+        return jsonify({"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": snapshot["execution_mode"], "solver": {key: (job.get("result") or {}).get(key) for key in ("solver_mode", "missing_capabilities", "evidence_kind", "solver")}, "report": report})
 
     @app.post("/api/runs/<run_id>/resume")
     def resume_run(run_id: str) -> tuple[Response, int]:
@@ -615,8 +668,11 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8090)
     parser.add_argument("--mode", choices=("fake", "live"), default="fake")
     parser.add_argument("--data-dir", default=None)
+    parser.add_argument("--star-limited", action="store_true", help="Enable explicit limited STAR selection")
+    parser.add_argument("--star-full", action="store_true", help="Enable full STAR presets after isolated runtime preflight; requires exact image configuration")
     args = parser.parse_args()
-    config: dict[str, Any] = {"SHOWCASE_MODE": args.mode}
+    config: dict[str, Any] = {"SHOWCASE_MODE": args.mode, "SHOWCASE_STAR_ENABLED": args.star_limited,
+                              "SHOWCASE_STAR_FULL_ENABLED": args.star_full}
     if args.data_dir:
         config["SHOWCASE_DATA_DIR"] = args.data_dir
     app = create_app(config)
@@ -682,6 +738,12 @@ def _json_error(error: str, status: int) -> tuple[Response, int]:
         "body_must_be_object": "请求体必须是对象。",
         "capability_unavailable": "当前环境未启用该能力。",
         "not_found": "请求的资源不存在。",
+        "star_prerequisites_unverified": "完整 STAR 前置能力尚未通过验收，请选择明确受限模式。",
+        "star_not_enabled": "服务尚未启用 STAR 受限模式。",
+        "star_review_required": "STAR 必须执行整题审查，不能关闭验证。",
+        "solver_mode_invalid": "求解模式无效或尚未实现。",
+        "solver_options_unsupported": "当前 STAR 使用固定受限预设，不接受自定义开关。",
+        "solver_hint_invalid": "STAR 提示须为 1 至 2000 字的非空文本。",
         "invalid_last_event_id": "事件游标无效。",
     }
     response = jsonify({

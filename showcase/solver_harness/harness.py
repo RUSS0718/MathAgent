@@ -67,10 +67,13 @@ class SolverHarness:
         verifier_port: VerifierPort | None = None,
         meta_port: MetaPort | None = None,
         tool_port=None,
+        event_observer=None,
     ) -> None:
         if store is not None and database_path is not None:
             raise SolverValidationError("provide either store or database_path")
         self._instance_id = uuid.uuid4().hex
+        self._product_recovery = False
+        self._event_observer = event_observer
         self._config = _normalize_config(config)
         self._config_hash = _hash_json(self._config)
         self._tool_port = tool_port
@@ -176,6 +179,8 @@ class SolverHarness:
         created = self._state_store.get_run(run_id)
         if created is None:
             raise SolverPersistenceError("create_run")
+        if self._event_observer is not None:
+            self._event_observer(created, event)
         if self._model_port is None:
             return advance(self, created, metadata, problem)
         return advance(
@@ -259,6 +264,16 @@ class SolverHarness:
         if current is None:
             raise SolverRunNotFoundError(normalized_run_id)
         self._validate_identity(current, normalized_run_id, None)
+        if self._product_recovery and normalized_event["type"].endswith("_dispatched"):
+            from .calls import pending_call
+
+            pending = pending_call(current)
+            if pending is not None:
+                return current
+            previous = next((item for item in current["events"]
+                             if item["event_id"] == normalized_event["event_id"]), None)
+            if previous is not None:
+                return current
         if (
             self._config.get("features", {}).get("stream_recovery") is True
             and current["state"]["phase"] == "TERMINAL"
@@ -288,6 +303,8 @@ class SolverHarness:
             state_updates={**normalized_updates, **candidate_patch},
             request_hash=request_hash,
         )
+        if self._event_observer is not None:
+            self._event_observer(result, next(item for item in result["events"] if item["event_id"] == normalized_event["event_id"]))
         for audit in candidate_events:
             result = self.commit_event(
                 normalized_run_id, expected_revision=result["state_revision"], event=audit

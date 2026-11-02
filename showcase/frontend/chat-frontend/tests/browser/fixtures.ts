@@ -20,7 +20,7 @@ export const campaign = {
   pairs: [{ pair_id: 'pair-demo', problem_hash: 'c'.repeat(64), arms: { baseline: arm, candidate: { ...arm, status: 'failed', error: 'transport_timeout' } } }],
 }
 
-export async function mockWorkspace(page: Page, populated = false): Promise<void> {
+export async function mockWorkspace(page: Page, populated = false, eventStream?: string): Promise<void> {
   await page.route(/\/api\//, async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname
@@ -36,7 +36,7 @@ export async function mockWorkspace(page: Page, populated = false): Promise<void
     else if (path.endsWith('/report')) body = report
     else if (path.endsWith('/evidence')) body = { evidence_id: 'evidence-demo', mode: 'fake', run: {} }
     else if (path.endsWith('/events')) {
-      await route.fulfill({ contentType: 'text/event-stream', body: 'id: 1\nevent: node_end\ndata: {"type":"node_end","step_id":"solve","node_name":"solver","title":"求解","status":"completed","duration":1.25,"summary":"完成演示推导"}\n\nid: 2\nevent: final_result\ndata: {"type":"final_result","data":{},"status":"succeeded"}\n\n' })
+      await route.fulfill({ contentType: 'text/event-stream', body: eventStream ?? 'id: 1\nevent: node_end\ndata: {"type":"node_end","step_id":"solve","node_name":"solver","title":"求解","status":"completed","duration":1.25,"summary":"完成演示推导"}\n\nid: 2\nevent: final_result\ndata: {"type":"final_result","data":{},"status":"succeeded"}\n\n' })
       return
     } else if (path.startsWith('/api/agent/jobs/')) body = { success: true, job_id: 'run-demo', session_id: 'session-demo', status: 'succeeded', last_event_id: 0 }
     else if (path === '/api/agent/jobs') body = { success: true, job_id: 'run-demo', status: 'succeeded' }

@@ -19,13 +19,13 @@ def compose_request(run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[
         request = {**request, "role": role}
     definition = role_definition(role)
     ids = select_skills(role, request)
-    projection = prepare_role_context(run, request)["state"]
+    projection = prepare_role_context(run, request, include_exploration=True)["state"]
     layers = [
         {"kind": "role", "version": "1", "definition": definition},
         {
             "kind": "protocols",
             "version": "1",
-            "protocols": [{"id": key, **deepcopy(PROTOCOLS[key])} for key in ids],
+            "protocols": [{"id": key, "version": "1", **deepcopy(PROTOCOLS[key])} for key in ids],
         },
         {
             "kind": "projection",
@@ -37,11 +37,9 @@ def compose_request(run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[
     fingerprint = hashlib.sha256(
         json.dumps(layers, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
-    allowed = (
-        []
-        if role in {"meta", "meta_strategist", "reason_noncoding"}
-        else ["read_state", "read_ledger"]
-    )
+    allowed = [] if role in {
+        "meta", "meta_strategist", "reason_noncoding", "researcher"
+    } else ["read_state", "read_ledger"]
     return {
         **request,
         "state_revision": run["state_revision"],

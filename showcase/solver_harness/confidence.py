@@ -48,7 +48,7 @@ def applicable_independent_refs(record, state):
 def _review_refs(record, state, events, whole):
     source_types = {
         "EXPLORE": {"explore_assessed", "exploration_polished"},
-        "STEP_EXECUTE": {"step_reported"},
+        "STEP_EXECUTE": {"step_reported", "challenge_replied"},
         "FINAL_GENERATE": {"final_candidate_generated"},
     }.get(record.get("source_phase"), set())
     sources = record.get("source_event_refs", [])

@@ -11,13 +11,19 @@ def apply_traceback(harness, run):
     step_id = state["current_step"]
     verification = state["steps"].get(step_id, {}).get("verification", {})
     meta = state.get("meta_decision", {})
-    from_meta = state["phase"] == "TRACE_BACK" and meta.get("decision") == "TRACE_BACK"
+    guidance = state.get("meta_guidance_decision") or {}
+    from_guidance = (
+        state["phase"] == "TRACE_BACK" and guidance.get("action_type") == "trace_back"
+    )
+    from_meta = state["phase"] == "TRACE_BACK" and (
+        meta.get("decision") == "TRACE_BACK" or from_guidance
+    )
     if from_meta:
         verification = {
-            **meta,
+            **(guidance if from_guidance else meta),
             "verdict": "TRACE_BACK",
             "valid": True,
-            "reason": meta["reason_summary"],
+            "reason": guidance.get("rationale", "") if from_guidance else meta["reason_summary"],
         }
     if verification.get("verdict") != "TRACE_BACK":
         return run
@@ -58,9 +64,14 @@ def apply_traceback(harness, run):
     known = {step["step_id"] for step in steps} | {
         result["result_id"] for result in results if result.get("result_id")
     }
-    for result in results:
+    invalid_records = set()
+    for index, result in enumerate(results):
         dependencies = result.get("dependencies")
-        if not isinstance(dependencies, list) or any(dep not in known for dep in dependencies):
+        if (not isinstance(dependencies, list) or any(dep not in known for dep in dependencies)
+            or result.get("evidence_level") not in {"llm_reviewed", "tool_verified"}
+            or not result.get("valid", True) or result.get("invalidated", False)
+            or result.get("status") in {"INVALIDATED", "invalidated"}):
+            invalid_records.add(index)
             if result.get("result_id"):
                 invalid.add(result["result_id"])
             elif result.get("source"):
@@ -74,25 +85,27 @@ def apply_traceback(harness, run):
                 invalid.add(step["step_id"])
         for result in results:
             if result.get("source") in invalid or invalid.intersection(
-                result.get("dependencies", [])
+                result.get("dependencies") or []
             ):
                 if result.get("result_id"):
                     invalid.add(result["result_id"])
         changed = before != invalid
     invalidated = []
     rescued = []
-    for result in results:
+    for index, result in enumerate(results):
         if (
-            result.get("source") in invalid
+            index in invalid_records
+            or result.get("source") in invalid
             or result.get("result_id") in invalid
-            or invalid.intersection(result.get("dependencies", []))
+            or invalid.intersection(result.get("dependencies") or [])
         ):
             invalidated.append({**result, "invalidated": True})
         else:
             rescued.append(deepcopy(result))
+    invalid_steps = invalid.intersection(step["step_id"] for step in steps)
     failure = {
         "kind": "trace_back",
-        "triggered_by": "meta" if from_meta else "verifier",
+        "triggered_by": "meta_guidance" if from_guidance else ("meta" if from_meta else "verifier"),
         "reason": verification.get("reason") or verification.get("objection", ""),
         "forbidden_directions": verification.get("forbidden_directions", []),
         "plan_version": state["plan_version"],
@@ -100,7 +113,7 @@ def apply_traceback(harness, run):
         "from_step": step_id,
         "trace_back_to": target,
         "archived_steps": deepcopy(
-            {key: value for key, value in state["steps"].items() if key in archived_ids}
+            {key: value for key, value in state["steps"].items() if key in invalid_steps}
         ),
         "invalidated_results": invalidated,
         "rescued_results": rescued,
@@ -112,14 +125,24 @@ def apply_traceback(harness, run):
             "event_id": f"trace-back-applied-{attempt}-{step_id}",
             "type": "trace_back_applied",
             "trace_back_to": target,
+            "role": "meta" if from_meta else "step_verifier",
+            "triggered_by": "meta_guidance" if from_guidance else ("meta" if from_meta else "verifier"),
+            **({
+                "action_type": "trace_back",
+                "failure_type": guidance.get("failure_type"),
+            } if from_guidance else {}),
             "attempt_index": attempt + 1,
+            "from_step_index": current + 1,
+            "archived_step_count": sum(key in invalid_steps for key in state["steps"]),
+            "invalidated_result_count": len(invalidated),
+            "rescued_result_count": len(rescued),
         },
         state_updates={
             "phase": "STEP_EXECUTE",
             "current_step": steps[target - 1]["step_id"],
             "attempt_index": attempt + 1,
             "steps": {
-                key: value for key, value in state["steps"].items() if key not in archived_ids
+                key: value for key, value in state["steps"].items() if key not in invalid_steps
             },
             "accepted_results": rescued,
             "rescued_results": rescued,

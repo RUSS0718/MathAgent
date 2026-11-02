@@ -22,6 +22,44 @@ class InternPortError(RuntimeError):
         super().__init__(category)
 
 
+def _request_metadata(request):
+    """Pure adapter metadata mapping for one invocation; no metering inside."""
+    return {
+        "run_id": request.get("run_id"),
+        "call_id": request.get("call_id"),
+        "role": request["role"],
+        "timeout_seconds": request.get("timeout_seconds"),
+    }
+
+
+def _invocation_record(request, model_id, *, stream=False):
+    """Assemble the initial audited invocation record; fields only, no dispatch."""
+    record = {
+        "run_id": request.get("run_id"),
+        "call_id": request.get("call_id"),
+        "consumed_receipt_ids": [
+            item["receipt_id"]
+            for item in request.get("report", {}).get("tool_receipts", [])
+            if item.get("receipt_id")
+        ],
+        "role": request["role"],
+        "state_revision": request.get("state_revision"),
+        "active_skill_ids": request.get("active_skill_ids", []),
+        "prompt_fingerprint": request.get("prompt_fingerprint"),
+        "requested_model": model_id,
+        "returned_model": None,
+        "finish_reason": None,
+        "request_attempts": [],
+        "usage": provider_usage(None),
+        "status": "error",
+        "error_category": None,
+        "response": None,
+    }
+    if stream:
+        record["stream"] = {"fragments": 0, "bytes": 0, "status": "streaming"}
+    return record
+
+
 class InternModelPort:
     """Reasoner/Verifier/Meta bridge, with no implicit live adapter creation."""
 
@@ -40,37 +78,12 @@ class InternModelPort:
             raise InternPortError("live_not_enabled")
         schema = response_schema(request)
         messages = self._messages(request, schema)
+        if callable(getattr(self.adapter, "stream_complete", None)):
+            return self._complete_stream(request, schema, messages)
         started = time.monotonic()
-        record = {
-            "run_id": request.get("run_id"),
-            "call_id": request.get("call_id"),
-            "consumed_receipt_ids": [
-                item["receipt_id"]
-                for item in request.get("report", {}).get("tool_receipts", [])
-                if item.get("receipt_id")
-            ],
-            "role": request["role"],
-            "state_revision": request.get("state_revision"),
-            "active_skill_ids": request.get("active_skill_ids", []),
-            "prompt_fingerprint": request.get("prompt_fingerprint"),
-            "requested_model": self.adapter.model_id,
-            "returned_model": None,
-            "finish_reason": None,
-            "request_attempts": [],
-            "usage": provider_usage(None),
-            "status": "error",
-            "error_category": None,
-            "response": None,
-        }
+        record = _invocation_record(request, self.adapter.model_id)
         try:
-            response = self.adapter.complete(
-                messages,
-                metadata={
-                    "run_id": request.get("run_id"),
-                    "role": request["role"],
-                    "timeout_seconds": request.get("timeout_seconds"),
-                },
-            )
+            response = self.adapter.complete(messages, metadata=_request_metadata(request))
             record.update(
                 effective_model=response.model_id,
                 returned_model=response.returned_model,
@@ -98,9 +111,70 @@ class InternModelPort:
                 error_category=exc.category,
                 request_attempts=list(getattr(exc, "request_attempts", ())),
             )
-            raise InternPortError(exc.category) from exc
+            error = InternPortError(exc.category)
+            error.request_attempts = record["request_attempts"]
+            raise error from exc
         except InternPortError as exc:
             record["error_category"] = exc.category
+            raise
+        finally:
+            record["duration_seconds"] = time.monotonic() - started
+            self.invocations.append(redact(record))
+
+    def _complete_stream(self, request, schema, messages):
+        """Stream fragments through the caller's audit; strict schema gates the result.
+
+        Each ``text_delta`` is yielded as it arrives so ``calls`` persists it before
+        the next provider fragment is requested. Only a complete package that passes
+        the strict provider schema is normalized into a final result chunk.
+        """
+        started = time.monotonic()
+        record = _invocation_record(request, self.adapter.model_id, stream=True)
+        metrics = record["stream"]
+
+        try:
+            envelope = None
+            for chunk in self.adapter.stream_complete(messages, metadata=_request_metadata(request)):
+                if chunk.get("type") == "text_delta" and isinstance(chunk.get("text"), str):
+                    metrics["fragments"] += 1
+                    metrics["bytes"] += len(chunk["text"].encode("utf-8"))
+                    yield {"type": "text_delta", "text": chunk["text"]}
+                elif isinstance(chunk, Mapping) and chunk.get("type") == "result":
+                    envelope = chunk
+            if not isinstance(envelope, Mapping):
+                raise InternPortError("stream_ended_without_result")
+            record.update(
+                returned_model=envelope.get("model"),
+                finish_reason=envelope.get("finish_reason"),
+                usage=provider_usage(envelope.get("usage")),
+                request_attempts=list(envelope.get("attempts") or ()),
+            )
+            if envelope.get("finish_reason") == "length":
+                raise InternPortError("truncated_response")
+            text = envelope.get("text")
+            if not isinstance(text, str) or not text.strip():
+                raise InternPortError("empty_response")
+            try:
+                parsed = json.loads(text)
+            except (TypeError, ValueError) as exc:
+                raise InternPortError("invalid_json") from exc
+            if not isinstance(parsed, Mapping) or schema_error(parsed, schema):
+                raise InternPortError("invalid_role_schema")
+            record["status"] = "success"
+            metrics["status"] = "completed"
+            yield {"result": dict(parsed), "usage": dict(envelope.get("usage") or {})}
+        except AdapterError as exc:
+            record.update(
+                error_category=exc.category,
+                request_attempts=list(getattr(exc, "request_attempts", ())),
+            )
+            metrics["status"] = exc.category
+            error = InternPortError(exc.category)
+            error.request_attempts = record["request_attempts"]
+            raise error from exc
+        except InternPortError as exc:
+            record["error_category"] = exc.category
+            metrics["status"] = exc.category
             raise
         finally:
             record["duration_seconds"] = time.monotonic() - started

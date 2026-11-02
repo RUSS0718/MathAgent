@@ -7,6 +7,7 @@ from .plan import validate_plan
 
 def generated_plan(harness, run, invoke, request, version, config):
     retries = 1 if config.get("features", {}).get("star_routing") is True else 0
+    repair = {}
     for attempt in range(retries + 1):
         reason = budget_reason(run["state"], config)
         if reason:
@@ -18,6 +19,7 @@ def generated_plan(harness, run, invoke, request, version, config):
                 run,
                 {
                     **request,
+                    **repair,
                     "repair_attempt": attempt,
                     "repair_instruction": "Repair the invalid plan; obey exact schema and earlier dependencies."
                     if attempt
@@ -61,7 +63,8 @@ def generated_plan(harness, run, invoke, request, version, config):
             if plan["version"] != version:
                 raise ValueError("wrong_plan_version")
             return run, plan
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            repair = {"invalid_plan": plan, "validation_error": str(exc)}
             if attempt == retries:
                 return finish(harness, run, "partial_aborted", kind), None
     return run, None
