@@ -86,7 +86,34 @@ class DockerExecutorTest(unittest.TestCase):
         result = self.execute("while True: pass")
         self.assertNotEqual("success", result["status"])
         self.assertNotEqual(0, result["exit_code"])
-        self.assertLess(result["duration_seconds"], 8)
+        # The wall guard is the terminating bound now that the CPU budget is
+        # calibrated for multi-second real computations (ALIGN-10): the kill
+        # lands at the timeout, so allow the supervisor's cleanup margin.
+        self.assertLess(result["duration_seconds"], 10)
+
+    def test_product_default_cpu_budget_runs_multi_second_computations(self):
+        # Live ALIGN-10 batches kept losing natural computations to the old
+        # 3s CPU hard cap (a sympy import alone can cost ~2s): every explore
+        # script became an unknown timeout. The product default must run
+        # multi-second mathematical scripts and still be hard-bounded above.
+        from pathlib import Path
+
+        import shutil
+
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        executor = DockerPythonExecutor(image=IMAGE, artifact_root=folder)
+        result = executor.execute(
+            "total = sum(i * i for i in range(80_000_000))\nprint(total % 1000007)",
+            run_id="run_docker_default", call_id="actual_tool", input_payload={})
+        self.assertTrue(result["executed"], result)
+        self.assertTrue(result["cleanup_verified"], result)
+        self.assertEqual("success", result["status"])
+        self.assertEqual(0, result["exit_code"])
+        containers = subprocess.run(["docker", "ps", "-a", "-q", "--filter",
+            "label=mathagent.run_id=run_docker_default"], capture_output=True,
+            text=True, timeout=5, check=False)
+        self.assertEqual("", containers.stdout.strip())
 
     def test_cancellation_kills_a_sleeping_container(self):
         cancelled = Event()

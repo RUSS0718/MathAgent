@@ -14,7 +14,8 @@ from llm_client import InternChatClient
 from showcase.adapters import InternModelAdapter, InternStreamAdapter
 from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
-from tests.star_product_support import ACCEPT, POLISH, SOLVED, StarJobFixture
+from tests.star_product_support import (ACCEPT, POLISH, SOLVED, StarJobFixture,
+                                        assert_no_uncalibrated_probability)
 from tests.test_star_product_planning import FEATURES, STEP
 from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
 
@@ -225,33 +226,39 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
     def test_schema_invalid_complete_stream_is_not_normalized_and_never_shows_probability(self):
         uncalibrated = {"assessment": "SOLVED", "worked": [], "failed": [], "candidates": [],
                         "solution_candidate": "2", "confidence": 0.95}
+        # ALIGN-10 gives the explore entry one bounded format repair, so the
+        # invalid streamed reply is followed by a single repair dispatch; the
+        # second invalid reply exhausts the bound and the run still ends
+        # honestly with no retry decision to make.
         self.open_stream([
             [*split_fragments(uncalibrated), {"type": "result"}],
-            [*split_fragments(NEED_PLAN), {"type": "result"}],
-            [*split_fragments(PLAN), {"type": "result"}],
-            [*split_fragments(STEP), {"type": "result"}],
-            [*split_fragments(VERDICT), {"type": "result"}],
-            [*split_fragments({"final_response": "2"}), {"type": "result"}],
-            [*split_fragments(ACCEPT), {"type": "result"}],
+            [*split_fragments(uncalibrated), {"type": "result"}],
         ], SHOWCASE_STAR_FEATURES=FEATURES,
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=16, max_http_attempts=16))
         job_id = self.create_job()
         failed = self.terminal(job_id)
         self.assertEqual("failed", failed["status"], failed)
         recovery = failed["result"]["solver"]["recovery"]
-        self.assertEqual(1, len(recovery["unknown_calls"]))
+        # ALIGN-04: the complete streamed package that fails the strict schema
+        # is a known protocol failure, never an unknown remote outcome.
+        self.assertEqual([], recovery["unknown_calls"])
+        self.assertEqual(2, len(recovery["protocol_failures"]))
+        self.assertEqual({"explore"}, {item["role"] for item in recovery["protocol_failures"]})
+        self.assertEqual({"invalid_role_schema"},
+                         {item["error_category"] for item in recovery["protocol_failures"]})
+        self.assertEqual(1, sum(item["repair_attempts"] for item in recovery["protocol_failures"]))
         # The streamed complete package never became a normalized candidate.
         self.assertEqual([], failed["result"]["solver"]["candidate_history"])
         stream, dumps = self.public_outputs(job_id)
-        self.assertNotIn("0.95", stream + dumps)
-        self.assertNotIn("confidence", stream + dumps)
-        old_id = recovery["unknown_calls"][0]["call_id"]
-        response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={"retry_call": {
-            "call_id": old_id, "new_call_id": str(uuid.uuid4())}}, headers=self.headers())
-        self.assertEqual(202, response.status_code, response.get_json())
-        final = self.terminal(job_id)
-        self.assertEqual("succeeded", final["status"], final)
-        self.assertEqual(7, len(self.outbound))
+        # A raw-text '0.95' scan misfires on wall-clock fields (an ISO timestamp
+        # like ...T06:47:20.9537650Z contains '0.95'); the leak check walks the
+        # parsed public output instead.
+        assert_no_uncalibrated_probability(self, stream, dumps)
+        # The known failure ends dispatch honestly; no retry decision applies.
+        rejected = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={},
+                                    headers=self.headers())
+        self.assertEqual(409, rejected.status_code)
+        self.assertEqual(2, len(self.outbound))
 
     def test_process_exit_mid_stream_keeps_unknown_and_requires_explicit_new_identity(self):
         import subprocess

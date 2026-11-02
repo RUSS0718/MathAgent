@@ -145,3 +145,100 @@ class ReplanTest(unittest.TestCase):
         self.assertEqual(
             "unverified_exploration", requests[-1]["reexploration_findings"][0]["provenance"]
         )
+
+
+class ReplanRulingGateTest(unittest.TestCase):
+    """Only the current transition's unconsumed APPROVE_REPLAN ruling archives (ALIGN-AC-14)."""
+
+    def seed_replan(self, meta_decision):
+        store = SQLiteStore(":memory:")
+        config = {"max_model_calls": 4}
+        with SolverHarness(store=store, config=config) as harness:
+            run = harness.solve("prove", {"run_id": "r"})
+            updates = {
+                "phase": "REPLAN", "plan": PLAN, "plan_version": 1,
+                "current_step": "s1",
+                "meta_decision": None if meta_decision is None else {
+                    **meta_decision,
+                    "run_id": "r", "plan_version": 1, "attempt_index": 0,
+                    "step_id": "s1", "decided_at_revision": run["state_revision"] + 1,
+                },
+            }
+            harness.commit_event(
+                "r",
+                expected_revision=run["state_revision"],
+                event={"event_id": "seed-replan", "type": "seed"},
+                state_updates=updates,
+            )
+        return store, config
+
+    def run_replan(self, store, config, planner_replies):
+        planner = ScriptedModelPort(planner_replies)
+        with SolverHarness(store=store, config=config, model_port=planner) as harness:
+            run = harness.solve("prove", {"run_id": "r"})
+            self.assertEqual(run, harness.get_run("r"))
+        return run["state"], planner.requests
+
+    def test_missing_or_mismatched_ruling_escalates_instead_of_archiving(self):
+        for meta_decision in (None, {**DECISION, "decision": "CONTINUE"}):
+            with self.subTest(meta_decision=meta_decision):
+                state, requests = self.run_replan(*self.seed_replan(meta_decision), [])
+                self.assertEqual([], requests)
+                self.assertEqual("META_DECIDE", state["phase"])
+                self.assertEqual(1, state["plan_version"])
+                self.assertEqual(
+                    "UNAUTHORIZED_REPLAN_TRANSITION", state["meta_interventions"][-1]["trigger"]
+                )
+
+    def test_consumed_ruling_cannot_archive_again(self):
+        consumed = {**DECISION, "consumed": {"event_type": "plan_archived",
+                                             "state_revision": 4, "plan_version": 2}}
+        state, requests = self.run_replan(*self.seed_replan(consumed), [])
+        self.assertEqual([], requests)
+        self.assertEqual("META_DECIDE", state["phase"])
+        self.assertEqual(1, state["plan_version"])
+
+    def test_valid_ruling_is_consumed_by_the_archive_it_authorizes(self):
+        state, requests = self.run_replan(*self.seed_replan(DECISION), [{**PLAN, "version": 2}])
+        self.assertEqual(2, state["plan_version"])
+        self.assertEqual("planner", requests[0]["role"])
+        self.assertEqual(["search"], requests[0]["forbidden_directions"])
+        consumption = state["meta_decision"]["consumed"]
+        self.assertEqual(("plan_archived", 2),
+                         (consumption["event_type"], consumption["plan_version"]))
+
+    def test_replayed_replan_phase_cannot_reuse_the_consumed_ruling(self):
+        store, config = self.seed_replan(DECISION)
+        state, requests = self.run_replan(store, config, [{**PLAN, "version": 2}])
+        self.assertEqual(2, state["plan_version"])
+        with SolverHarness(store=store, config=config) as harness:
+            run = harness.get_run("r")
+            self.assertEqual(2, run["state"]["meta_decision"]["consumed"]["plan_version"])
+            # A recovery replays the REPLAN phase against the already-consumed ruling.
+            harness.commit_event(
+                "r",
+                expected_revision=run["state_revision"],
+                event={"event_id": "replay-replan", "type": "seed"},
+                state_updates={"phase": "REPLAN"},
+            )
+        replayed, requests_again = self.run_replan(store, config, [])
+        self.assertEqual([], requests_again)
+        self.assertEqual("META_DECIDE", replayed["phase"])
+        self.assertEqual(
+            "UNAUTHORIZED_REPLAN_TRANSITION", replayed["meta_interventions"][-1]["trigger"]
+        )
+
+    def test_bypassing_the_transition_gate_rearchives_a_consumed_ruling(self):
+        from unittest.mock import patch
+
+        from showcase.solver_harness import replan as replan_module
+
+        consumed = {**DECISION, "consumed": {"event_type": "plan_archived",
+                                             "state_revision": 4, "plan_version": 2}}
+        with patch.object(replan_module, "transition_decision", lambda *arguments: True):
+            state, requests = self.run_replan(*self.seed_replan(consumed),
+                                              [{**PLAN, "version": 2}])
+        # Deliberately bypassing the current-transition gate lets the consumed
+        # ruling archive again: the exact regression the consumption contract blocks.
+        self.assertEqual(2, state["plan_version"])
+        self.assertEqual("planner", requests[0]["role"])

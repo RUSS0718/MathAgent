@@ -230,11 +230,13 @@ class InternPortTest(unittest.TestCase):
         ) as harness:
             result = harness.solve("public", {"run_id": "interrupted"})
             self.assertEqual(result, harness.get_run("interrupted"))
-        self.assertEqual("interrupted", result["state"]["status"])
-        self.assertEqual("EXPLORE", result["state"]["phase"])
+        # ALIGN-04: the complete schema-invalid reply is a known protocol
+        # failure that ends dispatch honestly, not an interrupted unknown.
+        self.assertEqual("partial_aborted", result["state"]["status"])
+        self.assertEqual("TERMINAL", result["state"]["phase"])
         self.assertEqual([], result["state"]["exploration_findings"])
         call = next(iter(result["state"]["calls"].values()))
-        self.assertEqual("unknown_outcome", call["status"])
+        self.assertEqual("protocol_failed", call["status"])
         self.assertEqual("invalid_role_schema", port.invocations[0]["error_category"])
 
     def test_evidence_runner_uses_physical_attempt_budget_and_terminal_safe_audit(self):
@@ -274,13 +276,17 @@ class InternPortTest(unittest.TestCase):
                 adapter, Path(directory), execution_source="offline_injected", followup=True
             )
             snapshot = json.loads((folder / "run.json").read_text(encoding="utf-8"))
-        self.assertEqual(1, post.call_count)
-        self.assertEqual(1, report["budget"]["http_attempts"])
+        # The probe config enables star_routing, so the explore entry takes its
+        # one bounded format repair (ALIGN-10 round 2): both physical attempts
+        # receive the same schema-invalid body and the run still ends as a
+        # known protocol failure, never an interrupted unknown outcome.
+        self.assertEqual(2, post.call_count)
+        self.assertEqual(2, report["budget"]["http_attempts"])
         self.assertEqual(4, report["budget"]["limits"]["max_http_attempts"])
         self.assertEqual(1, report["budget"]["limits"]["max_tool_calls"])
         self.assertEqual(120, report["budget"]["limits"]["max_runtime_seconds"])
         self.assertIsNone(report["invocations"][0]["usage"]["total_tokens"])
-        self.assertEqual("interrupted", report["final_status"])
+        self.assertEqual("partial_aborted", report["final_status"])
         self.assertEqual("needs_review", report["status"])
         event = snapshot["events"][-1]
         self.assertEqual("intern_evidence_recorded", event["type"])
