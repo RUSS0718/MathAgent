@@ -267,6 +267,37 @@ class ExperimentExecutionTest(unittest.TestCase):
             saved["log_tail"][-1]["stream_activity"]["last_content_at"],
         )
 
+    def test_polling_error_persists_only_safe_observer_error_fields(self):
+        from showcase.cli import CliError
+        from showcase.experiment_execution import run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+
+        class PollingErrorAdapter(_JobAdapter):
+            def wait_for_job(self, _job_id, _deadline_at):
+                raise CliError("network_error", 504)
+
+        manifest = _manifest(source)
+        adapter = PollingErrorAdapter()
+        with tempfile.TemporaryDirectory() as temporary:
+            result = run_batch(
+                manifest,
+                expected_sha256=manifest_digest(manifest),
+                run_id="run-polling-error",
+                output_root=temporary,
+                context=_context_for_run(manifest, adapter, "run-polling-error"),
+            )
+            saved = read_status("run-polling-error", output_root=temporary)
+
+        self.assertEqual("stopped", result["phase"])
+        self.assertEqual("unknown_job_status", result["stop_reason"])
+        self.assertEqual({"code": "network_error", "http_status": 504}, saved["observer_error"])
+
     def test_nonzero_provider_retry_is_rejected_before_adapter_construction(self):
         from showcase.experiment_execution import run_batch
 

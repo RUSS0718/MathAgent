@@ -349,8 +349,11 @@ def _advance(
                 )
             else:
                 observation = adapter.wait_for_job(job_id, intent["deadline_at"])
-        except Exception:
+        except Exception as exc:
             _record_execution_events(status, adapter, job_id)
+            observer_error = _safe_observer_error(exc)
+            if observer_error is not None:
+                status["observer_error"] = observer_error
             return _stop(directory, status, "unknown_job_status")
         _record_execution_events(status, adapter, job_id)
         stop_reason = _observation_stop_reason(
@@ -546,6 +549,20 @@ def _stop(directory: Path, status: dict[str, Any], reason: str) -> dict[str, Any
     status["stop_reason"] = reason
     _save(directory, status)
     return status
+
+
+def _safe_observer_error(error: Exception) -> dict[str, Any] | None:
+    code = getattr(error, "code", None)
+    if not isinstance(code, str) or not code or not all(
+        character.isascii() and (character.isalnum() or character == "_")
+        for character in code
+    ):
+        return None
+    result = {"code": code}
+    status = getattr(error, "status", None)
+    if type(status) is int and 100 <= status <= 599:
+        result["http_status"] = status
+    return result
 
 
 def _record_execution_events(status: dict[str, Any], adapter: Any, job_id: str) -> bool:
