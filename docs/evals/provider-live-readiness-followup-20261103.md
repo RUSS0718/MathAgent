@@ -91,7 +91,7 @@
 
 `issue127-medium-20261103-public-03` 已完成 1/1，返回 341 字答案；独立核验 task、transport、coverage 为 PASS，usage 为 UNKNOWN。该样本走 FASTPATH，没有 planner 或多步步骤，因此只能证明该配置下简单答案格式路径可完成，不能算自然多步 readiness。
 
-`issue127-hard-20261103-public-04` 使用源码提交 `3a12638` 和冻结 manifest `df612dd58556cc92ef1d10858934fcc48d48de7d3c34ae14b4801b35ff1fbae4`。公开 Job `run_06ec07255e27d4643fda226907b715e6` / session `session_952b8cdf9e1c9f8d5fe378335b861c6b` 实际完成 Explore、planner 与 reasoner 三次流式 HTTP 调用（均 HTTP 200、`finish_reason=stop`），并产生自然四步计划，进入第一步核验。时间均为北京时间：Explore 首正文 `23:34:17.425`；planner 首正文 `23:34:20.171`；reasoner 首正文 `23:34:50.171`。步骤核验请求首正文 `23:35:11.106`，最后持久化正文 `23:35:23.704`；该流至少累计 542 字节、41 个事件，之后仍没有 completion/finish 记录。
+`issue127-hard-20261103-public-04` 使用源码提交 `3a12638` 和冻结 manifest `df612dd58556cc92ef1d10858934fcc48d48de7d3c34ae14b4801b35ff1fbae4`。公开 Job `run_06ec07255e27d4643fda226907b715e6` / session `session_952b8cdf9e1c9f8d5fe378335b861c6b` 实际完成 Explore、planner 与 reasoner 三次流式 HTTP 调用（均 HTTP 200、`finish_reason=stop`），并产生自然四步计划，进入第一步核验。时间均为北京时间：Explore 首正文 `23:34:17.425`；planner 首正文 `23:34:20.171`；reasoner 首正文 `23:34:50.282`。步骤核验请求首正文 `23:35:11.106`，最后持久化正文 `23:35:23.704`；该流至少累计 542 字节、41 个事件，之后仍没有 completion/finish 记录。
 
 步骤核验对应 HTTP attempt 仍是 `reserved`，`dispatch_status=reserved_dispatch_unconfirmed`，恢复状态列出一个 `step_verifier` `unknown_outcome`。Run/Job 在 `STEP_VERIFY` 时保持 `running`，无最终答案、整题审查、S4 绑定或工具回执。此时 provider 流仍在产出；本地 CLI 与服务进程随后消失，超过 30 秒无进展停止规则并未触发。为什么执行进程退出尚无法从现有证据确认，因此将**该次 Run 结果标为 UNKNOWN/未完成**，不归因于 provider 超时或数学题答错。其已结算 usage 不可得；未决请求及原预算预留必须保留，不恢复、不重发。
 
