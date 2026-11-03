@@ -18,6 +18,20 @@ TRANSPORT_REJECTION_REASONS = frozenset({
 })
 
 
+def known_transport_rejection(identity: Any) -> bool:
+    """Recognize the public refusal schema without treating unknown data as a refusal."""
+    rejection = identity.get("rejection") if isinstance(identity, dict) else None
+    return (
+        isinstance(rejection, dict)
+        and set(rejection) == {"call_id", "role", "reason", "new_run_required"}
+        and isinstance(rejection["call_id"], str)
+        and re.fullmatch(r"solver_call_[0-9a-f]{32}", rejection["call_id"]) is not None
+        and isinstance(rejection["role"], str) and _CALL_ID.fullmatch(rejection["role"]) is not None
+        and isinstance(rejection["reason"], str) and rejection["reason"] in TRANSPORT_REJECTION_REASONS
+        and rejection["new_run_required"] is True
+    )
+
+
 def project_transport_identity(state: Any, job_id: str) -> dict[str, Any] | None:
     """Return only stable transport fields; malformed or incomplete state is unknown."""
     if not isinstance(state, dict) or state.get("run_id") != job_id:

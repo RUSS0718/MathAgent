@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .experiment_transport_projection import known_transport_rejection
 from .experiment_verification_reporting import _safe_evidence
 from .experiment_verification_state import _CHECKS, _check, _finite_number
 from .run_budget import public_solver_call_id
@@ -129,6 +130,12 @@ def _check_transport(
         or observed.get("profile_set_fingerprint") != expected["profile_set_fingerprint"]
     ):
         return _check("FAIL", "transport_policy_mismatch")
+    if "rejection" in observed:
+        if known_transport_rejection(observed) and observed["rejection"]["role"] in {
+            call["call_id"] for call in expected["calls"]
+        }:
+            return _check("FAIL", "transport_policy_rejected")
+        return _check("FAIL", "transport_rejection_invalid")
     calls = observed["calls"]
     if not calls or any(not isinstance(item, dict) for item in calls + attempts):
         return _check("FAIL", "transport_calls_mismatch")
@@ -170,7 +177,9 @@ def _check_transport(
             evidence_kind = call.get("evidence_kind")
             if (
                 call.get("transport") != "stream"
-                or call.get("profile_fingerprint") != frozen.get("profile_fingerprint")
+                or call.get("profile_fingerprint") not in frozen.get(
+                    "profile_fingerprints", [frozen.get("profile_fingerprint")]
+                )
                 or not isinstance(evidence_kind, str)
                 or evidence_kind not in {"controlled_test", "provider_live"}
                 or (

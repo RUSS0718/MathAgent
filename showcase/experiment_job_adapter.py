@@ -7,6 +7,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from .experiment_transport_projection import known_transport_rejection
+
 _PUBLIC_CALL_ID = re.compile(r"solver_call_[0-9a-f]{32}\Z")
 
 
@@ -238,6 +240,13 @@ class PublicExperimentJobAdapter:
         )
         transport = record.get("transport_identity")
         transport_known = self._transport_matches_manifest(transport)
+        expected = self.manifest.get("transport")
+        rejected = (
+            known_transport_rejection(transport) and isinstance(expected, dict)
+            and transport.get("policy") == expected.get("policy")
+            and transport.get("profile_set_fingerprint") == expected.get("profile_set_fingerprint")
+            and transport["rejection"]["role"] in {call["call_id"] for call in expected["calls"]}
+        )
         return {
             "status": status or record.get("status"),
             "ledger_consistent": ledger_consistent,
@@ -245,6 +254,7 @@ class PublicExperimentJobAdapter:
             "transport": self.manifest.get("transport") if transport_known else None,
             "budget": budget,
             "deadline_at": budget.get("deadline_at"),
+            **({"transport_rejected": True} if rejected else {}),
         }
 
     def _transport_matches_manifest(self, observed: Any) -> bool:
@@ -291,7 +301,10 @@ class PublicExperimentJobAdapter:
             role = call["role"]
             expected_call = expected_calls[role]
             if expected["policy"] == "stream_first":
-                profile_fingerprint = expected_call["profile_fingerprint"]
+                allowed = expected_call.get("profile_fingerprints", [expected_call.get("profile_fingerprint")])
+                profile_fingerprint = call.get("profile_fingerprint")
+                if profile_fingerprint not in allowed:
+                    return False
                 profile = profiles.get(profile_fingerprint)
                 if profile is None or call != {
                     "call_id": call["call_id"],
