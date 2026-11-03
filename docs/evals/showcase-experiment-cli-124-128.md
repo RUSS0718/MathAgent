@@ -27,5 +27,6 @@
 - `check.py --offline`：**1186 项通过、0 失败、2 跳过**，`repository_check=PASS`；两项跳过是显式要求 `RUN_STAR_READINESS_DOCKER_INTEGRATION=1` 的历史 readiness 集成用例，未计为通过。
 - `check_showcase_release.py --require-reference`：**41 项通过、0 失败**，`showcase_release=PASS`。
 - 前端 `npm ci --no-audit --no-fund`、`npm audit --audit-level=high` 和 `npm run check`：均通过，audit 报告 0 项漏洞。
+- 随后启用 `RUN_STAR_READINESS_DOCKER_INTEGRATION=1` 并复跑离线阶段跳过的两项 Docker 集成用例：**2 项通过**。该补充运行不重跑全量门禁。
 
 上述门禁只证明当前源码的工程合同、受控恢复、固定镜像隔离和前端检查可复现；它没有产生 provider-live 请求，也没有改变 #127 的 `NOT_RUN` 或 #128 的 `NOT_COVERED` 状态。
