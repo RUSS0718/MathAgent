@@ -163,6 +163,7 @@ class StreamPreferenceSelectorTest(unittest.TestCase):
         self.assertEqual("reject", decision["transport"])
         self.assertEqual("provider_native_tools_unsupported_with_stream", decision["reason"])
         self.assertEqual("documented", decision["evidence_kind"])
+        self.assertEqual("native_tools_require_nonstream", decision["capability_limit"])
         self.assertTrue(decision["new_run_required"])
 
     def test_legacy_policy_remains_an_explicit_nonstream_compatible_choice(self):
@@ -174,6 +175,46 @@ class StreamPreferenceSelectorTest(unittest.TestCase):
 
         self.assertEqual("legacy", decision["transport"])
         self.assertIsNone(decision["reason"])
+
+    def test_legacy_policy_rejects_unverified_stream_activity(self):
+        from showcase.solver_harness.intern_port import InternModelPort, InternPortError
+
+        class Adapter:
+            model_id = "intern-s2"
+
+            def __init__(self):
+                self.stream_calls = 0
+                self.nonstream_calls = 0
+
+            def complete(self, *_args, **_kwargs):
+                self.nonstream_calls += 1
+                raise AssertionError("unverified stream activity must not fall back")
+
+            def stream_complete(self, *_args, **_kwargs):
+                self.stream_calls += 1
+                return iter(())
+
+        adapter = Adapter()
+        decisions = []
+        port = InternModelPort(
+            adapter,
+            streaming=True,
+            transport_policy="legacy",
+            transport_choice_observer=lambda decision, _request:
+                decisions.append(decision) or True,
+        )
+
+        with self.assertRaises(InternPortError) as raised:
+            port.complete({
+                "role": "explore", "problem": "synthetic", "run_id": "legacy-unverified-stream",
+            })
+
+        self.assertEqual("stream_first_policy_required", raised.exception.category)
+        self.assertEqual(0, adapter.stream_calls)
+        self.assertEqual(0, adapter.nonstream_calls)
+        self.assertEqual("reject", decisions[0]["transport"])
+        self.assertEqual("stream_first_policy_required", decisions[0]["reason"])
+        self.assertTrue(decisions[0]["new_run_required"])
 
     def test_missing_stream_adapter_rejects_without_nonstream_dispatch(self):
         from showcase.solver_harness.intern_port import InternModelPort, InternPortError

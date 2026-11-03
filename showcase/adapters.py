@@ -139,6 +139,22 @@ class InternModelAdapter:
         self.client_retry = client_retry
         self.thinking_mode = thinking_mode
 
+    def applied_config(self) -> dict[str, Any]:
+        """Return resolved request settings without creating a lazy provider client."""
+        client = self._client
+        return {
+            "name": getattr(client, "model", None) or self.model_id,
+            "thinking_mode": (
+                self.thinking_mode
+                if self.thinking_mode is not None
+                else getattr(client, "thinking_mode", None)
+            ),
+            "temperature": self.temperature,
+            "max_output_tokens": self.max_tokens,
+            "request_timeout_seconds": getattr(client, "timeout", self.client_timeout),
+            "retry": getattr(client, "retry", self.client_retry),
+        }
+
     @controlled_action
     def complete(
         self,

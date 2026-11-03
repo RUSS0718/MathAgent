@@ -199,6 +199,75 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
             app.extensions["showcase_run_service"].close()
             app.extensions["loopback_store"].close()
 
+    def test_capabilities_reports_actual_client_model_name(self):
+        from types import SimpleNamespace
+
+        from showcase.adapters import InternModelAdapter
+
+        adapter = InternModelAdapter(
+            client=SimpleNamespace(
+                model="active-client-model",
+                timeout=60,
+                retry=0,
+                thinking_mode=True,
+            ),
+            model_id="adapter-default-model",
+            thinking_mode=True,
+            temperature=0.2,
+            max_tokens=512,
+        )
+        app = create_app(
+            {
+                "TESTING": True,
+                "SHOWCASE_DATA_DIR": str(Path(self.temporary.name) / "actual-client-model"),
+                "SHOWCASE_WORKER_ENABLED": False,
+                "SHOWCASE_STAR_ENABLED": True,
+                "SHOWCASE_STAR_ADAPTER": adapter,
+            }
+        )
+        try:
+            projection = app.test_client().get("/api/capabilities").get_json()[
+                "applied_model_config"
+            ]
+            self.assertEqual("available", projection["status"])
+            self.assertEqual("active-client-model", projection["model"]["name"])
+        finally:
+            app.extensions["showcase_workspace_service"].close()
+            app.extensions["showcase_run_service"].close()
+            app.extensions["loopback_store"].close()
+
+    def test_capabilities_marks_negative_temperature_unavailable(self):
+        from types import SimpleNamespace
+
+        from showcase.adapters import InternModelAdapter
+
+        adapter = InternModelAdapter(
+            client=SimpleNamespace(timeout=60, retry=0, thinking_mode=True),
+            model_id="intern-s2",
+            thinking_mode=True,
+            temperature=-0.1,
+            max_tokens=512,
+        )
+        app = create_app(
+            {
+                "TESTING": True,
+                "SHOWCASE_DATA_DIR": str(Path(self.temporary.name) / "invalid-temperature"),
+                "SHOWCASE_WORKER_ENABLED": False,
+                "SHOWCASE_STAR_ENABLED": True,
+                "SHOWCASE_STAR_ADAPTER": adapter,
+            }
+        )
+        try:
+            projection = app.test_client().get("/api/capabilities").get_json()[
+                "applied_model_config"
+            ]
+            self.assertEqual("unavailable", projection["status"])
+            self.assertIsNone(projection["model"])
+        finally:
+            app.extensions["showcase_workspace_service"].close()
+            app.extensions["showcase_run_service"].close()
+            app.extensions["loopback_store"].close()
+
     def test_public_job_adapter_rechecks_server_config_before_runtime_dispatch(self):
         from types import SimpleNamespace
 

@@ -122,6 +122,7 @@ def select_transport(adapter, messages, *, policy="legacy", native_tools=False, 
                 "transport": "nonstream",
                 "reason": "provider_native_tools_unsupported_with_stream",
                 "evidence_kind": "documented",
+                "capability_limit": "native_tools_require_nonstream",
                 "profile_set_fingerprint": profile_set_id,
             }
         return {
@@ -143,6 +144,7 @@ def select_transport(adapter, messages, *, policy="legacy", native_tools=False, 
             "transport": "reject",
             "reason": "provider_native_tools_unsupported_with_stream",
             "evidence_kind": "documented",
+            "capability_limit": "native_tools_require_nonstream",
             "new_run_required": True,
             "profile_set_fingerprint": profile_set_id,
         }

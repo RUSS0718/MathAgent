@@ -719,24 +719,11 @@ def _applied_model_config(star_pipeline: Any, solver_modes: list[dict[str, Any]]
     from .stream_preference import profile_set_fingerprint
 
     adapter = getattr(star_pipeline, "adapter", None)
-    client = getattr(adapter, "_client", None)
-    thinking_mode = getattr(adapter, "thinking_mode", None)
-    if thinking_mode is None:
-        thinking_mode = getattr(client, "thinking_mode", None)
-    timeout = getattr(adapter, "client_timeout", None)
-    retry = getattr(adapter, "client_retry", None)
-    if timeout is None:
-        timeout = getattr(client, "timeout", None)
-    if retry is None:
-        retry = getattr(client, "retry", None)
-    model = {
-        "name": getattr(adapter, "model_id", None),
-        "thinking_mode": thinking_mode,
-        "temperature": getattr(adapter, "temperature", None),
-        "max_output_tokens": getattr(adapter, "max_tokens", None),
-        "request_timeout_seconds": timeout,
-        "retry": retry,
-    }
+    read_applied_config = getattr(adapter, "applied_config", None)
+    try:
+        model = read_applied_config() if callable(read_applied_config) else None
+    except Exception:
+        model = None
     modes = sorted(
         record["solver_mode"]
         for record in solver_modes
@@ -752,11 +739,23 @@ def _applied_model_config(star_pipeline: Any, solver_modes: list[dict[str, Any]]
         }
     available = (
         star_pipeline is not None
+        and isinstance(model, dict)
+        and set(model) == {
+            "name",
+            "thinking_mode",
+            "temperature",
+            "max_output_tokens",
+            "request_timeout_seconds",
+            "retry",
+        }
         and isinstance(model["name"], str)
+        and bool(model["name"].strip())
         and isinstance(model["thinking_mode"], bool)
         and type(model["temperature"]) in {int, float}
         and math.isfinite(model["temperature"])
+        and model["temperature"] >= 0
         and type(model["max_output_tokens"]) is int
+        and model["max_output_tokens"] > 0
         and type(model["request_timeout_seconds"]) is int
         and model["request_timeout_seconds"] > 0
         and type(model["retry"]) is int

@@ -531,6 +531,21 @@ class ExperimentRegistrationTest(unittest.TestCase):
             ).encode()
         ).hexdigest()
         projections.append(("boolean_schema_version", malformed))
+        negative_temperature = json.loads(json.dumps(valid))
+        negative_temperature["model"]["temperature"] = -0.1
+        negative_temperature["config_sha256"] = hashlib.sha256(
+            json.dumps(
+                {
+                    key: value
+                    for key, value in negative_temperature.items()
+                    if key != "config_sha256"
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        projections.append(("negative_temperature", negative_temperature))
         stale = json.loads(json.dumps(valid))
         stale["model"]["name"] = "other-active-model"
         stale_fingerprint_input = {

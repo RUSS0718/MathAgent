@@ -119,9 +119,11 @@ def server_model_config_matches(value: Any, manifest: Mapping[str, Any]) -> bool
     model = value["model"]
     if (
         not isinstance(model["name"], str)
+        or not model["name"].strip()
         or type(model["thinking_mode"]) is not bool
         or type(model["temperature"]) not in {int, float}
         or not math.isfinite(model["temperature"])
+        or model["temperature"] < 0
         or type(model["max_output_tokens"]) is not int
         or model["max_output_tokens"] <= 0
         or type(model["request_timeout_seconds"]) is not int

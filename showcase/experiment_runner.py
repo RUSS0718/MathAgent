@@ -74,6 +74,7 @@ def preflight_manifest(
         "retry": "not_checked",
         "source_identity": "failed",
         "model": "not_checked",
+        "server_model": "not_checked",
         "transport": "not_checked",
         "samples": "not_checked",
         "budgets": "not_checked",
