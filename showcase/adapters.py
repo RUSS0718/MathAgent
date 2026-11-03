@@ -219,8 +219,8 @@ class InternModelAdapter:
         if budget is None:
             text, usage, parsed = normalize_response()
         else:
-            from .processing_deadline import process_before_deadline
             from .deadline_clock import guarded_utc_clock
+            from .processing_deadline import process_before_deadline
 
             source_attempts = raw.get("attempts", ()) if isinstance(raw, Mapping) else ()
             absolute = source_attempts[-1].get("deadline_at") if source_attempts else None
