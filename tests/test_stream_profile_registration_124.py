@@ -20,8 +20,8 @@ LAYERED_SCHEMAS = {
     "explore_polish": "818c4d7d0098f6117fa023907d53dc161f8d45bfbd847285ff07d0d890877b87",
     "researcher": "e5b9cd4d259add409204822298e4ed299c8eb2a02f27a359b688058b90721a4f",
 }
-COUNTEREXAMPLE_SCHEMA = "9806bf844a1871e77a826e802027f93929767e99a7bd3bc1366318abf4be7590"
-COUNTEREXAMPLE_PROFILE = "c533d7e24d63633c1b4418e51cc1412c552bffb4dd51195ba87d2173f6fce406"
+COUNTEREXAMPLE_SCHEMA = "d34c4ad6068e396ff084b945939e6bb3839bc2af86603e7aa2784161ac59a097"
+COUNTEREXAMPLE_PROFILE = "85543b0bdce2793ca8a0a0b666fea45de190ba74e814b8bbdfa30bc7bb8cc17a"
 MESSAGE = ("system", ("content", "role"))
 USER = ("user", ("content", "role"))
 SHAPE_2 = (MESSAGE, USER)
@@ -60,6 +60,16 @@ def schema_fingerprint_for(request):
 
 
 class VerifiedStreamProfileRegistrationTest(unittest.TestCase):
+    def test_counterexample_schema_fingerprint_matches_registered_live_profile(self):
+        """Keep the counterexample response schema and live profile in sync."""
+        actual = schema_fingerprint_for({"role": "researcher", "action": "counterexample_check"})
+        self.assertEqual(COUNTEREXAMPLE_SCHEMA, actual)
+        self.assertIn(
+            (actual, SHAPE_5),
+            {(profile.schema_fingerprint, profile.messages_schema)
+             for profile in VERIFIED_STREAM_PROFILES},
+        )
+
     def test_only_thirteen_probe_verified_schema_and_message_shape_pairs_are_registered(self):
         expected = ({(fingerprint, shape) for fingerprint in SCHEMAS.values()
                      for shape in (SHAPE_2, SHAPE_5)}

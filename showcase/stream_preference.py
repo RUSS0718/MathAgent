@@ -70,7 +70,7 @@ VERIFIED_STREAM_PROFILES: tuple[StreamProfile, ...] = tuple(
           for fingerprint in _SHAPE_2_SCHEMA_FINGERPRINTS),
         *((fingerprint, (_VERIFIED_MESSAGE_SHAPES[1],))
           for fingerprint in _SHAPE_5_SCHEMA_FINGERPRINTS),
-        ("9806bf844a1871e77a826e802027f93929767e99a7bd3bc1366318abf4be7590",
+        ("d34c4ad6068e396ff084b945939e6bb3839bc2af86603e7aa2784161ac59a097",
          (_VERIFIED_MESSAGE_SHAPES[1],)),
     )
     for messages_schema in message_shapes
