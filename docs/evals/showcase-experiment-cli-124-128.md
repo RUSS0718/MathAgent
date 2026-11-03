@@ -30,3 +30,12 @@
 - 随后启用 `RUN_STAR_READINESS_DOCKER_INTEGRATION=1` 并复跑离线阶段跳过的两项 Docker 集成用例：**2 项通过**。该补充运行不重跑全量门禁。
 
 上述门禁只证明当前源码的工程合同、受控恢复、固定镜像隔离和前端检查可复现；它没有产生 provider-live 请求，也没有改变 #127 的 `NOT_RUN` 或 #128 的 `NOT_COVERED` 状态。
+
+## 2026-11-04 追加结果
+
+上一段记录的是 2026-11-03 代码合入前的状态，以下结果追加到原记录，不改写旧批次。
+
+- #124 已加入 `researcher.counterexample_check` 的精确 stream profile 变体白名单，并将派发前已知拒绝投影为 `transport_policy_rejected`；真实 schema 探针通过。聚焦回归 52 项通过。
+- #127 的简单题和中等题已有 `completed 1/1` 的非空答案返回；中等题这次仍是 FASTPATH，没有自然 planner/steps。困难题新 Run 已实际完成 Explore、planner、reasoner，并进入自然步骤核验，但步骤核验流在进程退出前没有 completion/finish、最终答案、整题审查或 S4 绑定。该 Run 定性为 **已执行但未完成，结果 UNKNOWN**；因此 #127 readiness **未通过**。
+- #128 因 #127 readiness 未通过而保持 `NOT_RUN`；pair execution 仍为 `NOT_COVERED`，没有创建 baseline/variant 两臂 Run。
+- 新代码的实验 profile、消费者、已知拒绝投影和 pair 安全路径聚焦回归共 52 项通过；这不改变 provider-live readiness 结论，也不构成数学能力提升证据。

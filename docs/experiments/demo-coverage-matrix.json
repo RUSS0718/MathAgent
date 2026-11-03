@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "ticket": 122,
-  "updated": "2026-11-03",
+  "updated": "2026-11-04",
   "basis": {
     "integration_branch": "feat(setup)-流式与CLI实验组件设置",
     "integration_merge": "775d00e3cdcadb6cb6aeca07a1b59093103370d4",
@@ -64,12 +64,12 @@
     }
   ],
   "readiness": {
-    "provider_live": "NOT_RUN",
+    "provider_live": "FAILED",
     "blocks": [
       "#127 provider-live readiness conclusion",
       "#128 provider-live paired comparison conclusion"
     ],
-    "reason": "No provider-live batch has run through the new frozen-manifest CLI acceptance; historical outcomes do not substitute."
+    "reason": "Provider-live CLI attempts now exist: simple and medium fast-path Runs completed with non-empty answers, while the hard natural multi-step Run reached planning and step verification but ended with an unresolved step_verifier call before final delivery. #127 readiness is not passed; #128 remains blocked and unrun."
   },
   "capabilities": [
     {
@@ -129,7 +129,11 @@
         "note": "SP-13 records earlier simple successes; #97 later lacks complete reviewed and bound delivery."
       },
       "cli_provider_live": {
-        "status": "NOT_RUN"
+        "status": "COVERED",
+        "refs": [
+          "docs/evals/provider-live-readiness-followup-20261103.md"
+        ],
+        "note": "Simple and medium public CLI Runs completed with non-empty answers and, for the accepted sample, task/transport/coverage PASS plus same-text binding; medium remains FASTPATH and usage is UNKNOWN."
       }
     },
     {
@@ -162,7 +166,11 @@
         "note": "Natural non-fast-path acceptance and Challenge trigger remain uncovered."
       },
       "cli_provider_live": {
-        "status": "NOT_RUN"
+        "status": "FAILED",
+        "refs": [
+          "docs/evals/provider-live-readiness-followup-20261103.md"
+        ],
+        "note": "The hard Run naturally produced Explore, planner and reasoner output and entered step verification, but ended with an unresolved step_verifier request before final delivery, whole review or binding."
       }
     },
     {
@@ -264,7 +272,11 @@
         "note": "Historical timeout/unknown is not evidence of safe live resume."
       },
       "cli_provider_live": {
-        "status": "NOT_RUN"
+        "status": "FAILED",
+        "refs": [
+          "docs/evals/provider-live-readiness-followup-20261103.md"
+        ],
+        "note": "The hard Run has an unresolved in-flight reservation after the local process disappeared; no safe recovery or re-dispatch evidence is accepted."
       }
     },
     {
@@ -296,7 +308,11 @@
         "latest_attempt": "FAILED"
       },
       "cli_provider_live": {
-        "status": "NOT_RUN"
+        "status": "FAILED",
+        "refs": [
+          "docs/evals/provider-live-readiness-followup-20261103.md"
+        ],
+        "note": "Fast-path completed evidence exists, but the natural multi-step hard Run has no final answer, whole review or S4 binding."
       }
     },
     {
@@ -332,7 +348,11 @@
         "status": "NOT_COVERED"
       },
       "cli_provider_live": {
-        "status": "NOT_RUN"
+        "status": "COVERED",
+        "refs": [
+          "docs/evals/provider-live-readiness-followup-20261103.md"
+        ],
+        "note": "The new frozen manifest and independent verification path produced the accepted simple/medium projections; the hard unresolved Run remains UNKNOWN."
       }
     },
     {
@@ -367,7 +387,8 @@
         "note": "Historical Skills pair is not evidence for the new frozen-manifest public-Job CLI."
       },
       "cli_provider_live": {
-        "status": "NOT_RUN"
+        "status": "NOT_RUN",
+        "note": "Blocked by failed #127 readiness; no baseline or variant Run was created."
       },
       "reuse": "Public Job, S3/S4 and paired condition validation; do not replace the CLI flow with direct SolverHarness execution."
     }

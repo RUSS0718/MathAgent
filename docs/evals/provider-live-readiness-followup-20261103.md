@@ -76,3 +76,31 @@
 运行证据仍保存在 managed worktree `issue127-provider-readiness` 的忽略目录：冻结输入在 `.review/issue127-public-live-20261103*`，公共 Job、独立核验与脱敏证据在 `artifacts/experiments/`，诊断、首末流时间和服务 SQLite 在 `artifacts/issue127-public-live-20261103/`。原始输出、题面、数据库和凭证均未提交。
 
 已有 [draft PR #129](https://github.com/RUSS0718/MathAgent/pull/129) 继续指向 `develop`；#124/#127/#128 尚未提前关闭，不声称数学能力提升。
+
+## 2026-11-04：配置修复与后续 readiness 结果
+
+本节追加并更正上一节的“没有继续派发”状态；旧批次保持原样。本次没有重新派发上一批未知请求。
+
+### #124：已登记变体并补充真实 schema 证据
+
+在精确匹配原有 endpoint、模型及 `compose_request` payload 的真实 adapter 探针中，`researcher.counterexample_check` schema 收到 HTTP 200、完整流终止和与冻结 schema 一致的结果，单次探针通过。profile 指纹为 `c533d7e24d63633c1b4418e51cc1412c552bffb4dd51195ba87d2173f6fce406`，已在代码中窄范围登记；通用 researcher 与 counterexample_check 可在同一角色登记两个 profile 指纹。此证据只覆盖该 schema/payload，不证明自然多步 readiness 或数学正确性。
+
+新代码保留旧的单 profile manifest 格式，并支持显式列出多个精确 profile。已知的派发前拒绝会保留此前已成功的调用，并以 `transport_policy_rejected` 结束，不再汇总成 `unknown_transport`。变更提交为 `1dedfcd`、`805cab3`、`3a12638`；相应 allowlist、消费者、拒绝投影、pair 拒绝路径与核验聚焦回归 **52 项通过**。
+
+### #127：简单与中等返回已完成；自然多步仍未通过
+
+`issue127-medium-20261103-public-03` 已完成 1/1，返回 341 字答案；独立核验 task、transport、coverage 为 PASS，usage 为 UNKNOWN。该样本走 FASTPATH，没有 planner 或多步步骤，因此只能证明该配置下简单答案格式路径可完成，不能算自然多步 readiness。
+
+`issue127-hard-20261103-public-04` 使用源码提交 `3a12638` 和冻结 manifest `df612dd58556cc92ef1d10858934fcc48d48de7d3c34ae14b4801b35ff1fbae4`。公开 Job `run_06ec07255e27d4643fda226907b715e6` / session `session_952b8cdf9e1c9f8d5fe378335b861c6b` 实际完成 Explore、planner 与 reasoner 三次流式 HTTP 调用（均 HTTP 200、`finish_reason=stop`），并产生自然四步计划，进入第一步核验。时间均为北京时间：Explore 首正文 `23:34:17.425`；planner 首正文 `23:34:20.171`；reasoner 首正文 `23:34:50.171`。步骤核验请求首正文 `23:35:11.106`，最后持久化正文 `23:35:23.704`；该流至少累计 542 字节、41 个事件，之后仍没有 completion/finish 记录。
+
+步骤核验对应 HTTP attempt 仍是 `reserved`，`dispatch_status=reserved_dispatch_unconfirmed`，恢复状态列出一个 `step_verifier` `unknown_outcome`。Run/Job 在 `STEP_VERIFY` 时保持 `running`，无最终答案、整题审查、S4 绑定或工具回执。此时 provider 流仍在产出；本地 CLI 与服务进程随后消失，超过 30 秒无进展停止规则并未触发。为什么执行进程退出尚无法从现有证据确认，因此将**该次 Run 结果标为 UNKNOWN/未完成**，不归因于 provider 超时或数学题答错。其已结算 usage 不可得；未决请求及原预算预留必须保留，不恢复、不重发。
+
+因此 #127 readiness **NOT_PASSED**：简单题与中等题可稳定返回非空答案，但它们走快路径；困难题已证明自然规划可达，却没有完整自然多步交付。中断原因尚无法判断是执行环境问题还是执行链路问题，当前证据不足以归咎于 Issue 设计或解法本身。
+
+### #128：保持未执行
+
+由于 #127 readiness 未通过，pair CLI 继续 fail-closed，baseline/variant 两臂仍为 `NOT_RUN`，配对执行合同仍为 `NOT_COVERED`。没有创建 pair Run，也不接受 runner 自报的 PASS。
+
+### 最终门禁
+
+顺序后继 `provider-followup-20261103-r4` 的最后状态为 `completed=1/6`、`current_stage=offline`、`status=running`；检查时其 launcher 与 child 进程均已不存在，目录也没有终态汇总。因此该门禁是**中断/未完成**，不能沿用旧 r3 的失败报告来判定 r4，也不能声称 r4 通过。未另起完整门禁。
