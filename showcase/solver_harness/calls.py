@@ -187,6 +187,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
                 "first_event_at": None,
                 "first_reasoning_at": None,
                 "first_content_at": None,
+                "last_content_at": None,
                 "last_activity_at": None,
                 "completion_at": None,
                 "event_count": 0,
@@ -266,6 +267,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
                         metrics["first_reasoning_at"] = metrics["first_reasoning_at"] or at
                     if kind == "content":
                         metrics["first_content_at"] = metrics["first_content_at"] or at
+                        metrics["last_content_at"] = at
                     for key in ("reasoning_chars", "content_bytes"):
                         value = activity.get(key)
                         if type(value) is int and value >= 0:

@@ -10,6 +10,70 @@ from showcase.flask_app import create_app
 
 
 class ExperimentJobEventPaginationTest(unittest.TestCase):
+    def test_snapshot_projects_only_safe_stream_timing_fields(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = create_app(
+                {
+                    "TESTING": True,
+                    "SHOWCASE_DATA_DIR": str(Path(temporary) / "showcase"),
+                    "SHOWCASE_WORKER_ENABLED": False,
+                }
+            )
+            try:
+                client = app.test_client()
+                csrf = client.get("/api/check_auth").get_json()["csrf_token"]
+                session_id = client.post(
+                    "/api/new_chat", headers={"X-CSRF-Token": csrf}
+                ).get_json()["new_session_id"]
+                created = client.post(
+                    "/api/agent/jobs",
+                    json={"session_id": session_id, "message": "safe sample"},
+                    headers={"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())},
+                )
+                job_id = created.get_json()["job_id"]
+                app.extensions["showcase_workspace_service"].store.append_event(
+                    job_id,
+                    {
+                        "type": "solver_progress",
+                        "solver_event_id": "solver_event_safe",
+                        "solver": {},
+                        "stream_activity": {
+                            "first_content_at": "2026-11-03T00:00:01Z",
+                            "last_content_at": "2026-11-03T00:00:09Z",
+                            "status": "streaming",
+                            "content_bytes": 42,
+                            "text": "private answer fragment",
+                            "unexpected": "must not escape",
+                        },
+                    },
+                )
+
+                response = client.get(
+                    f"/api/agent/jobs/{job_id}/events?snapshot=1&last_event_id=0"
+                )
+
+                self.assertEqual(200, response.status_code)
+                event = next(
+                    item for item in response.get_json()["events"]
+                    if item["event"] == "solver_progress"
+                )
+                self.assertEqual(
+                    {
+                        "first_content_at": "2026-11-03T00:00:01Z",
+                        "last_content_at": "2026-11-03T00:00:09Z",
+                        "status": "streaming",
+                        "content_bytes": 42,
+                    },
+                    event.get("stream_activity"),
+                    msg=response.get_json(),
+                )
+                self.assertNotIn("private answer fragment", response.get_data(as_text=True))
+                self.assertNotIn("unexpected", response.get_data(as_text=True))
+            finally:
+                app.extensions["showcase_workspace_service"].close()
+                app.extensions["showcase_run_service"].close()
+                app.extensions["loopback_store"].close()
+
     def test_adapter_continues_after_page_with_no_public_events(self):
         class SnapshotClient:
             def __init__(self):

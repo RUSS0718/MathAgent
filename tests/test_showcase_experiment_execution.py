@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from showcase.experiment_manifest import manifest_digest
 from showcase.experiment_runner import read_status
@@ -212,6 +213,60 @@ def _two_sample_manifest(source):
 
 
 class ExperimentExecutionTest(unittest.TestCase):
+    def test_timeout_status_persists_safe_stream_timing_from_job_events(self):
+        from showcase.experiment_execution import run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+
+        class TimingAdapter(_JobAdapter):
+            def execution_events(self, _job_id, *, after_id=0):
+                if after_id:
+                    return []
+                return [{
+                    "id": 1,
+                    "event": "solver_progress",
+                    "summary": "Solver progress recorded",
+                    "stream_activity": {
+                        "first_content_at": "2026-11-03T00:00:01Z",
+                        "last_content_at": "2026-11-03T00:00:09Z",
+                        "status": "streaming",
+                        "content_bytes": 24,
+                    },
+                }]
+
+            def wait_for_job(self, job_id, deadline_at):
+                super().wait_for_job(job_id, deadline_at)
+                now[0] = deadline_at + 0.5
+                return _snapshot({"status": "running"}, deadline_at)
+
+        manifest = _manifest(source)
+        adapter = TimingAdapter()
+        now = [1000.0]
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch("showcase.experiment_execution.time.time", side_effect=lambda: now[0]):
+                result = run_batch(
+                    manifest,
+                    expected_sha256=manifest_digest(manifest),
+                    run_id="run-timeout-stream-timing",
+                    output_root=temporary,
+                    context=_context_for_run(manifest, adapter, "run-timeout-stream-timing"),
+                )
+            saved = read_status("run-timeout-stream-timing", output_root=temporary)
+
+        self.assertEqual("stopped", result["phase"])
+        self.assertEqual("hard_limit", result["stop_reason"])
+        self.assertEqual(1, result["event_cursor"])
+        self.assertEqual(result["log_tail"], saved["log_tail"])
+        self.assertEqual(
+            "2026-11-03T00:00:09Z",
+            saved["log_tail"][-1]["stream_activity"]["last_content_at"],
+        )
+
     def test_nonzero_provider_retry_is_rejected_before_adapter_construction(self):
         from showcase.experiment_execution import run_batch
 

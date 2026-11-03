@@ -138,7 +138,8 @@ def decision_fields(event, state, invocations=()):
                 key: (activity.get(key) if activity.get(key) is not None else "unavailable")
                 for key in (
                     "dispatched_at", "response_headers_at", "first_event_at",
-                    "first_reasoning_at", "first_content_at", "last_activity_at",
+                    "first_reasoning_at", "first_content_at", "last_content_at",
+                    "last_activity_at",
                     "completion_at", "event_count", "reasoning_chars", "content_bytes",
                     "usage_known", "status",
                 )

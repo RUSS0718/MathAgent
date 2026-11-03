@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from typing import Any
 
 from flask import Flask, Response, g, jsonify, request, stream_with_context
@@ -30,7 +31,7 @@ _PUBLIC_EVENT_SUMMARIES = {
 }
 
 
-def public_event_summary(event: Mapping[str, Any]) -> dict[str, str] | None:
+def public_event_summary(event: Mapping[str, Any]) -> dict[str, Any] | None:
     """Project one persisted event to a fixed, non-sensitive public summary."""
 
     code = event.get("event")
@@ -39,7 +40,51 @@ def public_event_summary(event: Mapping[str, Any]) -> dict[str, str] | None:
     summary = _PUBLIC_EVENT_SUMMARIES.get(code)
     if summary is None:
         return None
-    return {"event": code, "summary": summary}
+    result: dict[str, Any] = {"event": code, "summary": summary}
+    data = event.get("data")
+    activity = event.get("stream_activity")
+    if activity is None and isinstance(data, Mapping):
+        activity = data.get("stream_activity")
+    safe_activity = _public_stream_activity(activity)
+    if code == "solver_progress" and safe_activity:
+        result["stream_activity"] = safe_activity
+    return result
+
+
+def _public_stream_activity(value: Any) -> dict[str, Any]:
+    """Keep only typed timing counters and states from stream activity."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, Any] = {}
+    timestamps = (
+        "dispatched_at", "response_headers_at", "first_event_at",
+        "first_reasoning_at", "first_content_at", "last_content_at",
+        "last_activity_at", "completion_at",
+    )
+    for key in timestamps:
+        item = value.get(key)
+        if isinstance(item, str) and _is_timestamp(item):
+            result[key] = item
+    for key in ("event_count", "reasoning_chars", "content_bytes"):
+        item = value.get(key)
+        if type(item) is int and item >= 0:
+            result[key] = item
+    if type(value.get("usage_known")) is bool:
+        result["usage_known"] = value["usage_known"]
+    if value.get("status") in {"dispatched", "streaming", "completed", "unknown"}:
+        result["status"] = value["status"]
+    return result
+
+
+def _is_timestamp(value: str) -> bool:
+    """Accept ISO timestamps only when their timezone is explicit."""
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
 
 
 def register_job_event_route(
