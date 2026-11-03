@@ -10,7 +10,8 @@ from pathlib import Path
 
 from showcase.experiment_manifest import manifest_digest
 from showcase.experiment_sources import source_identity
-from showcase.stream_preference import profile_set_fingerprint
+from showcase.experiment_transport import profile_fingerprint
+from showcase.stream_preference import VERIFIED_STREAM_PROFILES, profile_set_fingerprint
 from tests.test_showcase_experiment_cli import _manifest
 
 
@@ -18,15 +19,12 @@ class ExperimentCliProcessTest(unittest.TestCase):
     def _inputs(self, root: Path) -> tuple[dict, list[str]]:
         manifest = _manifest(source_identity())
         manifest["transport"] = {
-            "policy": "legacy",
-            "transport": "nonstream",
-            "profile_set_fingerprint": profile_set_fingerprint(()),
+            "policy": "stream_first",
+            "profile_set_fingerprint": profile_set_fingerprint(),
             "calls": [
                 {
                     "call_id": "explore",
-                    "transport": "nonstream",
-                    "reason": "provider_profile_unverified",
-                    "capability_limit": "verified_stream_profiles_empty",
+                    "profile_fingerprint": profile_fingerprint(VERIFIED_STREAM_PROFILES[0]),
                 }
             ],
         }

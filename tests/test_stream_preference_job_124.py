@@ -82,6 +82,7 @@ class PublicStreamPreferenceJobTest(StarJobFixture, unittest.TestCase):
             ),
             "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection",
             "SHOWCASE_STAR_TRANSPORT_POLICY": "legacy",
+            "SHOWCASE_STAR_TRANSPORT_PROFILES": (),
             "SHOWCASE_STAR_BUDGET": RunBudgetLimits(
                 max_model_calls=6, max_http_attempts=12,
             ),
