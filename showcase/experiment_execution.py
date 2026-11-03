@@ -407,6 +407,8 @@ def _observation_stop_reason(
         return "unknown_transport"
     if observation.get("transport") != expected_transport:
         return "unknown_transport"
+    if observation.get("status") not in {"succeeded", "running"}:
+        return "job_failed_or_canceled"
     if _has_unknown(observation.get("budget")):
         metering_only = (
             usage_policy == "observe_only" and observation.get("status") == "succeeded"
@@ -416,8 +418,6 @@ def _observation_stop_reason(
         )
         if not metering_only:
             return "incomplete_or_unresolved_usage"
-    if observation.get("status") not in {"succeeded", "running"}:
-        return "job_failed_or_canceled"
     return None
 
 
