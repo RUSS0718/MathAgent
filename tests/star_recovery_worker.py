@@ -225,7 +225,7 @@ def config(folder, *, crash_tools=False):
     adapter = (InternStreamAdapter(InternChatClient(retry=1), max_tokens=256)
                if window in STREAM_WINDOWS
                else InternModelAdapter(InternChatClient(retry=1), max_tokens=256))
-    return {"TESTING": True, "SHOWCASE_DATA_DIR": str(folder),
+    configuration = {"TESTING": True, "SHOWCASE_DATA_DIR": str(folder),
             "SHOWCASE_JOB_DELAY_SECONDS": 0, "SHOWCASE_STAR_ENABLED": True,
             "SHOWCASE_STAR_ADAPTER": adapter,
             "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection",
@@ -240,6 +240,14 @@ def config(folder, *, crash_tools=False):
                                           if window in GUIDANCE_WINDOWS
                                           or window == REPLAN_GUIDANCE_WINDOW
                                           or window in CHAIN_WINDOWS else {})}}
+    if window in STREAM_WINDOWS:
+        from tests.controlled_stream_profiles import configure_controlled_streaming
+
+        configuration.update(
+            SHOWCASE_STAR_TRANSPORT_POLICY="stream_first",
+            SHOWCASE_STAR_TRANSPORT_PROFILES=configure_controlled_streaming(adapter),
+        )
+    return configuration
 
 
 def reply_value(window, context, folder):
@@ -506,8 +514,11 @@ def main():
     patches = [patch("llm_client.requests.post", side_effect=transport),
                patch.object(WorkspaceStore, "append_event", crash)]
     if window in STREAM_WINDOWS:
-        patches.append(patch("showcase.adapters.requests.post",
-                             side_effect=stream_transport(folder, window)))
+        fake_stream = stream_transport(folder, window)
+        patches.extend((
+            patch("showcase.adapters.requests.post", side_effect=fake_stream),
+            patch("showcase.request_transport.strict_loopback_post", side_effect=fake_stream),
+        ))
     from contextlib import ExitStack
     with ExitStack() as stack:
         for item in patches:

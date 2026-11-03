@@ -22,6 +22,7 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
                 "TESTING": True,
                 "SHOWCASE_DATA_DIR": str(Path(self.temporary.name) / "showcase"),
                 "SHOWCASE_WORKER_ENABLED": False,
+                "SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED": True,
             }
         )
         self.client = self.app.test_client()
@@ -35,6 +36,27 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
         self.app.extensions["showcase_run_service"].close()
         self.app.extensions["loopback_store"].close()
         self.temporary.cleanup()
+
+    def test_idempotency_lookup_route_is_unavailable_by_default(self):
+        app = create_app(
+            {
+                "TESTING": True,
+                "SHOWCASE_DATA_DIR": str(Path(self.temporary.name) / "default"),
+                "SHOWCASE_WORKER_ENABLED": False,
+            }
+        )
+        try:
+            endpoints = {rule.endpoint for rule in app.url_map.iter_rules()}
+            self.assertNotIn("get_job_by_idempotency_key", endpoints)
+            client = app.test_client()
+            csrf = client.get("/api/check_auth").get_json()["csrf_token"]
+            client.post("/api/new_chat", headers={"X-CSRF-Token": csrf})
+            response = client.get("/api/agent/jobs/by-idempotency")
+            self.assertEqual(404, response.status_code)
+        finally:
+            app.extensions["showcase_workspace_service"].close()
+            app.extensions["showcase_run_service"].close()
+            app.extensions["loopback_store"].close()
 
     def test_capabilities_exposes_credential_free_applied_model_config(self):
         """Contract documented in docs/experiments/showcase-capabilities-applied-model-config.md:
@@ -159,6 +181,81 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
             ).hexdigest(),
             projection["config_sha256"],
         )
+
+    def test_job_event_snapshot_returns_only_safe_summaries_after_cursor(self):
+        prompt = "private experiment prompt"
+        response = self.client.post(
+            "/api/agent/jobs",
+            json={"session_id": self.session_id, "message": prompt},
+            headers={"X-CSRF-Token": self.csrf, "Idempotency-Key": str(uuid.uuid4())},
+        )
+        self.assertIn(response.status_code, (200, 202))
+        job_id = response.get_json()["job_id"]
+        self.app.extensions["showcase_workspace_service"].store.complete_job(
+            job_id, "private provider response", "private provider summary"
+        )
+
+        snapshot = self.client.get(
+            f"/api/agent/jobs/{job_id}/events?snapshot=1&last_event_id=1&limit=10"
+        )
+
+        self.assertEqual(200, snapshot.status_code)
+        self.assertEqual("no-store", snapshot.headers["Cache-Control"])
+        self.assertEqual(
+            [{"id": 2, "event": "final_result", "summary": "Final result recorded"}],
+            snapshot.get_json()["events"],
+        )
+        self.assertEqual(2, snapshot.get_json()["next_cursor"])
+        self.assertFalse(snapshot.get_json()["has_more"])
+        body = snapshot.get_data(as_text=True)
+        self.assertNotIn(prompt, body)
+        self.assertNotIn("private provider response", body)
+        self.assertNotIn("private provider summary", body)
+
+    def test_job_event_snapshot_rejects_invalid_limit(self):
+        response = self.client.get(
+            "/api/agent/jobs/not-found/events?snapshot=1&limit=101"
+        )
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual("invalid_event_limit", response.get_json()["code"])
+
+    def test_public_job_adapter_reads_event_snapshots_across_pages(self):
+        class SnapshotClient:
+            def __init__(self):
+                self.paths = []
+
+            def bootstrap(self):
+                return {}
+
+            def request(self, method, path):
+                self.paths.append(path)
+                after_id = int(path.split("last_event_id=", 1)[1].split("&", 1)[0])
+                next_cursor = min(after_id + 50, 51)
+                return {
+                    "events": [
+                        {"id": event_id, "event": "queued", "summary": "Job queued"}
+                        for event_id in range(after_id + 1, next_cursor + 1)
+                    ],
+                    "next_cursor": next_cursor,
+                    "has_more": next_cursor < 51,
+                }
+
+        client = SnapshotClient()
+        adapter = PublicExperimentJobAdapter(
+            client,
+            {},
+            object(),
+            object(),
+            object(),
+        )
+
+        events = adapter.execution_events("job-01")
+
+        self.assertEqual(list(range(1, 52)), [event["id"] for event in events])
+        self.assertEqual(2, len(client.paths))
+        self.assertIn("last_event_id=0", client.paths[0])
+        self.assertIn("last_event_id=50", client.paths[1])
 
     def test_capabilities_uses_active_client_thinking_mode_when_adapter_has_no_override(self):
         from types import SimpleNamespace

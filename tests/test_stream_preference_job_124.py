@@ -75,6 +75,7 @@ class PublicStreamPreferenceJobTest(StarJobFixture, unittest.TestCase):
             "SHOWCASE_DATA_DIR": folder.name,
             "SHOWCASE_JOB_DELAY_SECONDS": 0,
             "SHOWCASE_STAR_ENABLED": True,
+            "SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED": True,
             "SHOWCASE_STAR_ADAPTER": InternModelAdapter(
                 InternChatClient(retry=1, loopback_only=True), max_tokens=256,
                 thinking_mode=True,
@@ -126,6 +127,7 @@ class PublicStreamPreferenceJobTest(StarJobFixture, unittest.TestCase):
         self.app = create_app({
             "TESTING": True, "SHOWCASE_DATA_DIR": folder.name,
             "SHOWCASE_JOB_DELAY_SECONDS": 0, "SHOWCASE_STAR_ENABLED": True,
+            "SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED": True,
             "SHOWCASE_STAR_ADAPTER": InternStreamAdapter(
                 InternChatClient(retry=1, thinking_mode=True, loopback_only=True),
                 max_tokens=256,

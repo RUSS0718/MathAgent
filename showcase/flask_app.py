@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, g, jsonify, request, send_from_directory, stream_with_context
+from flask import Flask, Response, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 from presentation_pages import render_presentation_page
@@ -27,6 +27,7 @@ else:
 from .campaign_api import register_campaigns
 from .evidence import EvidencePackExporter, replay_evidence
 from .final_evidence import checked_verification
+from .job_events import register_job_event_route
 from .loopback import AuthSession, LoopbackStore
 from .polynomial import PolynomialChecker
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
@@ -70,6 +71,7 @@ def create_app(
         SHOWCASE_JOB_DELAY_SECONDS=0.05,
         SHOWCASE_WORKER_ENABLED=True,
         SHOWCASE_WAITING_INPUT_MARKER="",
+        SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED=False,
     )
     if config:
         app.config.from_mapping(dict(config))
@@ -397,30 +399,31 @@ def create_app(
         status = 200 if existing else 202
         return jsonify({"success": True, "job_id": job["job_id"], "status": job["status"], "existing": existing}), status
 
-    @app.get("/api/agent/jobs/by-idempotency")
-    def get_job_by_idempotency_key() -> tuple[Response, int] | Response:
-        session = _require_auth(g.auth_session)
-        idempotency_key = request.headers.get("Idempotency-Key", "")
-        request_digest = request.headers.get("X-Request-Digest", "")
-        try:
-            if uuid.UUID(idempotency_key).version != 4:
-                raise ValueError
-        except (AttributeError, TypeError, ValueError):
-            return _json_error("idempotency_key_invalid", 400)
-        if (
-            len(request_digest) != 64
-            or any(character not in "0123456789abcdef" for character in request_digest)
-        ):
-            return _json_error("request_digest_invalid", 400)
-        try:
-            result = workspace_service.get_job_by_idempotency_key(
-                user_id=session.user_id,
-                idempotency_key=idempotency_key,
-                request_digest=request_digest,
-            )
-        except WorkspaceError as exc:
-            return _workspace_error(exc)
-        return jsonify(result)
+    if app.config.get("SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED") is True:
+        @app.get("/api/agent/jobs/by-idempotency")
+        def get_job_by_idempotency_key() -> tuple[Response, int] | Response:
+            session = _require_auth(g.auth_session)
+            idempotency_key = request.headers.get("Idempotency-Key", "")
+            request_digest = request.headers.get("X-Request-Digest", "")
+            try:
+                if uuid.UUID(idempotency_key).version != 4:
+                    raise ValueError
+            except (AttributeError, TypeError, ValueError):
+                return _json_error("idempotency_key_invalid", 400)
+            if (
+                len(request_digest) != 64
+                or any(character not in "0123456789abcdef" for character in request_digest)
+            ):
+                return _json_error("request_digest_invalid", 400)
+            try:
+                result = workspace_service.get_job_by_idempotency_key(
+                    user_id=session.user_id,
+                    idempotency_key=idempotency_key,
+                    request_digest=request_digest,
+                )
+            except WorkspaceError as exc:
+                return _workspace_error(exc)
+            return jsonify(result)
 
     @app.get("/api/agent/jobs/<job_id>/artifacts/<digest>")
     def tool_artifact(job_id, digest):
@@ -472,39 +475,13 @@ def create_app(
         except WorkspaceError as exc:
             return _workspace_error(exc)
 
-    @app.get("/api/agent/jobs/<job_id>/events")
-    def get_job_events(job_id: str) -> Response | tuple[Response, int]:
-        session = _require_auth(g.auth_session)
-        raw_cursor = request.args.get("last_event_id")
-        if raw_cursor is None:
-            raw_cursor = request.headers.get("Last-Event-ID", "0")
-        after_id = _parse_event_cursor(raw_cursor)
-        if after_id is None:
-            return _json_error("invalid_last_event_id", 400)
-        try:
-            # Validate ownership before returning a lazy streaming response.
-            workspace_service.get_job(job_id, session.user_id)
-            events = workspace_service.stream_events(job_id, session.user_id, after_id)
-        except WorkspaceError as exc:
-            return _workspace_error(exc)
-
-        def generate():
-            for event in events:
-                data = json.dumps(event["data"], ensure_ascii=False, separators=(",", ":"))
-                if event["id"] is None:
-                    yield f"event: {event['event']}\ndata: {data}\n\n"
-                else:
-                    yield (
-                        f"id: {int(event['id'])}\n"
-                        f"event: {event['event']}\n"
-                        f"data: {data}\n\n"
-                    )
-
-        return Response(
-            stream_with_context(generate()),
-            content_type="text/event-stream; charset=utf-8",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+    register_job_event_route(
+        app,
+        workspace_service,
+        require_auth=_require_auth,
+        json_error=_json_error,
+        workspace_error=_workspace_error,
+    )
 
     @app.post("/api/agent/jobs/<job_id>/resume")
     def resume_job(job_id: str) -> tuple[Response, int]:
@@ -787,9 +764,15 @@ def main() -> None:
     parser.add_argument("--data-dir", default=None)
     parser.add_argument("--star-limited", action="store_true", help="Enable explicit limited STAR selection")
     parser.add_argument("--star-full", action="store_true", help="Enable full STAR presets after isolated runtime preflight; requires exact image configuration")
+    parser.add_argument(
+        "--experiment-idempotency-lookup",
+        action="store_true",
+        help="Enable the experiment CLI's idempotency lookup Job route",
+    )
     args = parser.parse_args()
     config: dict[str, Any] = {"SHOWCASE_MODE": args.mode, "SHOWCASE_STAR_ENABLED": args.star_limited,
-                              "SHOWCASE_STAR_FULL_ENABLED": args.star_full}
+                              "SHOWCASE_STAR_FULL_ENABLED": args.star_full,
+                              "SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED": args.experiment_idempotency_lookup}
     if args.data_dir:
         config["SHOWCASE_DATA_DIR"] = args.data_dir
     app = create_app(config)
@@ -832,20 +815,6 @@ def _set_auth_cookie(response: Response, session: AuthSession) -> None:
     response.set_cookie(AUTH_COOKIE, session.session_id, httponly=True, samesite="Lax", path="/")
 
 
-def _parse_event_cursor(value: str | None) -> int | None:
-    if value is None or not value.isdigit():
-        return None
-    if value.startswith("+") or value.startswith("-"):
-        return None
-    try:
-        cursor = int(value, 10)
-    except ValueError:
-        return None
-    if cursor < 0 or cursor > 9_007_199_254_740_991:
-        return None
-    return cursor
-
-
 def _json_error(error: str, status: int) -> tuple[Response, int]:
     messages = {
         "auth_required": "请先完成本地登录。",
@@ -862,6 +831,8 @@ def _json_error(error: str, status: int) -> tuple[Response, int]:
         "solver_options_unsupported": "当前 STAR 使用固定受限预设，不接受自定义开关。",
         "solver_hint_invalid": "STAR 提示须为 1 至 2000 字的非空文本。",
         "invalid_last_event_id": "事件游标无效。",
+        "invalid_event_snapshot": "事件快照模式无效。",
+        "invalid_event_limit": "事件快照数量无效。",
     }
     response = jsonify({
         "success": False,

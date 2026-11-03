@@ -125,7 +125,17 @@ class StarJobFixture:
 
             return Reply()
 
+        adapter = config.get("SHOWCASE_STAR_ADAPTER")
+        if callable(getattr(adapter, "stream_complete", None)):
+            from tests.controlled_stream_profiles import configure_controlled_streaming
+
+            config.setdefault("SHOWCASE_STAR_TRANSPORT_POLICY", "stream_first")
+            config.setdefault(
+                "SHOWCASE_STAR_TRANSPORT_PROFILES",
+                configure_controlled_streaming(adapter),
+            )
         self.post = self.enterContext(patch("llm_client.requests.post", side_effect=respond))
+        self.enterContext(patch("showcase.request_transport.strict_loopback_post", new=self.post))
         self.app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": folder.name,
             "SHOWCASE_JOB_DELAY_SECONDS": 0, "SHOWCASE_STAR_ENABLED": True,
             "SHOWCASE_STAR_ADAPTER": InternModelAdapter(InternChatClient(retry=retry), max_tokens=256),
@@ -145,8 +155,8 @@ class StarJobFixture:
         self.assertEqual(202, response.status_code, response.get_json())
         return response.get_json()["job_id"]
 
-    def wait_for(self, predicate):
-        deadline = time.monotonic() + 8
+    def wait_for(self, predicate, *, timeout=8):
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             value = predicate()
             if value:
@@ -157,9 +167,14 @@ class StarJobFixture:
     def job(self, job_id):
         return self.client.get(f"/api/agent/jobs/{job_id}").get_json()
 
-    def terminal(self, job_id):
-        return self.wait_for(lambda: (job if (job := self.job(job_id))["status"] in {
-            "succeeded", "failed", "canceled"} else None))
+    def terminal(self, job_id, *, timeout=None):
+        def terminal_job():
+            job = self.job(job_id)
+            return job if job["status"] in {"succeeded", "failed", "canceled"} else None
+
+        if timeout is None:
+            return self.wait_for(terminal_job)
+        return self.wait_for(terminal_job, timeout=timeout)
 
     def report(self, job_id):
         return self.client.get(f"/api/agent/jobs/{job_id}/report").get_json()["report"]

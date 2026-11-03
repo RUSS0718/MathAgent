@@ -28,6 +28,7 @@ from .experiment_execution_state import (
 )
 from .experiment_manifest import is_executable_evidence_kind, validate_manifest
 from .experiment_runner import preflight_manifest, read_status, register_run
+from .job_events import public_event_summary
 
 
 def run_batch(
@@ -287,6 +288,7 @@ def _advance(
                     ):
                         return _stop(directory, status, "ledger_or_binding_defect")
             status["current_job_id"] = job_id
+            status["event_cursor"] = 0
             status["phase"] = "running"
         if not record_run_identity(status, intent, job_id=job_id):
             return _stop(directory, status, "ledger_or_binding_defect")
@@ -300,7 +302,13 @@ def _advance(
             except Exception:
                 return _stop(directory, status, "resume_review_required")
             observer_only = isinstance(recovery, dict) and recovery.get("observer_only") is True
-            if observer_only:
+            remote_succeeded = (
+                isinstance(recovery, dict) and recovery.get("status") == "succeeded"
+            )
+            if remote_succeeded:
+                if not _observer_attachment_is_safe(recovery, job_id, intent, limits):
+                    return _stop(directory, status, "resume_review_required")
+            elif observer_only:
                 if not _observer_attachment_is_safe(recovery, job_id, intent, limits):
                     return _stop(directory, status, "resume_review_required")
             elif not _resume_is_safe(recovery, intent["deadline_at"]):
@@ -323,10 +331,24 @@ def _advance(
                 except Exception:
                     return _stop(directory, status, "unknown_resume")
 
+        def record_progress() -> None:
+            if _record_execution_events(status, adapter, job_id):
+                _save(directory, status)
+
         try:
-            observation = adapter.wait_for_job(job_id, intent["deadline_at"])
+            wait_with_progress = getattr(adapter, "wait_for_job_with_progress", None)
+            if callable(wait_with_progress):
+                observation = wait_with_progress(
+                    job_id,
+                    intent["deadline_at"],
+                    on_progress=record_progress,
+                )
+            else:
+                observation = adapter.wait_for_job(job_id, intent["deadline_at"])
         except Exception:
+            _record_execution_events(status, adapter, job_id)
             return _stop(directory, status, "unknown_job_status")
+        _record_execution_events(status, adapter, job_id)
         stop_reason = _observation_stop_reason(observation, manifest["transport"])
         if stop_reason:
             status["pending_intent"] = None
@@ -336,7 +358,6 @@ def _advance(
                 return _stop(directory, status, "hard_limit")
             status["phase"] = "running"
             status["pending_intent"] = None
-            status["log_tail"] = ["job_running"]
             _save(directory, status)
             return status
         if observation["status"] != "succeeded":
@@ -360,7 +381,6 @@ def _advance(
         resume = False
     status["phase"] = "completed"
     status["stop_reason"] = None
-    status["log_tail"] = ["batch_completed"]
     _save(directory, status)
     return status
 
@@ -507,6 +527,35 @@ def _batch_reservation_exhausted(
 def _stop(directory: Path, status: dict[str, Any], reason: str) -> dict[str, Any]:
     status["phase"] = "stopped"
     status["stop_reason"] = reason
-    status["log_tail"] = [reason]
     _save(directory, status)
     return status
+
+
+def _record_execution_events(status: dict[str, Any], adapter: Any, job_id: str) -> bool:
+    read_events = getattr(adapter, "execution_events", None)
+    if not callable(read_events):
+        return False
+    cursor = status.get("event_cursor", 0)
+    previous_cursor = cursor
+    try:
+        events = read_events(job_id, after_id=cursor)
+    except Exception:
+        return False
+    if not isinstance(events, list):
+        return False
+    tail = status.setdefault("log_tail", [])
+    if not isinstance(tail, list):
+        tail = status["log_tail"] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        event_id = event.get("id")
+        if type(event_id) is not int or event_id <= cursor:
+            continue
+        cursor = event_id
+        summary = public_event_summary(event)
+        if summary is not None:
+            tail.append(summary)
+    status["event_cursor"] = cursor
+    status["log_tail"] = tail[-50:]
+    return cursor != previous_cursor

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
 from typing import Any
 
 _PUBLIC_CALL_ID = re.compile(r"solver_call_[0-9a-f]{32}\Z")
@@ -95,6 +96,30 @@ class PublicExperimentJobAdapter:
         self._bindings[result["job_id"]] = (key, request_digest)
         return [result]
 
+    def execution_events(self, job_id: str, *, after_id: int = 0) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        cursor = after_id
+        while True:
+            result = self.client.request(
+                "GET",
+                f"/api/agent/jobs/{job_id}/events?last_event_id={cursor}&snapshot=1&limit=50",
+            )
+            batch = result.get("events") if isinstance(result, dict) else None
+            if not isinstance(batch, list):
+                return events
+            next_cursor = result.get("next_cursor") if isinstance(result, dict) else None
+            has_more = result.get("has_more") if isinstance(result, dict) else None
+            events.extend(item for item in batch if isinstance(item, dict))
+            if type(next_cursor) is int and type(has_more) is bool:
+                if not has_more or next_cursor <= cursor:
+                    return events
+                cursor = next_cursor
+                continue
+            ids = [item.get("id") for item in batch if type(item.get("id")) is int]
+            if len(batch) < 50 or not ids or max(ids) <= cursor:
+                return events
+            cursor = max(ids)
+
     def create_job(
         self,
         sample: dict[str, Any],
@@ -121,11 +146,31 @@ class PublicExperimentJobAdapter:
         )
 
     def wait_for_job(self, job_id: str, deadline_at: float) -> dict[str, Any]:
+        return self._wait_for_job(job_id, deadline_at)
+
+    def wait_for_job_with_progress(
+        self,
+        job_id: str,
+        deadline_at: float,
+        *,
+        on_progress: Callable[[], None],
+    ) -> dict[str, Any]:
+        return self._wait_for_job(job_id, deadline_at, on_progress=on_progress)
+
+    def _wait_for_job(
+        self,
+        job_id: str,
+        deadline_at: float,
+        *,
+        on_progress: Any = None,
+    ) -> dict[str, Any]:
         binding = self._bindings.get(job_id)
         if binding is None:
             return {"status": "unknown", "ledger_consistent": False}
         key, digest = binding
         while True:
+            if callable(on_progress):
+                on_progress()
             records = self.find_by_idempotency_key(key, digest)
             if len(records) != 1 or records[0].get("job_id") != job_id:
                 return {"status": "unknown", "ledger_consistent": False}

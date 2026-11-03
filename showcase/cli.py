@@ -351,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         experiment_context = None
-        if args.command == "experiment" and args.action in {"run", "resume"}:
+        if args.command == "experiment" and args.action in {"run", "resume", "pair"}:
             experiment_context = {"authorization": confirm_cli_invocation(args)}
         return run(args, experiment_context=experiment_context)
     except (CliError, OSError) as exc:

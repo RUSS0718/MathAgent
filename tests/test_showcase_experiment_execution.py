@@ -425,6 +425,124 @@ class ExperimentExecutionTest(unittest.TestCase):
         self.assertNotIn("x+1=2", str(saved["run_records"]))
         self.assertFalse((Path(temporary) / "run-serial" / "dispatch_intent.json").exists())
 
+    def test_run_persists_actual_safe_execution_event_tail(self):
+        from showcase.experiment_execution import run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _manifest(source)
+        adapter = _JobAdapter()
+        adapter.execution_events = lambda _job_id, *, after_id=0: [
+            {"id": 1, "event": "queued", "summary": "Job queued"},
+            {"id": 2, "event": "final_result", "summary": "private provider response"},
+            {"id": 3, "event": "untrusted event code", "summary": "private prompt"},
+        ]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            result = run_batch(
+                manifest,
+                expected_sha256=manifest_digest(manifest),
+                run_id="run-event-tail",
+                output_root=temporary,
+                context=_context_for_run(manifest, adapter, "run-event-tail"),
+            )
+            saved = read_status("run-event-tail", output_root=temporary)
+
+        expected_tail = [
+            {"event": "queued", "summary": "Job queued"},
+            {"event": "final_result", "summary": "Final result recorded"},
+        ]
+        self.assertEqual(expected_tail, result["log_tail"])
+        self.assertEqual(expected_tail, saved["log_tail"])
+        self.assertNotIn("private provider response", str(saved))
+        self.assertNotIn("private prompt", str(saved))
+
+    def test_run_persists_safe_events_while_job_is_still_being_polled(self):
+        from showcase.experiment_execution import run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _manifest(source)
+        expected_tail = [{"event": "running", "summary": "Job started"}]
+
+        class ProgressAdapter(_JobAdapter):
+            def wait_for_job_with_progress(self, job_id, deadline_at, *, on_progress):
+                on_progress()
+                self.status_during_wait = read_status(
+                    "run-event-progress", output_root=temporary
+                )
+                return _snapshot({"status": "succeeded"}, deadline_at)
+
+        adapter = ProgressAdapter()
+        adapter.execution_events = lambda _job_id, *, after_id=0: (
+            [{"id": 1, "event": "running", "summary": "private prompt"}]
+            if after_id == 0
+            else []
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            result = run_batch(
+                manifest,
+                expected_sha256=manifest_digest(manifest),
+                run_id="run-event-progress",
+                output_root=temporary,
+                context=_context_for_run(manifest, adapter, "run-event-progress"),
+            )
+
+        self.assertEqual("completed", result["phase"])
+        self.assertEqual(expected_tail, adapter.status_during_wait["log_tail"])
+        self.assertNotIn("private prompt", str(adapter.status_during_wait))
+
+    def test_run_resets_event_cursor_for_each_job_in_a_batch(self):
+        from showcase.experiment_execution import run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _two_sample_manifest(source)
+        adapter = _JobAdapter()
+        events_by_job = {
+            job_id: [
+                {"id": 1, "event": "queued", "summary": "Job queued"},
+                {"id": 2, "event": "final_result", "summary": "Final result recorded"},
+            ]
+            for job_id in ("job-1", "job-2")
+        }
+        adapter.execution_events = lambda job_id, *, after_id=0: [
+            event for event in events_by_job[job_id] if event["id"] > after_id
+        ]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            result = run_batch(
+                manifest,
+                expected_sha256=manifest_digest(manifest),
+                run_id="run-event-cursor-per-job",
+                output_root=temporary,
+                context=_context_for_run(manifest, adapter, "run-event-cursor-per-job"),
+            )
+
+        self.assertEqual(2, result["completed"])
+        self.assertEqual(
+            [
+                {"event": "queued", "summary": "Job queued"},
+                {"event": "final_result", "summary": "Final result recorded"},
+                {"event": "queued", "summary": "Job queued"},
+                {"event": "final_result", "summary": "Final result recorded"},
+            ],
+            result["log_tail"],
+        )
+
     def test_resume_clears_intent_after_completed_record_was_saved(self):
         from showcase.experiment_execution import resume_batch, run_batch
         from showcase.experiment_execution_state import save_execution_status

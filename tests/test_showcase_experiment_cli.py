@@ -974,6 +974,57 @@ class ExperimentCliTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "experiment_run_not_found"):
                 run(args)
 
+    def test_status_cli_returns_persisted_safe_event_tail_without_remote_client(self) -> None:
+        from showcase.cli import build_parser, run
+        from showcase.experiment_manifest import manifest_digest
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _manifest(source)
+        digest = manifest_digest(manifest)
+        tail = [
+            {"event": "queued", "summary": "Job queued"},
+            {"event": "final_result", "summary": "Final result recorded"},
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = Path(temporary) / "cli-status-tail"
+            run_dir.mkdir()
+            (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            (run_dir / "manifest.sha256").write_text(digest + "\n", encoding="ascii")
+            (run_dir / "status.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": "cli-status-tail",
+                        "manifest_sha256": digest,
+                        "phase": "completed",
+                        "log_tail": tail,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = build_parser().parse_args(
+                [
+                    "experiment",
+                    "status",
+                    "--run-id",
+                    "cli-status-tail",
+                    "--output-root",
+                    temporary,
+                ]
+            )
+            with (
+                patch("showcase.cli.ShowcaseClient", side_effect=AssertionError("remote client created")),
+                patch("showcase.cli._print") as print_result,
+            ):
+                result_code = run(args)
+
+        self.assertEqual(0, result_code)
+        self.assertEqual(tail, print_result.call_args.args[0]["log_tail"])
+
 
 if __name__ == "__main__":
     unittest.main()

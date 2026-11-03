@@ -1,6 +1,6 @@
 # Demo 覆盖矩阵与 CLI readiness 合同（#122）
 
-状态：#122 文档基线，日期：2026-11-02。本文定义 #124–#128 的产品范围、设计边界和验收合同；矩阵数据保存在同目录的 [机器可读覆盖矩阵](demo-coverage-matrix.json)。两者在实现 CLI readiness 前必须保持一致。
+状态：#122 文档基线，日期：2026-11-02；实现进度于 2026-11-03 追加到[阶段验收记录](../evals/showcase-experiment-cli-124-128.md)。本文定义 #124–#128 的产品范围、设计边界和验收合同；矩阵数据保存在同目录的 [机器可读覆盖矩阵](demo-coverage-matrix.json)。合同保持冻结，当前覆盖状态以矩阵和阶段验收记录为准。
 
 ## 目标与边界
 
@@ -8,7 +8,7 @@
 
 官方评分入口仍是根目录 user_agent.py。Showcase 和 Solver Harness 只从显式产品入口运行。#122–#128 不改变官方文件、默认调用预算、JSON 输出合同或官方模型调用数。新增 CLI 预检不发模型或工具请求。运行产物写入被忽略的 artifacts/<run_id>/，公开报告只导出脱敏白名单字段。
 
-本轮只冻结覆盖与 readiness 合同，不实现 #124–#128。已有 CLI 提供 health、capabilities、session、job、file、probe 和 campaign 命令；它不等于后续实验登记 CLI。机器矩阵只记录当前证据，不授予 provider-live 调用权限，也不把“covered”变成通用能力声明。
+本票只冻结覆盖与 readiness 合同。后续实现 #124–#128 的进度不改变原合同。已有 CLI 提供 health、capabilities、session、job、file、probe 和 campaign 命令；它不等于后续实验登记 CLI。机器矩阵只记录当前证据，不授予 provider-live 调用权限，也不把“covered”变成通用能力声明。
 
 ## 固定来源与版本
 
@@ -66,7 +66,7 @@ PR #121 合并记录报告：固定源码上的 1,071 项 unittest 零失败、�
 | S3 预算、停止、取消与安全恢复 | P1 附录 A、B.5；强恢复合同为项目扩展 | showcase/run_budget.py、Job 控制、Solver checkpoint；attempt、reservation、deadline 和终态投影 | COVERED：公共 Job、进程退出、unknown、预算与迟到结算测试 | NOT_RUN：本票未验证真实 provider 在途请求的取消或恢复语义 |
 | S4 最终文本身份、审查和 Evidence | P1 §3.5；哈希身份绑定为项目扩展 | showcase/final_evidence.py、solver_harness/final_binding.py；artifact hash、review scope、binding 状态 | COVERED：改写失效、并发追加与公共报告合同 | NOT_RUN：#127 需要新 CLI Run 上真实整题审查和同文本绑定证据 |
 | 实验登记、只读核验与导出 | 项目工程扩展；独立报告与脱敏为工程合同 | `showcase/experiment_cli.py`、`experiment_runner.py`、`experiment_verification.py` 及其检查/报告模块 | COVERED：#125/#126 的 frozen manifest 与 verify/export CLI 合同；见对应测试 | NOT_RUN：新 CLI 尚无 provider-live 批次 |
-| 单因素配对 | 项目工程扩展；P1 §4.3 仅作研究背景 | 既有 `showcase/solver_harness/paired.py` 与条件校验仍未接入 frozen manifest CLI | NOT_COVERED：#128 尚未实现 | NOT_RUN：#127 readiness 尚无 provider-live 通过记录 |
+| 单因素配对 | 项目工程扩展；P1 §4.3 仅作研究背景 | 实验 CLI 已有 pair manifest 注册与 fail-closed 核验；公共 Job 组件配置、两臂派发及 arm 独立重核尚未接通 | NOT_COVERED：安全拒绝路径有测试，paired execution 未覆盖；见[阶段验收记录](../evals/showcase-experiment-cli-124-128.md) | NOT_RUN：#127 readiness 尚无 provider-live 通过记录 |
 
 逐项测试文件、状态值和阻断票以 [demo-coverage-matrix.json](demo-coverage-matrix.json) 为机器读取入口。未来运行报告必须新增实际证据引用和状态，不得覆盖本页列出的历史事实。
 

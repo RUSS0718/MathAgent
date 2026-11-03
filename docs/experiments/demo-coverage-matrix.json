@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "ticket": 122,
-  "updated": "2026-11-02",
+  "updated": "2026-11-03",
   "basis": {
     "integration_branch": "feat(setup)-流式与CLI实验组件设置",
     "integration_merge": "775d00e3cdcadb6cb6aeca07a1b59093103370d4",
@@ -353,9 +353,11 @@
       "offline": {
         "status": "NOT_COVERED",
         "refs": [
-          "showcase/cli.py"
+          "showcase/experiment_pair.py",
+          "showcase/experiment_pair_verification.py",
+          "tests/test_showcase_experiment_pair_cli.py"
         ],
-        "note": "Existing CLI/pair primitives do not implement the dependent-ticket contract."
+        "note": "The CLI validates single-factor registration, binds invocation authorization, and keeps readiness-blocked pairs NOT_RUN; pair verification demotes runner-authored PASS to UNKNOWN. Paired Job execution and independent per-arm re-verification remain unavailable, so the dependent-ticket contract is not covered."
       },
       "historical_live": {
         "status": "NOT_COVERED",

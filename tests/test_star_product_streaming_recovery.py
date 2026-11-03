@@ -117,13 +117,29 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         self.enterContext(patch.dict(os.environ, {"INTERN_API_KEY": "scripted-only"}))
         self.transport = ScriptedSSETransport(self, plans)
         self.enterContext(patch("showcase.adapters.requests.post", side_effect=self.transport))
+        self.enterContext(patch(
+            "showcase.request_transport.strict_loopback_post", side_effect=self.transport
+        ))
         self.outbound = self.transport.outbound
         features = {"stream_activity": True, **config.pop("SHOWCASE_STAR_FEATURES", {})}
+        adapter = config.pop(
+            "SHOWCASE_STAR_ADAPTER",
+            InternStreamAdapter(InternChatClient(retry=1), max_tokens=256),
+        )
+        from tests.controlled_stream_profiles import configure_controlled_streaming
+
+        profiles = config.pop(
+            "SHOWCASE_STAR_TRANSPORT_PROFILES",
+            configure_controlled_streaming(adapter),
+        )
         self.app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": folder.name,
             "SHOWCASE_JOB_DELAY_SECONDS": 0, "SHOWCASE_STAR_ENABLED": True,
-            "SHOWCASE_STAR_ADAPTER": InternStreamAdapter(InternChatClient(retry=1), max_tokens=256),
+            "SHOWCASE_STAR_ADAPTER": adapter,
             "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection",
-            "SHOWCASE_STAR_FEATURES": features, **config})
+            "SHOWCASE_STAR_FEATURES": features,
+            "SHOWCASE_STAR_TRANSPORT_POLICY": "stream_first",
+            "SHOWCASE_STAR_TRANSPORT_PROFILES": profiles,
+            **config})
         for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(self.app.extensions[name].close)
         self.client = self.app.test_client()
@@ -141,7 +157,7 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
             if len(calls) == 1:
                 raise requests.ConnectTimeout("not sent")
             return original(*args, **kwargs)
-        with patch("showcase.adapters.requests.post", side_effect=connect):
+        with patch("showcase.request_transport.strict_loopback_post", side_effect=connect):
             job_id = self.create_job()
             result = self.terminal(job_id)
         self.assertEqual("succeeded", result["status"], result)
@@ -163,7 +179,7 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         def limited(*args, **kwargs):
             calls.append(kwargs)
             return response if len(calls) == 1 else original(*args, **kwargs)
-        with patch("showcase.adapters.requests.post", side_effect=limited):
+        with patch("showcase.request_transport.strict_loopback_post", side_effect=limited):
             job_id = self.create_job()
             result = self.terminal(job_id)
         self.assertEqual("succeeded", result["status"], result)
@@ -186,7 +202,7 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
         ]), SHOWCASE_STAR_FEATURES=FEATURES,
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=16, max_http_attempts=16))
         job_id = self.create_job()
-        final = self.terminal(job_id)
+        final = self.terminal(job_id, timeout=20)
         self.assertEqual("succeeded", final["status"], final)
         self.assertEqual(["explore", "planner", "reasoner", "step_verifier",
                           "final_generator", "whole_solution_verifier"],
@@ -340,7 +356,9 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
             job_id = (folder / "job_id").read_text()
             self.assertEqual(1, len((folder / "requests.jsonl").read_text().splitlines()))
             with patch.dict(os.environ, {"INTERN_API_KEY": "scripted-only"}), patch(
-                    "showcase.adapters.requests.post", side_effect=stream_transport(folder, "after")):
+                    "showcase.adapters.requests.post", side_effect=stream_transport(folder, "after")), patch(
+                    "showcase.request_transport.strict_loopback_post",
+                    side_effect=stream_transport(folder, "after")):
                 app = create_app(config(folder))
                 try:
                     self.app = app

@@ -61,6 +61,18 @@ def add_experiment_parser(subparsers: Any) -> None:
     export.add_argument("--output-root", type=Path, default=Path("artifacts/experiments"))
     export.add_argument("--output", type=Path, required=True)
 
+    pair_verify = actions.add_parser("pair-verify", help="read-only verification of a saved pair")
+    pair_verify.add_argument("--pair-id", required=True)
+    pair_verify.add_argument("--output-root", type=Path, default=Path("artifacts/experiments"))
+
+    pair = actions.add_parser("pair", help="record readiness-gated pair admission")
+    pair.add_argument("--manifest", type=Path, required=True)
+    pair.add_argument("--sha256", required=True)
+    pair.add_argument("--authorize-sha256", required=True)
+    pair.add_argument("--authorize-evidence-kind", required=True)
+    pair.add_argument("--readiness-report", type=Path, required=True)
+    pair.add_argument("--output-root", type=Path, default=Path("artifacts/experiments"))
+
 
 def execute_experiment_command(
     args: argparse.Namespace,
@@ -104,6 +116,15 @@ def execute_experiment_command(
             output=args.output,
         )
         return result, 0 if result["status"] == "PASS" else 1
+
+    if args.action == "pair-verify":
+        from .experiment_pair_verification import verify_experiment_pair
+
+        result = verify_experiment_pair(args.pair_id, output_root=args.output_root)
+        return result, 0 if result["status"] == "PASS" else 1
+
+    if args.action == "pair":
+        return _execute_pair_command(args, dependencies)
 
     manifest = load_manifest(args.manifest) if args.action != "resume" else None
     dependencies.setdefault("current_source", source_identity())
@@ -162,11 +183,65 @@ def execute_experiment_command(
     return result, 0
 
 
+def _execute_pair_command(
+    args: argparse.Namespace, dependencies: dict[str, Any]
+) -> tuple[dict[str, Any], int]:
+    """Persist fail-closed pair admission without constructing a dispatch client."""
+    from .experiment_pair import (
+        load_pair_manifest,
+        load_readiness_report,
+        run_pair,
+    )
+
+    pair = load_pair_manifest(args.manifest)
+    try:
+        receipt = load_readiness_report(args.readiness_report)
+    except ValueError:
+        receipt = None
+
+    result = run_pair(
+        pair,
+        expected_sha256=args.sha256,
+        readiness_report=receipt,
+        output_root=args.output_root,
+        context=dependencies,
+    )
+    return result, 0 if result["status"] == "PASS" else 1
+
+
 def confirm_cli_invocation(args: argparse.Namespace) -> InvocationAuthorization:
     """Require a terminal confirmation bound to the exact frozen Run tuple."""
     from .experiment_execution_state import load_registered_manifest
     from .experiment_manifest import is_executable_evidence_kind, manifest_digest
     from .experiment_runner import load_manifest
+
+    if args.action == "pair":
+        from .experiment_pair import load_pair_manifest, pair_manifest_digest
+
+        pair = load_pair_manifest(args.manifest)
+        digest = pair_manifest_digest(pair)
+        evidence_kind = pair["baseline"]["manifest"]["evidence_kind"]
+        if (
+            digest != args.sha256
+            or digest != args.authorize_sha256
+            or evidence_kind != args.authorize_evidence_kind
+            or pair["variant"]["manifest"]["evidence_kind"] != evidence_kind
+        ):
+            raise ValueError("experiment_invocation_authorization_mismatch")
+        if not is_executable_evidence_kind(evidence_kind):
+            raise ValueError("experiment_evidence_kind_unavailable")
+        if evidence_kind == "provider_live" and any(
+            pair[name]["manifest"]["authorization"]["execution_authorized"] is not True
+            for name in ("baseline", "variant")
+        ):
+            raise ValueError("experiment_live_authorization_required")
+        if not sys.stdin.isatty():
+            raise ValueError("experiment_terminal_confirmation_required")
+        phrase = f"authorize {digest} {evidence_kind} {pair['pair_id']}"
+        print(f"Type '{phrase}' to authorize this invocation:", file=sys.stderr)
+        if sys.stdin.readline().rstrip("\r\n") != phrase:
+            raise ValueError("experiment_invocation_confirmation_mismatch")
+        return InvocationAuthorization(digest, evidence_kind, pair["pair_id"])
 
     manifest = (
         load_manifest(args.manifest)

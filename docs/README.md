@@ -6,6 +6,8 @@
 
 ## 先读哪些文档
 
+2026-11-03 的[实验 CLI #124–#128 阶段记录](evals/showcase-experiment-cli-124-128.md)区分已实现的流式、串行实验执行与独立核验，以及仍未运行的 provider-live readiness 和配对执行。
+
 ## 当前 ALIGN 状态
 
 CP-05 检查点公共 Job 验收与 #112 交接见 [CP-05 交接记录](evals/showcase-cp05-checkpoint-handoff.md)。该记录只使用受控 loopback / replay 证据，保留 #112 的 `unknown/not_run` 身份，不替代 provider-live 或数学能力验收。
