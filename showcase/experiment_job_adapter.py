@@ -30,8 +30,18 @@ class PublicExperimentJobAdapter:
 
     def validate_runtime_contract(self, manifest: dict[str, Any]) -> bool:
         try:
+            from .experiment_sources import (
+                ServerAppliedModelConfigAdapter,
+                server_model_config_matches,
+            )
+
             self.transport_adapter.validate_manifest_transport(manifest["transport"])
-            return dict(self.model_config.config()) == manifest["model"]
+            return (
+                dict(self.model_config.config()) == manifest["model"]
+                and server_model_config_matches(
+                    ServerAppliedModelConfigAdapter(self.client).config(), manifest
+                )
+            )
         except (AttributeError, KeyError, TypeError, ValueError):
             return False
 

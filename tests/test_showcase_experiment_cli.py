@@ -70,6 +70,38 @@ def _manifest(source_identity: dict[str, object]) -> dict[str, object]:
     }
 
 
+class _ServerAppliedConfig:
+    def __init__(self, manifest, *, model_updates=None):
+        model_keys = (
+            "name",
+            "thinking_mode",
+            "temperature",
+            "max_output_tokens",
+            "request_timeout_seconds",
+            "retry",
+        )
+        model = {key: manifest["model"][key] for key in model_keys}
+        model.update(model_updates or {})
+        value = {
+            "schema_version": 1,
+            "status": "available",
+            "model": model,
+            "solver_modes": [manifest["model"]["solver_mode"]],
+            "verification_modes": [manifest["model"]["verification_mode"]],
+            "transport": {
+                "policy": manifest["transport"]["policy"],
+                "profile_set_fingerprint": manifest["transport"]["profile_set_fingerprint"],
+            },
+        }
+        value["config_sha256"] = hashlib.sha256(
+            json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        self.value = value
+
+    def config(self):
+        return self.value
+
+
 class ExperimentManifestTest(unittest.TestCase):
     def test_manifest_digest_is_canonical_and_schema_is_strict(self) -> None:
         from showcase.experiment_manifest import manifest_digest, validate_manifest
@@ -306,6 +338,7 @@ class ExperimentRegistrationTest(unittest.TestCase):
                     expected_sha256=manifest_digest(manifest),
                     current_source=source,
                     trusted_model_config=StaticModelConfigAdapter(manifest["model"]),
+                    server_model_config=_ServerAppliedConfig(manifest),
                     sample_resolver=FileSampleHashResolver(
                         root, {"sample-01": {"input": "sample.txt", "text": "sample.txt"}}
                     ),
@@ -339,6 +372,7 @@ class ExperimentRegistrationTest(unittest.TestCase):
                 expected_sha256=manifest_digest(manifest),
                 current_source=source,
                 trusted_model_config=StaticModelConfigAdapter(manifest["model"]),
+                server_model_config=_ServerAppliedConfig(manifest),
                 sample_resolver=FileSampleHashResolver(
                     root, {"sample-01": {"input": "sample.txt", "text": "sample.txt"}}
                 ),
@@ -352,6 +386,7 @@ class ExperimentRegistrationTest(unittest.TestCase):
                 expected_sha256=manifest_digest(manifest),
                 current_source=source,
                 trusted_model_config=StaticModelConfigAdapter(manifest["model"]),
+                server_model_config=_ServerAppliedConfig(manifest),
                 sample_resolver=FileSampleHashResolver(
                     root, {"sample-01": {"input": "sample.txt", "text": "sample.txt"}}
                 ),
@@ -394,6 +429,7 @@ class ExperimentRegistrationTest(unittest.TestCase):
                 expected_sha256=manifest_digest(manifest),
                 current_source=source,
                 trusted_model_config=model_config,
+                server_model_config=_ServerAppliedConfig(manifest),
                 sample_resolver=sample_resolver,
                 transport_adapter=transport,
             )
@@ -408,6 +444,7 @@ class ExperimentRegistrationTest(unittest.TestCase):
                 output_root=root,
                 current_source=source,
                 trusted_model_config=model_config,
+                server_model_config=_ServerAppliedConfig(manifest),
                 sample_resolver=sample_resolver,
                 transport_adapter=transport,
             )
@@ -431,6 +468,7 @@ class ExperimentRegistrationTest(unittest.TestCase):
                     output_root=root,
                     current_source=source,
                     trusted_model_config=model_config,
+                    server_model_config=_ServerAppliedConfig(manifest),
                     sample_resolver=sample_resolver,
                     transport_adapter=transport,
                 )
@@ -451,6 +489,7 @@ class ExperimentRegistrationTest(unittest.TestCase):
             expected_sha256=manifest_digest(manifest),
             current_source=source,
             trusted_model_config=None,
+            server_model_config=None,
             sample_resolver=None,
             transport_adapter=None,
         )
@@ -459,6 +498,76 @@ class ExperimentRegistrationTest(unittest.TestCase):
         self.assertEqual("not_checked", result["checks"]["model"])
         self.assertEqual("not_checked", result["checks"]["samples"])
         self.assertEqual(0, result["dispatch_count"])
+
+    def test_preflight_rejects_malformed_and_stale_server_model_projection(self) -> None:
+        from showcase.experiment_manifest import manifest_digest
+        from showcase.experiment_runner import preflight_manifest
+        from showcase.experiment_samples import FileSampleHashResolver
+        from showcase.experiment_sources import (
+            StaticModelConfigAdapter,
+            StaticServerAppliedModelConfigAdapter,
+        )
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _manifest(source)
+        valid = _ServerAppliedConfig(manifest).config()
+        projections = []
+        malformed = json.loads(json.dumps(valid))
+        malformed["schema_version"] = True
+        malformed_fingerprint_input = {
+            key: value for key, value in malformed.items() if key != "config_sha256"
+        }
+        malformed["config_sha256"] = hashlib.sha256(
+            json.dumps(
+                malformed_fingerprint_input,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        projections.append(("boolean_schema_version", malformed))
+        stale = json.loads(json.dumps(valid))
+        stale["model"]["name"] = "other-active-model"
+        stale_fingerprint_input = {
+            key: value for key, value in stale.items() if key != "config_sha256"
+        }
+        stale["config_sha256"] = hashlib.sha256(
+            json.dumps(
+                stale_fingerprint_input,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        projections.append(("stale_active_model", stale))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            data_root = Path(temporary)
+            (data_root / "sample.txt").write_bytes(b"x+1=2\n")
+            for case, projection in projections:
+                with self.subTest(case=case):
+                    result = preflight_manifest(
+                        manifest,
+                        expected_sha256=manifest_digest(manifest),
+                        current_source=source,
+                        trusted_model_config=StaticModelConfigAdapter(manifest["model"]),
+                        server_model_config=StaticServerAppliedModelConfigAdapter(projection),
+                        sample_resolver=FileSampleHashResolver(
+                            data_root,
+                            {"sample-01": {"input": "sample.txt", "text": "sample.txt"}},
+                        ),
+                        transport_adapter=MockTransportAdapter(),
+                    )
+
+                    self.assertFalse(result["ready"])
+                    self.assertEqual("failed", result["checks"]["server_model"])
+                    self.assertIn("experiment_server_model_config_mismatch", result["errors"])
+                    self.assertEqual(0, result["dispatch_count"])
 
     def test_preflight_fails_when_trusted_model_or_sample_hashes_differ(self) -> None:
         from showcase.experiment_manifest import manifest_digest
@@ -483,6 +592,7 @@ class ExperimentRegistrationTest(unittest.TestCase):
                 trusted_model_config=StaticModelConfigAdapter(
                     dict(manifest["model"], name="other")
                 ),
+                server_model_config=_ServerAppliedConfig(manifest),
                 sample_resolver=FileSampleHashResolver(
                     data_root,
                     {"sample-01": {"input": "sample.txt", "text": "sample.txt"}},
@@ -513,6 +623,7 @@ class ExperimentRegistrationTest(unittest.TestCase):
             expected_sha256=manifest_digest(manifest),
             current_source=source,
             trusted_model_config=StaticModelConfigAdapter(manifest["model"]),
+            server_model_config=_ServerAppliedConfig(manifest),
             sample_resolver=None,
             transport_adapter=MockTransportAdapter(),
         )
@@ -805,6 +916,7 @@ class ExperimentCliTest(unittest.TestCase):
             context = {
                 "current_source": source,
                 "trusted_model_config": StaticModelConfigAdapter(manifest["model"]),
+                "server_model_config": _ServerAppliedConfig(manifest),
                 "sample_resolver": FileSampleHashResolver(
                     root, {"sample-01": {"input": "sample.txt", "text": "sample.txt"}}
                 ),

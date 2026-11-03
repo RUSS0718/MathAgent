@@ -212,6 +212,31 @@ class InternModelPort:
                 schema_fingerprint=fingerprints["schema_fingerprint"],
             )
             self._authorize_transport(request, decision, fingerprints)
+        else:
+            decision = select_transport(
+                self.adapter,
+                messages,
+                policy="legacy",
+                native_tools=bool(provider_tools),
+                profiles=self.stream_profiles,
+                schema_fingerprint=fingerprints["schema_fingerprint"],
+            )
+            if (decision["transport"] == "legacy" and self.streaming
+                    and callable(getattr(self.adapter, "stream_complete", None))):
+                decision = {
+                    **decision,
+                    "transport": "stream",
+                    "reason": "legacy_stream_activity",
+                    "evidence_kind": "documented",
+                }
+            elif decision["transport"] == "legacy":
+                decision = {
+                    **decision,
+                    "transport": "nonstream",
+                    "reason": "provider_profile_unverified",
+                    "evidence_kind": "documented",
+                }
+            self._authorize_transport(request, decision, fingerprints)
         streaming = decision["transport"] == "stream" if decision else self.streaming
         if streaming and callable(getattr(self.adapter, "stream_complete", None)):
             if decision is None:

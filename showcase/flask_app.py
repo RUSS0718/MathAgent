@@ -205,12 +205,13 @@ def create_app(
             "mime": "image/png",
             "max_bytes": MAX_PNG_BYTES,
         }
-        return jsonify(
+        solver_modes = star_capabilities(star_pipeline is not None, star_pipeline)
+        response = jsonify(
             {
                 "profile": profile,
                 "jobs": {"enabled": True, "status": "available"},
                 "sse": {"enabled": True, "status": "available"},
-                "solver_modes": star_capabilities(star_pipeline is not None, star_pipeline),
+                "solver_modes": solver_modes,
                 "verification_mode": VERIFICATION_MODES,
                 "files": {"upload": upload},
                 "execution": {
@@ -218,6 +219,7 @@ def create_app(
                     "provider": "fake" if getattr(live_pipeline, "execution_mode", app.config.get("SHOWCASE_MODE")) == "fake" else "intern",
                     "status": "configured" if os.getenv("INTERN_API_KEY") else "missing_credentials",
                 },
+                "applied_model_config": _applied_model_config(star_pipeline, solver_modes),
                 "capabilities": {
                     "jobs": True,
                     "sse": True,
@@ -226,6 +228,8 @@ def create_app(
                 },
             }
         )
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/api/files")
     def files() -> Response:
@@ -708,6 +712,70 @@ def create_app(
             return _json_error(exc.category, 409)
 
     return app
+
+
+def _applied_model_config(star_pipeline: Any, solver_modes: list[dict[str, Any]]) -> dict[str, Any]:
+    """Project only the active STAR adapter settings needed by frozen experiment preflight."""
+    from .stream_preference import profile_set_fingerprint
+
+    adapter = getattr(star_pipeline, "adapter", None)
+    client = getattr(adapter, "_client", None)
+    thinking_mode = getattr(adapter, "thinking_mode", None)
+    if thinking_mode is None:
+        thinking_mode = getattr(client, "thinking_mode", None)
+    timeout = getattr(adapter, "client_timeout", None)
+    retry = getattr(adapter, "client_retry", None)
+    if timeout is None:
+        timeout = getattr(client, "timeout", None)
+    if retry is None:
+        retry = getattr(client, "retry", None)
+    model = {
+        "name": getattr(adapter, "model_id", None),
+        "thinking_mode": thinking_mode,
+        "temperature": getattr(adapter, "temperature", None),
+        "max_output_tokens": getattr(adapter, "max_tokens", None),
+        "request_timeout_seconds": timeout,
+        "retry": retry,
+    }
+    modes = sorted(
+        record["solver_mode"]
+        for record in solver_modes
+        if record.get("solver_mode", "").startswith("star_") and record.get("enabled") is True
+    )
+    transport = None
+    if star_pipeline is not None:
+        transport = {
+            "policy": star_pipeline.transport_policy,
+            "profile_set_fingerprint": profile_set_fingerprint(
+                star_pipeline.stream_profiles
+            ),
+        }
+    available = (
+        star_pipeline is not None
+        and isinstance(model["name"], str)
+        and isinstance(model["thinking_mode"], bool)
+        and type(model["temperature"]) in {int, float}
+        and math.isfinite(model["temperature"])
+        and type(model["max_output_tokens"]) is int
+        and type(model["request_timeout_seconds"]) is int
+        and model["request_timeout_seconds"] > 0
+        and type(model["retry"]) is int
+        and model["retry"] >= 0
+        and transport is not None
+    )
+    projection = {
+        "schema_version": 1,
+        "status": "available" if available else "unavailable",
+        "model": model if available else None,
+        "solver_modes": modes if available else [],
+        "verification_modes": VERIFICATION_MODES if available else [],
+        "transport": transport if available else None,
+    }
+    canonical = json.dumps(
+        projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    projection["config_sha256"] = hashlib.sha256(canonical).hexdigest()
+    return projection
 
 
 def main() -> None:

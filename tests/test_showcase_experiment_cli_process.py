@@ -89,7 +89,29 @@ class ExperimentCliProcessTest(unittest.TestCase):
             child = """
 import os
 import sys
+import json
+import hashlib
 import showcase.cli as cli
+import showcase.experiment_cli as experiment_cli
+manifest_path = sys.argv[sys.argv.index('--manifest') + 1]
+manifest = json.loads(open(manifest_path, encoding='utf-8').read())
+model = {key: manifest['model'][key] for key in (
+    'name', 'thinking_mode', 'temperature', 'max_output_tokens',
+    'request_timeout_seconds', 'retry')}
+projection = {
+    'schema_version': 1, 'status': 'available', 'model': model,
+    'solver_modes': [manifest['model']['solver_mode']],
+    'verification_modes': [manifest['model']['verification_mode']],
+    'transport': {'policy': manifest['transport']['policy'],
+                  'profile_set_fingerprint': manifest['transport']['profile_set_fingerprint']},
+}
+projection['config_sha256'] = hashlib.sha256(json.dumps(
+    projection, sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+def fetch(base_url, timeout):
+    assert base_url == 'http://127.0.0.1:8090'
+    assert timeout == 1200.0
+    return {'applied_model_config': projection}
+experiment_cli.fetch_public_capabilities = fetch
 class ForbiddenClient:
     def __init__(self, *args, **kwargs):
         raise RuntimeError('showcase_client_constructed')
@@ -98,11 +120,26 @@ raise SystemExit(cli.main(sys.argv[1:]))
 """
             result = self._run_child(args, child)
 
-        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         report = json.loads(result.stdout)
         self.assertTrue(report["ready"])
         self.assertEqual(0, report["dispatch_count"])
         self.assertNotIn("x+1=2", result.stdout + result.stderr)
+
+    def test_preflight_fails_closed_when_server_applied_config_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _manifest_value, args = self._inputs(Path(temporary))
+            result = self._run_child(
+                args,
+                "import showcase.experiment_cli as e; e.fetch_public_capabilities = lambda *_: {}; "
+                "import sys; from showcase.cli import main; raise SystemExit(main(sys.argv[1:]))",
+            )
+
+        self.assertEqual(1, result.returncode)
+        report = json.loads(result.stdout)
+        self.assertEqual(["experiment_server_model_config_mismatch"], report["errors"])
+        self.assertEqual(0, report["dispatch_count"])
+        self.assertNotIn("Traceback", result.stdout + result.stderr)
 
     def test_run_rejects_non_tty_before_registration_or_client_bootstrap(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -174,6 +211,23 @@ raise SystemExit(cli.main(sys.argv[1:]))
 import os
 import sys
 import showcase.cli as cli
+import showcase.experiment_cli as experiment_cli
+import json
+import hashlib
+manifest = json.loads(open(sys.argv[sys.argv.index('--manifest') + 1], encoding='utf-8').read())
+model = {key: manifest['model'][key] for key in (
+    'name', 'thinking_mode', 'temperature', 'max_output_tokens',
+    'request_timeout_seconds', 'retry')}
+projection = {
+    'schema_version': 1, 'status': 'available', 'model': model,
+    'solver_modes': [manifest['model']['solver_mode']],
+    'verification_modes': [manifest['model']['verification_mode']],
+    'transport': {'policy': manifest['transport']['policy'],
+                  'profile_set_fingerprint': manifest['transport']['profile_set_fingerprint']},
+}
+projection['config_sha256'] = hashlib.sha256(json.dumps(
+    projection, sort_keys=True, ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+experiment_cli.fetch_public_capabilities = lambda *_: {'applied_model_config': projection}
 real_stdin = sys.stdin
 class TtyInput:
     def isatty(self): return True

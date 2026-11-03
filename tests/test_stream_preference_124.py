@@ -1,9 +1,9 @@
 """Issue #124 per-call streaming preference contracts; offline only."""
 
-import unittest
-from types import SimpleNamespace
 import hashlib
 import json
+import unittest
+from types import SimpleNamespace
 
 from showcase.stream_preference import StreamProfile
 
@@ -63,7 +63,7 @@ class StreamPreferenceSelectorTest(unittest.TestCase):
         self.assertTrue(decision["new_run_required"])
 
     def test_injected_provider_live_claim_cannot_authorize_streaming(self):
-        from showcase.stream_preference import StreamProfile, select_transport
+        from showcase.stream_preference import select_transport
 
         endpoint = "https://chat.intern-ai.org.cn/api/v1/chat/completions"
         adapter = self._adapter(endpoint=endpoint)
@@ -90,7 +90,7 @@ class StreamPreferenceSelectorTest(unittest.TestCase):
         self.assertTrue(decision["new_run_required"])
 
     def test_matching_controlled_profile_selects_stream_before_dispatch(self):
-        from showcase.stream_preference import StreamProfile, select_transport
+        from showcase.stream_preference import select_transport
 
         messages = [
             {"role": "system", "content": "schema"},
@@ -121,7 +121,7 @@ class StreamPreferenceSelectorTest(unittest.TestCase):
         self.assertEqual(64, len(decision["profile_fingerprint"]))
 
     def test_different_response_schema_does_not_match_registered_stream_profile(self):
-        from showcase.stream_preference import StreamProfile, select_transport
+        from showcase.stream_preference import select_transport
 
         messages = [{"role": "user", "content": "synthetic"}]
         profile = StreamProfile(
@@ -143,7 +143,7 @@ class StreamPreferenceSelectorTest(unittest.TestCase):
         self.assertTrue(decision["new_run_required"])
 
     def test_native_tools_reject_stream_first_and_require_separate_run(self):
-        from showcase.stream_preference import StreamProfile, select_transport
+        from showcase.stream_preference import select_transport
 
         adapter = self._adapter()
         decision = select_transport(
@@ -177,7 +177,6 @@ class StreamPreferenceSelectorTest(unittest.TestCase):
 
     def test_missing_stream_adapter_rejects_without_nonstream_dispatch(self):
         from showcase.solver_harness.intern_port import InternModelPort, InternPortError
-        from showcase.stream_preference import StreamProfile
 
         class Adapter:
             model_id = "intern-s2"
@@ -224,7 +223,6 @@ class StreamPreferenceSelectorTest(unittest.TestCase):
         import json
 
         from showcase.solver_harness.intern_port import InternModelPort, InternPortError
-        from showcase.stream_preference import StreamProfile
 
         class Adapter:
             model_id = "intern-s2"
@@ -312,14 +310,64 @@ class StreamPreferenceSelectorTest(unittest.TestCase):
 
         self.assertEqual("SOLVED", result["assessment"])
         self.assertEqual(tools, adapter.received_tools)
-        self.assertEqual([], decisions)
-        self.assertNotIn("transport", port.invocations[-1])
+        self.assertEqual(1, len(decisions))
+        self.assertEqual("legacy", decisions[0]["policy"])
+        self.assertEqual("nonstream", port.invocations[-1]["transport"]["transport"])
+        self.assertEqual(
+            "provider_native_tools_unsupported_with_stream",
+            port.invocations[-1]["transport"]["reason"],
+        )
+
+    def test_legacy_stream_activity_does_not_override_native_tools_fallback(self):
+        from showcase.solver_harness.intern_port import InternModelPort
+
+        class Adapter:
+            model_id = "intern-s2"
+
+            def __init__(self):
+                self.received_tools = None
+                self.stream_calls = 0
+
+            def complete(self, _messages, *, tools=(), metadata=None):
+                self.received_tools = tools
+                return SimpleNamespace(
+                    model_id="intern-s2", returned_model="intern-s2", finish_reason="stop",
+                    usage={}, request_attempts=(), text=json.dumps({
+                        "assessment": "SOLVED", "worked": [], "failed": [], "candidates": [],
+                    }), error_category=None,
+                )
+
+            def stream_complete(self, *_args, **_kwargs):
+                self.stream_calls += 1
+                return iter(())
+
+        adapter = Adapter()
+        decisions = []
+        port = InternModelPort(
+            adapter, streaming=True, transport_policy="legacy",
+            transport_choice_observer=lambda decision, _request:
+                decisions.append(decision) or True,
+        )
+        tools = [{"type": "function", "function": {"name": "legacy_tool"}}]
+
+        result = port.complete({
+            "role": "explore", "problem": "synthetic", "run_id": "legacy-stream-tools",
+            "provider_tools": tools,
+        })
+
+        self.assertIsInstance(result, dict)
+        self.assertEqual("SOLVED", result["assessment"])
+        self.assertEqual(tools, adapter.received_tools)
+        self.assertEqual(0, adapter.stream_calls)
+        self.assertEqual(1, len(decisions))
+        self.assertEqual("nonstream", decisions[0]["transport"])
+        self.assertEqual("provider_native_tools_unsupported_with_stream", decisions[0]["reason"])
+        self.assertEqual("nonstream", port.invocations[-1]["transport"]["transport"])
 
     def test_resumed_run_rejects_changed_schema_profile_without_dispatch(self):
         import json
 
         from showcase.solver_harness.intern_port import InternModelPort, InternPortError
-        from showcase.stream_preference import StreamProfile
 
         class Adapter:
             model_id = "intern-s2"

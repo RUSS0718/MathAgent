@@ -17,7 +17,11 @@ from .experiment_manifest import (
     validate_manifest,
 )
 from .experiment_samples import FileSampleHashResolver
-from .experiment_sources import ModelConfigAdapter, is_sensitive_path
+from .experiment_sources import (
+    ModelConfigAdapter,
+    is_sensitive_path,
+    server_model_config_matches,
+)
 
 _RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z")
 
@@ -59,6 +63,7 @@ def preflight_manifest(
     trusted_model_config: ModelConfigAdapter | None,
     sample_resolver: FileSampleHashResolver | None,
     transport_adapter: TransportManifestAdapter | None,
+    server_model_config: ModelConfigAdapter | None = None,
 ) -> dict[str, Any]:
     """Check frozen inputs without creating clients, Jobs, tools, or requests."""
     checks = {
@@ -134,6 +139,20 @@ def preflight_manifest(
         else:
             checks["model"] = "failed"
             errors.append("experiment_model_config_mismatch")
+    if server_model_config is None:
+        checks["server_model"] = "failed"
+        errors.append("experiment_server_model_config_unavailable")
+    else:
+        try:
+            server_model = server_model_config.config()
+            server_matches = server_model_config_matches(server_model, record)
+        except Exception:
+            server_matches = False
+        if server_matches:
+            checks["server_model"] = "passed"
+        else:
+            checks["server_model"] = "failed"
+            errors.append("experiment_server_model_config_mismatch")
     if sample_resolver is None:
         errors.append("experiment_sample_resolver_unavailable")
     else:
@@ -177,6 +196,7 @@ def register_run(
     trusted_model_config: ModelConfigAdapter | None,
     sample_resolver: FileSampleHashResolver | None,
     transport_adapter: TransportManifestAdapter | None,
+    server_model_config: ModelConfigAdapter | None = None,
 ) -> dict[str, Any]:
     """Register one exact manifest once; the manifest snapshot is write-once."""
     if not isinstance(run_id, str) or not _RUN_ID.fullmatch(run_id):
@@ -186,6 +206,7 @@ def register_run(
         expected_sha256=expected_sha256,
         current_source=current_source,
         trusted_model_config=trusted_model_config,
+        server_model_config=server_model_config,
         sample_resolver=sample_resolver,
         transport_adapter=transport_adapter,
     )

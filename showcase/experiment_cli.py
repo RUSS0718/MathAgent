@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 
 class InvocationAuthorization:
@@ -67,7 +70,11 @@ def execute_experiment_command(
     dependencies = dict(context or {})
     from .experiment_runner import load_manifest, preflight_manifest, read_status
     from .experiment_samples import FileSampleHashResolver, load_sample_map
-    from .experiment_sources import FileAppliedModelConfig, source_identity
+    from .experiment_sources import (
+        FileAppliedModelConfig,
+        StaticServerAppliedModelConfigAdapter,
+        source_identity,
+    )
     from .experiment_transport import ExperimentTransportAdapter
 
     if args.action == "status":
@@ -103,6 +110,14 @@ def execute_experiment_command(
     dependencies.setdefault("transport_adapter", ExperimentTransportAdapter())
     if "trusted_model_config" not in dependencies:
         dependencies["trusted_model_config"] = FileAppliedModelConfig(args.applied_config)
+    if "server_model_config" not in dependencies:
+        capabilities = dependencies.get("server_capabilities")
+        if capabilities is None:
+            capabilities = fetch_public_capabilities(args.base_url, args.timeout)
+        projection = (
+            capabilities.get("applied_model_config") if isinstance(capabilities, dict) else None
+        )
+        dependencies["server_model_config"] = StaticServerAppliedModelConfigAdapter(projection)
     if "sample_resolver" not in dependencies:
         dependencies["sample_resolver"] = FileSampleHashResolver(
             args.sample_root, load_sample_map(args.sample_map)
@@ -119,6 +134,7 @@ def execute_experiment_command(
             expected_sha256=args.sha256,
             current_source=dependencies["current_source"],
             trusted_model_config=dependencies.get("trusted_model_config"),
+            server_model_config=dependencies.get("server_model_config"),
             sample_resolver=dependencies.get("sample_resolver"),
             transport_adapter=dependencies["transport_adapter"],
         )
@@ -180,6 +196,23 @@ def confirm_cli_invocation(args: argparse.Namespace) -> InvocationAuthorization:
     return InvocationAuthorization(digest, manifest["evidence_kind"], args.run_id)
 
 
+def fetch_public_capabilities(base_url: str, timeout: float) -> dict[str, Any]:
+    """Fetch only the public capabilities route without loading cookies or credentials."""
+    request = Request(
+        base_url.rstrip("/") + "/api/capabilities",
+        headers={"Accept": "application/json", "Cache-Control": "no-cache"},
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            value = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, OSError, UnicodeError, json.JSONDecodeError, TimeoutError):
+        raise ValueError("experiment_server_capabilities_unavailable") from None
+    if not isinstance(value, dict):
+        raise ValueError("experiment_server_capabilities_unavailable")
+    return value
+
+
 def _create_public_job_adapter(
     args: argparse.Namespace, dependencies: dict[str, Any], manifest: dict[str, Any] | None
 ) -> Any:
@@ -188,7 +221,9 @@ def _create_public_job_adapter(
     from .experiment_job_adapter import PublicExperimentJobAdapter
 
     runtime_manifest = manifest or load_registered_manifest(Path(args.output_root) / args.run_id)
-    client = ShowcaseClient(args.base_url, args.cookie_file, args.timeout)
+    client = dependencies.get("showcase_client") or ShowcaseClient(
+        args.base_url, args.cookie_file, args.timeout
+    )
     return PublicExperimentJobAdapter(
         client,
         runtime_manifest,

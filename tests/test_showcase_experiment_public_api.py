@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import time
@@ -34,6 +35,212 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
         self.app.extensions["showcase_run_service"].close()
         self.app.extensions["loopback_store"].close()
         self.temporary.cleanup()
+
+    def test_capabilities_exposes_credential_free_applied_model_config(self):
+        """Contract documented in docs/experiments/showcase-capabilities-applied-model-config.md:
+        v1/status, model{name, thinking_mode, temperature,
+        max_output_tokens, request_timeout_seconds, retry}, solver_modes,
+        verification_modes, transport{policy, profile_set_fingerprint}, and
+        config_sha256 over canonical JSON excluding that digest. The projection
+        describes this server's active STAR adapter and contains no credentials.
+        """
+        from showcase.adapters import InternModelAdapter
+
+        model = {
+            "name": "intern-s2",
+            "thinking_mode": True,
+            "temperature": 0.2,
+            "max_output_tokens": 512,
+            "request_timeout_seconds": 60,
+            "retry": 0,
+        }
+        adapter = InternModelAdapter(
+            client=object(),
+            model_id=model["name"],
+            thinking_mode=True,
+            temperature=0.2,
+            max_tokens=512,
+            client_timeout=60,
+            client_retry=0,
+        )
+        app = create_app(
+            {
+                "TESTING": True,
+                "SHOWCASE_DATA_DIR": str(Path(self.temporary.name) / "configured"),
+                "SHOWCASE_WORKER_ENABLED": False,
+                "SHOWCASE_STAR_ENABLED": True,
+                "SHOWCASE_STAR_ADAPTER": adapter,
+            }
+        )
+        try:
+            response = app.test_client().get("/api/capabilities")
+            self.assertEqual(200, response.status_code)
+            body = response.get_json()
+            projection = body["applied_model_config"]
+            self.assertEqual(1, projection["schema_version"])
+            self.assertEqual("available", projection["status"])
+            self.assertEqual(model, projection["model"])
+            self.assertEqual(
+                ["star_limited", "star_limited_best_effort"],
+                projection["solver_modes"],
+            )
+            self.assertEqual(["auto", "required", "off"], projection["verification_modes"])
+            self.assertEqual(
+                {
+                    "schema_version",
+                    "status",
+                    "model",
+                    "solver_modes",
+                    "verification_modes",
+                    "transport",
+                    "config_sha256",
+                },
+                set(projection),
+            )
+            fingerprint_input = {
+                key: value for key, value in projection.items() if key != "config_sha256"
+            }
+            self.assertEqual(
+                hashlib.sha256(
+                    json.dumps(
+                        fingerprint_input,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ).encode("utf-8")
+                ).hexdigest(),
+                projection["config_sha256"],
+            )
+            self.assertEqual("legacy", projection["transport"]["policy"])
+            self.assertEqual("no-store", response.headers["Cache-Control"])
+            self.assertNotIn("client", json.dumps(projection))
+            self.assertNotIn("credential", json.dumps(projection).lower())
+            self.assertTrue(body["jobs"]["enabled"])
+        finally:
+            app.extensions["showcase_workspace_service"].close()
+            app.extensions["showcase_run_service"].close()
+            app.extensions["loopback_store"].close()
+
+    def test_capabilities_marks_unavailable_applied_config_without_active_star_adapter(self):
+        response = self.client.get("/api/capabilities")
+        self.assertEqual(200, response.status_code)
+        projection = response.get_json()["applied_model_config"]
+        self.assertEqual(
+            {
+                "schema_version",
+                "status",
+                "model",
+                "solver_modes",
+                "verification_modes",
+                "transport",
+                "config_sha256",
+            },
+            set(projection),
+        )
+        self.assertEqual(1, projection["schema_version"])
+        self.assertEqual("unavailable", projection["status"])
+        self.assertIsNone(projection["model"])
+        self.assertEqual([], projection["solver_modes"])
+        self.assertEqual([], projection["verification_modes"])
+        self.assertIsNone(projection["transport"])
+        fingerprint_input = {
+            key: value for key, value in projection.items() if key != "config_sha256"
+        }
+        self.assertEqual(
+            hashlib.sha256(
+                json.dumps(
+                    fingerprint_input,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest(),
+            projection["config_sha256"],
+        )
+
+    def test_capabilities_uses_active_client_thinking_mode_when_adapter_has_no_override(self):
+        from types import SimpleNamespace
+
+        from showcase.adapters import InternModelAdapter
+
+        model = {
+            "name": "intern-s2",
+            "thinking_mode": True,
+            "temperature": 0.2,
+            "max_output_tokens": 512,
+            "request_timeout_seconds": 60,
+            "retry": 0,
+        }
+        adapter = InternModelAdapter(
+            client=SimpleNamespace(timeout=60, retry=0, thinking_mode=True),
+            model_id=model["name"],
+            temperature=model["temperature"],
+            max_tokens=model["max_output_tokens"],
+        )
+        app = create_app(
+            {
+                "TESTING": True,
+                "SHOWCASE_DATA_DIR": str(Path(self.temporary.name) / "client-configured"),
+                "SHOWCASE_WORKER_ENABLED": False,
+                "SHOWCASE_STAR_ENABLED": True,
+                "SHOWCASE_STAR_ADAPTER": adapter,
+            }
+        )
+        try:
+            projection = (
+                app.test_client().get("/api/capabilities").get_json()["applied_model_config"]
+            )
+            self.assertEqual("available", projection["status"])
+            self.assertEqual(model, projection["model"])
+        finally:
+            app.extensions["showcase_workspace_service"].close()
+            app.extensions["showcase_run_service"].close()
+            app.extensions["loopback_store"].close()
+
+    def test_public_job_adapter_rechecks_server_config_before_runtime_dispatch(self):
+        from types import SimpleNamespace
+
+        from showcase.experiment_sources import canonical_json
+        from tests.test_showcase_experiment_cli import _manifest, _ServerAppliedConfig
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _manifest(source)
+        projection = _ServerAppliedConfig(manifest).config()
+        projection["model"]["name"] = "stale-active-model"
+        fingerprint_input = {
+            key: value for key, value in projection.items() if key != "config_sha256"
+        }
+        projection["config_sha256"] = hashlib.sha256(canonical_json(fingerprint_input)).hexdigest()
+
+        class Client:
+            def __init__(self):
+                self.requests = []
+
+            def bootstrap(self):
+                return {}
+
+            def request(self, method, path):
+                self.requests.append((method, path))
+                return {"applied_model_config": projection}
+
+        client = Client()
+        adapter = PublicExperimentJobAdapter(
+            client,
+            manifest,
+            SimpleNamespace(config=lambda: manifest["model"]),
+            sample_resolver=object(),
+            transport_adapter=SimpleNamespace(validate_manifest_transport=lambda _value: None),
+        )
+
+        self.assertFalse(adapter.validate_runtime_contract(manifest))
+        self.assertEqual([("GET", "/api/capabilities")], client.requests)
 
     def test_budgeted_job_lookup_returns_active_and_terminal_identity_without_prompt(self):
         limits = {

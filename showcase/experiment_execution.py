@@ -131,6 +131,7 @@ def _preflight(manifest: dict[str, Any], digest: str, context: dict[str, Any]) -
         expected_sha256=digest,
         current_source=context.get("current_source", {}),
         trusted_model_config=context.get("trusted_model_config"),
+        server_model_config=context.get("server_model_config"),
         sample_resolver=context.get("sample_resolver"),
         transport_adapter=context.get("transport_adapter"),
     )
@@ -140,6 +141,7 @@ def _preflight_context(context: dict[str, Any]) -> dict[str, Any]:
     return {
         "current_source": context.get("current_source", {}),
         "trusted_model_config": context.get("trusted_model_config"),
+        "server_model_config": context.get("server_model_config"),
         "sample_resolver": context.get("sample_resolver"),
         "transport_adapter": context.get("transport_adapter"),
     }
@@ -330,6 +332,8 @@ def _advance(
             status["pending_intent"] = None
             return _stop(directory, status, stop_reason)
         if observation["status"] == "running":
+            if time.time() >= intent["deadline_at"]:
+                return _stop(directory, status, "hard_limit")
             status["phase"] = "running"
             status["pending_intent"] = None
             status["log_tail"] = ["job_running"]

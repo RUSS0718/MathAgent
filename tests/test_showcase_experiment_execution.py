@@ -10,7 +10,11 @@ from pathlib import Path
 from showcase.experiment_manifest import manifest_digest
 from showcase.experiment_runner import read_status
 from showcase.experiment_sources import StaticModelConfigAdapter
-from tests.test_showcase_experiment_cli import MockTransportAdapter, _manifest
+from tests.test_showcase_experiment_cli import (
+    MockTransportAdapter,
+    _manifest,
+    _ServerAppliedConfig,
+)
 
 
 class _Authorization:
@@ -166,6 +170,7 @@ def _context(manifest, job_adapter):
     return {
         "current_source": source,
         "trusted_model_config": StaticModelConfigAdapter(manifest["model"]),
+        "server_model_config": _ServerAppliedConfig(manifest),
         "sample_resolver": type(
             "Resolver",
             (),
@@ -580,6 +585,53 @@ class ExperimentExecutionTest(unittest.TestCase):
         self.assertEqual("hard_limit", result["stop_reason"])
         self.assertEqual(0, result["completed"])
         self.assertEqual(0, adapter.submissions)
+
+    def test_running_job_at_run_deadline_stops_with_hard_limit_and_keeps_identity(self):
+        from unittest.mock import patch
+
+        from showcase.experiment_execution import run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _two_sample_manifest(source)
+        now = [1_000.0]
+
+        class StillRunningAdapter(_JobAdapter):
+            def wait_for_job(self, job_id, deadline_at):
+                observation = super().wait_for_job(job_id, deadline_at)
+                now[0] = deadline_at + 0.5
+                observation["status"] = "running"
+                return observation
+
+        adapter = StillRunningAdapter()
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch("showcase.experiment_execution.time.time", side_effect=lambda: now[0]):
+                result = run_batch(
+                    manifest,
+                    expected_sha256=manifest_digest(manifest),
+                    run_id="run-deadline-still-running",
+                    output_root=temporary,
+                    context=_context_for_run(manifest, adapter, "run-deadline-still-running"),
+                )
+            intent = json.loads(
+                (Path(temporary) / "run-deadline-still-running" / "dispatch_intent.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        self.assertEqual("stopped", result["phase"])
+        self.assertEqual("hard_limit", result["stop_reason"])
+        self.assertEqual("job-1", result["current_job_id"])
+        self.assertEqual(intent["deadline_at"], result["run_records"][0]["deadline_at"])
+        self.assertEqual(adapter.wait_deadlines[0], intent["deadline_at"])
+        self.assertEqual(manifest["run_limits"], adapter.dispatch_inputs[0][0])
+        self.assertEqual(0, result["current_index"])
+        self.assertEqual(0, result["completed"])
+        self.assertEqual(1, adapter.submissions)
 
     def test_resume_reuses_original_job_and_does_not_repeat_dispatch(self):
         from showcase.experiment_execution import resume_batch, run_batch

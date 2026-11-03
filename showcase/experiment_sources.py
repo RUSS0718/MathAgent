@@ -16,6 +16,14 @@ _APPLIED_MODEL_KEYS = {
     "name", "thinking_mode", "temperature", "max_output_tokens",
     "request_timeout_seconds", "retry", "solver_mode", "verification_mode",
 }
+_SERVER_MODEL_KEYS = {
+    "name", "thinking_mode", "temperature", "max_output_tokens",
+    "request_timeout_seconds", "retry",
+}
+_SERVER_CONFIG_KEYS = {
+    "schema_version", "status", "model", "solver_modes", "verification_modes",
+    "transport", "config_sha256",
+}
 
 
 class FileAppliedModelConfig:
@@ -65,6 +73,87 @@ class StaticModelConfigAdapter:
 
     def config(self) -> Mapping[str, Any]:
         return dict(self._config)
+
+
+class ServerAppliedModelConfigAdapter:
+    """Read the public, versioned applied-config projection from a Showcase server."""
+
+    def __init__(self, client: Any) -> None:
+        self.client = client
+
+    def config(self) -> Any:
+        response = self.client.request("GET", "/api/capabilities")
+        if not isinstance(response, dict):
+            raise ValueError("experiment_server_model_config_unavailable")
+        return response.get("applied_model_config")
+
+
+class StaticServerAppliedModelConfigAdapter:
+    """Keep an untrusted server projection intact for strict boundary validation."""
+
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+    def config(self) -> Any:
+        return self.value
+
+
+def server_model_config_matches(value: Any, manifest: Mapping[str, Any]) -> bool:
+    """Validate the allowlisted server projection and compare active settings to a manifest."""
+    if not isinstance(value, dict) or set(value) != _SERVER_CONFIG_KEYS:
+        return False
+    if (
+        type(value.get("schema_version")) is not int
+        or value.get("schema_version") != 1
+        or value.get("status") != "available"
+        or not isinstance(value.get("model"), dict)
+        or set(value["model"]) != _SERVER_MODEL_KEYS
+        or not isinstance(value.get("solver_modes"), list)
+        or any(not isinstance(item, str) for item in value["solver_modes"])
+        or len(set(value["solver_modes"])) != len(value["solver_modes"])
+        or not isinstance(value.get("verification_modes"), list)
+        or any(not isinstance(item, str) for item in value["verification_modes"])
+        or len(set(value["verification_modes"])) != len(value["verification_modes"])
+    ):
+        return False
+    model = value["model"]
+    if (
+        not isinstance(model["name"], str)
+        or type(model["thinking_mode"]) is not bool
+        or type(model["temperature"]) not in {int, float}
+        or not math.isfinite(model["temperature"])
+        or type(model["max_output_tokens"]) is not int
+        or model["max_output_tokens"] <= 0
+        or type(model["request_timeout_seconds"]) is not int
+        or model["request_timeout_seconds"] <= 0
+        or type(model["retry"]) is not int
+        or model["retry"] < 0
+    ):
+        return False
+    transport = value.get("transport")
+    if (
+        not isinstance(transport, dict)
+        or set(transport) != {"policy", "profile_set_fingerprint"}
+        or transport.get("policy") not in {"legacy", "stream_first"}
+        or not _is_hash(transport.get("profile_set_fingerprint"))
+        or not _is_hash(value.get("config_sha256"))
+    ):
+        return False
+    fingerprint_input = {key: item for key, item in value.items() if key != "config_sha256"}
+    if hashlib.sha256(canonical_json(fingerprint_input)).hexdigest() != value["config_sha256"]:
+        return False
+    expected_model = manifest.get("model")
+    expected_transport = manifest.get("transport")
+    return (
+        isinstance(expected_model, Mapping)
+        and all(model[key] == expected_model[key] for key in _SERVER_MODEL_KEYS)
+        and expected_model.get("solver_mode") in value["solver_modes"]
+        and expected_model.get("verification_mode") in value["verification_modes"]
+        and isinstance(expected_transport, Mapping)
+        and transport["policy"] == expected_transport.get("policy")
+        and transport["profile_set_fingerprint"]
+        == expected_transport.get("profile_set_fingerprint")
+    )
 
 
 def source_identity(root: str | Path | None = None) -> dict[str, Any]:
@@ -175,6 +264,12 @@ def _git(root: Path, *arguments: str) -> bytes:
     return subprocess.run(
         ["git", *arguments], cwd=root, capture_output=True, check=True
     ).stdout
+
+
+def _is_hash(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
 
 
 def _is_source_path(name: str) -> bool:
