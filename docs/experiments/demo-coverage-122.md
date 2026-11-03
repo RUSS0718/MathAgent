@@ -54,6 +54,8 @@ PR #121 合并记录报告：固定源码上的 1,071 项 unittest 零失败、�
 
 因此，当前矩阵将 CLI 对应的 provider-live 验收标成 NOT_RUN。这个状态阻止 #127 宣称简单题与自然多步 provider-live readiness 通过，也阻止 #128 宣称 live 单因素对照已完成。历史失败和其他历史成功配对保持可引用，但不能代替新 CLI、冻结登记和本票要求的证据。
 
+provider-live manifest 的 `model.retry: 1` 表示 Intern 客户端的单次初始尝试；它不授权自动重试。预检和执行只接受这一有界配置，`retry: 0` 继续兼容 scripted 夹具，其他非零值保持拒绝。未知结果仍停止批次，resume 只复用原 Job，不重发不明请求。
+
 ## 当前覆盖映射
 
 | 能力 | 论文定位或项目合同 | 当前实现与可观察来源 | 离线证据 | provider-live 状态 |

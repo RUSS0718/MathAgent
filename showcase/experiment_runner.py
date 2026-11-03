@@ -119,7 +119,9 @@ def preflight_manifest(
             ["experiment_live_authorization_required"],
         )
     checks["execution_authorization"] = "passed"
-    if record["model"]["retry"] != 0:
+    if record["model"]["retry"] not in {0, 1} or (
+        record["model"]["retry"] == 1 and record["evidence_kind"] != "provider_live"
+    ):
         checks["retry"] = "failed"
         return _preflight_result(False, actual_sha256, checks, ["experiment_retry_unsupported"])
     checks["retry"] = "passed"

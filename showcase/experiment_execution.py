@@ -47,7 +47,9 @@ def run_batch(
         and record["authorization"]["execution_authorized"] is not True
     ):
         raise ValueError("experiment_live_authorization_required")
-    if record["model"]["retry"] != 0:
+    if record["model"]["retry"] not in {0, 1} or (
+        record["model"]["retry"] == 1 and record["evidence_kind"] != "provider_live"
+    ):
         raise ValueError("experiment_retry_unsupported")
     authorization = context.get("authorization")
     try:
@@ -101,7 +103,9 @@ def resume_batch(
         and manifest["authorization"]["execution_authorized"] is not True
     ):
         raise ValueError("experiment_live_authorization_required")
-    if manifest["model"]["retry"] != 0:
+    if manifest["model"]["retry"] not in {0, 1} or (
+        manifest["model"]["retry"] == 1 and manifest["evidence_kind"] != "provider_live"
+    ):
         raise ValueError("experiment_retry_unsupported")
     if status["manifest_sha256"] != expected_sha256:
         raise ValueError("experiment_manifest_hash_mismatch")
