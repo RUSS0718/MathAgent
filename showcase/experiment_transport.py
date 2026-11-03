@@ -97,7 +97,7 @@ class ExperimentTransportAdapter:
                 raise ValueError
             limitation = (call["reason"], call["capability_limit"])
             if limitation == ("provider_profile_unverified", "verified_stream_profiles_empty"):
-                if VERIFIED_STREAM_PROFILES:
+                if self.profiles:
                     raise ValueError
             elif limitation != (
                 "provider_native_tools_unsupported_with_stream",
