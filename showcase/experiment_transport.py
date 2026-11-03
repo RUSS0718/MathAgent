@@ -58,15 +58,30 @@ class ExperimentTransportAdapter:
             raise ValueError
         seen = set()
         for call in transport["calls"]:
+            keys = set(call) if isinstance(call, dict) else set()
+            singular = keys == {"call_id", "profile_fingerprint"}
+            plural = keys == {"call_id", "profile_fingerprints"}
+            if not singular and not plural:
+                raise ValueError
+            fingerprints = (
+                [call["profile_fingerprint"]]
+                if singular
+                else call["profile_fingerprints"]
+            )
             if (
                 not isinstance(call, dict)
-                or set(call) != {"call_id", "profile_fingerprint"}
                 or not isinstance(call["call_id"], str)
                 or _IDENTIFIER.fullmatch(call["call_id"]) is None
                 or call["call_id"] in seen
-                or not isinstance(call["profile_fingerprint"], str)
-                or _HASH.fullmatch(call["profile_fingerprint"]) is None
-                or call["profile_fingerprint"] not in self.profile_fingerprints
+                or not isinstance(fingerprints, list)
+                or not fingerprints
+                or len(fingerprints) != len(set(fingerprints))
+                or any(
+                    not isinstance(value, str)
+                    or _HASH.fullmatch(value) is None
+                    or value not in self.profile_fingerprints
+                    for value in fingerprints
+                )
             ):
                 raise ValueError
             seen.add(call["call_id"])

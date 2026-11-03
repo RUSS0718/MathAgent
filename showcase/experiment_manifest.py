@@ -170,18 +170,28 @@ def _validate_transport(transport: Any) -> None:
         raise ValueError
     call_ids = []
     for call in calls:
-        keys = (
-            {"call_id", "profile_fingerprint"}
-            if policy == "stream_first"
-            else {"call_id", "transport", "reason", "capability_limit"}
-        )
+        keys = {"call_id", "profile_fingerprint"} if policy == "stream_first" else {
+            "call_id", "transport", "reason", "capability_limit"
+        }
+        if policy == "stream_first" and "profile_fingerprints" in call:
+            keys = {"call_id", "profile_fingerprints"}
         if not isinstance(call, dict) or set(call) != keys:
             raise ValueError
         if not _valid_identifier(call["call_id"]):
             raise ValueError
         if policy == "stream_first":
-            if not _is_hash(call["profile_fingerprint"]):
-                raise ValueError
+            if "profile_fingerprint" in call:
+                if not _is_hash(call["profile_fingerprint"]):
+                    raise ValueError
+            else:
+                values = call["profile_fingerprints"]
+                if (
+                    not isinstance(values, list)
+                    or not values
+                    or len(values) != len(set(values))
+                    or any(not _is_hash(value) for value in values)
+                ):
+                    raise ValueError
         elif (
             call["transport"] != "nonstream"
             or (call["reason"], call["capability_limit"])
