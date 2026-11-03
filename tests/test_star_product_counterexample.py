@@ -98,6 +98,15 @@ class StarCounterexampleTest(StarJobFixture, unittest.TestCase):
             self.assertEqual(200, self.client.get(endpoint).status_code)
         self.assertEqual(before, len(self.outbound))
 
+    def test_not_found_ignores_provider_usage_metadata_in_response(self):
+        job_id, job, events = self.start({**NOT_FOUND, "usage": {"total_tokens": 17}})
+        self.assert_research_executed(job_id, job, events, "NOT_FOUND")
+        review = next(e for e in events if e.get("solver_event_type") == "step_reviewed")
+        self.assertEqual("PARTIAL", review["goal_gate"])
+        self.assertEqual("UNCERTAIN", review["logic_gate"])
+        self.assertFalse(any(e.get("valid") is False for e in events
+                             if e.get("solver_event_type") == "step_reviewed"))
+
     def test_budget_exhaustion_prevents_research_and_never_accepts_missing_proof(self):
         job_id, job, events = self.start(limit=4)
         self.assertEqual("failed", job["status"])

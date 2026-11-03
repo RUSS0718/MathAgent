@@ -229,7 +229,9 @@ def response_schema(request):
             "verdict": {"enum": ["FOUND_COUNTEREXAMPLE", "NOT_FOUND"]},
             "counterexample": TEXT, "assumptions_checked": TEXTS,
             "violated_conclusion": TEXT, "searched_scope": TEXT,
-        })
+            "usage": {},
+        }, ["verdict", "counterexample", "assumptions_checked",
+            "violated_conclusion", "searched_scope"])
     if role in {"meta", "meta_strategist"} and request.get("action") == "delegate_research_task":
         return SCHEMAS["research_delegation"]
     if role in {"meta", "meta_strategist"} and request.get("action") == "preplan_hint":
