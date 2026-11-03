@@ -2,6 +2,8 @@
 
 文档职责：为开发者和 agent 提供版本、开发阶段、能力验收及官方边界的阅读入口。
 
+2026-11-03 的 #124–#128 后续进展见 [provider-live 协议与 readiness 补充记录](evals/provider-live-readiness-followup-20261103.md)。该记录区分角色协议探测、公共 CLI readiness、usage 暂缓验收和未实现的配对路径。
+
 适用范围：理解 v0.1、v0.2 历史版本和当前 v1.1 Solver Harness 规格；执行规则以根 [AGENTS.md](../AGENTS.md) 为准。
 
 ## 先读哪些文档
