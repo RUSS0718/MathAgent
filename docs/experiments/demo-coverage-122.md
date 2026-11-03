@@ -1,5 +1,7 @@
 # Demo 覆盖矩阵与 CLI readiness 合同（#122）
 
+2026-11-03 用户授权补充：新冻结 provider-live manifest 可显式选择 `usage_policy=observe_only`；省略该字段仍按 `required` 执行。只有终态成功、`unresolved_attempts=0`、`unknown_tool_calls=0` 的已知传输允许忽略缺失 usage 的停止条件。缺失 usage 仍为未知，保留最大预留与硬预算；未决请求、未知工具、配置/绑定缺陷仍停止。独立报告继续分别显示 task、transport、coverage 与 usage，不把本选项解释为用量核验通过。该选项不修改官方求解路径、运行时预算或整题审查。
+
 状态：#122 文档基线，日期：2026-11-02；实现进度于 2026-11-03 追加到[阶段验收记录](../evals/showcase-experiment-cli-124-128.md)。本文定义 #124–#128 的产品范围、设计边界和验收合同；矩阵数据保存在同目录的 [机器可读覆盖矩阵](demo-coverage-matrix.json)。合同保持冻结，当前覆盖状态以矩阵和阶段验收记录为准。
 
 ## 目标与边界

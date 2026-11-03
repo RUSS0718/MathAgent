@@ -87,7 +87,7 @@ def is_executable_evidence_kind(value: Any) -> bool:
 
 def validate_manifest(manifest: Any) -> dict[str, Any]:
     """Validate a complete v1 registration without importing runtime adapters."""
-    if not isinstance(manifest, dict) or set(manifest) != _MANIFEST_KEYS:
+    if not isinstance(manifest, dict) or set(manifest) - {"usage_policy"} != _MANIFEST_KEYS:
         raise ValueError("experiment_manifest_invalid")
     try:
         if type(manifest["schema_version"]) is not int or manifest["schema_version"] != 1:
@@ -95,6 +95,11 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
         if not _valid_identifier(manifest["manifest_id"]):
             raise ValueError
         if not _nonempty_string(manifest["evidence_kind"]):
+            raise ValueError
+        usage_policy = manifest.get("usage_policy", "required")
+        if usage_policy not in {"required", "observe_only"} or (
+            usage_policy == "observe_only" and manifest["evidence_kind"] != "provider_live"
+        ):
             raise ValueError
         _validate_source(manifest["source_identity"])
         _validate_model(manifest["model"])

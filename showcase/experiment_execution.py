@@ -353,7 +353,9 @@ def _advance(
             _record_execution_events(status, adapter, job_id)
             return _stop(directory, status, "unknown_job_status")
         _record_execution_events(status, adapter, job_id)
-        stop_reason = _observation_stop_reason(observation, manifest["transport"])
+        stop_reason = _observation_stop_reason(
+            observation, manifest["transport"], usage_policy=manifest.get("usage_policy", "required")
+        )
         if stop_reason:
             status["pending_intent"] = None
             return _stop(directory, status, stop_reason)
@@ -389,7 +391,9 @@ def _advance(
     return status
 
 
-def _observation_stop_reason(observation: Any, expected_transport: dict[str, Any]) -> str | None:
+def _observation_stop_reason(
+    observation: Any, expected_transport: dict[str, Any], *, usage_policy: str = "required"
+) -> str | None:
     if not isinstance(observation, dict):
         return "unknown_job_status"
     if observation.get("ledger_consistent") is not True:
@@ -399,7 +403,14 @@ def _observation_stop_reason(observation: Any, expected_transport: dict[str, Any
     if observation.get("transport") != expected_transport:
         return "unknown_transport"
     if _has_unknown(observation.get("budget")):
-        return "incomplete_or_unresolved_usage"
+        metering_only = (
+            usage_policy == "observe_only" and observation.get("status") == "succeeded"
+            and isinstance(observation.get("budget"), dict)
+            and all(observation["budget"].get(key) == 0
+                    for key in ("unresolved_attempts", "unknown_tool_calls"))
+        )
+        if not metering_only:
+            return "incomplete_or_unresolved_usage"
     if observation.get("status") not in {"succeeded", "running"}:
         return "job_failed_or_canceled"
     return None
