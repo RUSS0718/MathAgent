@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -214,10 +215,18 @@ __all__ = ["EvidencePackExporter", "replay_evidence"]
 
 
 def _attempts(snapshot):
+    """Keep ledger-projected IDs stable; redact IDs from raw adapter records."""
     result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
     records = snapshot.get("request_attempts", result.get("request_attempts", []))
-    return [{**public_attempt(item, run_id=item.get("run_id"), role=item.get("role")),
-             "solver_call_id": public_solver_call_id(
-                 item.get("run_id") or snapshot.get("run_id"), item.get("solver_call_id")
-             )}
-            for item in records if isinstance(item, Mapping)]
+    attempts = []
+    for item in records:
+        if not isinstance(item, Mapping):
+            continue
+        call_id = item.get("solver_call_id")
+        if not isinstance(call_id, str) or re.fullmatch(r"solver_call_[0-9a-f]{32}", call_id) is None:
+            call_id = public_solver_call_id(item.get("run_id") or snapshot.get("run_id"), call_id)
+        attempts.append({
+            **public_attempt(item, run_id=item.get("run_id"), role=item.get("role")),
+            "solver_call_id": call_id,
+        })
+    return attempts

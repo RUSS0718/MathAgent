@@ -256,7 +256,7 @@ def _check_task(
         and report_body["checks"] == verification
         and latest.get("scope") == "whole_solution_llm_review"
         and latest.get("checker_version") == "star-whole-review-v1"
-        and "llm_whole_review_accepted" in findings
+        and any(tag in findings for tag in ("llm_whole_review_accept", "llm_whole_review_accepted"))
         and latest.get("artifact") == artifact
         and source.get("run_id") == record["job_id"]
         and source.get("candidate_version") == len(history)
