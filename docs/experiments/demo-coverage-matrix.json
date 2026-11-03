@@ -16,6 +16,7 @@
   "evidence_status": [
     "COVERED",
     "FAILED",
+    "UNKNOWN",
     "NOT_RUN",
     "NOT_COVERED"
   ],
@@ -272,11 +273,11 @@
         "note": "Historical timeout/unknown is not evidence of safe live resume."
       },
       "cli_provider_live": {
-        "status": "FAILED",
+        "status": "UNKNOWN",
         "refs": [
           "docs/evals/provider-live-readiness-followup-20261103.md"
         ],
-        "note": "The hard Run has an unresolved in-flight reservation after the local process disappeared; no safe recovery or re-dispatch evidence is accepted."
+        "note": "The hard Run ended with an unresolved in-flight reservation after the local process disappeared; safe recovery outcome is unknown, and the request is not replayed."
       }
     },
     {
@@ -308,11 +309,11 @@
         "latest_attempt": "FAILED"
       },
       "cli_provider_live": {
-        "status": "FAILED",
+        "status": "NOT_COVERED",
         "refs": [
           "docs/evals/provider-live-readiness-followup-20261103.md"
         ],
-        "note": "Fast-path completed evidence exists, but the natural multi-step hard Run has no final answer, whole review or S4 binding."
+        "note": "Simple fast-path binding passed, but the natural multi-step hard Run stopped before final delivery; multistep review/binding remains unobserved."
       }
     },
     {
