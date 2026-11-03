@@ -17,6 +17,9 @@ PLAN = {"version": 1, "steps": [{"step_id": "private-optimum", "title": "Optimiz
 STEP = {"argument": "At x=0 the value is zero, so zero is the minimum.",
     "claims": [{"statement": "The minimum of x over real x is 0.", "label": "hard-verify"}],
     "blocked": False}
+FOUR_CLAIM_STEP = {**STEP, "claims": [
+    {"statement": f"Claim {index}", "label": "hard-verify"} for index in range(4)
+]}
 TRIGGER = {"claim_index": 0, "both_directions_proved": False,
     "assumptions": ["x is real"], "approach": "Only test x=0"}
 ACCEPT = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
@@ -31,9 +34,9 @@ PROBLEM = "Find the minimum of x over all real numbers."
 
 
 class StarCounterexampleTest(StarJobFixture, unittest.TestCase):
-    def start(self, result=FOUND, *, limit=5, trigger=TRIGGER, tail=(), **config):
+    def start(self, result=FOUND, *, limit=5, trigger=TRIGGER, report=STEP, tail=(), **config):
         self.open_star(
-            [NEED_PLAN, PLAN, STEP, {**ACCEPT, "answer_claim": trigger}, result, *tail],
+            [NEED_PLAN, PLAN, report, {**ACCEPT, "answer_claim": trigger}, result, *tail],
             SHOWCASE_STAR_FEATURES=FEATURES,
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=limit, max_http_attempts=limit),
             **config,
@@ -117,7 +120,9 @@ class StarCounterexampleTest(StarJobFixture, unittest.TestCase):
         self.assertFalse(any(e.get("solver_event_type") == "counterexample_completed" for e in events))
 
     def test_invalid_claim_target_cannot_schedule_unbound_research_or_accept(self):
-        _, job, events = self.start(trigger={**TRIGGER, "claim_index": 1})
+        _, job, events = self.start(
+            trigger={**TRIGGER, "claim_index": 4}, report=FOUR_CLAIM_STEP,
+        )
         self.assertEqual("failed", job["status"])
         self.assertEqual(4, len(self.outbound))
         review = next(e for e in events if e.get("solver_event_type") == "step_reviewed")
