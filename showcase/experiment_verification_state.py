@@ -13,6 +13,7 @@ _STOP_REASONS = {
     "hard_limit",
     "ledger_or_binding_defect",
     "unknown_transport",
+    "transport_policy_rejected",
     "incomplete_or_unresolved_usage",
     "job_failed_or_canceled",
     "unknown_job_status",

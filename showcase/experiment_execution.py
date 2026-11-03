@@ -398,6 +398,8 @@ def _observation_stop_reason(
         return "unknown_job_status"
     if observation.get("ledger_consistent") is not True:
         return "ledger_or_binding_defect"
+    if observation.get("transport_rejected") is True:
+        return "transport_policy_rejected"
     if observation.get("transport_known") is not True:
         return "unknown_transport"
     if observation.get("transport") != expected_transport:

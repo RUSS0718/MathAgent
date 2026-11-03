@@ -11,6 +11,11 @@ _LEGACY_CAPABILITY_LIMITS = {
     "provider_profile_unverified": "verified_stream_profiles_empty",
     "provider_native_tools_unsupported_with_stream": "native_tools_require_nonstream",
 }
+TRANSPORT_REJECTION_REASONS = frozenset({
+    "provider_profile_unverified", "unknown_endpoint", "stream_adapter_unavailable",
+    "provider_native_tools_unsupported_with_stream", "transport_policy_run_mismatch",
+    "stream_first_policy_required",
+})
 
 
 def project_transport_identity(state: Any, job_id: str) -> dict[str, Any] | None:
@@ -27,6 +32,7 @@ def project_transport_identity(state: Any, job_id: str) -> dict[str, Any] | None
         return None
 
     projected = []
+    rejection = None
     seen_call_ids = set()
     from .run_budget import public_solver_call_id
 
@@ -48,6 +54,19 @@ def project_transport_identity(state: Any, job_id: str) -> dict[str, Any] | None
             return None
         transport = decision.get("transport")
         evidence_kind = decision.get("evidence_kind")
+        if transport == "reject":
+            if (
+                rejection is not None or call.get("status") != "policy_rejected"
+                or decision.get("reason") not in TRANSPORT_REJECTION_REASONS
+                or decision.get("new_run_required") is not True
+            ):
+                return None
+            rejection = {
+                "call_id": opaque_call_id, "role": call_id,
+                "reason": decision["reason"], "new_run_required": True,
+            }
+            seen_call_ids.add(opaque_call_id)
+            continue
         if policy == "stream_first":
             profile = decision.get("profile_fingerprint")
             if (
@@ -85,6 +104,7 @@ def project_transport_identity(state: Any, job_id: str) -> dict[str, Any] | None
         "policy": policy,
         "profile_set_fingerprint": profile_set,
         "calls": sorted(projected, key=lambda item: item["call_id"]),
+        **({"rejection": rejection} if rejection is not None else {}),
     }
 
 
