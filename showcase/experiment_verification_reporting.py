@@ -143,8 +143,11 @@ def _safe_evidence(
         "whole_review": {
             "scope": latest.get("scope") if latest.get("scope") == "whole_solution_llm_review" else "unavailable",
             "checker_version": latest.get("checker_version") if latest.get("checker_version") == "star-whole-review-v1" else "unavailable",
-            "accepted": isinstance(latest.get("findings"), list)
-            and "llm_whole_review_accepted" in latest["findings"],
+            "accepted": latest.get("scope") == "whole_solution_llm_review"
+            and latest.get("checker_version") == "star-whole-review-v1"
+            and isinstance(latest.get("findings"), list)
+            and any(tag in latest["findings"]
+                    for tag in ("llm_whole_review_accept", "llm_whole_review_accepted")),
             "binding": _safe_choice(
                 verification.get("binding"), {"same_artifact", "artifact_changed", "unbound"}, "unknown"
             ),
