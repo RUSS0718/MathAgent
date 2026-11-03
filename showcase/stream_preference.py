@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from .request_transport import INTERN_S2_LIVE_ENDPOINT
@@ -28,8 +28,51 @@ class StreamProfile:
     })
 
 
-# Provider-live profiles are added only after a separately registered probe.
-VERIFIED_STREAM_PROFILES: tuple[StreamProfile, ...] = ()
+_VERIFIED_ENDPOINT = INTERN_S2_LIVE_ENDPOINT
+_VERIFIED_MESSAGE = ("system", ("content", "role"))
+_VERIFIED_USER_MESSAGE = ("user", ("content", "role"))
+_VERIFIED_MESSAGE_SHAPES = (
+    (_VERIFIED_MESSAGE, _VERIFIED_USER_MESSAGE),
+    (_VERIFIED_MESSAGE, _VERIFIED_MESSAGE, _VERIFIED_MESSAGE, _VERIFIED_MESSAGE,
+     _VERIFIED_USER_MESSAGE),
+)
+_SHAPE_2_SCHEMA_FINGERPRINTS = (
+    "89fbfab654098a2025a0b69375f8dc8a7d8000391507639243712ca85a3a1473",
+    "54ac692b082da9544bf9ee6ebc6c71cbf38396b8863aeb2e9d932de7f2cb6c10",
+    "edaea8b9ad088955e19001ef3b3bc6479028b604003ddf6dee7feeef56507aec",
+)
+_SHAPE_5_SCHEMA_FINGERPRINTS = (
+    *_SHAPE_2_SCHEMA_FINGERPRINTS,
+    "47d696ba141a0df8916096620b35e322e402c59c41a80fca7b268a4c2ee2efee",
+    "8836d710fac9532e05ef506e19a3da7fee87bb4a96b588396dd9842e83d986ef",
+    "f45df661a9c9ae45dee4ed363ed244c934a60b951d5cd4eeb2464b3fd2606eb7",
+    "db00d390d3dd387091b0ead73c45125c45094bf98ea7f04df5dce1257dd238ee",
+    "818c4d7d0098f6117fa023907d53dc161f8d45bfbd847285ff07d0d890877b87",
+    "e5b9cd4d259add409204822298e4ed299c8eb2a02f27a359b688058b90721a4f",
+)
+
+# These twelve immutable entries cover nine schemas across only the probe-tested
+# message shapes. Any other endpoint/configuration/schema remains unverified.
+VERIFIED_STREAM_PROFILES: tuple[StreamProfile, ...] = tuple(
+    StreamProfile(
+        endpoint=_VERIFIED_ENDPOINT,
+        model="intern-s2",
+        temperature=0.2,
+        max_tokens=32_768,
+        thinking_mode=False,
+        messages_schema=messages_schema,
+        evidence_kind="provider_live",
+        status="provider_live_verified",
+        schema_fingerprint=schema_fingerprint,
+    )
+    for schema_fingerprint, message_shapes in (
+        *((fingerprint, (_VERIFIED_MESSAGE_SHAPES[0],))
+          for fingerprint in _SHAPE_2_SCHEMA_FINGERPRINTS),
+        *((fingerprint, (_VERIFIED_MESSAGE_SHAPES[1],))
+          for fingerprint in _SHAPE_5_SCHEMA_FINGERPRINTS),
+    )
+    for messages_schema in message_shapes
+)
 
 
 def _message_shape(messages):
