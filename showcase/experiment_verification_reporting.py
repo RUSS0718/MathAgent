@@ -362,7 +362,6 @@ def export_experiment_report(
         or set(report) != expected_fields
         or report.get("run_id") != run_id
         or hashlib.sha256(content).hexdigest() != expected
-        or report.get("status") != _overall_status(report.get("checks", {}))
     ):
         raise ValueError("experiment_verification_invalid")
     try:
@@ -382,6 +381,10 @@ def export_experiment_report(
         or report.get("evidence_kind") != manifest["evidence_kind"]
         or report.get("source_identity") != manifest["source_identity"]
         or report.get("model_conditions") != manifest["model"]
+        or report.get("status")
+        != _overall_status(
+            report.get("checks", {}), usage_policy=manifest.get("usage_policy", "required")
+        )
         or report.get("transport_policy") != manifest["transport"]
         or report.get("sample_ids") != [sample["id"] for sample in manifest["samples"]]
         or report.get("samples") != expected_samples

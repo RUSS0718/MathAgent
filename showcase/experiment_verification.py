@@ -171,7 +171,7 @@ def verify_experiment_run(
         else None,
         "execution_mode": _execution_mode(archived_evidence),
         "checks": checks,
-        "status": _overall_status(checks),
+        "status": _overall_status(checks, usage_policy=manifest.get("usage_policy", "required")),
     }
     if archive_matches:
         if evidence_complete:

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from showcase.cli import build_parser, run
 from showcase.experiment_manifest import canonical_json, manifest_digest
+from showcase.experiment_verification_state import _overall_status
 from showcase.run_budget import public_solver_call_id
 
 
@@ -379,6 +380,83 @@ def verify_args(root: Path, output_root: Path):
 
 
 class ExperimentVerifyCliTest(unittest.TestCase):
+    def test_overall_status_keeps_usage_required_by_default(self):
+        checks = {
+            "transport": {"status": "PASS"},
+            "task": {"status": "PASS"},
+            "usage": {"status": "UNKNOWN"},
+            "coverage": {"status": "PASS"},
+        }
+
+        self.assertEqual("UNKNOWN", _overall_status(checks))
+        self.assertEqual("PASS", _overall_status(checks, usage_policy="observe_only"))
+        checks["usage"]["status"] = "FAIL"
+        self.assertEqual("FAIL", _overall_status(checks, usage_policy="observe_only"))
+
+    def test_verify_observe_only_ignores_usage_unknown_for_overall_status(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, _, _, manifest, responses = prepare_run(root)
+            manifest["evidence_kind"] = "provider_live"
+            manifest["usage_policy"] = "observe_only"
+            attempt = responses["/api/agent/jobs/job-1"]["result"]["request_attempts"][0]
+            attempt["usage"] = None
+            budget = responses["/api/agent/jobs/job-1"]["result"]["budget"]
+            budget["provider_known"] = {
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "total_tokens": None,
+            }
+            budget["provider_unknown_fields"] = {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 1,
+            }
+            budget["unknown_attempts"] = 1
+            responses["/api/agent/jobs/job-1/report"]["report"]["request_attempts"] = [attempt]
+            responses["/api/runs/job-1/evidence"]["request_attempts"] = [attempt]
+            digest = manifest_digest(manifest)
+            run_dir = output_root / "batch-1"
+            (run_dir / "manifest.json").write_bytes(canonical_json(manifest))
+            (run_dir / "manifest.sha256").write_text(digest + "\n", encoding="ascii")
+            status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+            status["manifest_sha256"] = digest
+            (run_dir / "status.json").write_text(json.dumps(status), encoding="utf-8")
+            client = ReadOnlyShowcaseClient(responses)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": client},
+                )
+
+            report = json.loads(output.getvalue())
+            self.assertEqual(0, result)
+            self.assertEqual("PASS", report["status"])
+            self.assertEqual("UNKNOWN", report["checks"]["usage"]["status"])
+
+            export_path = root / "observe-only-report.json"
+            export_args = build_parser().parse_args(
+                [
+                    "--base-url",
+                    "http://127.0.0.1:8090",
+                    "--cookie-file",
+                    str(root / "cookies.txt"),
+                    "experiment",
+                    "export",
+                    "--run-id",
+                    "batch-1",
+                    "--output-root",
+                    str(output_root),
+                    "--output",
+                    str(export_path),
+                ]
+            )
+            with contextlib.redirect_stdout(io.StringIO()):
+                export_result = run(export_args, experiment_context={})
+            self.assertEqual(0, export_result)
+            self.assertEqual("PASS", json.loads(export_path.read_text(encoding="utf-8"))["status"])
+
     def test_verify_accepts_legacy_transport_without_evidence_kind(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

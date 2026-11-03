@@ -211,11 +211,20 @@ def _check(status: str, reason: str) -> dict[str, Any]:
     return {"status": status, "reason": reason}
 
 
-def _overall_status(checks: Any) -> str:
-    """Derive the report result only from the four required check states."""
+def _overall_status(checks: Any, *, usage_policy: str = "required") -> str:
+    """Derive the report result, optionally excluding observed-only usage unknowns."""
     if not isinstance(checks, dict) or set(checks) != set(_CHECKS):
         return "UNKNOWN"
-    statuses = [item.get("status") if isinstance(item, dict) else None for item in checks.values()]
+    statuses = [
+        item.get("status") if isinstance(item, dict) else None
+        for name, item in checks.items()
+        if not (
+            name == "usage"
+            and usage_policy == "observe_only"
+            and isinstance(item, dict)
+            and item.get("status") == "UNKNOWN"
+        )
+    ]
     if any(not isinstance(value, str) or value not in _CHECK_STATUSES for value in statuses):
         return "UNKNOWN"
     for candidate in ("FAIL", "UNKNOWN", "NOT_RUN"):
