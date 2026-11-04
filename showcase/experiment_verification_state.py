@@ -6,7 +6,8 @@ import math
 import re
 from typing import Any
 
-_CHECKS = ("transport", "task", "usage", "coverage")
+_LEGACY_CHECKS = ("transport", "task", "usage", "coverage")
+_CHECKS = (*_LEGACY_CHECKS, "process_path")
 _CHECK_STATUSES = {"PASS", "FAIL", "UNKNOWN", "NOT_RUN"}
 _STOP_REASONS = {
     "source_or_config_change",
@@ -146,6 +147,119 @@ def _coverage_check(
     return _check("NOT_RUN", "required_samples_not_completed")
 
 
+def _process_path_check(
+    manifest: dict[str, Any], outcomes: list[dict[str, dict[str, Any]]]
+) -> dict[str, Any]:
+    """Require at least one audited natural planned trace when multistep is registered."""
+    indices = [
+        index
+        for index, sample in enumerate(manifest["samples"])
+        if sample.get("type") == "multistep"
+    ]
+    if not indices:
+        return _check("PASS", "natural_multistep_not_required")
+    checks = [
+        outcomes[index].get("process_path", {})
+        for index in indices
+        if index < len(outcomes) and isinstance(outcomes[index], dict)
+    ]
+    observed = [item.get("status") for item in checks]
+    if "FAIL" in observed:
+        return _check("FAIL", "natural_multistep_evidence_inconsistent")
+    if "PASS" in observed:
+        return _check("PASS", "natural_multistep_path_observed")
+    if "UNKNOWN" in observed:
+        return _check("UNKNOWN", "natural_multistep_evidence_unavailable")
+    if any(
+        item.get("reason") in {
+            "natural_multistep_trace_incomplete",
+            "natural_multistep_delivery_unverified",
+        }
+        for item in checks
+    ):
+        return _check("NOT_RUN", "natural_multistep_path_incomplete")
+    if any(item.get("reason") == "provider_live_trace_required" for item in checks):
+        return _check("NOT_RUN", "provider_live_trace_required")
+    return _check("NOT_RUN", "natural_multistep_path_not_observed")
+
+
+def _process_coverage_summary(
+    manifest: dict[str, Any],
+    outcomes: list[dict[str, dict[str, Any]]],
+    evidence: list[dict[str, Any]],
+) -> dict[str, int]:
+    """Report raw registered, audited, and path-observed counts without a rate claim."""
+    indices = [
+        index
+        for index, sample in enumerate(manifest["samples"])
+        if sample.get("type") == "multistep"
+    ]
+    evidence_by_id = {
+        item.get("sample_id"): item
+        for item in evidence
+        if isinstance(item, dict) and isinstance(item.get("sample_id"), str)
+    }
+    statuses = []
+    audited = 0
+    completed_without_plan = 0
+    planned = 0
+    incomplete = 0
+    not_provider_live = 0
+    not_observed = 0
+    not_run = 0
+    for index in indices:
+        outcome = outcomes[index] if index < len(outcomes) else {}
+        if outcome.get("coverage", {}).get("status") == "PASS":
+            audited += 1
+        process_status = outcome.get("process_path", {}).get("status", "NOT_RUN")
+        process_reason = outcome.get("process_path", {}).get("reason")
+        statuses.append(process_status)
+        summary = evidence_by_id.get(manifest["samples"][index]["id"], {}).get(
+            "process_path", {}
+        )
+        plan_version = summary.get("plan_version") if isinstance(summary, dict) else None
+        if type(plan_version) is int and plan_version > 0:
+            planned += 1
+        if process_status != "NOT_RUN":
+            continue
+        if outcome.get("coverage", {}).get("status") != "PASS":
+            not_run += 1
+            continue
+        if process_reason == "natural_multistep_path_not_observed":
+            if outcome.get("task", {}).get("status") == "PASS":
+                completed_without_plan += 1
+            not_observed += 1
+        elif type(plan_version) is int and plan_version == 0:
+            if outcome.get("task", {}).get("status") == "PASS":
+                completed_without_plan += 1
+            not_observed += 1
+        elif type(plan_version) is int and plan_version > 0:
+            if process_reason == "provider_live_trace_required":
+                not_provider_live += 1
+            elif process_reason in {
+                "natural_multistep_trace_incomplete",
+                "natural_multistep_delivery_unverified",
+            }:
+                incomplete += 1
+            else:
+                not_run += 1
+        else:
+            not_run += 1
+    return {
+        "registered": len(indices),
+        "audited": audited,
+        "completed_without_plan": completed_without_plan,
+        "planned": planned,
+        "path_completed": statuses.count("PASS"),
+        "not_observed": not_observed,
+        "incomplete": incomplete,
+        "not_provider_live": not_provider_live,
+        "unknown": statuses.count("UNKNOWN"),
+        "not_run": not_run,
+        "failed": statuses.count("FAIL"),
+    }
+
+
 def _aggregate_usage_mismatch(
     status: dict[str, Any],
     samples: list[dict[str, Any]],
@@ -211,9 +325,20 @@ def _check(status: str, reason: str) -> dict[str, Any]:
     return {"status": status, "reason": reason}
 
 
-def _overall_status(checks: Any, *, usage_policy: str = "required") -> str:
+def _overall_status(
+    checks: Any,
+    *,
+    usage_policy: str = "required",
+    check_names: tuple[str, ...] | None = None,
+) -> str:
     """Derive the report result, optionally excluding observed-only usage unknowns."""
-    if not isinstance(checks, dict) or set(checks) != set(_CHECKS):
+    if not isinstance(checks, dict):
+        return "UNKNOWN"
+    if check_names is not None:
+        valid_shape = set(checks) == set(check_names)
+    else:
+        valid_shape = set(checks) in (set(_LEGACY_CHECKS), set(_CHECKS))
+    if not valid_shape:
         return "UNKNOWN"
     statuses = [
         item.get("status") if isinstance(item, dict) else None

@@ -12,7 +12,7 @@ from typing import Any
 
 from .experiment_execution_state import load_registered_manifest
 from .experiment_manifest import canonical_json, manifest_digest
-from .experiment_verification_state import _STOP_REASONS, _finite_number, _overall_status
+from .experiment_verification_state import _CHECKS, _STOP_REASONS, _finite_number, _overall_status
 
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}\Z")
 _PUBLIC_CALL_ID = re.compile(r"solver_call_[0-9a-f]{32}\Z")
@@ -381,11 +381,43 @@ def export_experiment_report(
         "schema_version", "run_id", "manifest_id", "manifest_sha256", "evidence_kind",
         "source_identity", "model_conditions", "applied_config", "transport_policy",
         "sample_ids", "samples", "evidence_sha256", "budget", "stop_reason",
-        "execution_mode", "checks", "status",
+        "execution_mode", "checks", "process_coverage", "status",
     }
+    legacy_fields = expected_fields - {"process_coverage"}
+    legacy_checks = ("transport", "task", "usage", "coverage")
+    is_legacy = isinstance(report, dict) and report.get("schema_version") == 1 and set(report) == legacy_fields
+    is_current = isinstance(report, dict) and report.get("schema_version") == 2 and set(report) == expected_fields
+    expected_checks = legacy_checks if is_legacy else _CHECKS
+    process_coverage = report.get("process_coverage") if isinstance(report, dict) else None
+    process_coverage_invalid = not is_legacy and (
+        not isinstance(process_coverage, dict)
+        or set(process_coverage)
+        != {
+            "registered", "audited", "completed_without_plan", "planned", "path_completed",
+            "not_observed", "incomplete", "not_provider_live", "unknown", "not_run", "failed",
+        }
+        or any(
+            type(value) is not int or value < 0
+            for value in process_coverage.values()
+        )
+        or process_coverage.get("audited", 0) > process_coverage.get("registered", 0)
+        or process_coverage.get("path_completed", 0) > process_coverage.get("planned", 0)
+        or process_coverage.get("planned", 0) > process_coverage.get("registered", 0)
+        or process_coverage.get("planned", 0) > process_coverage.get("audited", 0)
+        or process_coverage.get("not_provider_live", 0) > process_coverage.get("planned", 0)
+        or process_coverage.get("incomplete", 0) > process_coverage.get("planned", 0)
+        or sum(
+            process_coverage.get(key, 0)
+            for key in (
+                "path_completed", "not_observed", "incomplete", "not_provider_live", "unknown", "not_run", "failed"
+            )
+        ) != process_coverage.get("registered", 0)
+        or process_coverage.get("completed_without_plan", 0)
+        > process_coverage.get("not_observed", 0)
+    )
     if (
         not isinstance(report, dict)
-        or set(report) != expected_fields
+        or not (is_legacy or is_current)
         or report.get("run_id") != run_id
         or hashlib.sha256(content).hexdigest() != expected
     ):
@@ -399,9 +431,18 @@ def export_experiment_report(
         {key: sample[key] for key in ("id", "type", "input_sha256", "text_sha256")}
         for sample in manifest["samples"]
     ]
+    expected_multistep_count = sum(
+        sample["type"] == "multistep" for sample in manifest["samples"]
+    )
+    registered_process_count = (
+        process_coverage.get("registered") if isinstance(process_coverage, dict) else None
+    )
+    legacy_multistep_report = is_legacy and any(
+        sample["type"] == "multistep" for sample in manifest["samples"]
+    )
     checks = report.get("checks")
     if (
-        report.get("schema_version") != 1
+        report.get("schema_version") != (1 if is_legacy else 2)
         or report.get("manifest_id") != manifest["manifest_id"]
         or report.get("manifest_sha256") != digest
         or report.get("evidence_kind") != manifest["evidence_kind"]
@@ -409,11 +450,15 @@ def export_experiment_report(
         or report.get("model_conditions") != manifest["model"]
         or report.get("status")
         != _overall_status(
-            report.get("checks", {}), usage_policy=manifest.get("usage_policy", "required")
+            report.get("checks", {}),
+            usage_policy=manifest.get("usage_policy", "required"),
+            check_names=expected_checks,
         )
         or report.get("transport_policy") != manifest["transport"]
         or report.get("sample_ids") != [sample["id"] for sample in manifest["samples"]]
         or report.get("samples") != expected_samples
+        or (not is_legacy and registered_process_count != expected_multistep_count)
+        or legacy_multistep_report
         or not isinstance(report.get("evidence_sha256"), list)
         or any(
             not isinstance(value, str) or _SHA256.fullmatch(value) is None
@@ -436,7 +481,7 @@ def export_experiment_report(
         or _safe_choice(report.get("execution_mode"), _EXECUTION_MODES, "") == ""
         or (report.get("applied_config") is not None and report["applied_config"] != manifest["model"])
         or not isinstance(checks, dict)
-        or set(checks) != {"transport", "task", "usage", "coverage"}
+        or set(checks) != set(expected_checks)
         or any(
             not isinstance(value, dict)
             or set(value) != {"status", "reason"}
@@ -446,6 +491,7 @@ def export_experiment_report(
             or re.fullmatch(r"[a-z0-9_]{1,80}", value["reason"]) is None
             for value in checks.values()
         )
+        or process_coverage_invalid
     ):
         raise ValueError("experiment_verification_invalid")
     try:

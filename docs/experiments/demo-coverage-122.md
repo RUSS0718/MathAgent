@@ -105,6 +105,8 @@ verify 独立读取持久 Job/Run、attempt、usage、reservation、审查与文
 | #127 | 依赖 #124、#126。通过同一登记和 CLI 验收简单题、自然多步路径和适用故障。 | 简单题验证适用快路径、完整生成、整题审查与同文本绑定。至少一条自然多步真实 trace 覆盖规划、步骤、适用工具回执、最终生成、审查与绑定。不得强迫机制触发；没有自然触发就保留 NOT_RUN/NOT_COVERED 并判该项未通过。故障注入覆盖适用断流、timeout、usage 缺失或进程中断。工程结论限于可达性和稳定性。 |
 | #128 | 依赖 #127。提供登记化的单因素 paired execution。 | 一对只改一个因素，baseline/variant 独立身份，核对实际 applied config 和执行顺序。题目、模型、thinking、传输、预算和安全合同相同。独立 verify 生成配对结论；未知、失败、硬限或登记不一致时不宣称完成。保持所有预登记样本及未触发项。 |
 
+`process_coverage` 只统计冻结 manifest 中 `type=multistep` 的样本：`registered` 是固定分母，`audited` 表示样本证据已独立对账，`planned` 表示观察到正数计划版本，`path_completed` 只计真实 provider-live、传输已核验，且步骤、最终生成、整题审查和文本绑定均通过的路径。`not_observed`、`incomplete`、`not_provider_live`、`unknown`、`not_run`、`failed` 是互斥结果，合计等于 `registered`；`completed_without_plan` 是 `not_observed` 的子集。它们是路径可达性计数，不是正确率或组件效果量；单独的简单题 Run 即使通过，也不代表 #127 readiness 通过。
+
 依赖图：#124 还等待独立的 #123；#125 等待 #124；#126 等待 #125；#127 等待 #124 与 #126；#128 等待 #127。#122 文档完成只解除自身依赖，不代表其余票已交付。
 
 ## readiness 出口条件
