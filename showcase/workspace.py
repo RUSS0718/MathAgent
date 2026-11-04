@@ -216,6 +216,7 @@ class WorkspaceStore:
         verification_mode: str = "auto",
         input_user_file_id: str | None = None,
         solver_identity: Mapping[str, Any] | None = None,
+        experiment_binding: Mapping[str, Any] | None = None,
         solver_hint: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Durably accept one Job and its user message before returning."""
@@ -246,7 +247,7 @@ class WorkspaceStore:
                 self._connection.execute(
                     "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,input_user_file_id,verification_mode,idempotency_key,request_digest,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (job_id, session_id, user_id, problem, "queued", _json({"execution_mode": execution_mode, **(solver_identity or {})}), None, input_user_file_id, verification_mode, idempotency_key, request_digest, now, now),
+                    (job_id, session_id, user_id, problem, "queued", _json({"execution_mode": execution_mode, **(solver_identity or {}), **({"experiment_pair": dict(experiment_binding)} if experiment_binding else {})}), None, input_user_file_id, verification_mode, idempotency_key, request_digest, now, now),
                 )
                 self._connection.execute(
                     "INSERT INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
@@ -321,7 +322,10 @@ class WorkspaceStore:
                     self._connection.rollback()
                     return
                 now = _utc_now()
-                result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response), "execution_mode": (_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable")}
+                prior = _loads(row["result_json"]) if row["result_json"] else {}
+                result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response), "execution_mode": prior.get("execution_mode", "unavailable")}
+                if isinstance(prior.get("experiment_pair"), dict):
+                    result["experiment_pair"] = prior["experiment_pair"]
                 result["budget"] = freeze_budget(self._connection, job_id)
                 self._connection.execute(
                     "UPDATE workspace_jobs SET status='succeeded',result_json=?,updated_at=? WHERE job_id=?",
@@ -530,6 +534,9 @@ class WorkspaceStore:
                 if row is None or row["status"] in TERMINAL_JOB_STATUSES:
                     self._connection.rollback()
                     return
+                prior = _loads(row["result_json"]) if row["result_json"] else {}
+                if isinstance(prior.get("experiment_pair"), dict):
+                    result["experiment_pair"] = prior["experiment_pair"]
                 now = _utc_now()
                 result["budget"] = freeze_budget(self._connection, job_id) or result.get("budget")
                 self._connection.execute(
@@ -821,6 +828,7 @@ class WorkspaceService:
         solver_mode: str = "legacy",
         solver_options: Any = None,
         solver_hint: Any = None,
+        experiment_binding: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         from .star_product_modes import validate_mode
 
@@ -847,6 +855,7 @@ class WorkspaceService:
             solver_hint=solver_hint,
             budget_limits=budget_limits,
             deadline_at=deadline_at,
+            experiment_binding=experiment_binding,
         )
         payload, existing = self.store.create_job(
             user_id=user_id,
@@ -856,6 +865,7 @@ class WorkspaceService:
             request_digest=digest,
             execution_mode=solver_mode if solver_mode in STAR_MODES else getattr(selected, "execution_mode", self.execution_mode),
             solver_identity={**identity, "evidence_kind": getattr(selected, "evidence_kind", self.execution_mode)},
+            experiment_binding=experiment_binding,
             solver_hint=solver_hint,
             verification_mode=verification_mode,
             input_user_file_id=input_user_file_id,
@@ -1084,6 +1094,7 @@ def workspace_job_request_digest(
     solver_hint: str | None = None,
     budget_limits: RunBudgetLimits | None = None,
     deadline_at: float | None = None,
+    experiment_binding: Mapping[str, Any] | None = None,
 ) -> str:
     """Fingerprint the exact public Job request, including any frozen budget."""
     request_parts = (session_id, message, web_search_enabled, input_user_file_id, verification_mode)
@@ -1108,6 +1119,8 @@ def workspace_job_request_digest(
                 "deadline_at": deadline_at,
             },
         )
+    if experiment_binding is not None:
+        digest = _request_digest(digest, {"experiment_pair": dict(experiment_binding)})
     return digest
 
 

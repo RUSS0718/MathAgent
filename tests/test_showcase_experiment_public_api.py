@@ -12,6 +12,8 @@ from showcase.experiment_job_adapter import PublicExperimentJobAdapter
 from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
 from showcase.workspace import workspace_job_request_digest
+from showcase.experiment_pair import pair_manifest_digest
+from tests.test_showcase_experiment_pair_cli import _pair
 
 
 class ExperimentPublicJobApiTest(unittest.TestCase):
@@ -57,6 +59,128 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
             app.extensions["showcase_workspace_service"].close()
             app.extensions["showcase_run_service"].close()
             app.extensions["loopback_store"].close()
+
+    def test_experiment_pair_job_route_accepts_only_the_registered_arm_and_is_opt_in(self):
+        readiness_report = {"schema_version": 1, "issue_number": 127, "status": "PASS"}
+        pair = _pair("pair-api", readiness_report)
+        for name in ("baseline", "variant"):
+            pair[name]["manifest"]["model"]["solver_mode"] = "star_limited"
+        app = create_app(
+            {
+                "TESTING": True,
+                "SHOWCASE_DATA_DIR": str(Path(self.temporary.name) / "pair-api"),
+                "SHOWCASE_WORKER_ENABLED": False,
+                "SHOWCASE_STAR_ENABLED": True,
+                "SHOWCASE_EXPERIMENT_PAIR_ENABLED": True,
+                "SHOWCASE_EXPERIMENT_READINESS_VERIFIER": lambda _report: {"status": "PASS"},
+            }
+        )
+        try:
+            client = app.test_client()
+            csrf = client.get("/api/check_auth").get_json()["csrf_token"]
+            session = client.post(
+                "/api/new_chat", headers={"X-CSRF-Token": csrf}
+            ).get_json()["new_session_id"]
+            headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
+            response = client.post(
+                f"/api/experiments/pairs/{pair['pair_id']}/arms/baseline/jobs",
+                json={
+                    "pair_manifest": pair,
+                    "pair_sha256": pair_manifest_digest(pair),
+                    "readiness_report": readiness_report,
+                    "sample_id": "sample-01",
+                    "sample_text_sha256": pair["baseline"]["manifest"]["samples"][0]["text_sha256"],
+                    "session_id": session,
+                    "message": "x+1=2\n",
+                    "budget_limits": pair["baseline"]["manifest"]["run_limits"],
+                    "deadline_at": time.time() + 60,
+                },
+                headers=headers,
+            )
+            self.assertEqual(202, response.status_code, response.get_json())
+            job_id = response.get_json()["job_id"]
+            job = client.get(f"/api/agent/jobs/{job_id}").get_json()
+            binding = job["result"]["experiment_pair"]
+            self.assertEqual(pair["pair_id"], binding["pair_id"])
+            self.assertEqual(pair_manifest_digest(pair), binding["pair_sha256"])
+            self.assertEqual("baseline", binding["arm"])
+            self.assertEqual(pair["baseline"]["features"], binding["features"])
+
+            variant_session = client.post(
+                "/api/new_chat", headers={"X-CSRF-Token": csrf}
+            ).get_json()["new_session_id"]
+            variant_response = client.post(
+                f"/api/experiments/pairs/{pair['pair_id']}/arms/variant/jobs",
+                json={
+                    "pair_manifest": pair,
+                    "pair_sha256": pair_manifest_digest(pair),
+                    "readiness_report": readiness_report,
+                    "sample_id": "sample-01",
+                    "sample_text_sha256": pair["variant"]["manifest"]["samples"][0]["text_sha256"],
+                    "session_id": variant_session,
+                    "message": "x+1=2\n",
+                    "budget_limits": pair["variant"]["manifest"]["run_limits"],
+                    "deadline_at": time.time() + 60,
+                },
+                headers={"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())},
+            )
+            self.assertEqual(202, variant_response.status_code, variant_response.get_json())
+            variant = client.get(
+                f"/api/agent/jobs/{variant_response.get_json()['job_id']}"
+            ).get_json()["result"]["experiment_pair"]
+            self.assertNotEqual(job_id, variant_response.get_json()["job_id"])
+            self.assertEqual("variant", variant["arm"])
+            self.assertEqual(pair["variant"]["features"], variant["features"])
+            self.assertEqual(
+                {"skills"},
+                {
+                    key
+                    for key in pair["baseline"]["features"]
+                    if pair["baseline"]["features"][key] != variant["features"][key]
+                },
+            )
+
+            invalid = client.post(
+                f"/api/experiments/pairs/{pair['pair_id']}/arms/other/jobs",
+                json={
+                    "pair_manifest": pair,
+                    "pair_sha256": pair_manifest_digest(pair),
+                    "readiness_report": readiness_report,
+                    "sample_id": "sample-01",
+                    "sample_text_sha256": pair["baseline"]["manifest"]["samples"][0]["text_sha256"],
+                    "session_id": session,
+                    "message": "x+1=2",
+                    "budget_limits": pair["baseline"]["manifest"]["run_limits"],
+                    "deadline_at": time.time() + 60,
+                },
+                headers={"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())},
+            )
+            self.assertEqual(400, invalid.status_code)
+        finally:
+            app.extensions["showcase_workspace_service"].close()
+            app.extensions["showcase_run_service"].close()
+            app.extensions["loopback_store"].close()
+
+    def test_experiment_pair_job_route_is_disabled_by_default(self):
+        response = self.client.post(
+            "/api/experiments/pairs/pair/arms/baseline/jobs",
+            json={},
+            headers={"X-CSRF-Token": self.csrf, "Idempotency-Key": str(uuid.uuid4())},
+        )
+        self.assertEqual(404, response.status_code)
+
+    def test_regular_job_route_rejects_caller_selected_solver_components(self):
+        response = self.client.post(
+            "/api/agent/jobs",
+            json={
+                "session_id": self.session_id,
+                "message": "x+1=2",
+                "solver_options": {"features": {"best_effort": True}},
+            },
+            headers={"X-CSRF-Token": self.csrf, "Idempotency-Key": str(uuid.uuid4())},
+        )
+        self.assertEqual(400, response.status_code)
+        self.assertEqual("solver_options_unsupported", response.get_json()["code"])
 
     def test_capabilities_exposes_credential_free_applied_model_config(self):
         """Contract documented in docs/experiments/showcase-capabilities-applied-model-config.md:

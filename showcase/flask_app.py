@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import time
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
@@ -72,6 +73,7 @@ def create_app(
         SHOWCASE_WORKER_ENABLED=True,
         SHOWCASE_WAITING_INPUT_MARKER="",
         SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED=False,
+        SHOWCASE_EXPERIMENT_PAIR_ENABLED=False,
     )
     if config:
         app.config.from_mapping(dict(config))
@@ -398,6 +400,90 @@ def create_app(
             return _workspace_error(exc)
         status = 200 if existing else 202
         return jsonify({"success": True, "job_id": job["job_id"], "status": job["status"], "existing": existing}), status
+
+    if app.config.get("SHOWCASE_EXPERIMENT_PAIR_ENABLED") is True:
+        @app.post("/api/experiments/pairs/<pair_id>/arms/<arm>/jobs")
+        def create_experiment_pair_job(pair_id: str, arm: str) -> tuple[Response, int]:
+            session = _require_auth(g.auth_session)
+            payload = _request_object()
+            if isinstance(payload, tuple):
+                return payload
+            try:
+                from .experiment_pair import pair_manifest_digest, validate_pair_manifest
+                from .experiment_manifest import canonical_json
+
+                pair = validate_pair_manifest(payload.get("pair_manifest"))
+                if pair["pair_id"] != pair_id:
+                    raise ValueError("experiment_pair_id_mismatch")
+                pair_sha256 = payload.get("pair_sha256")
+                if pair_manifest_digest(pair) != pair_sha256:
+                    raise ValueError("experiment_pair_manifest_hash_mismatch")
+                if arm not in {"baseline", "variant"}:
+                    raise ValueError("experiment_pair_arm_invalid")
+                report = payload.get("readiness_report")
+                report_hash = hashlib.sha256(canonical_json(report)).hexdigest()
+                if (
+                    report_hash != pair["readiness_report_sha256"]
+                    or not isinstance(report, dict)
+                    or report.get("status") != "PASS"
+                ):
+                    raise ValueError("experiment_readiness_not_passed")
+                readiness_verifier = app.config.get("SHOWCASE_EXPERIMENT_READINESS_VERIFIER")
+                if not callable(readiness_verifier) or readiness_verifier(report).get("status") != "PASS":
+                    raise ValueError("experiment_readiness_not_verified")
+
+                arm_registration = pair[arm]
+                manifest = arm_registration["manifest"]
+                sample_id = payload.get("sample_id")
+                samples = [sample for sample in manifest["samples"] if sample["id"] == sample_id]
+                if len(samples) != 1:
+                    raise ValueError("experiment_sample_invalid")
+                message = payload.get("message")
+                if not isinstance(message, str) or not message.strip():
+                    raise ValueError("message_must_be_non_empty")
+                if hashlib.sha256(message.encode("utf-8")).hexdigest() != samples[0]["text_sha256"]:
+                    raise ValueError("experiment_sample_hash_mismatch")
+
+                raw_limits = payload.get("budget_limits")
+                if raw_limits != manifest["run_limits"]:
+                    raise ValueError("run_budget_invalid")
+                budget_limits = RunBudgetLimits(**raw_limits)
+                deadline_at = payload.get("deadline_at")
+                if (
+                    type(deadline_at) not in {int, float}
+                    or not math.isfinite(deadline_at)
+                    or deadline_at <= 0
+                    or deadline_at > time.time() + budget_limits.max_runtime_seconds
+                ):
+                    raise ValueError("run_budget_deadline_invalid")
+
+                binding = {
+                    "pair_id": pair["pair_id"],
+                    "pair_sha256": pair_sha256,
+                    "arm": arm,
+                    "arm_run_id": arm_registration["run_id"],
+                    "factor": pair["factor"],
+                    "features": dict(arm_registration["features"]),
+                    "applied_config_status": "pre_execution",
+                    "applied_component_config": None,
+                }
+                job, existing = workspace_service.create_job(
+                    user_id=session.user_id,
+                    session_id=payload.get("session_id"),
+                    problem=message.strip(),
+                    idempotency_key=request.headers.get("Idempotency-Key", ""),
+                    verification_mode=manifest["model"]["verification_mode"],
+                    budget_limits=budget_limits,
+                    deadline_at=deadline_at,
+                    solver_mode=manifest["model"]["solver_mode"],
+                    experiment_binding=binding,
+                )
+            except WorkspaceError as exc:
+                return _workspace_error(exc)
+            except Exception:
+                return _json_error("experiment_pair_request_invalid", 400)
+            status = 200 if existing else 202
+            return jsonify({"success": True, "job_id": job["job_id"], "status": job["status"], "existing": existing}), status
 
     if app.config.get("SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED") is True:
         @app.get("/api/agent/jobs/by-idempotency")
