@@ -34,8 +34,10 @@ PROBLEM = "Find the minimum of x over all real numbers."
 
 
 class StarCounterexampleTest(StarJobFixture, unittest.TestCase):
-    def start(self, result=FOUND, *, limit=5, trigger=TRIGGER, report=STEP, tail=(), **config):
+    def start(self, result=FOUND, *, limit=5, trigger=TRIGGER, report=STEP, tail=(),
+              responses=None, **config):
         self.open_star(
+            responses if responses is not None else
             [NEED_PLAN, PLAN, report, {**ACCEPT, "answer_claim": trigger}, result, *tail],
             SHOWCASE_STAR_FEATURES=FEATURES,
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=limit, max_http_attempts=limit),
@@ -120,14 +122,43 @@ class StarCounterexampleTest(StarJobFixture, unittest.TestCase):
         self.assertFalse(any(e.get("solver_event_type") == "counterexample_completed" for e in events))
 
     def test_invalid_claim_target_cannot_schedule_unbound_research_or_accept(self):
+        invalid = {**ACCEPT, "answer_claim": {**TRIGGER, "claim_index": 4}}
         _, job, events = self.start(
-            trigger={**TRIGGER, "claim_index": 4}, report=FOUR_CLAIM_STEP,
+            report=FOUR_CLAIM_STEP,
+            responses=[NEED_PLAN, PLAN, FOUR_CLAIM_STEP, invalid, invalid],
         )
         self.assertEqual("failed", job["status"])
-        self.assertEqual(4, len(self.outbound))
+        self.assertEqual(5, len(self.outbound))
+        repair = next(item for item in self.outbound if item.get("repair_instruction"))
+        self.assertIn("0 through 3", repair["repair_instruction"])
         review = next(e for e in events if e.get("solver_event_type") == "step_reviewed")
         self.assertFalse(review["valid"])
         self.assertEqual("STEP_VERIFY", review["solver"]["phase"])
+
+    def test_out_of_range_claim_index_gets_one_bounded_repair(self):
+        invalid = {**ACCEPT, "answer_claim": {**TRIGGER, "claim_index": 4}}
+        corrected = {**ACCEPT, "answer_claim": {
+            **TRIGGER, "claim_index": 3, "both_directions_proved": True,
+            "approach": "Prove the fourth report claim in both directions",
+        }}
+        _, job, events = self.start(
+            limit=7,
+            report=FOUR_CLAIM_STEP,
+            responses=[NEED_PLAN, PLAN, FOUR_CLAIM_STEP, invalid, corrected,
+                       {"final_response": "The reviewed conclusion is Claim 3."},
+                       {"verdict": "ACCEPT", "reason": "The final answer matches the reviewed result."}],
+        )
+
+        self.assertEqual("succeeded", job["status"], job)
+        verifiers = [item for item in self.outbound if item["role"] == "step_verifier"]
+        self.assertEqual(2, len(verifiers))
+        self.assertTrue(verifiers[1]["call_id"].endswith(":repair-1"))
+        self.assertIn("0 through 3", verifiers[1]["repair_instruction"])
+        self.assertEqual(7, self.report(job["job_id"])["budget"]["logical_calls"])
+        reviewed = [e for e in events if e.get("solver_event_type") == "step_reviewed"]
+        self.assertEqual(1, len(reviewed))
+        self.assertTrue(reviewed[0]["valid"])
+        self.assertEqual("ACCEPT", reviewed[0]["verdict"])
 
     def test_research_tool_or_cross_run_instruction_is_rejected_without_registry_dispatch(self):
         executed = []

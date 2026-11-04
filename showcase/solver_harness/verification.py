@@ -140,12 +140,14 @@ def verify_step(
         "state_revision": reserved["state_revision"],
     }
 
-    def reserve_and_dispatch(current, seq, continuation_call_id, continuation_request):
+    def reserve_and_dispatch(current, seq, continuation_call_id, continuation_request,
+                             *, purpose="compute"):
+        event_suffix = f"{purpose}-{seq + 1}"
         reserved = harness.commit_event(
             current["run_id"],
             expected_revision=current["state_revision"],
             event={
-                "event_id": f"step-review-dispatched-{step_id}{suffix}-compute-{seq + 1}",
+                "event_id": f"step-review-dispatched-{step_id}{suffix}-{event_suffix}",
                 "type": "step_review_dispatched",
                 "step_id": step_id,
                 "role": "step_verifier",
@@ -245,8 +247,70 @@ def verify_step(
 
         declared = counterexample.target(report, reply["answer_claim"])
         if declared is None:
-            verification.update(valid=False, reason="invalid_answer_claim_target")
-        elif verification["valid"] and counterexample.missing_direction(declared):
+            declaration = reply["answer_claim"]
+            claims = report.get("claims", [])
+            claim_index = declaration.get("claim_index") if isinstance(declaration, Mapping) else None
+            repair_failure_reason = None
+            if (type(claim_index) is int and isinstance(claims, list) and claims
+                    and not 0 <= claim_index < len(claims)):
+                from . import protocol_repair
+
+                if protocol_repair.repair_enabled(harness._config):
+                    target_request = protocol_repair.repair_request(
+                        request,
+                        instruction=(
+                            "Your answer_claim used an index outside the current report. "
+                            f"There are {len(claims)} claims, indexed from 0 through {len(claims) - 1}. "
+                            "Re-evaluate the report and return the complete verifier response with "
+                            "answer_claim bound to the exact existing claim. Keep all required fields "
+                            "and gates faithful to the review; do not change them just to pass validation."
+                        ),
+                    )
+                    target_call_id = target_request["call_id"]
+                    target_request["retry_of"] = call_id
+                    try:
+                        reserved, reply = reserve_and_dispatch(
+                            reserved, 0, target_call_id, target_request,
+                            purpose="claim-target-repair",
+                        )
+                        call_id = target_call_id
+                        reserved, reply, unfulfilled = continue_review(
+                            harness,
+                            reserved,
+                            role="step_verifier",
+                            step_id=step_id,
+                            round_number=round_number,
+                            attempt_index=attempt,
+                            base_call_id=call_id,
+                            base_request=target_request,
+                            reply=reply,
+                            reserve_and_dispatch=reserve_and_dispatch,
+                        )
+                    except CallInterrupted:
+                        latest = harness.get_run(run["run_id"])
+                        repair_call = latest["state"].get("calls", {}).get(target_call_id, {})
+                        if repair_call.get("error_category") not in {
+                            "invalid_role_schema", "invalid_json", "empty_response", "truncated_response"
+                        }:
+                            return latest
+                        reply = None
+                        repair_failure_reason = "invalid_verifier_response"
+                    else:
+                        verification = normalize_verdict(reply, index + 1)
+                        if unfulfilled:
+                            verification.update(valid=False, reason="verifier_tool_request_unfulfilled")
+                        declared = (
+                            counterexample.target(report, reply.get("answer_claim"))
+                            if isinstance(reply, Mapping) and "answer_claim" in reply and not unfulfilled
+                            else None
+                        )
+            if declared is None:
+                verification.update(
+                    valid=False,
+                    reason=("verifier_tool_request_unfulfilled" if unfulfilled
+                            else repair_failure_reason or "invalid_answer_claim_target"),
+                )
+        if declared is not None and verification["valid"] and counterexample.missing_direction(declared):
             reserved = counterexample.run_check(
                 harness, reserved, problem=problem, declared=declared, verifier_call_id=call_id,
             )
