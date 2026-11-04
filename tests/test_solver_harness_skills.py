@@ -84,6 +84,11 @@ class SkillsTest(unittest.TestCase):
         )
         protocols = verifier.requests[0]["prompt_layers"][1]["protocols"]
         review = next(item for item in protocols if item["id"] == "verifier-review-protocol")
+        role = verifier.requests[0]["prompt_layers"][0]["definition"]
+        self.assertIn("Judge completion only against this step's stated scope", role)
+        self.assertIn("do not impose obligations assigned to later steps", role)
+        self.assertIn("Finite checks can satisfy an explicitly bounded example-search", role)
+        self.assertIn("verdict=CHALLENGE", role)
         self.assertIn("four claims => 0, 1, 2, 3", review["instructions"])
         self.assertIn("never use N itself as the index", review["instructions"])
 
