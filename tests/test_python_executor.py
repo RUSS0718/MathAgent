@@ -1,6 +1,8 @@
 """The production executor fails closed before Docker dispatch."""
 
 import json
+import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -71,6 +73,27 @@ class PythonExecutorContractTest(unittest.TestCase):
             (Path(root) / "run_public" / reference["sha256"]).write_bytes(b"changed")
             with self.assertRaisesRegex(ToolArtifactError, "artifact_integrity_failed"):
                 store.verify(reference, run_id="run_public", call_id="tool_public")
+
+    def test_artifact_store_supports_windows_long_digest_paths(self):
+        from showcase.tool_artifacts import ToolArtifactStore
+
+        if os.name != "nt":
+            self.skipTest("Windows path limit")
+        folder = tempfile.mkdtemp()
+        try:
+            run_id = "star-preflight-" + "a" * 32
+            base = Path(folder).resolve()
+            padding = 261 - len(str(base)) - len(run_id) - 67
+            root = base / ("p" * padding)
+            root.mkdir()
+            self.assertEqual(261, len(str(root / run_id / ("0" * 64))))
+
+            store = ToolArtifactStore(root)
+            reference = store.put(run_id, "isolation-probe", "probe", b"probe")
+
+            self.assertEqual(b"probe", store.read(run_id, reference["sha256"]))
+        finally:
+            shutil.rmtree("\\\\?\\" + os.path.abspath(folder))
 
     def test_pure_reasoning_and_meta_role_cannot_use_python(self):
         from showcase.python_executor import DockerPythonExecutor

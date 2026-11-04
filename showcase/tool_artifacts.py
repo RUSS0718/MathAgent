@@ -25,12 +25,13 @@ class ToolArtifactStore:
         ref = {"run_id": run_id, "call_id": call_id, "kind": kind, "sha256": digest,
                "size": len(content), "media_type": media_type}
         folder = self.root / run_id
-        folder.mkdir(parents=True, exist_ok=True)
+        os.makedirs(_io_path(folder), exist_ok=True)
         target = folder / digest
-        if not target.exists():
+        if not os.path.exists(_io_path(target)):
             temporary = folder / (uuid.uuid4().hex + ".tmp")
-            temporary.write_bytes(content)
-            os.replace(temporary, target)
+            with open(_io_path(temporary), "wb") as stream:
+                stream.write(content)
+            os.replace(_io_path(temporary), _io_path(target))
         # A digest alone never grants another Run access.
         return ref
 
@@ -39,7 +40,8 @@ class ToolArtifactStore:
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
             raise ToolArtifactError("artifact_ref_invalid")
         try:
-            content = (self.root / run_id / digest).read_bytes()
+            with open(_io_path(self.root / run_id / digest), "rb") as stream:
+                content = stream.read()
         except OSError as exc:
             raise ToolArtifactError("artifact_not_found") from exc
         if hashlib.sha256(content).hexdigest() != digest:
@@ -72,3 +74,14 @@ class ToolArtifactStore:
     def _call(call_id):
         if not isinstance(call_id, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,200}", call_id):
             raise ToolArtifactError("artifact_call_invalid")
+
+
+def _io_path(path):
+    """Use Windows extended paths so deep workspace roots can store SHA-256 files."""
+    value = os.fspath(path)
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return value
+    absolute = os.path.abspath(value)
+    if absolute.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + absolute[2:]
+    return "\\\\?\\" + absolute
