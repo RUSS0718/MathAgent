@@ -59,6 +59,54 @@ def verify_experiment_pair(
     return _result(pair_id, "UNKNOWN", "paired_arm_reverification_unavailable")
 
 
+def verify_pair_arm_component_config(
+    job_reader: Any, job_id: str, pair: Any, arm: str
+) -> dict[str, Any]:
+    """Read one public Job and compare its applied config with its frozen arm."""
+    if not isinstance(job_id, str) or not _IDENTIFIER.fullmatch(job_id):
+        return {"status": "FAIL", "reason": "experiment_pair_job_id_invalid"}
+    try:
+        registration = validate_pair_manifest(pair)
+        if arm not in {"baseline", "variant"}:
+            raise ValueError
+    except (TypeError, ValueError):
+        return {"status": "FAIL", "reason": "experiment_pair_manifest_invalid"}
+
+    try:
+        job = job_reader.request("GET", f"/api/agent/jobs/{job_id}")
+    except Exception:
+        return {"status": "UNKNOWN", "reason": "experiment_pair_job_unavailable"}
+    if not isinstance(job, dict):
+        return {"status": "UNKNOWN", "reason": "experiment_pair_job_unavailable"}
+
+    result = job.get("result")
+    binding = result.get("experiment_pair") if isinstance(result, dict) else None
+    expected_arm = registration[arm]
+    expected = expected_arm["features"]
+    if (
+        job.get("job_id") != job_id
+        or job.get("status") != "succeeded"
+        or not isinstance(result, dict)
+        or result.get("solver_mode") != expected_arm["manifest"]["model"]["solver_mode"]
+        or result.get("execution_mode") != expected_arm["manifest"]["model"]["solver_mode"]
+        or not isinstance(binding, dict)
+        or binding.get("pair_id") != registration["pair_id"]
+        or binding.get("pair_sha256") != pair_manifest_digest(registration)
+        or binding.get("arm") != arm
+        or binding.get("arm_run_id") != expected_arm["run_id"]
+        or binding.get("factor") != registration["factor"]
+        or binding.get("features") != expected
+        or binding.get("applied_config_status") != "applied"
+        or binding.get("applied_component_config") != expected
+    ):
+        return {"status": "FAIL", "reason": "experiment_pair_arm_identity_or_config_mismatch"}
+
+    solver = result.get("solver")
+    if not isinstance(solver, dict) or solver.get("run_id") != job_id:
+        return {"status": "FAIL", "reason": "experiment_pair_solver_run_identity_mismatch"}
+    return {"status": "PASS", "applied_component_config": dict(expected)}
+
+
 def _result(pair_id: str, status: str, reason: str) -> dict[str, Any]:
     """Return a minimal public verification projection."""
     return {"schema_version": 1, "pair_id": pair_id, "status": status, "reason": reason}

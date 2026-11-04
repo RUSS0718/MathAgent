@@ -12,6 +12,7 @@ from .experiment_execution import run_batch
 from .experiment_execution_state import save_execution_status, write_json_once
 from .experiment_manifest import canonical_json, manifest_digest, validate_manifest
 from .solver_harness.paired_conditions import STRATEGIES
+from .star_product_modes import BEST_EFFORT_MODES, STAR_MODES
 
 _PAIR_KEYS = {
     "schema_version",
@@ -78,6 +79,12 @@ def validate_pair_manifest(value: Any) -> dict[str, Any]:
                 "manifest": validate_manifest(arm["manifest"]),
                 "features": features,
             }
+            if (
+                features["best_effort"]
+                or arms[name]["manifest"]["model"]["solver_mode"]
+                not in STAR_MODES - BEST_EFFORT_MODES
+            ):
+                raise ValueError
         if len({value["pair_id"], *(arm["run_id"] for arm in arms.values())}) != 3:
             raise ValueError
         baseline, variant = arms["baseline"], arms["variant"]

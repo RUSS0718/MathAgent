@@ -283,6 +283,41 @@ class WorkspaceStore:
             row = self._connection.execute("SELECT result_json FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
         return _loads(row[0]) if row else {}
 
+    def record_pair_applied_config(
+        self, job_id: str, expected_binding: Mapping[str, Any], config: Mapping[str, Any]
+    ) -> None:
+        """Persist the resolved arm flags before the pipeline can call a provider."""
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._connection.execute(
+                    "SELECT status,result_json FROM workspace_jobs WHERE job_id=?", (job_id,)
+                ).fetchone()
+                if row is None or row["status"] != "running":
+                    raise WorkspaceError("experiment_pair_job_not_running", status=409)
+                result = _loads(row["result_json"]) if row["result_json"] else {}
+                binding = result.get("experiment_pair")
+                if (
+                    not isinstance(binding, dict)
+                    or binding != dict(expected_binding)
+                    or dict(config) != binding.get("features")
+                ):
+                    raise WorkspaceError("experiment_pair_applied_config_mismatch", status=409)
+                binding = {
+                    **binding,
+                    "applied_config_status": "applied",
+                    "applied_component_config": dict(config),
+                }
+                result["experiment_pair"] = binding
+                self._connection.execute(
+                    "UPDATE workspace_jobs SET result_json=?,updated_at=? WHERE job_id=?",
+                    (_json(result), _utc_now(), job_id),
+                )
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
+
     def start_job(self, job_id: str, *, execution_mode: str = "fake") -> bool:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
@@ -326,6 +361,7 @@ class WorkspaceStore:
                 result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response), "execution_mode": prior.get("execution_mode", "unavailable")}
                 if isinstance(prior.get("experiment_pair"), dict):
                     result["experiment_pair"] = prior["experiment_pair"]
+                    _mark_pair_config_not_applied(result)
                 result["budget"] = freeze_budget(self._connection, job_id)
                 self._connection.execute(
                     "UPDATE workspace_jobs SET status='succeeded',result_json=?,updated_at=? WHERE job_id=?",
@@ -405,7 +441,9 @@ class WorkspaceStore:
                     if status != "canceled":
                         now = _utc_now()
                         freeze_budget(self._connection, job_id)
-                        self._connection.execute("UPDATE workspace_jobs SET status='canceled',updated_at=? WHERE job_id=?", (now, job_id))
+                        result_json = _loads(row["result_json"]) if row["result_json"] else {}
+                        _mark_pair_config_not_applied(result_json)
+                        self._connection.execute("UPDATE workspace_jobs SET status='canceled',result_json=?,updated_at=? WHERE job_id=?", (_json(result_json), now, job_id))
                         self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "CANCELED", now, execution_mode=(_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable"), result=self.job_identity(job_id), asset_refs=self._asset_refs(job_id))), now, job_id))
                         self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled", "scope": "future_dispatch", "remote_request": "cannot_revoke"})
                     result = {"success": True, "job_id": job_id, "status": "canceled"}
@@ -443,7 +481,9 @@ class WorkspaceStore:
                 if row["status"] == "waiting_input" and checkpointer is not None and checkpointer.is_interrupted(job_id):
                     continue
                 now = _utc_now()
-                self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code='needs_review',updated_at=? WHERE job_id=?", (now, job_id))
+                result = _loads(row["result_json"]) if row["result_json"] else {}
+                _mark_pair_config_not_applied(result)
+                self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code='needs_review',result_json=?,updated_at=? WHERE job_id=?", (_json(result), now, job_id))
                 self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, execution_mode=(_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable"), result=self.job_identity(job_id), error={"category": "needs_review"}, asset_refs=self._asset_refs(job_id))), now, job_id))
                 self._insert_event(job_id, "needs_review", {"type": "needs_review", "job_id": job_id, "status": "failed", "reason": "process_restart"})
             self._connection.commit()
@@ -457,12 +497,17 @@ class WorkspaceStore:
     def fail_job(self, job_id: str, code: str, *, execution_mode: str = "fake") -> None:
         with self._lock:
             now = _utc_now()
-            updated = self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code=?,updated_at=? WHERE job_id=? AND status IN ('queued','running')", (code, now, job_id))
+            stored = self._connection.execute("SELECT result_json FROM workspace_jobs WHERE job_id=? AND status IN ('queued','running')", (job_id,)).fetchone()
+            if stored is None:
+                self._connection.commit()
+                return
+            result = _loads(stored["result_json"]) if stored["result_json"] else {}
+            _mark_pair_config_not_applied(result)
+            updated = self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code=?,result_json=?,updated_at=? WHERE job_id=? AND status IN ('queued','running')", (code, _json(result), now, job_id))
             if updated.rowcount == 0:
                 self._connection.commit()
                 return
-            stored = self._connection.execute('SELECT result_json FROM workspace_jobs WHERE job_id=?', (job_id,)).fetchone()
-            execution_mode = (_loads(stored['result_json']) if stored['result_json'] else {}).get('execution_mode', 'unavailable')
+            execution_mode = result.get('execution_mode', 'unavailable')
             freeze_budget(self._connection, job_id)
             self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "FAILED", now, execution_mode=execution_mode, result=self.job_identity(job_id), error={"category": code}, asset_refs=self._asset_refs(job_id))), now, job_id))
             self._insert_event(
@@ -537,6 +582,7 @@ class WorkspaceStore:
                 prior = _loads(row["result_json"]) if row["result_json"] else {}
                 if isinstance(prior.get("experiment_pair"), dict):
                     result["experiment_pair"] = prior["experiment_pair"]
+                    _mark_pair_config_not_applied(result)
                 now = _utc_now()
                 result["budget"] = freeze_budget(self._connection, job_id) or result.get("budget")
                 self._connection.execute(
@@ -926,6 +972,17 @@ class WorkspaceService:
     def _execute(self, job_id: str) -> None:
         try:
             identity = self.store.job_identity(job_id)
+            pair_binding = identity.get("experiment_pair")
+            if pair_binding is not None:
+                from .star_product_modes import BEST_EFFORT_MODES
+
+                if (
+                    not isinstance(pair_binding, dict)
+                    or identity.get("solver_mode") not in STAR_MODES - BEST_EFFORT_MODES
+                    or identity.get("execution_mode") != identity.get("solver_mode")
+                ):
+                    self.store.fail_job(job_id, "experiment_pair_execution_mode_invalid")
+                    return
             pipeline = self.star_pipeline if identity.get("solver_mode") in STAR_MODES else self.pipeline
             execution_mode = identity.get("execution_mode", self.execution_mode)
             if not self.store.start_job(job_id, execution_mode=execution_mode):
@@ -940,6 +997,26 @@ class WorkspaceService:
                 if pipeline is None:
                     self.store.fail_job(job_id, "unavailable", execution_mode="live")
                     return
+                component_features = None
+                if isinstance(pair_binding, dict):
+                    from .solver_harness.paired_conditions import STRATEGIES
+                    from .star_product_modes import BEST_EFFORT_MODES
+
+                    component_features = pair_binding.get("features")
+                    applied_status = pair_binding.get("applied_config_status")
+                    applied_config = pair_binding.get("applied_component_config")
+                    if (
+                        identity.get("solver_mode") in BEST_EFFORT_MODES
+                        or not isinstance(component_features, dict)
+                        or set(component_features) != STRATEGIES
+                        or any(type(enabled) is not bool for enabled in component_features.values())
+                        or component_features.get("best_effort") is not False
+                        or not (
+                            (applied_status == "pre_execution" and applied_config is None)
+                            or (applied_status == "applied" and applied_config == component_features)
+                        )
+                    ):
+                        raise WorkspaceError("experiment_pair_features_invalid")
                 limits = (pipeline.budget_for_mode(identity.get("solver_mode"))
                           if execution_mode in STAR_MODES else getattr(pipeline, "budget", RunBudgetLimits()))
                 deadline = getattr(getattr(pipeline, "experiment_policy", None), "deadline_at", None)
@@ -953,6 +1030,10 @@ class WorkspaceService:
                         **({"solver_hint": self.store.solver_hint(job_id),
                             "retry_call": identity.get("retry_call"),
                             "solver_mode": identity.get("solver_mode")} if execution_mode in STAR_MODES else {}),
+                        **({"component_features": component_features,
+                            "on_component_config_applied": lambda config: self.store.record_pair_applied_config(
+                                job_id, pair_binding, config
+                            )} if component_features is not None else {}),
                     )
                 self.store.finish_live_job(job_id, state)
                 if self.checkpointer is not None and state.get("status") != "WAITING_INPUT":
@@ -1167,6 +1248,17 @@ def _json(value: Any) -> str:
 
 def _loads(value: str) -> Any:
     return json.loads(value)
+
+
+def _mark_pair_config_not_applied(result: dict[str, Any]) -> None:
+    """Replace a stale pre-execution marker on a terminal pair Job."""
+    binding = result.get("experiment_pair")
+    if isinstance(binding, dict) and binding.get("applied_config_status") == "pre_execution":
+        result["experiment_pair"] = {
+            **binding,
+            "applied_config_status": "not_applied",
+            "applied_component_config": None,
+        }
 
 
 def _utc_now() -> str:
