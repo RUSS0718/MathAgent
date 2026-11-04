@@ -35,14 +35,20 @@ class InternPortTest(unittest.TestCase):
             "allowed_tools": [],
         }
 
+        minimal_reply = {"decision": "PLAN", "reason": "A staged approach is useful."}
+        self.assertIsNone(schema_error(minimal_reply, schema))
         self.assertIsNone(schema_error(reply, schema))
         self.assertIsNotNone(schema_error({"decision": "PLAN"}, schema))
+        self.assertIsNotNone(schema_error({**minimal_reply, "role": "other"}, schema))
+        self.assertIsNotNone(schema_error({**minimal_reply, "action": "other"}, schema))
         self.assertIsNotNone(schema_error({**reply, "unregistered_context": "ignored"}, schema))
 
         strategist_schema = response_schema(
             {"role": "meta_strategist", "action": "partial_exploration"}
         )
         self.assertIsNone(schema_error(reply, strategist_schema))
+        self.assertIsNone(schema_error({**reply, "role": "meta_strategist"}, strategist_schema))
+        self.assertIsNone(schema_error(minimal_reply, strategist_schema))
         self.assertIsNotNone(
             schema_error({**reply, "unregistered_context": "ignored"}, strategist_schema)
         )

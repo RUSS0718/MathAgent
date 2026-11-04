@@ -241,11 +241,12 @@ def response_schema(request):
             {
                 "decision": {"enum": ["RETRY", "PLAN"]},
                 "reason": TEXT,
-                "role": {"const": "meta", "type": "string"},
+                "role": {"enum": ["meta", "meta_strategist"]},
                 "action": {"const": "partial_exploration", "type": "string"},
                 "findings": TEXTS,
                 "allowed_tools": {"type": "array", "items": TEXT},
             },
+            ["decision", "reason"],
         )
     if role in {"meta", "meta_strategist"}:
         return SCHEMAS["meta_guidance" if request.get("guidance_request") else "meta"]
