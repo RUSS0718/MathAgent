@@ -8,9 +8,11 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .experiment_execution import run_batch
 from .experiment_execution_state import save_execution_status, write_json_once
 from .experiment_manifest import canonical_json, manifest_digest, validate_manifest
 from .solver_harness.paired_conditions import STRATEGIES
+from .star_product_modes import BEST_EFFORT_MODES, STAR_MODES
 
 _PAIR_KEYS = {
     "schema_version",
@@ -77,6 +79,12 @@ def validate_pair_manifest(value: Any) -> dict[str, Any]:
                 "manifest": validate_manifest(arm["manifest"]),
                 "features": features,
             }
+            if (
+                features["best_effort"]
+                or arms[name]["manifest"]["model"]["solver_mode"]
+                not in STAR_MODES - BEST_EFFORT_MODES
+            ):
+                raise ValueError
         if len({value["pair_id"], *(arm["run_id"] for arm in arms.values())}) != 3:
             raise ValueError
         baseline, variant = arms["baseline"], arms["variant"]
@@ -105,7 +113,7 @@ def run_pair(
     output_root: str | Path,
     context: dict[str, Any],
 ) -> dict[str, Any]:
-    """Persist a NOT_RUN result until aggregate readiness and component Job wiring exist."""
+    """Run and independently verify the frozen arms in baseline-then-variant order."""
     registration = validate_pair_manifest(pair)
     digest = pair_manifest_digest(registration)
     authorization = context.get("authorization")
@@ -118,7 +126,12 @@ def run_pair(
     if not authorized:
         raise ValueError("experiment_invocation_authorization_required")
 
-    reason = _admission_blocker(registration, expected_sha256, readiness_report)
+    reason = _admission_blocker(
+        registration,
+        expected_sha256,
+        readiness_report,
+        context.get("readiness_verifier"),
+    )
     directory = Path(output_root) / "pairs" / registration["pair_id"]
     try:
         directory.mkdir(parents=True, exist_ok=False)
@@ -130,18 +143,19 @@ def run_pair(
         "pair_id": registration["pair_id"],
         "pair_sha256": digest,
         "factor": registration["factor"],
-        "status": "NOT_RUN",
-        "phase": "readiness_blocked",
+        "status": "NOT_RUN" if reason else "RUNNING",
+        "phase": "readiness_blocked" if reason else "dispatching",
         "execution_order": [],
         "completed": 0,
         "total": 2,
         "dispatch_count": 0,
-        "execution_blockers": [
-            "aggregate_readiness_verifier_unavailable",
-            "component_job_path_unavailable",
-        ],
+        "execution_blockers": [reason] if reason else [],
         "stop_reason": reason,
-        "readiness": {"issue_number": 127, "status": "NOT_RUN"},
+        "readiness": {
+            "issue_number": 127,
+            "status": "NOT_RUN" if reason else "PASS",
+            "report_sha256": registration["readiness_report_sha256"],
+        },
         "arms": {
             name: {
                 "run_id": registration[name]["run_id"],
@@ -153,10 +167,131 @@ def run_pair(
         },
     }
     save_execution_status(directory, state)
+    if reason:
+        return state
+
+    arm_verifier = context.get("pair_arm_verifier")
+    adapter_factory = context.get("pair_job_adapter_factory")
+    if not callable(arm_verifier) or not callable(adapter_factory):
+        state.update(
+            status="NOT_RUN",
+            phase="readiness_blocked",
+            stop_reason="experiment_pair_runtime_unavailable",
+            execution_blockers=["experiment_pair_runtime_unavailable"],
+        )
+        save_execution_status(directory, state)
+        return state
+
+    runtime_preparer = context.get("pair_runtime_preparer")
+    if callable(runtime_preparer):
+        try:
+            runtime_preparer()
+        except Exception:
+            state.update(
+                status="NOT_RUN",
+                phase="readiness_blocked",
+                stop_reason="experiment_pair_runtime_unavailable",
+                execution_blockers=["experiment_pair_runtime_unavailable"],
+            )
+            save_execution_status(directory, state)
+            return state
+
+    from .experiment_cli import InvocationAuthorization
+
+    for name in ("baseline", "variant"):
+        arm = registration[name]
+        manifest = arm["manifest"]
+        run_id = arm["run_id"]
+        digest = manifest_digest(manifest)
+        state["execution_order"].append(name)
+        state["dispatch_count"] += 1
+        state["phase"] = f"running_{name}"
+        state["arms"][name].update(status="running", verification_status="NOT_RUN")
+        save_execution_status(directory, state)
+
+        arm_context = dict(context)
+        arm_context["authorization"] = InvocationAuthorization(
+            digest, manifest["evidence_kind"], run_id
+        )
+        try:
+            arm_context["job_adapter_factory"] = lambda a=arm, n=name: adapter_factory(
+                registration, n, a
+            )
+            result = run_batch(
+                manifest,
+                expected_sha256=digest,
+                run_id=run_id,
+                output_root=output_root,
+                context=arm_context,
+            )
+            state["completed"] += int(result.get("phase") == "completed")
+            if result.get("phase") != "completed":
+                verified = {
+                    "status": "FAIL",
+                    "reason": "experiment_pair_arm_execution_not_completed",
+                }
+            else:
+                verified = arm_verifier(run_id, output_root=output_root, context=arm_context)
+        except Exception:
+            verified = {"status": "UNKNOWN", "reason": "experiment_pair_arm_unavailable"}
+            result = locals().get("result", {})
+
+        arm_state = state["arms"][name]
+        arm_state.update(
+            status=("completed" if result.get("phase") == "completed" else "stopped"),
+            execution_phase=result.get("phase", "unknown"),
+            stop_reason=result.get("stop_reason"),
+            job_ids=[
+                item["job_id"]
+                for item in result.get("run_records", [])
+                if isinstance(item, dict) and isinstance(item.get("job_id"), str)
+            ],
+            verification_status=(
+                verified.get("status") if isinstance(verified, dict) else "UNKNOWN"
+            ),
+        )
+        if isinstance(verified, dict) and isinstance(
+            verified.get("applied_component_config"), dict
+        ):
+            arm_state["applied_component_config"] = verified[
+                "applied_component_config"
+            ]
+        if isinstance(verified, dict) and isinstance(verified.get("sample_outcomes"), list):
+            arm_state["sample_outcomes"] = verified["sample_outcomes"]
+        if isinstance(verified, dict) and isinstance(verified.get("run_verification"), dict):
+            arm_state["run_verification"] = verified["run_verification"]
+        if isinstance(verified, dict) and isinstance(verified.get("reason"), str):
+            arm_state["verification_reason"] = verified["reason"]
+        save_execution_status(directory, state)
+        if arm_state["verification_status"] != "PASS":
+            state.update(
+                status=arm_state["verification_status"],
+                phase="stopped",
+                stop_reason=arm_state.get("stop_reason")
+                or arm_state.get("verification_reason")
+                or "experiment_pair_arm_not_verified",
+            )
+            save_execution_status(directory, state)
+            return state
+
+    if not _applied_features_match(registration, state["arms"]):
+        state.update(
+            status="FAIL",
+            phase="stopped",
+            stop_reason="experiment_pair_applied_config_mismatch",
+        )
+    else:
+        state.update(status="PASS", phase="completed", stop_reason=None)
+    save_execution_status(directory, state)
     return state
 
 
-def _admission_blocker(pair: dict[str, Any], expected_sha256: str, report: Any) -> str:
+def _admission_blocker(
+    pair: dict[str, Any],
+    expected_sha256: str,
+    report: Any,
+    readiness_verifier: Any,
+) -> str:
     """Return the first fail-closed admission reason without trusting report status."""
     if not _is_hash(expected_sha256) or expected_sha256 != pair_manifest_digest(pair):
         return "experiment_pair_manifest_hash_mismatch"
@@ -170,7 +305,24 @@ def _admission_blocker(pair: dict[str, Any], expected_sha256: str, report: Any) 
         return "experiment_readiness_mismatch"
     if report.get("status") != "PASS":
         return "experiment_readiness_not_passed"
-    return "experiment_readiness_aggregate_verifier_unavailable"
+    if not callable(readiness_verifier):
+        return "experiment_readiness_aggregate_verifier_unavailable"
+    try:
+        result = readiness_verifier(report)
+    except Exception:
+        return "experiment_readiness_not_verified"
+    if not isinstance(result, dict) or result.get("status") != "PASS":
+        return "experiment_readiness_not_verified"
+    return ""
+
+
+def _applied_features_match(pair: dict[str, Any], arms: dict[str, Any]) -> bool:
+    """Require independently observed components to equal both frozen arm flags."""
+    for name in ("baseline", "variant"):
+        observed = arms.get(name, {}).get("applied_component_config")
+        if observed != pair[name]["features"]:
+            return False
+    return True
 
 
 def _only_factor_differs(

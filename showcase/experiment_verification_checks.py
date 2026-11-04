@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from .experiment_transport_projection import known_transport_rejection
+from .experiment_verification_process import _check_process_path, _safe_process_path
 from .experiment_verification_reporting import _safe_evidence
 from .experiment_verification_state import _CHECKS, _check, _finite_number
 from .run_budget import public_solver_call_id
@@ -106,12 +107,19 @@ def _verify_job(
         {item["call_id"] for item in manifest["transport"]["calls"]},
     )
     safe["applied_config"] = applied["config"] if applied["status"] == "PASS" else None
+    safe["process_path"] = _safe_process_path(
+        evidence,
+        attempts,
+        {item["call_id"] for item in manifest["transport"]["calls"]},
+        manifest["evidence_kind"],
+    )
     return (
         {
             "transport": transport,
             "task": task,
             "usage": usage,
             "coverage": _check("PASS", "sample_audited"),
+            "process_path": _check_process_path(sample, safe, task, transport),
         },
         safe,
         budget,

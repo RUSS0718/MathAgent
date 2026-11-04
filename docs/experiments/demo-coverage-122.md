@@ -71,7 +71,7 @@ provider-live manifest 的 `model.retry: 1` 表示 Intern 客户端的单次初�
 | S3 预算、停止、取消与安全恢复 | P1 附录 A、B.5；强恢复合同为项目扩展 | showcase/run_budget.py、Job 控制、Solver checkpoint；attempt、reservation、deadline 和终态投影 | COVERED：公共 Job、进程退出、unknown、预算与迟到结算测试 | NOT_RUN：本票未验证真实 provider 在途请求的取消或恢复语义 |
 | S4 最终文本身份、审查和 Evidence | P1 §3.5；哈希身份绑定为项目扩展 | showcase/final_evidence.py、solver_harness/final_binding.py；artifact hash、review scope、binding 状态 | COVERED：改写失效、并发追加与公共报告合同 | NOT_RUN：#127 需要新 CLI Run 上真实整题审查和同文本绑定证据 |
 | 实验登记、只读核验与导出 | 项目工程扩展；独立报告与脱敏为工程合同 | `showcase/experiment_cli.py`、`experiment_runner.py`、`experiment_verification.py` 及其检查/报告模块 | COVERED：#125/#126 的 frozen manifest 与 verify/export CLI 合同；见对应测试 | NOT_RUN：新 CLI 尚无 provider-live 批次 |
-| 单因素配对 | 项目工程扩展；P1 §4.3 仅作研究背景 | 实验 CLI 已有 pair manifest 注册与 fail-closed 核验；公共 Job 组件配置、两臂派发及 arm 独立重核尚未接通 | NOT_COVERED：安全拒绝路径有测试，paired execution 未覆盖；见[阶段验收记录](../evals/showcase-experiment-cli-124-128.md) | NOT_RUN：#127 readiness 尚无 provider-live 通过记录 |
+| 单因素配对 | 项目工程扩展；P1 §4.3 仅作研究背景 | `experiment pair` 通过专用公共 Job 路由串行执行冻结 baseline/variant Runs，保存逐样本结果，并独立复核 Job/Run 身份与 applied component config | COVERED：scripted / fake-public-API 合同覆盖离线配对执行；见[阶段验收记录](../evals/showcase-experiment-cli-124-128.md) | NOT_RUN：#127 readiness 尚无 provider-live 通过记录；不得据此报告 live 配对完成 |
 
 逐项测试文件、状态值和阻断票以 [demo-coverage-matrix.json](demo-coverage-matrix.json) 为机器读取入口。未来运行报告必须新增实际证据引用和状态，不得覆盖本页列出的历史事实。
 
@@ -105,6 +105,8 @@ verify 独立读取持久 Job/Run、attempt、usage、reservation、审查与文
 | #126 | 依赖 #125。提供独立 verify 与 export。 | 读取实际持久状态及归档；对账派发、attempt、usage/reservation、Job、审查和文本绑定。分别输出 transport、任务、用量和覆盖状态。PASS、FAIL、UNKNOWN、NOT_RUN 明确区分；强制项失败/未知/未完成不能导出 PASS。审计零派发。 |
 | #127 | 依赖 #124、#126。通过同一登记和 CLI 验收简单题、自然多步路径和适用故障。 | 简单题验证适用快路径、完整生成、整题审查与同文本绑定。至少一条自然多步真实 trace 覆盖规划、步骤、适用工具回执、最终生成、审查与绑定。不得强迫机制触发；没有自然触发就保留 NOT_RUN/NOT_COVERED 并判该项未通过。故障注入覆盖适用断流、timeout、usage 缺失或进程中断。工程结论限于可达性和稳定性。 |
 | #128 | 依赖 #127。提供登记化的单因素 paired execution。 | 一对只改一个因素，baseline/variant 独立身份，核对实际 applied config 和执行顺序。题目、模型、thinking、传输、预算和安全合同相同。独立 verify 生成配对结论；未知、失败、硬限或登记不一致时不宣称完成。保持所有预登记样本及未触发项。 |
+
+`process_coverage` 只统计冻结 manifest 中 `type=multistep` 的样本：`registered` 是固定分母，`audited` 表示样本证据已独立对账，`planned` 表示观察到正数计划版本，`path_completed` 只计真实 provider-live、传输已核验，且步骤、最终生成、整题审查和文本绑定均通过的路径。`not_observed`、`incomplete`、`not_provider_live`、`unknown`、`not_run`、`failed` 是互斥结果，合计等于 `registered`；`completed_without_plan` 是 `not_observed` 的子集。它们是路径可达性计数，不是正确率或组件效果量；单独的简单题 Run 即使通过，也不代表 #127 readiness 通过。
 
 依赖图：#124 还等待独立的 #123；#125 等待 #124；#126 等待 #125；#127 等待 #124 与 #126；#128 等待 #127。#122 文档完成只解除自身依赖，不代表其余票已交付。
 

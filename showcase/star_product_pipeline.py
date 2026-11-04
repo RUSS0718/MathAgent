@@ -115,7 +115,9 @@ class StarProductPipeline:
         return self.full_budget if mode in FULL_MODES else self.budget
 
     def run(self, run_id, problem, *, verification_mode="auto", emit=None, solver_hint=None,
-            retry_call=None, solver_mode="star_limited"):
+            retry_call=None, solver_mode="star_limited", component_features=None,
+            on_component_config_applied=None):
+        """Execute STAR, applying and recording pair-only feature overrides when present."""
         if solver_mode not in STAR_MODES:
             raise ValueError("star_mode_invalid")
         if solver_mode in FULL_MODES and self.full_gaps():
@@ -135,8 +137,23 @@ class StarProductPipeline:
             features["candidate_registry"] = True
         if solver_mode in BEST_EFFORT_MODES:
             features["best_effort"] = True
+        if component_features is not None:
+            from .solver_harness.paired_conditions import STRATEGIES
+
+            if (
+                not isinstance(component_features, dict)
+                or set(component_features) != STRATEGIES
+                or any(type(enabled) is not bool for enabled in component_features.values())
+                or component_features["best_effort"]
+                or solver_mode in BEST_EFFORT_MODES
+                or not callable(on_component_config_applied)
+            ):
+                raise ValueError("experiment_pair_features_invalid")
+            features.update(component_features)
         config = {**base, **({"hint_mode": "user_hint"} if solver_hint is not None else {}),
                   "features": features}
+        if component_features is not None:
+            config["reexplore_after_replan"] = component_features["reexplore_after_replan"]
         if self.transport_policy == "stream_first":
             config["transport_policy"] = self.transport_policy
         port = InternModelPort(
@@ -152,6 +169,12 @@ class StarProductPipeline:
             config.update(max_model_calls=limits["max_model_calls"],
                           max_tool_calls=limits["max_tool_calls"],
                           max_total_duration_seconds=max(1, int(limits["max_runtime_seconds"])))
+        if component_features is not None:
+            applied_components = {
+                key: config["features"].get(key, False)
+                for key in ("skills", "reexplore_after_replan", "candidate_registry", "best_effort")
+            }
+            on_component_config_applied(applied_components)
 
         def observe(run, event):
             if event:

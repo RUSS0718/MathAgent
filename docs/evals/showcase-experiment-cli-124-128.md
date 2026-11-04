@@ -37,5 +37,12 @@
 
 - #124 已加入 `researcher.counterexample_check` 的精确 stream profile 变体白名单，并将派发前已知拒绝投影为 `transport_policy_rejected`；真实 schema 探针通过。聚焦回归 52 项通过。
 - #127 的简单题和中等题已有 `completed 1/1` 的非空答案返回；中等题这次仍是 FASTPATH，没有自然 planner/steps。困难题新 Run 已实际完成 Explore、planner、reasoner，并进入自然步骤核验，但步骤核验流在进程退出前没有 completion/finish、最终答案、整题审查或 S4 绑定。该 Run 定性为 **已执行但未完成，结果 UNKNOWN**；因此 #127 readiness **未通过**。
-- #128 因 #127 readiness 未通过而保持 `NOT_RUN`；pair execution 仍为 `NOT_COVERED`，没有创建 baseline/variant 两臂 Run。
+- #128 已接通离线 scripted / fake-public-API 配对执行与逐臂核验；因 #127 provider-live readiness 未通过，没有启动线上两臂 Run。详见下方配对切片记录。
 - 新代码的实验 profile、消费者、已知拒绝投影和 pair 安全路径聚焦回归共 52 项通过；这不改变 provider-live readiness 结论，也不构成数学能力提升证据。
+统计修复固定登记分母，并分别报告已审计、未观察到路径、路径未完成、未知和明确失败；聚焦回归 62 项通过，Ruff 与 `git diff --check` 通过。该统计只说明实验路径可达性，不代表答案正确率或论文能力提升。
+
+## 2026-11-04 #128 离线配对执行切片
+
+#128 的专用 `experiment pair` 路径现已串行派发冻结 baseline 与 variant，并将各自样本通过公共 Job 路径执行为独立 Run。持久 pair 状态包含每个样本的脱敏执行结果；独立 `pair-verify` 重新核对 Run manifest、样本与 Job 身份、公共 Job 的实际组件配置、执行顺序及单因素差异。readiness 先经服务端预检，实际 arm 创建时再次核验；预检本身不创建 Job。
+
+离线 scripted / fake-public-API 合同覆盖该执行与复核切片：聚焦 unittest **54 项通过**，改动范围 Ruff 检查和 `git diff --check` 通过，coverage matrix JSON 可解析。2026-11-04 运行 `uv run python scripts/check.py --offline`，全仓 **1,234 项测试中 3 项失败、42 项跳过**；失败分别为 `test_star_product_guidance_consumption...test_recovery_after_meta_ruling_applies_it_exactly_once` 超时、`test_star_rb03_obligations...test_invalid_declaration_target_and_type_cannot_be_accepted` 调用数不符、`test_star_rb06_faults...test_public_http_deadline_stops_waiting_and_only_late_usage_can_settle` 未决 attempt 断言不符，均不在本切片改动文件内。该证据不包含 provider-live 调用：#127 readiness 仍为 `NOT_RUN`，因此没有运行 live pair，也不支持 pair complete 或数学能力提升结论。

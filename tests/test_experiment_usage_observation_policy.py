@@ -9,7 +9,7 @@ from tests.test_showcase_experiment_execution import _context_for_run, _JobAdapt
 
 
 class ExperimentUsageObservationPolicyTest(unittest.TestCase):
-    def _run(self, *, policy=None, unresolved=0, unknown_tools=0):
+    def _run(self, *, policy=None, unresolved=0, unknown_tools=0, status="succeeded"):
         manifest = _manifest({
             "revision": "a" * 40, "source_sha256": "b" * 64,
             "dirty_status": "clean", "dirty_paths": [],
@@ -18,7 +18,7 @@ class ExperimentUsageObservationPolicyTest(unittest.TestCase):
         manifest["authorization"]["execution_authorized"] = True
         if policy is not None:
             manifest["usage_policy"] = policy
-        adapter = _JobAdapter([{"budget": {
+        adapter = _JobAdapter([{"status": status, "budget": {
             "logical_calls": 1, "http_attempts": 1, "tool_calls": 0,
             "charged_tokens": 2048, "wall_time_seconds": 1.0,
             "unknown_attempts": 1, "unresolved_attempts": unresolved,
@@ -56,6 +56,12 @@ class ExperimentUsageObservationPolicyTest(unittest.TestCase):
                 self.assertEqual("incomplete_or_unresolved_usage", result["stop_reason"])
                 self.assertEqual(0, result["completed"])
                 self.assertEqual(1, submissions)
+
+    def test_observe_only_classifies_failed_job_before_unknown_usage(self):
+        result, submissions = self._run(policy="observe_only", status="failed")
+        self.assertEqual("job_failed_or_canceled", result["stop_reason"])
+        self.assertEqual(0, result["completed"])
+        self.assertEqual(1, submissions)
 
     def test_unknown_policy_is_rejected(self):
         manifest = _manifest({

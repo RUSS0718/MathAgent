@@ -132,9 +132,14 @@ def run_check(harness, run, *, problem, declared, verifier_call_id):
 
 
 def valid_result(result):
-    if not isinstance(result, Mapping) or set(result) != {
+    required = {
         "verdict", "counterexample", "assumptions_checked", "violated_conclusion", "searched_scope",
-    }:
+    }
+    if (
+        not isinstance(result, Mapping)
+        or not required.issubset(result)
+        or set(result) - required - {"usage"}
+    ):
         return False
     if (
         result["verdict"] not in {"FOUND_COUNTEREXAMPLE", "NOT_FOUND"}

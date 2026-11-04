@@ -147,6 +147,7 @@ class PublicExperimentJobAdapter:
             headers={"Idempotency-Key": key},
         )
 
+
     def wait_for_job(self, job_id: str, deadline_at: float) -> dict[str, Any]:
         return self._wait_for_job(job_id, deadline_at)
 
@@ -337,3 +338,70 @@ class PublicExperimentJobAdapter:
                     return False
             seen_call_ids.add(call["call_id"])
         return True
+
+
+class PublicExperimentPairJobAdapter(PublicExperimentJobAdapter):
+    """Dispatch one frozen pair arm through its dedicated public Job route."""
+
+    def __init__(
+        self, *args: Any, pair: dict[str, Any], arm: str,
+        readiness_report: dict[str, Any], **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.pair = pair
+        self.arm = arm
+        self.readiness_report = readiness_report
+
+    def _pair_binding(self) -> dict[str, Any]:
+        from .experiment_pair import pair_manifest_digest
+
+        registered = self.pair[self.arm]
+        return {
+            "pair_id": self.pair["pair_id"],
+            "pair_sha256": pair_manifest_digest(self.pair),
+            "arm": self.arm,
+            "arm_run_id": registered["run_id"],
+            "factor": self.pair["factor"],
+            "features": dict(registered["features"]),
+            "applied_config_status": "pre_execution",
+            "applied_component_config": None,
+        }
+
+    def request_digest(
+        self, sample: dict[str, Any], session_id: str, *,
+        budget_limits: dict[str, Any], deadline_at: float,
+    ) -> str:
+        from .run_budget import RunBudgetLimits
+        from .workspace import workspace_job_request_digest
+
+        return workspace_job_request_digest(
+            session_id=session_id,
+            message=self.sample_resolver.read_text(sample).strip(),
+            verification_mode=self.manifest["model"]["verification_mode"],
+            solver_mode=self.manifest["model"]["solver_mode"],
+            budget_limits=RunBudgetLimits(**budget_limits),
+            deadline_at=deadline_at,
+            experiment_binding=self._pair_binding(),
+        )
+
+    def create_job(
+        self, sample: dict[str, Any], session_id: str, key: str, *,
+        budget_limits: dict[str, Any], deadline_at: float,
+    ) -> dict[str, Any]:
+        from .experiment_pair import pair_manifest_digest
+
+        return self.client.request(
+            "POST",
+            f"/api/experiments/pairs/{self.pair['pair_id']}/arms/{self.arm}/jobs",
+            payload={
+                "pair_manifest": self.pair,
+                "pair_sha256": pair_manifest_digest(self.pair),
+                "readiness_report": self.readiness_report,
+                "sample_id": sample["id"],
+                "session_id": session_id,
+                "message": self.sample_resolver.read_text(sample).strip(),
+                "budget_limits": dict(budget_limits),
+                "deadline_at": deadline_at,
+            },
+            headers={"Idempotency-Key": key},
+        )

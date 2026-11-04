@@ -16,7 +16,9 @@ def budget_reason(state, config):
             return "model_call_budget_exhausted"
         if budget["http_attempts"] >= budget["limits"]["max_http_attempts"]:
             return "http_attempt_budget_exhausted"
-        if budget["charged_tokens"] + budget["reserved_tokens"] >= budget["limits"]["max_tokens"]:
+        # charged_tokens already includes the full reservation for attempts
+        # whose provider usage is unknown; reserved_tokens is its audit view.
+        if budget["charged_tokens"] >= budget["limits"]["max_tokens"]:
             return "token_budget_exhausted"
         return None
     elapsed = (datetime.now(UTC) - datetime.fromisoformat(state["created_at"])).total_seconds()

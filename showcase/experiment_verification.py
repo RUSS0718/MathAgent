@@ -29,6 +29,8 @@ from .experiment_verification_state import (
     _execution_mode,
     _index_records,
     _overall_status,
+    _process_coverage_summary,
+    _process_path_check,
     _read_job_evidence,
     _sum_budgets,
     _valid_run_record,
@@ -133,12 +135,17 @@ def verify_experiment_run(
     checks["coverage"] = _coverage_check(
         status, manifest, records, completed, directory_has_intent, integrity_failures, per_sample
     )
+    checks["process_path"] = (
+        _check("FAIL", "persisted_state_inconsistent")
+        if integrity_failures
+        else _process_path_check(manifest, per_sample)
+    )
     usage_error = _aggregate_usage_mismatch(status, samples, records, completed, observed_budgets)
     if usage_error:
         checks["usage"] = _check("FAIL", usage_error)
 
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": run_id,
         "manifest_id": manifest["manifest_id"],
         "manifest_sha256": digest,
@@ -155,6 +162,9 @@ def verify_experiment_run(
             }
             for sample in samples
         ],
+        "process_coverage": _process_coverage_summary(
+            manifest, per_sample, archived_evidence
+        ),
         "evidence_sha256": (
             sorted(hashlib.sha256(canonical_json(item)).hexdigest() for item in archived_evidence)
             if evidence_complete
@@ -171,7 +181,7 @@ def verify_experiment_run(
         else None,
         "execution_mode": _execution_mode(archived_evidence),
         "checks": checks,
-        "status": _overall_status(checks),
+        "status": _overall_status(checks, usage_policy=manifest.get("usage_policy", "required")),
     }
     if archive_matches:
         if evidence_complete:

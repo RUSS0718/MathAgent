@@ -10,6 +10,8 @@ from pathlib import Path
 
 from showcase.cli import build_parser, run
 from showcase.experiment_manifest import canonical_json, manifest_digest
+from showcase.experiment_verification_process import _check_process_path, _safe_process_path
+from showcase.experiment_verification_state import _overall_status, _process_coverage_summary
 from showcase.run_budget import public_solver_call_id
 
 
@@ -379,6 +381,228 @@ def verify_args(root: Path, output_root: Path):
 
 
 class ExperimentVerifyCliTest(unittest.TestCase):
+    def test_natural_multistep_requires_live_mode_and_verified_transport(self):
+        sample = {"type": "multistep"}
+        evidence = {
+            "execution_mode": "live",
+            "process_path": {
+                "evidence_kind": "provider_live",
+                "plan_version": 1,
+                "planned_steps": 1,
+                "reported_steps": 1,
+                "accepted_steps": 1,
+                "successful_roles": ["planner", "reasoner", "step_verifier", "final_generator"],
+                "tool_calls": 0,
+                "review_origin": "final_generator",
+                "review_plan_version": 1,
+            },
+        }
+
+        result = _check_process_path(
+            sample, evidence, {"status": "PASS"}, {"status": "PASS"}
+        )
+
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual("natural_multistep_path_observed", result["reason"])
+
+    def test_missing_progress_uses_complete_call_roles_without_guessing_a_path(self):
+        attempts = [
+            {"status": "success", "dispatch_status": "transport_observed", "role": "explore"},
+            {
+                "status": "success",
+                "dispatch_status": "transport_observed",
+                "role": "whole_solution_verifier",
+            },
+        ]
+        process = _safe_process_path(
+            {"solver": {"solver": {}}, "verification": {"history": []}},
+            attempts,
+            {"explore", "whole_solution_verifier", "planner"},
+            "provider_live",
+        )
+        evidence = {
+            "process_path": process,
+            "request_attempts": [
+                {
+                    "status": item["status"],
+                    "dispatch_status": item["dispatch_status"],
+                    "role": item["role"],
+                }
+                for item in attempts
+            ],
+        }
+
+        result = _check_process_path(
+            {"type": "multistep"},
+            evidence,
+            {"status": "PASS"},
+            {"status": "PASS"},
+        )
+
+        self.assertEqual("NOT_RUN", result["status"])
+        self.assertEqual("natural_multistep_path_not_observed", result["reason"])
+
+        attempts.append(
+            {"status": "success", "dispatch_status": "transport_observed", "role": "planner"}
+        )
+        evidence["process_path"] = _safe_process_path(
+            {"solver": {"solver": {}}, "verification": {"history": []}},
+            attempts,
+            {"explore", "whole_solution_verifier", "planner"},
+            "provider_live",
+        )
+        evidence["request_attempts"].append(
+            {"status": "success", "dispatch_status": "transport_observed", "role": "planner"}
+        )
+        result = _check_process_path(
+            {"type": "multistep"},
+            evidence,
+            {"status": "PASS"},
+            {"status": "PASS"},
+        )
+        self.assertEqual("UNKNOWN", result["status"])
+        self.assertEqual("solver_progress_unavailable", result["reason"])
+
+    def test_failed_delivery_is_counted_as_failed_after_multistep_path_started(self):
+        evidence = {
+            "process_path": {
+                "plan_version": 1,
+                "planned_steps": 1,
+                "reported_steps": 0,
+                "accepted_steps": 0,
+                "tool_calls": 0,
+                "successful_roles": ["planner", "reasoner", "step_verifier"],
+                "review_plan_version": 1,
+                "review_origin": "final_generator",
+            }
+        }
+
+        result = _check_process_path(
+            {"type": "multistep"},
+            evidence,
+            {"status": "FAIL"},
+            {"status": "PASS"},
+        )
+
+        self.assertEqual("FAIL", result["status"])
+        self.assertEqual("natural_multistep_delivery_failed", result["reason"])
+
+    def test_process_counts_keep_incomplete_distinct_from_failed_and_not_run(self):
+        summary = _process_coverage_summary(
+            {"samples": [
+                {"id": "s1", "type": "multistep"},
+                {"id": "s2", "type": "multistep"},
+                {"id": "s3", "type": "multistep"},
+            ]},
+            [{
+                "coverage": {"status": "PASS"},
+                "process_path": {
+                    "status": "NOT_RUN",
+                    "reason": "natural_multistep_trace_incomplete",
+                },
+            }, {
+                "coverage": {"status": "UNKNOWN"},
+                "task": {"status": "FAIL"},
+                "process_path": {"status": "FAIL", "reason": "delivery_failed"},
+            }, {
+                "coverage": {"status": "PASS"},
+                "task": {"status": "PASS"},
+                "process_path": {
+                    "status": "NOT_RUN",
+                    "reason": "natural_multistep_path_not_observed",
+                },
+            }],
+            [
+                {"sample_id": "s1", "process_path": {"plan_version": 1}},
+                {"sample_id": "s2", "process_path": {"plan_version": 1}},
+                {"sample_id": "s3", "process_path": {"plan_version": None}},
+            ],
+        )
+
+        self.assertEqual(3, summary["registered"])
+        self.assertEqual(2, summary["audited"])
+        self.assertEqual(1, summary["not_observed"])
+        self.assertEqual(1, summary["incomplete"])
+        self.assertEqual(1, summary["failed"])
+        self.assertEqual(0, summary["not_run"])
+
+    def test_overall_status_keeps_usage_required_by_default(self):
+        checks = {
+            "transport": {"status": "PASS"},
+            "task": {"status": "PASS"},
+            "usage": {"status": "UNKNOWN"},
+            "coverage": {"status": "PASS"},
+        }
+
+        self.assertEqual("UNKNOWN", _overall_status(checks))
+        self.assertEqual("PASS", _overall_status(checks, usage_policy="observe_only"))
+        checks["usage"]["status"] = "FAIL"
+        self.assertEqual("FAIL", _overall_status(checks, usage_policy="observe_only"))
+
+    def test_verify_observe_only_ignores_usage_unknown_for_overall_status(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, _, _, manifest, responses = prepare_run(root)
+            manifest["evidence_kind"] = "provider_live"
+            manifest["usage_policy"] = "observe_only"
+            attempt = responses["/api/agent/jobs/job-1"]["result"]["request_attempts"][0]
+            attempt["usage"] = None
+            budget = responses["/api/agent/jobs/job-1"]["result"]["budget"]
+            budget["provider_known"] = {
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "total_tokens": None,
+            }
+            budget["provider_unknown_fields"] = {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 1,
+            }
+            budget["unknown_attempts"] = 1
+            responses["/api/agent/jobs/job-1/report"]["report"]["request_attempts"] = [attempt]
+            responses["/api/runs/job-1/evidence"]["request_attempts"] = [attempt]
+            digest = manifest_digest(manifest)
+            run_dir = output_root / "batch-1"
+            (run_dir / "manifest.json").write_bytes(canonical_json(manifest))
+            (run_dir / "manifest.sha256").write_text(digest + "\n", encoding="ascii")
+            status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+            status["manifest_sha256"] = digest
+            (run_dir / "status.json").write_text(json.dumps(status), encoding="utf-8")
+            client = ReadOnlyShowcaseClient(responses)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": client},
+                )
+
+            report = json.loads(output.getvalue())
+            self.assertEqual(0, result)
+            self.assertEqual("PASS", report["status"])
+            self.assertEqual("UNKNOWN", report["checks"]["usage"]["status"])
+
+            export_path = root / "observe-only-report.json"
+            export_args = build_parser().parse_args(
+                [
+                    "--base-url",
+                    "http://127.0.0.1:8090",
+                    "--cookie-file",
+                    str(root / "cookies.txt"),
+                    "experiment",
+                    "export",
+                    "--run-id",
+                    "batch-1",
+                    "--output-root",
+                    str(output_root),
+                    "--output",
+                    str(export_path),
+                ]
+            )
+            with contextlib.redirect_stdout(io.StringIO()):
+                export_result = run(export_args, experiment_context={})
+            self.assertEqual(0, export_result)
+            self.assertEqual("PASS", json.loads(export_path.read_text(encoding="utf-8"))["status"])
+
     def test_verify_accepts_legacy_transport_without_evidence_kind(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -444,6 +668,77 @@ class ExperimentVerifyCliTest(unittest.TestCase):
                 "UNKNOWN", json.loads(export_path.read_text(encoding="utf-8"))["status"]
             )
 
+    def test_multistep_without_progress_is_audited_but_not_counted_as_path_coverage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, run_dir, _, manifest, responses = prepare_run(root)
+            manifest["samples"][0]["type"] = "multistep"
+            digest = manifest_digest(manifest)
+            (run_dir / "manifest.json").write_bytes(canonical_json(manifest))
+            (run_dir / "manifest.sha256").write_text(digest + "\n", encoding="ascii")
+            status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+            status["manifest_sha256"] = digest
+            (run_dir / "status.json").write_text(json.dumps(status), encoding="utf-8")
+            client = ReadOnlyShowcaseClient(responses)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": client},
+                )
+
+            report = json.loads(output.getvalue())
+            self.assertEqual(1, result)
+            self.assertEqual("PASS", report["checks"]["task"]["status"])
+            self.assertEqual("PASS", report["checks"]["coverage"]["status"])
+            self.assertEqual("NOT_RUN", report["checks"]["process_path"]["status"])
+            self.assertEqual(
+                "natural_multistep_path_not_observed",
+                report["checks"]["process_path"]["reason"],
+            )
+            self.assertEqual(
+                {
+                    "registered": 1,
+                    "audited": 1,
+                    "completed_without_plan": 1,
+                    "planned": 0,
+                    "path_completed": 0,
+                    "not_observed": 1,
+                    "incomplete": 0,
+                    "not_provider_live": 0,
+                    "unknown": 0,
+                    "not_run": 0,
+                    "failed": 0,
+                },
+                report["process_coverage"],
+            )
+
+    def test_scripted_multistep_trace_is_not_counted_as_natural_path_coverage(self):
+        evidence = {
+            "execution_mode": "experimental",
+            "process_path": {
+                "evidence_kind": "scripted",
+                "plan_version": 1,
+                "planned_steps": 1,
+                "reported_steps": 1,
+                "accepted_steps": 1,
+                "successful_roles": ["planner", "reasoner", "step_verifier", "final_generator"],
+                "tool_calls": 0,
+                "review_origin": "final_generator",
+                "review_plan_version": 1,
+            },
+        }
+
+        result = _check_process_path(
+            {"type": "multistep"},
+            evidence,
+            {"status": "PASS"},
+            {"status": "PASS"},
+        )
+
+        self.assertEqual("NOT_RUN", result["status"])
+        self.assertEqual("provider_live_trace_required", result["reason"])
+
     def test_verify_reports_not_run_without_dispatching_any_sample(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -461,6 +756,7 @@ class ExperimentVerifyCliTest(unittest.TestCase):
                     "task": "NOT_RUN",
                     "usage": "NOT_RUN",
                     "coverage": "NOT_RUN",
+                    "process_path": "PASS",
                 },
                 {key: value["status"] for key, value in report["checks"].items()},
             )
@@ -720,6 +1016,80 @@ class ExperimentVerifyCliTest(unittest.TestCase):
                 )
             self.assertFalse(export_path.exists())
 
+    def test_legacy_multistep_report_cannot_export_without_path_evidence(self):
+        from showcase.experiment_verification import export_experiment_report
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, run_dir, _, manifest, responses = prepare_run(root)
+            manifest["samples"][0]["type"] = "multistep"
+            digest = manifest_digest(manifest)
+            (run_dir / "manifest.json").write_bytes(canonical_json(manifest))
+            (run_dir / "manifest.sha256").write_text(digest + "\n", encoding="ascii")
+            status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+            status["manifest_sha256"] = digest
+            (run_dir / "status.json").write_text(json.dumps(status), encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": ReadOnlyShowcaseClient(responses)},
+                )
+
+            report_path = run_dir / "verification.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["schema_version"] = 1
+            report.pop("process_coverage")
+            report["checks"].pop("process_path")
+            report["samples"][0]["type"] = "multistep"
+            report["manifest_sha256"] = digest
+            report["status"] = _overall_status(report["checks"])
+            content = canonical_json(report)
+            report_path.write_bytes(content)
+            (run_dir / "verification.sha256").write_text(
+                hashlib.sha256(content).hexdigest(), encoding="ascii"
+            )
+
+            with self.assertRaisesRegex(ValueError, "experiment_verification_invalid"):
+                export_experiment_report(
+                    "batch-1", output_root=output_root, output=root / "report.json"
+                )
+
+    def test_export_rejects_process_counts_that_disagree_with_registered_samples(self):
+        from showcase.experiment_verification import export_experiment_report
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, run_dir, _, manifest, responses = prepare_run(root)
+            manifest["samples"][0]["type"] = "multistep"
+            digest = manifest_digest(manifest)
+            (run_dir / "manifest.json").write_bytes(canonical_json(manifest))
+            (run_dir / "manifest.sha256").write_text(digest + "\n", encoding="ascii")
+            status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+            status["manifest_sha256"] = digest
+            (run_dir / "status.json").write_text(json.dumps(status), encoding="utf-8")
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": ReadOnlyShowcaseClient(responses)},
+                )
+
+            report_path = run_dir / "verification.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["process_coverage"]["registered"] = 2
+            report["process_coverage"]["not_observed"] = 2
+            content = canonical_json(report)
+            report_path.write_bytes(content)
+            (run_dir / "verification.sha256").write_text(
+                hashlib.sha256(content).hexdigest(), encoding="ascii"
+            )
+
+            with self.assertRaisesRegex(ValueError, "experiment_verification_invalid"):
+                export_experiment_report(
+                    "batch-1", output_root=output_root, output=root / "report.json"
+                )
+
     def test_verify_reports_changed_final_artifact_binding_as_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -853,7 +1223,13 @@ class ExperimentVerifyCliTest(unittest.TestCase):
             report_json = json.loads(output.getvalue())
             self.assertEqual("PASS", report_json["status"])
             self.assertEqual(
-                {"transport": "PASS", "task": "PASS", "usage": "PASS", "coverage": "PASS"},
+                {
+                    "transport": "PASS",
+                    "task": "PASS",
+                    "usage": "PASS",
+                    "coverage": "PASS",
+                    "process_path": "PASS",
+                },
                 {key: value["status"] for key, value in report_json["checks"].items()},
             )
             self.assertEqual("batch-1", report_json["run_id"])
