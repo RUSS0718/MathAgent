@@ -21,6 +21,7 @@ LAYERED_SCHEMAS = {
     "researcher": "e5b9cd4d259add409204822298e4ed299c8eb2a02f27a359b688058b90721a4f",
 }
 COUNTEREXAMPLE_SCHEMA = "d34c4ad6068e396ff084b945939e6bb3839bc2af86603e7aa2784161ac59a097"
+PARTIAL_EXPLORATION_SCHEMA = "0bee07618015f9cd6ecedf2f63e6785b9cad5b92e7e22aabc0feeca03dc86bf7"
 COUNTEREXAMPLE_PROFILE = "85543b0bdce2793ca8a0a0b666fea45de190ba74e814b8bbdfa30bc7bb8cc17a"
 MESSAGE = ("system", ("content", "role"))
 USER = ("user", ("content", "role"))
@@ -60,6 +61,17 @@ def schema_fingerprint_for(request):
 
 
 class VerifiedStreamProfileRegistrationTest(unittest.TestCase):
+    def test_partial_exploration_meta_uses_only_its_probe_verified_shape(self):
+        actual = schema_fingerprint_for({"role": "meta", "action": "partial_exploration"})
+        self.assertEqual(PARTIAL_EXPLORATION_SCHEMA, actual)
+        decision = select_transport(adapter(), messages_for(SHAPE_5), policy="stream_first",
+                                    schema_fingerprint=actual)
+        self.assertEqual("stream", decision["transport"])
+        self.assertEqual("reject", select_transport(
+            adapter(), messages_for(SHAPE_2), policy="stream_first",
+            schema_fingerprint=actual,
+        )["transport"])
+
     def test_counterexample_schema_fingerprint_matches_registered_live_profile(self):
         """Keep the counterexample response schema and live profile in sync."""
         actual = schema_fingerprint_for({"role": "researcher", "action": "counterexample_check"})
@@ -70,12 +82,12 @@ class VerifiedStreamProfileRegistrationTest(unittest.TestCase):
              for profile in VERIFIED_STREAM_PROFILES},
         )
 
-    def test_only_thirteen_probe_verified_schema_and_message_shape_pairs_are_registered(self):
+    def test_only_fourteen_probe_verified_schema_and_message_shape_pairs_are_registered(self):
         expected = ({(fingerprint, shape) for fingerprint in SCHEMAS.values()
                      for shape in (SHAPE_2, SHAPE_5)}
                     | {(fingerprint, SHAPE_5) for fingerprint in LAYERED_SCHEMAS.values()}
-                    | {(COUNTEREXAMPLE_SCHEMA, SHAPE_5)})
-        self.assertEqual(13, len(VERIFIED_STREAM_PROFILES))
+                    | {(COUNTEREXAMPLE_SCHEMA, SHAPE_5), (PARTIAL_EXPLORATION_SCHEMA, SHAPE_5)})
+        self.assertEqual(14, len(VERIFIED_STREAM_PROFILES))
         self.assertEqual(
             expected,
             {(profile.schema_fingerprint, profile.messages_schema)
@@ -102,7 +114,7 @@ class VerifiedStreamProfileRegistrationTest(unittest.TestCase):
                             for shape in (SHAPE_2, SHAPE_5)),
                           *((fingerprint, SHAPE_5)
                             for fingerprint in LAYERED_SCHEMAS.values()),
-                          (COUNTEREXAMPLE_SCHEMA, SHAPE_5)]
+                          (COUNTEREXAMPLE_SCHEMA, SHAPE_5), (PARTIAL_EXPLORATION_SCHEMA, SHAPE_5)]
         for schema_fingerprint, shape in expected_pairs:
             with self.subTest(schema=schema_fingerprint, shape=len(shape)):
                 decision = select_transport(

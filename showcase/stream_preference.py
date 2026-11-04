@@ -51,7 +51,7 @@ _SHAPE_5_SCHEMA_FINGERPRINTS = (
     "e5b9cd4d259add409204822298e4ed299c8eb2a02f27a359b688058b90721a4f",
 )
 
-# These thirteen immutable entries cover ten schemas across only the probe-tested
+# These fourteen immutable entries cover eleven schemas across only the probe-tested
 # message shapes. Any other endpoint/configuration/schema remains unverified.
 VERIFIED_STREAM_PROFILES: tuple[StreamProfile, ...] = tuple(
     StreamProfile(
@@ -71,6 +71,9 @@ VERIFIED_STREAM_PROFILES: tuple[StreamProfile, ...] = tuple(
         *((fingerprint, (_VERIFIED_MESSAGE_SHAPES[1],))
           for fingerprint in _SHAPE_5_SCHEMA_FINGERPRINTS),
         ("d34c4ad6068e396ff084b945939e6bb3839bc2af86603e7aa2784161ac59a097",
+         (_VERIFIED_MESSAGE_SHAPES[1],)),
+        # 2026-11-04: standalone live probe of Meta partial_exploration.
+        ("0bee07618015f9cd6ecedf2f63e6785b9cad5b92e7e22aabc0feeca03dc86bf7",
          (_VERIFIED_MESSAGE_SHAPES[1],)),
     )
     for messages_schema in message_shapes
