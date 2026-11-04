@@ -1,7 +1,7 @@
 """Intern transmission observed through public Solver Harness ports."""
 
-import json
 import hashlib
+import json
 import unittest
 
 from showcase.adapters import InternModelAdapter
@@ -21,6 +21,23 @@ class FakeClient:
 
 
 class InternPortTest(unittest.TestCase):
+    def test_role_reply_accepts_extra_handoff_fields_but_keeps_owned_fields_required(self):
+        from showcase.solver_harness.intern_schemas import response_schema
+        from showcase.tool_schemas import schema_error
+
+        schema = response_schema({"role": "meta", "action": "partial_exploration"})
+        reply = {
+            "decision": "PLAN",
+            "reason": "A staged approach is useful.",
+            "role": "meta",
+            "action": "partial_exploration",
+            "findings": ["The initial exploration was incomplete."],
+            "allowed_tools": [],
+        }
+
+        self.assertIsNone(schema_error(reply, schema))
+        self.assertIsNotNone(schema_error({"decision": "PLAN"}, schema))
+
     def test_runtime_fingerprints_bind_actual_messages_input_and_schema(self):
         from showcase.solver_harness.intern_port import InternModelPort
         from showcase.solver_harness.intern_schemas import response_schema
@@ -87,8 +104,8 @@ class InternPortTest(unittest.TestCase):
         )
 
     def test_stream_capable_adapter_stays_non_streaming_without_explicit_switch(self):
-        from showcase.solver_harness.intern_port import InternModelPort
         from showcase.adapters import ModelResponse
+        from showcase.solver_harness.intern_port import InternModelPort
 
         class StreamCapableAdapter:
             model_id = "intern-test"
