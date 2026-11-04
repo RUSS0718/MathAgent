@@ -233,6 +233,7 @@ def _valid_text_chat_messages(messages):
         if (
             not isinstance(message, dict)
             or set(message) != {"role", "content"}
+            or not isinstance(message["role"], str)
             or message["role"] not in {"system", "developer", "user", "assistant"}
             or not isinstance(message["content"], str)
         ):
