@@ -261,6 +261,8 @@ class StarProductPipeline:
                     "error": None if reviewed and verification_mode != "required" else {
                         "category": ("protocol_failure_unrepaired"
                                      if math.get("result_reason") == "protocol_failure_unrepaired"
+                                     else "invalid_verifier_verdict"
+                                     if math.get("result_reason") == "invalid_verifier_verdict"
                                      else "verification_needs_review" if reviewed
                                      else "star_needs_review")},
                 }

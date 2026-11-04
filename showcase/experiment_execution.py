@@ -124,7 +124,17 @@ def resume_batch(
     if status.get("current_index", 0) < len(manifest["samples"]) and not status.get(
         "current_session_id"
     ):
-        return _stop(directory, status, "unknown_session")
+        if status.get("current_job_id") or not _completed_prefix_is_committed(
+            status, manifest["samples"]
+        ):
+            return _stop(directory, status, "unknown_session")
+        intent_path = directory / "dispatch_intent.json"
+        try:
+            intent = _read_json(intent_path)
+        except ValueError:
+            return _stop(directory, status, "ledger_or_binding_defect")
+        if intent is not None and not _intent_is_committed(status, manifest["samples"], intent):
+            return _stop(directory, status, "unknown_session")
     adapter = _job_adapter(context)
     _validate_runtime_contract(adapter, manifest)
     return _advance(manifest, directory, status, adapter, resume=True)
@@ -186,6 +196,16 @@ def _advance(
             return _stop(directory, status, "hard_limit")
         intent_path = directory / "dispatch_intent.json"
         has_unresolved_intent = intent_path.exists()
+        if resume and has_unresolved_intent:
+            try:
+                saved_intent = _read_json(intent_path)
+            except ValueError:
+                return _stop(directory, status, "ledger_or_binding_defect")
+            if saved_intent is not None and _intent_is_committed(
+                status, samples, saved_intent
+            ):
+                _remove_intent(intent_path)
+                has_unresolved_intent = False
         if _batch_limit_exhausted(status["usage"], batch_limits, completed=status["completed"]) or (
             not status.get("current_job_id")
             and not has_unresolved_intent
@@ -199,7 +219,7 @@ def _advance(
             continue
         session_id = status.get("current_session_id")
         if not session_id:
-            if resume:
+            if resume and not _completed_prefix_is_committed(status, samples):
                 return _stop(directory, status, "unknown_session")
             try:
                 session_id = adapter.create_session(status["run_id"])
@@ -211,8 +231,11 @@ def _advance(
             status["phase"] = "dispatching"
             _save(directory, status)
         intent = _read_json(intent_path)
+        intent_created = False
         if intent is None and resume and status.get("current_job_id"):
             return _stop(directory, status, "ledger_or_binding_defect")
+        if intent is None and resume and status.get("pending_intent") is not None:
+            return _stop(directory, status, "unknown_dispatch")
         if intent is None:
             key = str(uuid.uuid4())
             deadline_at = min(status["deadline_at"], time.time() + limits["max_runtime_seconds"])
@@ -236,6 +259,7 @@ def _advance(
                 "deadline_at": deadline_at,
             }
             _write_json_once(intent_path, intent)
+            intent_created = True
         elif intent.get("index") != index or intent.get("sample_id") != sample["id"]:
             return _stop(directory, status, "ledger_or_binding_defect")
 
@@ -252,7 +276,7 @@ def _advance(
                     return _stop(directory, status, "ledger_or_binding_defect")
                 job_id = existing[0]["job_id"]
             else:
-                if resume and intent_path.exists():
+                if resume and intent_path.exists() and not intent_created:
                     # A durable intent without a known Job may have crossed the POST boundary.
                     # Recovery must stop for review instead of replaying the request.
                     return _stop(directory, status, "unknown_dispatch")
@@ -368,7 +392,14 @@ def _advance(
         )
         if stop_reason:
             status["pending_intent"] = None
-            return _stop(directory, status, stop_reason)
+            stopped = _stop(directory, status, stop_reason)
+            if (
+                stop_reason == "job_failed_or_canceled"
+                and observation.get("status") in {"failed", "canceled"}
+                and status.get("current_job_id") == job_id
+            ):
+                _remove_intent(intent_path)
+            return stopped
         if observation["status"] == "running":
             if time.time() >= intent["deadline_at"]:
                 return _stop(directory, status, "hard_limit")
@@ -395,6 +426,15 @@ def _advance(
         _save(directory, status)
         _remove_intent(intent_path)
         resume = False
+    if resume and (directory / "dispatch_intent.json").exists():
+        intent_path = directory / "dispatch_intent.json"
+        try:
+            intent = _read_json(intent_path)
+        except ValueError:
+            return _stop(directory, status, "ledger_or_binding_defect")
+        if intent is None or not _intent_is_committed(status, samples, intent):
+            return _stop(directory, status, "unknown_dispatch")
+        _remove_intent(intent_path)
     status["phase"] = "completed"
     status["stop_reason"] = None
     _save(directory, status)
@@ -414,8 +454,10 @@ def _observation_stop_reason(
         return "unknown_transport"
     if observation.get("transport") != expected_transport:
         return "unknown_transport"
-    if observation.get("status") not in {"succeeded", "running"}:
+    if observation.get("status") in {"failed", "canceled"}:
         return "job_failed_or_canceled"
+    if observation.get("status") not in {"succeeded", "running"}:
+        return "unknown_job_status"
     if _has_unknown(observation.get("budget")):
         metering_only = (
             usage_policy == "observe_only" and observation.get("status") == "succeeded"
@@ -437,6 +479,79 @@ def _resume_is_safe(value: Any, deadline_at: float) -> bool:
         and value.get("ledger_consistent") is True
         and value.get("deadline_at") == deadline_at
         and time.time() < deadline_at
+    )
+
+
+def _completed_prefix_is_committed(status: dict[str, Any], samples: list[dict[str, Any]]) -> bool:
+    index = status.get("current_index")
+    completed = status.get("completed_samples")
+    records = status.get("run_records")
+    if (
+        type(index) is not int
+        or index <= 0
+        or index >= len(samples)
+        or type(status.get("completed")) is not int
+        or status["completed"] != index
+        or not isinstance(completed, list)
+        or len(completed) != index
+        or any(type(item) is not int or item != offset for offset, item in enumerate(completed))
+        or not isinstance(records, list)
+    ):
+        return False
+    by_sample = {
+        record.get("sample_id"): record
+        for record in records
+        if isinstance(record, dict) and isinstance(record.get("sample_id"), str)
+    }
+    return all(
+        isinstance(by_sample.get(samples[offset]["id"]), dict)
+        and isinstance(by_sample[samples[offset]["id"]].get("job_id"), str)
+        and bool(by_sample[samples[offset]["id"]]["job_id"])
+        for offset in range(index)
+    )
+
+
+def _intent_is_committed(
+    status: dict[str, Any], samples: list[dict[str, Any]], intent: dict[str, Any]
+) -> bool:
+    index = intent.get("index")
+    current_index = status.get("current_index")
+    completed = status.get("completed_samples")
+    if (
+        type(index) is not int
+        or index < 0
+        or index >= len(samples)
+        or type(current_index) is not int
+        or index >= current_index
+        or type(status.get("completed")) is not int
+        or status["completed"] != current_index
+        or not isinstance(completed, list)
+        or len(completed) != current_index
+        or any(type(item) is not int or item != offset for offset, item in enumerate(completed))
+        or status.get("pending_intent") is not None
+    ):
+        return False
+    records = status.get("run_records")
+    by_sample = {
+        item.get("sample_id"): item
+        for item in records
+        if isinstance(item, dict) and isinstance(item.get("sample_id"), str)
+    } if isinstance(records, list) else {}
+    record = by_sample.get(samples[index]["id"])
+    if any(
+        not isinstance(by_sample.get(samples[offset]["id"]), dict)
+        or not isinstance(by_sample[samples[offset]["id"]].get("job_id"), str)
+        or not by_sample[samples[offset]["id"]]["job_id"]
+        for offset in range(current_index)
+    ):
+        return False
+    return (
+        isinstance(record, dict)
+        and intent.get("sample_id") == samples[index]["id"]
+        and all(
+            intent.get(key) == record.get(key)
+            for key in ("session_id", "idempotency_key", "request_digest", "deadline_at")
+        )
     )
 
 

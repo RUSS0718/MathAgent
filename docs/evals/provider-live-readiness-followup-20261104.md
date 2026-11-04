@@ -52,3 +52,17 @@
 该批次状态曾将 stop reason 记为 `incomplete_or_unresolved_usage`。当前代码已修正为：若观察到 Job 仍运行且原硬截止已过，优先记录 `hard_limit`；请求未知状态仍独立保持 UNKNOWN，不恢复、不重发。新回归测试验证此分类。此修复只校正观察器停因，不改变历史 Run，也不证明线上多步交付已修复。
 
 #127 仍 FAIL / open；#128 仍 NOT_RUN / open，usage 仍 UNKNOWN。未发起新 provider 调用。
+
+## 2026-11-05 readiness-01 追加结果
+
+新增冻结 Run 的完整身份和阶段证据见 [readiness-01 运行记录](provider-live-natural-20261105-readiness-01.md)。Run 使用源码 `2b42070fbd64145d761ceede68abe7113bdbe557`、manifest SHA-256 `d1a08223e364f4032dffeecf7c0253fe4e8f8640c7c537ab9c1998d5097ff3e9`，登记 2 题并完成 1/2。自然多步 trace 形成 4 步计划，完成第一步且有 3 次成功工具调用；第二步核验返回矛盾的 `ACCEPT / PARTIAL / PASS`，Job 以 `star_needs_review` 失败。末次 verifier 正文首 token 04:13:56.561、末 token 04:16:18.332（北京时间），流在 04:16:19.145 正常完成；这不是传输失败或数学正确性判定。缺最终答案、整题审查与文本绑定。
+
+离线审查后修复了矛盾 verdict 的错误分类和已确认终态失败的 intent 清理，并修复三项 #128 配对证据路径问题。103 项聚焦测试通过；这不证明 provider-live 重新运行通过。旧 Run 报告的 coverage UNKNOWN 是 intent 分类问题；usage 继续 UNKNOWN，不阻断答案完成也不标 PASS。
+
+#127 保持 **FAIL / open**；#128 保持 **NOT_RUN / open**。新 provider-live Run 必须使用修复后新的源码身份、manifest 和 Run ID。未改变官方 baseline、预算或 best-effort 开关，不声称数学能力提升。
+
+### readiness-02 前的复核补充（2026-11-05）
+
+对 readiness-01 后的修复工作树再次独立审查，发现最后一题提交后删除 dispatch intent 的崩溃窗口，以及低层 pair 来源校验可被覆写 port/adapter/client 方法绕过的问题；另补足计数与已完成连续前缀不一致时不得清理 intent 的约束。逐项回归先复现缺陷后验证修复。
+
+当前定向聚焦 113 项测试、快速合同门禁、Ruff、`git diff --check` 均通过，官方 baseline 文件和 `user_agent.py`/`implementations/` 无差异。上述证据只证明离线工程边界；readiness-02 还未派发。readiness-01 原记录不修改，usage 继续 `UNKNOWN` 且按本轮授权不阻断答案完成、不标 PASS；#127/#128 Issue 状态待新 Run 及配对证据更新。

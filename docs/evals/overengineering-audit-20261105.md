@@ -149,3 +149,53 @@ GitHub #127/#128 评论已按以上终态更新；两个 Issue 均保持开放�
 - 没有合并中间流片段，也没有删除 `candidate_registry`、Best-Effort、恢复或 pair 的空状态分支。它们分别受崩溃恢复和公开状态消费者约束，仍不具备安全删除证据。
 
 本追加没有启动 provider-live、#128 pair 或全量测试。新增及相关聚焦回归通过；官方 baseline、硬预算、身份追踪、unknown 防重发、整题审查和最终文本绑定保持不变。
+
+## 2026-11-05 审计口径更正与 readiness-01 复核
+
+### 独立根因计数更正
+
+先前“已简化 2 项”的合并口径遗漏了 Solver 投影路径。按不同事件表和读取消费者拆分后，当前审计范围内已有 **3 项已简化的过度复杂度根因**：
+
+1. `workspace_events` 的 Job 快照重复/无界读取；
+2. Solver 展示投影读取与展示无关的完整历史；
+3. 所有 role 顶层 schema 一律允许附加字段。
+
+前两项分别由 `job_events.py` 分页和 `star_product_projection.py` 的投影模式处理，属于不同读取路径，不能合并计数。传输 profile 与业务 schema 的旧耦合是更早已修复的第 4 项，不属于本次三候选。
+
+当前**没有已确认且仍存在的过度开发项**；仍有 **2 项待量化的性能复杂度疑点**，均不据此改写恢复语义：
+
+- 每个流片段同步 checkpoint。现有测试明确要求下一个片段前已保存 partial text，并验证进程退出后可恢复该文本；尚无证据表明当前每片段完整快照写入的成本超过该恢复收益。
+- 每次 checkpoint 前后的调用路径会重复物化完整 Solver 事件历史：`calls._save()` 读取一次，`harness.commit_event()` 再读取一次。代码可确认重复读取行为，但没有 profile 证明它是本次失败的主因，也没有验证更轻的提交接口能保留并发终态保护。
+
+第二项局部 schema 兼容范围仍受 `meta.partial_exploration` 限定，但仓库未保存可独立复核的脱敏原始 provider 响应；“字段曾在线上出现”目前只见于已有运行记录。保持例外并继续记为证据缺口，不扩大到其它 role，也不在缺乏样本时撤销。
+
+第三候选 `candidate_registry` / `best_effort_decision` 等可选字段保留：实现、公开投影、配对和回放路径有实际消费者。可确认配对及 opt-in 消费者；没有独立证据说明恢复机制依赖这些字段的 `None` 值，不再沿用这一过强表述。readiness 中 Best-Effort 仍关闭。
+
+### 新 Run 与修复后状态
+
+`readiness-01` 的完整冻结信息和结果见 [独立运行记录](provider-live-natural-20261105-readiness-01.md)。该 Run 确实生成自然多步 trace，并执行了工具回执；Job 因步骤核验返回矛盾的 `ACCEPT + PARTIAL + PASS` 组合而安全终止。模型输出矛盾不是代码应当放行的合法 verdict。
+
+围绕本 Run 和 #128 证据路径，又修复 5 个代码问题，均与“过度开发”分开计数：
+
+1. 矛盾 verifier verdict 的 `invalid_verifier_verdict` 原因被自由文本覆盖，Job 只呈现笼统的 `star_needs_review`；现在保留稳定原因并在 Job 错误类别中展示。
+2. 只有已核实为终态 Job 失败、且停止原因确认为 `job_failed_or_canceled` 时才清理 intent；账本/传输核验失败仍保留 intent 和 UNKNOWN。
+3. Pair variant 执行异常时可能沿用 baseline 的局部 `result`，污染 variant 的 phase/Job ID；现在每臂独立初始化。
+4. Pair 核心 admission 与 arm Job 路由都强制 readiness 报告属于 Issue #127。
+5. 低层 `SolverHarness.PairedRunner` 的来源声明曾只按字符串分类：脚本 port 可冒称 `provider_live`，而带外部网络能力的 `InternModelAdapter` 可冒称 `offline_injected`；随后加入的 blanket provider-live guard 又会拒绝旧 SH22 合同支持的真实 Intern 调用。现在离线注入只接受严格 loopback client，`provider_live` 只接受固定 Intern endpoint 的 provider-only client；低层真实 live pair 保留原 `needs_review` 结论，#128 仍只能走 readiness-gated 公共入口取得 Issue 证据。
+
+前三项曾影响 #127 分类或未来 #128 证据真实性；后两项是 #128 证据路径缺陷。总计为此前记录的 4 项修复、本次 5 项修复及后续来源/传输核验这一项，共 10 项已确认实现/诊断缺陷修复；不将模型提供矛盾内容或数学正确性列为代码 bug。
+
+配对公共服务路由默认关闭且 readiness verifier 需要受信任宿主注入，这是显式 opt-in 保护边界，不在本轮改成默认开放。当前仓库没有可独立使用的默认 verifier，故线上 pair 仍需由受信任运行配置提供；缺少该配置时应保持 NOT_RUN，而不是降级验收。
+
+聚焦验证：先前的 103 项测试记录对应来源核验修正前的工作树。当前来源核验新增了低层 pair 回归；最新重新执行结果以本记录后续追加为准。官方 baseline 路径保持无差异。#127 仍 FAIL/open；#128 仍 NOT_RUN/open。
+
+## 2026-11-05 独立复核追加：恢复与来源证明
+
+对当前修复工作树做的两轮只读独立复核又定位了 2 个实现缺陷：
+
+1. 最后一个样本提交后、删除 `dispatch_intent.json` 前进程中断时，恢复循环已无下一样本可进入，会把 Run 标为 `completed` 却留下未决 intent；独立核验因该文件将 coverage 降为 UNKNOWN。现在只有 intent 与已完成样本记录的 session、key、digest 和 deadline 完全匹配时，恢复才清理它；未知或不匹配 intent 仍停止并保留。
+2. pair source 校验此前只验证 `port.adapter`，但实际 Solver Harness 调用 port 方法。自定义 `InternModelPort` 子类可以挂载固定 endpoint adapter 并覆写 `complete()`；精确类型 adapter 或 client 实例也能覆写实际 dispatch 方法，造成 `provider_live` 或 `offline_injected` 来源被错误确认。现在来源声明要求使用未覆写 dispatch 方法的精确 port、adapter 与 Intern client，再核对 adapter、client 类型和 endpoint；不触网的回归覆盖 port、adapter、client 三层覆写及两个 source 标签。
+
+单样本崩溃回归曾因断言位于临时目录销毁后而失效；修正后先稳定复现“completed 且 intent 仍存在”，再加恢复清理并验证通过。进一步的负向恢复用例证明计数不一致时不会清理 intent。当前聚焦 unittest 为 **113 项通过**，包含执行、独立核验、公共 Job API、pair CLI/来源、配对执行和 STAR gate；快速合同门禁及改动文件 Ruff 通过，`git diff --check` 通过，`BASELINE.json`、`user_agent.py` 与 `implementations/` 无差异。该数字是定向工程证据，不是全仓门禁或 provider-live readiness 结论。
+
+本次审查采取 3 类路径：复用 readiness-01 已冻结证据定位缺口；通过定向 unittest 与源码检查审查既有修复和 3 项审计简化；再用独立子智能体审查恢复、来源证明及新 Run 前置条件。readiness-01 保持原样并仍为已执行未通过；readiness-02 尚未派发；#128 仍 NOT_RUN。上述修复只是本次已知缺陷，不代表已穷尽整个仓库所有潜在 bug。

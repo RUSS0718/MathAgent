@@ -40,6 +40,16 @@ def normalize_verdict(reply: Any, current_index: int) -> dict[str, Any]:
     }
 
 
+def _reject_contradictory_acceptance(verification: dict[str, Any]) -> dict[str, Any]:
+    """Reject an ACCEPT verdict whose gates do not prove acceptance."""
+    if (
+        verification["verdict"] == "ACCEPT"
+        and (verification["goal_gate"] != "YES" or verification["logic_gate"] != "PASS")
+    ):
+        verification.update(valid=False, reason="invalid_verifier_verdict")
+    return verification
+
+
 def verify_step(
     harness: _HarnessOperations,
     run: dict[str, Any],
@@ -237,7 +247,7 @@ def verify_step(
         reply=reply,
         reserve_and_dispatch=reserve_and_dispatch,
     )
-    verification = normalize_verdict(reply, index + 1)
+    verification = _reject_contradictory_acceptance(normalize_verdict(reply, index + 1))
     if unfulfilled:
         # A computation the reviewer asked for never completed; its verdict is not
         # an acceptance and must not promote any evidence.
@@ -296,7 +306,9 @@ def verify_step(
                         reply = None
                         repair_failure_reason = "invalid_verifier_response"
                     else:
-                        verification = normalize_verdict(reply, index + 1)
+                        verification = _reject_contradictory_acceptance(
+                            normalize_verdict(reply, index + 1)
+                        )
                         if unfulfilled:
                             verification.update(valid=False, reason="verifier_tool_request_unfulfilled")
                         declared = (
@@ -342,7 +354,10 @@ def verify_step(
         else ""
     )
     if isinstance(reply, Mapping):
-        if isinstance(reply.get("reason"), str):
+        if (
+            isinstance(reply.get("reason"), str)
+            and verification.get("reason") != "invalid_verifier_verdict"
+        ):
             verification["reason"] = reply["reason"]
         directions = reply.get("forbidden_directions")
         if isinstance(directions, list) and all(isinstance(item, str) for item in directions):
@@ -431,6 +446,8 @@ def verify_step(
     }
     if not verification["valid"] and not checkpoint_accepted:
         state_updates["status"] = "partial_aborted"
+        if verification.get("reason") == "invalid_verifier_verdict":
+            state_updates["result_reason"] = "invalid_verifier_verdict"
     event = {
         "event_id": f"step-reviewed-{step_id}{suffix}",
         "type": "step_reviewed",

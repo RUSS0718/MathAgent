@@ -179,6 +179,18 @@ class ExperimentPairCliTest(unittest.TestCase):
                 },
                 "experiment_readiness_not_verified",
             ),
+            (
+                "wrong-issue",
+                {
+                    "schema_version": 1,
+                    "issue_number": 126,
+                    "status": "PASS",
+                    "run_id": "one-run",
+                    "manifest_sha256": "a" * 64,
+                    "verification_sha256": "b" * 64,
+                },
+                "experiment_readiness_mismatch",
+            ),
         )
         for label, report, expected_reason in cases:
             with self.subTest(readiness=label), tempfile.TemporaryDirectory() as temporary:
@@ -659,6 +671,47 @@ class ExperimentPairCliTest(unittest.TestCase):
             self.assertEqual([pair["baseline"]["run_id"]], order)
             self.assertNotEqual("PASS", result["status"])
             self.assertEqual("NOT_RUN", result["arms"]["variant"]["verification_status"])
+
+    def test_second_arm_exception_does_not_reuse_baseline_result(self) -> None:
+        from showcase.experiment_pair import run_pair
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = {"schema_version": 1, "issue_number": 127, "status": "PASS"}
+            pair = _pair("pair-variant-error", report)
+            baseline_result = {
+                "run_id": pair["baseline"]["run_id"],
+                "phase": "completed",
+                "completed": 1,
+                "total": 1,
+                "run_records": [{"job_id": "baseline-job"}],
+            }
+            with patch(
+                "showcase.experiment_pair.run_batch",
+                side_effect=[baseline_result, RuntimeError("variant failed")],
+            ):
+                result = run_pair(
+                    pair,
+                    expected_sha256=pair_manifest_digest(pair),
+                    readiness_report=report,
+                    output_root=root / "runs",
+                    context={
+                        "authorization": InvocationAuthorization(
+                            pair_manifest_digest(pair), "scripted", pair["pair_id"]
+                        ),
+                        "readiness_verifier": lambda _report: {"status": "PASS"},
+                        "pair_job_adapter_factory": lambda *_args: object(),
+                        "pair_arm_verifier": lambda _run_id, **_kwargs: {
+                            "status": "PASS",
+                            "applied_component_config": pair["baseline"]["features"],
+                        },
+                    },
+                )
+
+            variant = result["arms"]["variant"]
+            self.assertEqual("unknown", variant["execution_phase"])
+            self.assertEqual([], variant["job_ids"])
+            self.assertEqual("UNKNOWN", variant["verification_status"])
 
 
 if __name__ == "__main__":

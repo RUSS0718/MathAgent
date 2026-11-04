@@ -52,3 +52,17 @@
 新增 [handoffloose-02 脱敏运行记录](provider-live-natural-20261104-handoffloose-02.md)：最新自然多步 Run 完成 1/2，在 3600 秒 Run 截止时 Job 仍运行于 `STEP_VERIFY`，随后 Job 以 `run_deadline_exhausted` 失败。原批次 stop reason 对未知 usage 的分类遮住硬截止；已修正本地观察顺序并增加回归。coverage/usage 保持 UNKNOWN，task 与 process_path 为 FAIL，transport PASS 仅指登记配置匹配。
 
 当前工作树还修复了两个既有实现缺陷（观察器丢失安全错误类别、非法非字符串 message role 可触发 `TypeError`），并把事件 snapshot 改为 SQL 限量页、避免 Job 快照重复读全量事件历史；Meta handoff 只允许已登记字段，其余 role 保持严格 schema。聚焦验证结果见本轮审计记录。没有启动新的 provider 请求；#127 仍 FAIL / open，#128 两臂仍 NOT_RUN / open，离线通过不替代线上验收。
+
+## 2026-11-05 readiness-01 与 pair admission 修复
+
+新的 #127 自然多步 Run 已执行未通过，冻结身份、trace、逐调用首末正文及整题交付缺口见 [readiness-01 记录](provider-live-natural-20261105-readiness-01.md)。步骤核验返回矛盾 ACCEPT，系统拒绝接受；后续修复只增加精确诊断，不改变该 Run 结果或 verdict 合同。
+
+#128 离线合同中又修复：pair variant 异常时误复用 baseline 结果、readiness 报告未在所有 admission 层核对 `issue_number=127`、低层 pair 的来源标签与实际传输能力不匹配。后续审查还发现，拦截所有 `provider_live` 声明会误阻断既有 SH22 的显式 Intern 用法；现改为校验固定 provider endpoint 与 strict loopback 边界，不再仅信任来源字符串。#128 仍必须走 readiness-gated 公共入口。聚焦回归和最近一轮完整聚焦测试结果以本记录追加为准。标准公共路由仍是显式 opt-in，并要求受信任服务端注入独立 readiness verifier。
+
+因此 #127 仍为 **已执行未通过 / FAIL / open**，#128 仍为 **NOT_RUN / open**。没有两臂线上 Run；离线结果不替代线上验收。复杂度审计按独立根因更正为 3 项已简化、2 项性能疑点待量化，见 [过度开发审计与修复记录](overengineering-audit-20261105.md)。
+
+## 2026-11-05 readiness-02 前的补充修复
+
+独立复核新增发现最后一个已提交样本在 intent 删除前进程退出时，Run 可 completed 而残留 intent；恢复现已只清理与连续已完成前缀、计数及运行记录完全匹配的 intent，不一致时保留并停止。来源核验也已覆盖实际 port、adapter 和 provider client dispatch 方法，防止实例覆写使 `provider_live`/`offline_injected` 来源标签与调用路径不符。
+
+新增 RED→GREEN 回归后，执行相关 6 组聚焦合同共 **113 项通过**，`check_fast.py`、Ruff、`git diff --check` 通过；官方 baseline 差异检查通过。这些修复和简化仍没有替代 readiness-02 provider-live 证据。当前尚未派发 readiness-02；#128 仍 NOT_RUN，不关闭 Issue。

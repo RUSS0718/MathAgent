@@ -424,7 +424,8 @@ def create_app(
                     or not isinstance(report, dict)
                     or hashlib.sha256(canonical_json(report)).hexdigest()
                     != pair["readiness_report_sha256"]
-                    or report.get("issue_number") != 127
+                    or type(report.get("issue_number")) is not int
+                    or report["issue_number"] != 127
                     or report.get("status") != "PASS"
                 ):
                     raise ValueError("experiment_readiness_mismatch")
@@ -459,8 +460,10 @@ def create_app(
                 report = payload.get("readiness_report")
                 report_hash = hashlib.sha256(canonical_json(report)).hexdigest()
                 if (
-                    report_hash != pair["readiness_report_sha256"]
-                    or not isinstance(report, dict)
+                    not isinstance(report, dict)
+                    or type(report.get("issue_number")) is not int
+                    or report["issue_number"] != 127
+                    or report_hash != pair["readiness_report_sha256"]
                     or report.get("status") != "PASS"
                 ):
                     raise ValueError("experiment_readiness_not_passed")
