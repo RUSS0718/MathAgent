@@ -30,3 +30,9 @@
 - 随后启用 `RUN_STAR_READINESS_DOCKER_INTEGRATION=1` 并复跑离线阶段跳过的两项 Docker 集成用例：**2 项通过**。该补充运行不重跑全量门禁。
 
 上述门禁只证明当前源码的工程合同、受控恢复、固定镜像隔离和前端检查可复现；它没有产生 provider-live 请求，也没有改变 #127 的 `NOT_RUN` 或 #128 的 `NOT_COVERED` 状态。
+
+## 2026-11-04 #128 离线配对执行切片
+
+#128 的专用 `experiment pair` 路径现已串行派发冻结 baseline 与 variant，并将各自样本通过公共 Job 路径执行为独立 Run。持久 pair 状态包含每个样本的脱敏执行结果；独立 `pair-verify` 重新核对 Run manifest、样本与 Job 身份、公共 Job 的实际组件配置、执行顺序及单因素差异。readiness 先经服务端预检，实际 arm 创建时再次核验；预检本身不创建 Job。
+
+离线 scripted / fake-public-API 合同覆盖该执行与复核切片：聚焦 unittest **54 项通过**，改动范围 Ruff 检查和 `git diff --check` 通过，coverage matrix JSON 可解析。2026-11-04 运行 `uv run python scripts/check.py --offline`，全仓 **1,234 项测试中 3 项失败、42 项跳过**；失败分别为 `test_star_product_guidance_consumption...test_recovery_after_meta_ruling_applies_it_exactly_once` 超时、`test_star_rb03_obligations...test_invalid_declaration_target_and_type_cannot_be_accepted` 调用数不符、`test_star_rb06_faults...test_public_http_deadline_stops_waiting_and_only_late_usage_can_settle` 未决 attempt 断言不符，均不在本切片改动文件内。该证据不包含 provider-live 调用：#127 readiness 仍为 `NOT_RUN`，因此没有运行 live pair，也不支持 pair complete 或数学能力提升结论。

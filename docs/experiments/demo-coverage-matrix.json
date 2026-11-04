@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "ticket": 122,
-  "updated": "2026-11-03",
+  "updated": "2026-11-04",
   "basis": {
     "integration_branch": "feat(setup)-流式与CLI实验组件设置",
     "integration_merge": "775d00e3cdcadb6cb6aeca07a1b59093103370d4",
@@ -339,25 +339,30 @@
       "id": "experiment_cli_single_factor_pair",
       "source": "Project engineering extension; P1 §4.3 is literature context, not implementation attribution.",
       "existing_code_candidates": [
-        "showcase/cli.py",
-        "showcase/campaign_cli.py",
-        "showcase/solver_harness/paired.py",
-        "showcase/solver_harness/paired_conditions.py"
+        "showcase/experiment_cli.py",
+        "showcase/experiment_job_adapter.py",
+        "showcase/experiment_pair.py",
+        "showcase/experiment_pair_verification.py",
+        "showcase/flask_app.py"
       ],
       "trace": [
-        "manifest/source hash",
-        "PID/created time/phase/completion/stop/log tail",
-        "public Job/Run plus S3/S4 reconciliation",
-        "redacted export"
+        "frozen pair manifest and one-factor condition",
+        "serial baseline/variant public Runs",
+        "per-sample outcomes and applied component configuration",
+        "independent Job/Run identity and S3/S4 reconciliation"
       ],
       "offline": {
-        "status": "NOT_COVERED",
+        "status": "COVERED",
         "refs": [
           "showcase/experiment_pair.py",
+          "showcase/experiment_job_adapter.py",
           "showcase/experiment_pair_verification.py",
-          "tests/test_showcase_experiment_pair_cli.py"
+          "tests/test_showcase_experiment_pair_cli.py",
+          "tests/test_experiment_pair_worker_plumbing.py",
+          "tests/test_showcase_experiment_public_api.py",
+          "tests/test_showcase_experiment_verify.py"
         ],
-        "note": "The CLI validates single-factor registration, binds invocation authorization, and keeps readiness-blocked pairs NOT_RUN; pair verification demotes runner-authored PASS to UNKNOWN. Paired Job execution and independent per-arm re-verification remain unavailable, so the dependent-ticket contract is not covered."
+        "note": "Offline scripted tests cover separate public baseline/variant arm Runs, readiness preflight, persisted per-sample outcomes, applied component configuration, and independent pair/Run/Job identity reconciliation. This covers the offline execution contract only; #127 provider-live readiness remains NOT_RUN. The 2026-11-04 repository-wide offline gate ran 1,234 tests with 3 failures outside this pairing slice and 42 skips; see the dated evaluation record."
       },
       "historical_live": {
         "status": "NOT_COVERED",

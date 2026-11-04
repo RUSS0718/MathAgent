@@ -70,7 +70,7 @@ provider-live manifest 的 `model.retry: 1` 表示 Intern 客户端的单次初�
 | S3 预算、停止、取消与安全恢复 | P1 附录 A、B.5；强恢复合同为项目扩展 | showcase/run_budget.py、Job 控制、Solver checkpoint；attempt、reservation、deadline 和终态投影 | COVERED：公共 Job、进程退出、unknown、预算与迟到结算测试 | NOT_RUN：本票未验证真实 provider 在途请求的取消或恢复语义 |
 | S4 最终文本身份、审查和 Evidence | P1 §3.5；哈希身份绑定为项目扩展 | showcase/final_evidence.py、solver_harness/final_binding.py；artifact hash、review scope、binding 状态 | COVERED：改写失效、并发追加与公共报告合同 | NOT_RUN：#127 需要新 CLI Run 上真实整题审查和同文本绑定证据 |
 | 实验登记、只读核验与导出 | 项目工程扩展；独立报告与脱敏为工程合同 | `showcase/experiment_cli.py`、`experiment_runner.py`、`experiment_verification.py` 及其检查/报告模块 | COVERED：#125/#126 的 frozen manifest 与 verify/export CLI 合同；见对应测试 | NOT_RUN：新 CLI 尚无 provider-live 批次 |
-| 单因素配对 | 项目工程扩展；P1 §4.3 仅作研究背景 | 实验 CLI 已有 pair manifest 注册与 fail-closed 核验；公共 Job 组件配置、两臂派发及 arm 独立重核尚未接通 | NOT_COVERED：安全拒绝路径有测试，paired execution 未覆盖；见[阶段验收记录](../evals/showcase-experiment-cli-124-128.md) | NOT_RUN：#127 readiness 尚无 provider-live 通过记录 |
+| 单因素配对 | 项目工程扩展；P1 §4.3 仅作研究背景 | `experiment pair` 通过专用公共 Job 路由串行执行冻结 baseline/variant Runs，保存逐样本结果，并独立复核 Job/Run 身份与 applied component config | COVERED：scripted / fake-public-API 合同覆盖离线配对执行；见[阶段验收记录](../evals/showcase-experiment-cli-124-128.md) | NOT_RUN：#127 readiness 尚无 provider-live 通过记录；不得据此报告 live 配对完成 |
 
 逐项测试文件、状态值和阻断票以 [demo-coverage-matrix.json](demo-coverage-matrix.json) 为机器读取入口。未来运行报告必须新增实际证据引用和状态，不得覆盖本页列出的历史事实。
 

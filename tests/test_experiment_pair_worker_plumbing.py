@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from llm_client import InternChatClient
 from showcase.adapters import InternModelAdapter
+from showcase.experiment_job_adapter import PublicExperimentPairJobAdapter
 from showcase.experiment_pair import pair_manifest_digest, validate_pair_manifest
 from showcase.experiment_pair_verification import verify_pair_arm_component_config
 from showcase.flask_app import create_app
@@ -51,7 +52,87 @@ class _PublicJobReader:
         return response.get_json()
 
 
+class _RecordingClient:
+    def __init__(self):
+        self.calls = []
+
+    def bootstrap(self):
+        return {}
+
+    def request(self, method, path, *, payload=None, headers=None):
+        self.calls.append((method, path, payload, headers))
+        return {"job_id": "job-pair", "status": "queued"}
+
+
 class ExperimentPairWorkerPlumbingTest(unittest.TestCase):
+    def test_pair_adapter_uses_dedicated_route_and_matching_request_identity(self):
+        report = {"schema_version": 1, "issue_number": 127, "status": "PASS"}
+        pair = _pair("pair-adapter", report)
+        client = _RecordingClient()
+        resolver = type("Resolver", (), {"read_text": lambda _self, _sample: "x+1=2\n"})()
+        adapter = PublicExperimentPairJobAdapter(
+            client,
+            pair["baseline"]["manifest"],
+            object(),
+            resolver,
+            object(),
+            pair=pair,
+            arm="baseline",
+            readiness_report=report,
+        )
+        limits = {
+            "max_model_calls": 2,
+            "max_http_attempts": 3,
+            "max_tool_calls": 1,
+            "max_tokens": 4096,
+            "max_runtime_seconds": 120,
+        }
+        digest = adapter.request_digest(
+            pair["baseline"]["manifest"]["samples"][0],
+            "session-01",
+            budget_limits=limits,
+            deadline_at=1234.0,
+        )
+        response = adapter.create_job(
+            pair["baseline"]["manifest"]["samples"][0],
+            "session-01",
+            "idempotency-key",
+            budget_limits=limits,
+            deadline_at=1234.0,
+        )
+
+        from showcase.workspace import workspace_job_request_digest
+
+        binding = {
+            "pair_id": pair["pair_id"],
+            "pair_sha256": pair_manifest_digest(pair),
+            "arm": "baseline",
+            "arm_run_id": pair["baseline"]["run_id"],
+            "factor": pair["factor"],
+            "features": pair["baseline"]["features"],
+            "applied_config_status": "pre_execution",
+            "applied_component_config": None,
+        }
+        expected_digest = workspace_job_request_digest(
+            session_id="session-01",
+            message="x+1=2",
+            verification_mode=pair["baseline"]["manifest"]["model"]["verification_mode"],
+            solver_mode=pair["baseline"]["manifest"]["model"]["solver_mode"],
+            budget_limits=RunBudgetLimits(**limits),
+            deadline_at=1234.0,
+            experiment_binding=binding,
+        )
+        method, path, payload, headers = client.calls[0]
+        self.assertEqual("POST", method)
+        self.assertEqual(expected_digest, digest)
+        self.assertEqual({"job_id": "job-pair", "status": "queued"}, response)
+        self.assertEqual(
+            f"/api/experiments/pairs/{pair['pair_id']}/arms/baseline/jobs", path
+        )
+        self.assertEqual("x+1=2", payload["message"])
+        self.assertEqual(pair_manifest_digest(pair), payload["pair_sha256"])
+        self.assertEqual({"Idempotency-Key": "idempotency-key"}, headers)
+
     def test_pair_manifest_rejects_best_effort_arms(self):
         cases = []
         enabled_feature = _pair("pair-best-effort-feature")

@@ -182,6 +182,20 @@ def run_pair(
         save_execution_status(directory, state)
         return state
 
+    runtime_preparer = context.get("pair_runtime_preparer")
+    if callable(runtime_preparer):
+        try:
+            runtime_preparer()
+        except Exception:
+            state.update(
+                status="NOT_RUN",
+                phase="readiness_blocked",
+                stop_reason="experiment_pair_runtime_unavailable",
+                execution_blockers=["experiment_pair_runtime_unavailable"],
+            )
+            save_execution_status(directory, state)
+            return state
+
     from .experiment_cli import InvocationAuthorization
 
     for name in ("baseline", "variant"):
@@ -242,6 +256,10 @@ def run_pair(
             arm_state["applied_component_config"] = verified[
                 "applied_component_config"
             ]
+        if isinstance(verified, dict) and isinstance(verified.get("sample_outcomes"), list):
+            arm_state["sample_outcomes"] = verified["sample_outcomes"]
+        if isinstance(verified, dict) and isinstance(verified.get("run_verification"), dict):
+            arm_state["run_verification"] = verified["run_verification"]
         if isinstance(verified, dict) and isinstance(verified.get("reason"), str):
             arm_state["verification_reason"] = verified["reason"]
         save_execution_status(directory, state)

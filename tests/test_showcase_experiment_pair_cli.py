@@ -110,6 +110,14 @@ class ExperimentPairCliTest(unittest.TestCase):
     def _invoke(self, root: Path, pair: dict, report_path: Path) -> tuple[int, dict]:
         manifest_path = root / f"{pair['pair_id']}.json"
         manifest_path.write_text(json.dumps(pair), encoding="utf-8")
+        model_path = root / "applied-model.json"
+        model_path.write_text(json.dumps({"schema_version": 1, "model": pair["baseline"]["manifest"]["model"]}), encoding="utf-8")
+        sample_root = root / "samples"
+        sample_root.mkdir()
+        (sample_root / "sample.txt").write_text("x+1=2\n", encoding="utf-8")
+        (sample_root / "input.txt").write_text("x+1=2\n", encoding="utf-8")
+        sample_map = root / "sample-map.json"
+        sample_map.write_text(json.dumps({"sample-01": {"input": "input.txt", "text": "sample.txt"}}), encoding="utf-8")
         argv = [
             "experiment",
             "pair",
@@ -125,6 +133,12 @@ class ExperimentPairCliTest(unittest.TestCase):
             str(report_path),
             "--output-root",
             str(root / "runs"),
+            "--applied-config",
+            str(model_path),
+            "--sample-root",
+            str(sample_root),
+            "--sample-map",
+            str(sample_map),
         ]
         factory = Mock(side_effect=AssertionError("Job adapter must not be created"))
         output = StringIO()
@@ -163,7 +177,7 @@ class ExperimentPairCliTest(unittest.TestCase):
                     "manifest_sha256": "a" * 64,
                     "verification_sha256": "b" * 64,
                 },
-                "experiment_readiness_aggregate_verifier_unavailable",
+                "experiment_readiness_not_verified",
             ),
         )
         for label, report, expected_reason in cases:
@@ -190,7 +204,10 @@ class ExperimentPairCliTest(unittest.TestCase):
                 self.assertTrue((root / "runs" / "pairs" / pair["pair_id"] / "status.json").is_file())
 
                 verify_output = StringIO()
-                with redirect_stdout(verify_output):
+                with (
+                    redirect_stdout(verify_output),
+                    patch("showcase.experiment_cli._create_read_client", return_value=Mock()),
+                ):
                     verify_code = cli.main(
                         [
                             "experiment",
@@ -246,6 +263,12 @@ class ExperimentPairCliTest(unittest.TestCase):
                 str(readiness_path),
                 "--output-root",
                 str(root / "runs"),
+                "--applied-config",
+                str(root / "applied-model.json"),
+                "--sample-root",
+                str(root / "samples"),
+                "--sample-map",
+                str(root / "sample-map.json"),
             ]
             error_output = StringIO()
             adapter_factory = Mock(side_effect=AssertionError("Job adapter must not be created"))
@@ -284,7 +307,11 @@ class ExperimentPairCliTest(unittest.TestCase):
                 "phase": "completed",
                 "execution_order": ["baseline", "variant"],
                 "dispatch_count": 2,
-                "readiness": {"status": "PASS"},
+                "readiness": {
+                    "issue_number": 127,
+                    "status": "PASS",
+                    "report_sha256": pair["readiness_report_sha256"],
+                },
                 "arms": {},
             }
             (pair_dir / "status.json").write_text(json.dumps(forged), encoding="utf-8")
@@ -292,11 +319,118 @@ class ExperimentPairCliTest(unittest.TestCase):
                 ["experiment", "pair-verify", "--pair-id", pair["pair_id"], "--output-root", str(root)]
             )
             output = StringIO()
-            with redirect_stdout(output):
+            with redirect_stdout(output), patch(
+                "showcase.experiment_cli._create_read_client", return_value=Mock()
+            ):
                 code = cli.run(args)
 
             self.assertEqual(1, code)
             self.assertEqual("UNKNOWN", json.loads(output.getvalue())["status"])
+
+    def test_pair_verify_reconciles_each_saved_arm_and_rejects_tampered_sample_rows(self) -> None:
+        from showcase.experiment_manifest import manifest_digest
+        from showcase.experiment_pair_verification import _sample_outcome, verify_experiment_pair
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = {"schema_version": 1, "issue_number": 127, "status": "PASS"}
+            pair = _pair("pair-independent-verify", report)
+            pair_dir = root / "pairs" / pair["pair_id"]
+            pair_dir.mkdir(parents=True)
+            (pair_dir / "registration.json").write_bytes(canonical_json(pair))
+            arms = {}
+            for name in ("baseline", "variant"):
+                arm = pair[name]
+                run_id = arm["run_id"]
+                run_dir = root / run_id
+                (run_dir / "evidence").mkdir(parents=True)
+                job_id = f"job-{name}"
+                evidence = {
+                    "sample_id": "sample-01",
+                    "job_id": job_id,
+                    "job_status": "succeeded",
+                    "transport_identity": {"policy": "stream_first", "calls": []},
+                    "budget": {"tool_calls": 0, "logical_calls": 1},
+                    "whole_review": {"accepted": True, "binding": "same_artifact"},
+                    "semantics": {"binding": "same_artifact"},
+                    "request_attempts": [],
+                }
+                (run_dir / "evidence" / "sample.json").write_bytes(canonical_json(evidence))
+                run_status = {
+                    "run_id": run_id,
+                    "manifest_sha256": manifest_digest(arm["manifest"]),
+                    "phase": "completed",
+                    "completed": 1,
+                    "completed_samples": [0],
+                    "total": 1,
+                    "run_records": [{"sample_id": "sample-01", "job_id": job_id}],
+                }
+                (run_dir / "status.json").write_bytes(canonical_json(run_status))
+                (run_dir / "manifest.json").write_bytes(canonical_json(arm["manifest"]))
+                (run_dir / "manifest.sha256").write_text(
+                    manifest_digest(arm["manifest"]), encoding="ascii"
+                )
+                arms[name] = {
+                    "run_id": run_id,
+                    "manifest_sha256": manifest_digest(arm["manifest"]),
+                    "status": "completed",
+                    "execution_phase": "completed",
+                    "verification_status": "PASS",
+                    "job_ids": [job_id],
+                    "applied_component_config": arm["features"],
+                    "sample_outcomes": [_sample_outcome(evidence, "PASS")],
+                }
+            state = {
+                "pair_id": pair["pair_id"],
+                "pair_sha256": pair_manifest_digest(pair),
+                "factor": pair["factor"],
+                "status": "PASS",
+                "phase": "completed",
+                "execution_order": ["baseline", "variant"],
+                "dispatch_count": 2,
+                "completed": 2,
+                "readiness": {
+                    "issue_number": 127,
+                    "status": "PASS",
+                    "report_sha256": pair["readiness_report_sha256"],
+                },
+                "arms": arms,
+            }
+            (pair_dir / "status.json").write_bytes(canonical_json(state))
+            reader = Mock()
+            reader.request.return_value = {}
+            with (
+                patch("showcase.experiment_verification.verify_experiment_run",
+                      return_value={"status": "PASS"}),
+                patch("showcase.experiment_pair_verification.verify_pair_arm_component_config",
+                      side_effect=lambda _reader, _job, pair_value, arm_name: {
+                          "status": "PASS",
+                          "applied_component_config": pair_value[arm_name]["features"],
+                      }),
+            ):
+                verified = verify_experiment_pair(
+                    pair["pair_id"], output_root=root, read_client=reader
+                )
+                self.assertEqual("PASS", verified["status"], verified)
+                self.assertEqual(
+                    {"factor": "skills", "baseline": False, "variant": True},
+                    verified["config_difference"],
+                )
+                state["arms"]["variant"]["sample_outcomes"][0]["job_status"] = "failed"
+                (pair_dir / "status.json").write_bytes(canonical_json(state))
+                tampered = verify_experiment_pair(
+                    pair["pair_id"], output_root=root, read_client=reader
+                )
+                state["arms"]["variant"]["sample_outcomes"][0]["job_status"] = "succeeded"
+                state["arms"]["variant"]["status"] = "stopped"
+                (pair_dir / "status.json").write_bytes(canonical_json(state))
+                inconsistent = verify_experiment_pair(
+                    pair["pair_id"], output_root=root, read_client=reader
+                )
+            self.assertEqual("FAIL", tampered["status"])
+            self.assertEqual("paired_arm_record_mismatch", tampered["reason"])
+            self.assertEqual("FAIL", inconsistent["status"])
+            self.assertEqual("paired_arm_record_mismatch", inconsistent["reason"])
 
     def test_pair_dispatches_arms_serially_only_with_independent_readiness(self) -> None:
         from showcase.experiment_pair import run_pair
@@ -344,6 +478,12 @@ class ExperimentPairCliTest(unittest.TestCase):
                             "applied_component_config": pair[
                                 "baseline" if run_id == pair["baseline"]["run_id"] else "variant"
                             ]["features"],
+                            "sample_outcomes": [{
+                                "sample_id": "sample-01",
+                                "job_id": f"job-{run_id}",
+                                "status": "PASS",
+                                "usage": {"logical_calls": 1, "tool_calls": 0},
+                            }],
                         },
                     },
                 )
@@ -354,7 +494,136 @@ class ExperimentPairCliTest(unittest.TestCase):
             self.assertEqual(2, result["dispatch_count"])
             self.assertEqual("completed", result["arms"]["baseline"]["status"])
             self.assertEqual("completed", result["arms"]["variant"]["status"])
+            for name in ("baseline", "variant"):
+                self.assertEqual(
+                    [{
+                        "sample_id": "sample-01",
+                        "job_id": f"job-{pair[name]['run_id']}",
+                        "status": "PASS",
+                        "usage": {"logical_calls": 1, "tool_calls": 0},
+                    }],
+                    result["arms"][name]["sample_outcomes"],
+                )
 
+    def test_pair_cli_dispatches_frozen_arms_separately_and_persists_outcomes(self) -> None:
+        from showcase.experiment_cli import execute_experiment_command
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = {"schema_version": 1, "issue_number": 127, "status": "PASS"}
+            pair = _pair("pair-cli-dispatch", report)
+            pair_path = root / "pair.json"
+            pair_path.write_bytes(canonical_json(pair))
+            report_path = root / "readiness.json"
+            report_path.write_bytes(canonical_json(report))
+            adapter_order = []
+            verifier_order = []
+            outcome = {
+                "sample_id": "sample-01",
+                "job_id": "job-public",
+                "status": "PASS",
+                "usage": {"logical_calls": 1, "tool_calls": 0},
+            }
+
+            def adapter_factory(_pair, arm_name, _arm):
+                adapter_order.append(arm_name)
+                return object()
+
+            def run_arm(_manifest, *, expected_sha256, run_id, output_root, context):
+                del expected_sha256, output_root
+                adapter = context["job_adapter_factory"]()
+                self.assertIsNotNone(adapter)
+                arm_name = "baseline" if run_id == pair["baseline"]["run_id"] else "variant"
+                return {
+                    "run_id": run_id,
+                    "phase": "completed",
+                    "completed": 1,
+                    "total": 1,
+                    "run_records": [{"sample_id": "sample-01", "job_id": f"job-{arm_name}"}],
+                }
+
+            def verify_arm(run_id, **_kwargs):
+                arm_name = "baseline" if run_id == pair["baseline"]["run_id"] else "variant"
+                verifier_order.append(arm_name)
+                return {
+                    "status": "PASS",
+                    "applied_component_config": pair[arm_name]["features"],
+                    "sample_outcomes": [dict(outcome, job_id=f"job-{arm_name}")],
+                }
+
+            args = cli.build_parser().parse_args([
+                "experiment", "pair", "--manifest", str(pair_path),
+                "--sha256", pair_manifest_digest(pair),
+                "--authorize-sha256", pair_manifest_digest(pair),
+                "--authorize-evidence-kind", "scripted",
+                "--readiness-report", str(report_path),
+                "--output-root", str(root / "runs"),
+                "--applied-config", str(root / "unused-model.json"),
+                "--sample-root", str(root / "unused-samples"),
+                "--sample-map", str(root / "unused-map.json"),
+            ])
+            with patch("showcase.experiment_pair.run_batch", side_effect=run_arm):
+                result, exit_code = execute_experiment_command(
+                    args,
+                    context={
+                        "authorization": InvocationAuthorization(
+                            pair_manifest_digest(pair), "scripted", pair["pair_id"]
+                        ),
+                        "readiness_verifier": lambda _report: {"status": "PASS"},
+                        "pair_runtime_preparer": lambda: None,
+                        "pair_job_adapter_factory": adapter_factory,
+                        "pair_arm_verifier": verify_arm,
+                    },
+                )
+
+            self.assertEqual(0, exit_code)
+            self.assertEqual(["baseline", "variant"], adapter_order)
+            self.assertEqual(["baseline", "variant"], verifier_order)
+            persisted = json.loads(
+                (root / "runs" / "pairs" / pair["pair_id"] / "status.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual("PASS", persisted["status"])
+            self.assertEqual(
+                [dict(outcome, job_id="job-baseline")],
+                persisted["arms"]["baseline"]["sample_outcomes"],
+            )
+            self.assertEqual(
+                [dict(outcome, job_id="job-variant")],
+                persisted["arms"]["variant"]["sample_outcomes"],
+            )
+
+    def test_cli_readiness_verifier_uses_service_preflight_without_job_dispatch(self) -> None:
+        from showcase.experiment_cli import _verify_pair_readiness
+
+        report = {"schema_version": 1, "issue_number": 127, "status": "PASS"}
+        pair = _pair("pair-cli-readiness", report)
+
+        class Client:
+            def bootstrap(self):
+                return {"csrf_token": "fixture"}
+
+            def request(self, method, path, *, payload):
+                self.assertion = (method, path, payload)
+                return {"status": "PASS"}
+
+        client = Client()
+        args = type("Args", (), {
+            "base_url": "http://127.0.0.1:8090",
+            "cookie_file": Path("fixture.cookies"),
+            "timeout": 10,
+        })()
+        result = _verify_pair_readiness(args, {"showcase_client": client}, pair, report)
+
+        self.assertEqual({"status": "PASS"}, result)
+        method, path, payload = client.assertion
+        self.assertEqual("POST", method)
+        self.assertEqual(
+            f"/api/experiments/pairs/{pair['pair_id']}/readiness", path
+        )
+        self.assertEqual(pair_manifest_digest(pair), payload["pair_sha256"])
+        self.assertEqual(report, payload["readiness_report"])
     def test_pair_does_not_complete_when_execution_stops_even_if_arm_verifier_claims_pass(self) -> None:
         from showcase.experiment_pair import run_pair
 

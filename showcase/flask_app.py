@@ -402,6 +402,38 @@ def create_app(
         return jsonify({"success": True, "job_id": job["job_id"], "status": job["status"], "existing": existing}), status
 
     if app.config.get("SHOWCASE_EXPERIMENT_PAIR_ENABLED") is True:
+        @app.post("/api/experiments/pairs/<pair_id>/readiness")
+        def verify_experiment_pair_readiness(pair_id: str) -> tuple[Response, int]:
+            _require_auth(g.auth_session)
+            payload = _request_object()
+            if isinstance(payload, tuple):
+                return payload
+            try:
+                from .experiment_manifest import canonical_json
+                from .experiment_pair import pair_manifest_digest, validate_pair_manifest
+
+                pair = validate_pair_manifest(payload.get("pair_manifest"))
+                report = payload.get("readiness_report")
+                if (
+                    pair["pair_id"] != pair_id
+                    or payload.get("pair_sha256") != pair_manifest_digest(pair)
+                    or not isinstance(report, dict)
+                    or hashlib.sha256(canonical_json(report)).hexdigest()
+                    != pair["readiness_report_sha256"]
+                    or report.get("issue_number") != 127
+                    or report.get("status") != "PASS"
+                ):
+                    raise ValueError("experiment_readiness_mismatch")
+                verifier = app.config.get("SHOWCASE_EXPERIMENT_READINESS_VERIFIER")
+                if not callable(verifier):
+                    raise ValueError("experiment_readiness_not_verified")
+                verified = verifier(report)
+                if not isinstance(verified, dict) or verified.get("status") != "PASS":
+                    raise ValueError("experiment_readiness_not_verified")
+                return jsonify({"status": "PASS"}), 200
+            except Exception:
+                return _json_error("experiment_readiness_not_verified", 400)
+
         @app.post("/api/experiments/pairs/<pair_id>/arms/<arm>/jobs")
         def create_experiment_pair_job(pair_id: str, arm: str) -> tuple[Response, int]:
             session = _require_auth(g.auth_session)
@@ -409,8 +441,8 @@ def create_app(
             if isinstance(payload, tuple):
                 return payload
             try:
-                from .experiment_pair import pair_manifest_digest, validate_pair_manifest
                 from .experiment_manifest import canonical_json
+                from .experiment_pair import pair_manifest_digest, validate_pair_manifest
 
                 pair = validate_pair_manifest(payload.get("pair_manifest"))
                 if pair["pair_id"] != pair_id:

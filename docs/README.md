@@ -6,6 +6,8 @@
 
 2026-11-04 的当前源码三题复验、简单题与中等题新 Run 结果、流式首末正文时间及独立核验见 [provider-live readiness follow-up](evals/provider-live-readiness-followup-20261104.md)。
 
+2026-11-04 的 #128 离线配对执行切片与覆盖状态见 [实验 CLI #124–#128 阶段记录](evals/showcase-experiment-cli-124-128.md)；#127 provider-live readiness 与 live 配对结论仍待单独验收。
+
 适用范围：理解 v0.1、v0.2 历史版本和当前 v1.1 Solver Harness 规格；执行规则以根 [AGENTS.md](../AGENTS.md) 为准。
 
 ## 先读哪些文档

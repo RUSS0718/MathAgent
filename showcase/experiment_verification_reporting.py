@@ -106,6 +106,7 @@ def _safe_evidence(
     semantic = evidence.get("semantics") if isinstance(evidence.get("semantics"), dict) else {}
     artifact = latest.get("artifact") if isinstance(latest.get("artifact"), dict) else {}
     job_result = job.get("result") if isinstance(job.get("result"), dict) else {}
+    report_body = report.get("report") if isinstance(report.get("report"), dict) else {}
     return {
         "sample_id": sample["id"],
         "job_id": record.get("job_id"),
@@ -114,6 +115,7 @@ def _safe_evidence(
         ),
         "execution_mode": _safe_choice(report.get("mode"), _EXECUTION_MODES, "unavailable"),
         "request_attempts": projected_attempts,
+        "tools": _safe_tool_summaries(report_body.get("tool_summaries")),
         "budget": _safe_budget(budget),
         "solver_mode": _safe_choice(
             job_result.get("solver_mode"), {"star_reference"}, "unavailable"
@@ -175,6 +177,30 @@ def _safe_evidence(
         ),
         "applied_config": None,
     }
+
+
+def _safe_tool_summaries(values: Any) -> list[dict[str, Any]]:
+    """Keep only categorical tool outcomes and numeric duration in pair evidence."""
+    if not isinstance(values, list):
+        return []
+    output = []
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        status = item.get("status")
+        error = item.get("error_category")
+        output.append({
+            "name": name if isinstance(name, str) and _IDENTIFIER.fullmatch(name) else None,
+            "status": status if status in {"completed", "failed", "unknown", "rejected"} else "unknown",
+            "duration_seconds": item.get("duration_seconds")
+            if _finite_number(item.get("duration_seconds")) and item["duration_seconds"] >= 0
+            else None,
+            "error_category": error
+            if isinstance(error, str) and _IDENTIFIER.fullmatch(error)
+            else None,
+        })
+    return output
 
 
 def _safe_attempt_usage(value: Any) -> dict[str, int | None] | None:

@@ -9,10 +9,10 @@ import uuid
 from pathlib import Path
 
 from showcase.experiment_job_adapter import PublicExperimentJobAdapter
+from showcase.experiment_pair import pair_manifest_digest
 from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
 from showcase.workspace import workspace_job_request_digest
-from showcase.experiment_pair import pair_manifest_digest
 from tests.test_showcase_experiment_pair_cli import _pair
 
 
@@ -168,6 +168,58 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
             headers={"X-CSRF-Token": self.csrf, "Idempotency-Key": str(uuid.uuid4())},
         )
         self.assertEqual(404, response.status_code)
+
+    def test_pair_readiness_check_verifies_without_creating_a_job(self):
+        report = {"schema_version": 1, "issue_number": 127, "status": "PASS"}
+        pair = _pair("pair-readiness-api", report)
+        verifier_calls = []
+        app = create_app(
+            {
+                "TESTING": True,
+                "SHOWCASE_DATA_DIR": str(Path(self.temporary.name) / "pair-readiness"),
+                "SHOWCASE_WORKER_ENABLED": False,
+                "SHOWCASE_EXPERIMENT_PAIR_ENABLED": True,
+                "SHOWCASE_EXPERIMENT_READINESS_VERIFIER": lambda value: (
+                    verifier_calls.append(value) or {"status": "PASS"}
+                ),
+            }
+        )
+        try:
+            client = app.test_client()
+            csrf = client.get("/api/check_auth").get_json()["csrf_token"]
+            client.post("/api/new_chat", headers={"X-CSRF-Token": csrf})
+            response = client.post(
+                f"/api/experiments/pairs/{pair['pair_id']}/readiness",
+                json={
+                    "pair_manifest": pair,
+                    "pair_sha256": pair_manifest_digest(pair),
+                    "readiness_report": report,
+                },
+                headers={"X-CSRF-Token": csrf},
+            )
+            self.assertEqual(200, response.status_code, response.get_json())
+            self.assertEqual({"status": "PASS"}, response.get_json())
+            self.assertEqual([report], verifier_calls)
+            self.assertEqual([], client.get("/api/agent/jobs/active").get_json()["jobs"])
+
+            app.config["SHOWCASE_EXPERIMENT_READINESS_VERIFIER"] = (
+                lambda _report: {"status": "FAIL"}
+            )
+            rejected = client.post(
+                f"/api/experiments/pairs/{pair['pair_id']}/readiness",
+                json={
+                    "pair_manifest": pair,
+                    "pair_sha256": pair_manifest_digest(pair),
+                    "readiness_report": report,
+                },
+                headers={"X-CSRF-Token": csrf},
+            )
+            self.assertEqual(400, rejected.status_code)
+            self.assertEqual([], client.get("/api/agent/jobs/active").get_json()["jobs"])
+        finally:
+            app.extensions["showcase_workspace_service"].close()
+            app.extensions["showcase_run_service"].close()
+            app.extensions["loopback_store"].close()
 
     def test_regular_job_route_rejects_caller_selected_solver_components(self):
         response = self.client.post(
