@@ -44,3 +44,11 @@
 中等题 manifest SHA-256 为 `c3653a4742b141f69e3856e07eac83e7b76d564a79f358443cfffcd1ad8e07ea`。Job 的公共终态为 `failed`，错误码为 `run_deadline_exhausted`；核验结果为 task `FAIL`、coverage `UNKNOWN`、transport `PASS`、usage `FAIL`。该批次没有 30 秒流空闲证据，主要失败归类为 Run 截止导致的执行未完成；它不能证明题目本身不可解，也不能证明模型答案正确。
 
 这次中等题仍未形成 #127 所需的自然多步 readiness。#127 保持 open。#128 继续保持 `NOT_COVERED`，因为 #127 前置条件未通过，且公共 Job 的组件配置、两臂派发和逐臂独立核验尚未接通。
+
+## 2026-11-05 最新自然多步运行
+
+最新 `handoffloose-02` Run 的冻结身份、逐调用限制、流时间及失败边界见 [独立脱敏记录](provider-live-natural-20261104-handoffloose-02.md)。它完成 1/2：自然多步 Job 在 2026-11-05 00:43:25（北京时间）以 `run_deadline_exhausted` 失败，Solver 留在 `STEP_VERIFY` / revision 10839；没有最终生成、整题审查或文本绑定。最后正文为 00:43:21.879，完成/finish 缺失；没有连续 30 秒无流活动停止证据。
+
+该批次状态曾将 stop reason 记为 `incomplete_or_unresolved_usage`。当前代码已修正为：若观察到 Job 仍运行且原硬截止已过，优先记录 `hard_limit`；请求未知状态仍独立保持 UNKNOWN，不恢复、不重发。新回归测试验证此分类。此修复只校正观察器停因，不改变历史 Run，也不证明线上多步交付已修复。
+
+#127 仍 FAIL / open；#128 仍 NOT_RUN / open，usage 仍 UNKNOWN。未发起新 provider 调用。

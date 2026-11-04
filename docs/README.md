@@ -8,6 +8,8 @@
 
 2026-11-04 的 #128 离线配对执行切片与覆盖状态见 [实验 CLI #124–#128 阶段记录](evals/showcase-experiment-cli-124-128.md)；#127 provider-live readiness 与 live 配对结论仍待单独验收。
 
+2026-11-05 的 `handoffloose-02` 自然多步运行停在 Run 硬截止，脱敏身份、Job/Solver 状态和停止分类修复见 [#127 线上运行记录](evals/provider-live-natural-20261104-handoffloose-02.md)。该运行未通过 #127，#128 线上 pair 仍为 `NOT_RUN`；当前过度复杂度审计与离线修复进度见 [审计与修复记录](evals/overengineering-audit-20261105.md)。
+
 适用范围：理解 v0.1、v0.2 历史版本和当前 v1.1 Solver Harness 规格；执行规则以根 [AGENTS.md](../AGENTS.md) 为准。
 
 ## 先读哪些文档
