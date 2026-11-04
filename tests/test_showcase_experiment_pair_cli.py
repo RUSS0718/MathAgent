@@ -183,7 +183,7 @@ class ExperimentPairCliTest(unittest.TestCase):
                 self.assertEqual("NOT_RUN", result["readiness"]["status"])
                 self.assertEqual(expected_reason, result["stop_reason"])
                 self.assertEqual(
-                    ["aggregate_readiness_verifier_unavailable", "component_job_path_unavailable"],
+                    [expected_reason],
                     result["execution_blockers"],
                 )
                 self.assertEqual("not_started", result["arms"]["baseline"]["status"])
@@ -297,6 +297,99 @@ class ExperimentPairCliTest(unittest.TestCase):
 
             self.assertEqual(1, code)
             self.assertEqual("UNKNOWN", json.loads(output.getvalue())["status"])
+
+    def test_pair_dispatches_arms_serially_only_with_independent_readiness(self) -> None:
+        from showcase.experiment_pair import run_pair
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = {
+                "schema_version": 1,
+                "issue_number": 127,
+                "status": "PASS",
+                "independent_verifier": "PASS",
+                "manifest_sha256": "a" * 64,
+                "verification_sha256": "b" * 64,
+            }
+            pair = _pair("pair-dispatch", report)
+            order: list[str] = []
+
+            def run_arm(manifest, *, expected_sha256, run_id, output_root, context):
+                del manifest, expected_sha256, output_root, context
+                order.append(run_id)
+                return {
+                    "run_id": run_id,
+                    "phase": "completed",
+                    "status": "COMPLETED",
+                    "completed": 1,
+                    "total": 1,
+                    "stop_reason": None,
+                    "run_records": [{"job_id": f"job-{run_id}"}],
+                }
+
+            with patch("showcase.experiment_pair.run_batch", side_effect=run_arm):
+                result = run_pair(
+                    pair,
+                    expected_sha256=pair_manifest_digest(pair),
+                    readiness_report=report,
+                    output_root=root / "runs",
+                    context={
+                        "authorization": InvocationAuthorization(
+                            pair_manifest_digest(pair), "scripted", pair["pair_id"]
+                        ),
+                        "readiness_verifier": lambda _report: {"status": "PASS"},
+                        "pair_job_adapter_factory": lambda *_args: object(),
+                        "pair_arm_verifier": lambda run_id, **_kwargs: {
+                            "status": "PASS",
+                            "applied_component_config": pair[
+                                "baseline" if run_id == pair["baseline"]["run_id"] else "variant"
+                            ]["features"],
+                        },
+                    },
+                )
+
+            self.assertEqual([pair["baseline"]["run_id"], pair["variant"]["run_id"]], order)
+            self.assertEqual("PASS", result["status"])
+            self.assertEqual(["baseline", "variant"], result["execution_order"])
+            self.assertEqual(2, result["dispatch_count"])
+            self.assertEqual("completed", result["arms"]["baseline"]["status"])
+            self.assertEqual("completed", result["arms"]["variant"]["status"])
+
+    def test_pair_does_not_complete_when_execution_stops_even_if_arm_verifier_claims_pass(self) -> None:
+        from showcase.experiment_pair import run_pair
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            report = {"schema_version": 1, "issue_number": 127, "status": "PASS"}
+            pair = _pair("pair-stopped", report)
+            order: list[str] = []
+
+            def run_arm(_manifest, *, run_id, **_kwargs):
+                order.append(run_id)
+                return {"phase": "stopped", "stop_reason": "hard_limit", "run_records": []}
+
+            with patch("showcase.experiment_pair.run_batch", side_effect=run_arm):
+                result = run_pair(
+                    pair,
+                    expected_sha256=pair_manifest_digest(pair),
+                    readiness_report=report,
+                    output_root=root / "runs",
+                    context={
+                        "authorization": InvocationAuthorization(
+                            pair_manifest_digest(pair), "scripted", pair["pair_id"]
+                        ),
+                        "readiness_verifier": lambda _report: {"status": "PASS"},
+                        "pair_job_adapter_factory": lambda *_args: object(),
+                        "pair_arm_verifier": lambda _run_id, **_kwargs: {
+                            "status": "PASS",
+                            "applied_component_config": pair["baseline"]["features"],
+                        },
+                    },
+                )
+
+            self.assertEqual([pair["baseline"]["run_id"]], order)
+            self.assertNotEqual("PASS", result["status"])
+            self.assertEqual("NOT_RUN", result["arms"]["variant"]["verification_status"])
 
 
 if __name__ == "__main__":
