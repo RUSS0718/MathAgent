@@ -21,7 +21,7 @@ class FakeClient:
 
 
 class InternPortTest(unittest.TestCase):
-    def test_role_reply_accepts_extra_handoff_fields_but_keeps_owned_fields_required(self):
+    def test_partial_exploration_accepts_only_registered_handoff_fields(self):
         from showcase.solver_harness.intern_schemas import response_schema
         from showcase.tool_schemas import schema_error
 
@@ -37,6 +37,28 @@ class InternPortTest(unittest.TestCase):
 
         self.assertIsNone(schema_error(reply, schema))
         self.assertIsNotNone(schema_error({"decision": "PLAN"}, schema))
+        self.assertIsNotNone(schema_error({**reply, "unregistered_context": "ignored"}, schema))
+
+        strategist_schema = response_schema(
+            {"role": "meta_strategist", "action": "partial_exploration"}
+        )
+        self.assertIsNone(schema_error(reply, strategist_schema))
+        self.assertIsNotNone(
+            schema_error({**reply, "unregistered_context": "ignored"}, strategist_schema)
+        )
+
+        reasoner_schema = response_schema({"role": "reasoner"})
+        self.assertIsNotNone(
+            schema_error(
+                {
+                    "argument": "continue",
+                    "claims": [],
+                    "blocked": False,
+                    "unregistered_context": "ignored",
+                },
+                reasoner_schema,
+            )
+        )
 
     def test_runtime_fingerprints_bind_actual_messages_input_and_schema(self):
         from showcase.solver_harness.intern_port import InternModelPort

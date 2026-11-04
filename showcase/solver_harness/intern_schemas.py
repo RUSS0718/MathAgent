@@ -10,11 +10,6 @@ def obj(properties, required=None, *, additional_properties=False):
     }
 
 
-def handoff_obj(properties, required=None):
-    """Validate role-owned fields while tolerating attached handoff context."""
-    return obj(properties, required, additional_properties=True)
-
-
 TEXT = {"type": "string"}
 TEXTS = {"type": "array", "items": TEXT}
 TARGET = {"oneOf": [{"type": "integer", "minimum": 1}, {"enum": [None]}]}
@@ -59,7 +54,7 @@ STEP = obj(
     ["argument", "claims", "blocked"],
 )
 SCHEMAS = {
-    "explore": handoff_obj(
+    "explore": obj(
         {
             "assessment": {"enum": ["SOLVED", "PARTIALLY_SOLVED", "NEED_PLAN", "UNKNOWN"]},
             "worked": TEXTS,
@@ -70,10 +65,10 @@ SCHEMAS = {
         },
         ["assessment", "worked", "failed", "candidates"],
     ),
-    "explore_polish": handoff_obj({"solution_candidate": TEXT}),
-    "reasoner": handoff_obj(STEP["properties"], STEP["required"]),
-    "reason_noncoding": handoff_obj(STEP["properties"], STEP["required"]),
-    "step_verifier": handoff_obj(
+    "explore_polish": obj({"solution_candidate": TEXT}),
+    "reasoner": obj(STEP["properties"], STEP["required"]),
+    "reason_noncoding": obj(STEP["properties"], STEP["required"]),
+    "step_verifier": obj(
         {
             "goal_gate": {"enum": ["YES", "PARTIAL", "NO"]},
             "logic_gate": {"enum": ["PASS", "FAIL", "UNCERTAIN"]},
@@ -93,7 +88,7 @@ SCHEMAS = {
         },
         ["goal_gate", "logic_gate", "verdict", "objection"],
     ),
-    "whole_solution_verifier": handoff_obj(
+    "whole_solution_verifier": obj(
         {
             "verdict": {"enum": ["ACCEPT", "REJECT"]},
             "reason": TEXT,
@@ -101,8 +96,8 @@ SCHEMAS = {
         },
         ["verdict"],
     ),
-    "final_generator": handoff_obj({"final_response": TEXT}),
-    "meta": handoff_obj(
+    "final_generator": obj({"final_response": TEXT}),
+    "meta": obj(
         {
             "decision": {"enum": ["CONTINUE", "TRACE_BACK", "APPROVE_REPLAN", "ABORT"]},
             "reason_summary": TEXT,
@@ -112,7 +107,7 @@ SCHEMAS = {
             "trace_back_to": TARGET,
         }
     ),
-    "research_delegation": handoff_obj(
+    "research_delegation": obj(
         {
             "tasks": {
                 "type": "array",
@@ -127,7 +122,7 @@ SCHEMAS = {
             }
         }
     ),
-    "meta_guidance": handoff_obj(
+    "meta_guidance": obj(
         {
             "action_type": {
                 "enum": ["explore_more", "retry_different_method", "trace_back", "replan"]
@@ -138,7 +133,7 @@ SCHEMAS = {
             "rationale": TEXT,
         }
     ),
-    "planner": handoff_obj(
+    "planner": obj(
         {
             "version": {"type": "integer", "minimum": 1},
             "steps": {
@@ -151,10 +146,10 @@ SCHEMAS = {
             },
         }
     ),
-    "researcher": handoff_obj({"findings": TEXTS}),
+    "researcher": obj({"findings": TEXTS}),
 }
 
-SCHEMAS["reasoner_checkpoint"] = handoff_obj(
+SCHEMAS["reasoner_checkpoint"] = obj(
     {
         "checkpoint": obj(
             {
@@ -212,7 +207,7 @@ _PLANNER_CHECKPOINT_TERMINAL = obj(
     },
     _PLANNER_CHECKPOINT_REQUIRED,
 )
-SCHEMAS["planner_checkpoint"] = handoff_obj(
+SCHEMAS["planner_checkpoint"] = obj(
     {
         "checkpoint": {
             "oneOf": [_PLANNER_CHECKPOINT_YIELD, _PLANNER_CHECKPOINT_TERMINAL],
@@ -230,7 +225,7 @@ def response_schema(request):
     if role == "planner" and request.get("checkpoint_protocol"):
         return SCHEMAS["planner_checkpoint"]
     if role == "researcher" and request.get("action") == "counterexample_check":
-        return handoff_obj({
+        return obj({
             "verdict": {"enum": ["FOUND_COUNTEREXAMPLE", "NOT_FOUND"]},
             "counterexample": TEXT, "assumptions_checked": TEXTS,
             "violated_conclusion": TEXT, "searched_scope": TEXT,
@@ -240,9 +235,18 @@ def response_schema(request):
     if role in {"meta", "meta_strategist"} and request.get("action") == "delegate_research_task":
         return SCHEMAS["research_delegation"]
     if role in {"meta", "meta_strategist"} and request.get("action") == "preplan_hint":
-        return handoff_obj({"hint": TEXT})
+        return obj({"hint": TEXT})
     if role in {"meta", "meta_strategist"} and request.get("action") == "partial_exploration":
-        return handoff_obj({"decision": {"enum": ["RETRY", "PLAN"]}, "reason": TEXT})
+        return obj(
+            {
+                "decision": {"enum": ["RETRY", "PLAN"]},
+                "reason": TEXT,
+                "role": {"const": "meta", "type": "string"},
+                "action": {"const": "partial_exploration", "type": "string"},
+                "findings": TEXTS,
+                "allowed_tools": {"type": "array", "items": TEXT},
+            },
+        )
     if role in {"meta", "meta_strategist"}:
         return SCHEMAS["meta_guidance" if request.get("guidance_request") else "meta"]
     if role not in SCHEMAS:
