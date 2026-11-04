@@ -105,6 +105,10 @@ def create_app(
         else:
             service = RunService(database_path=resolved_database)
     shared_connection = getattr(getattr(service, "_store", None), "_connection", None)
+    # File-backed Run readers must not step the Job writer's connection from
+    # another thread. Job and budget writes still share Workspace's connection.
+    if getattr(getattr(service, "_store", None), "database_path", ":memory:") != ":memory:":
+        shared_connection = None
     workspace_service = WorkspaceService(
         resolved_database,
         connection=shared_connection,
