@@ -525,7 +525,7 @@ class WorkspaceStore:
     def append_event(self, job_id: str, event: Mapping[str, Any]) -> None:
         """Append one already-redacted public pipeline event."""
 
-        with self._lock:
+        with self._lock, self._connection:
             row = self._connection.execute(
                 "SELECT status FROM workspace_jobs WHERE job_id=?", (job_id,)
             ).fetchone()
@@ -1059,7 +1059,10 @@ class WorkspaceService:
                 if self.checkpointer is not None:
                     self.checkpointer.stop(job_id, "FAILED", exc.category)
             return
-        except Exception:
+        except Exception as exc:
+            from .job_failure import record_job_failure
+
+            record_job_failure(job_id, exc)
             self.store.fail_job(job_id, "job_execution_failed", execution_mode=self.execution_mode)
             if self.checkpointer is not None:
                 self.checkpointer.stop(job_id, "FAILED", "job_execution_failed")
