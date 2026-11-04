@@ -4,7 +4,7 @@
 
 2026-11-03 的 #124–#128 后续进展见 [provider-live 协议与 readiness 补充记录](evals/provider-live-readiness-followup-20261103.md)。该记录区分角色协议探测、公共 CLI readiness、usage 暂缓验收和未实现的配对路径。
 
-2026-11-04 的当前源码三题复验及困难题失败原因见 [provider-live readiness follow-up](evals/provider-live-readiness-followup-20261104.md)。
+2026-11-04 的当前源码三题复验、简单题与中等题新 Run 结果、流式首末正文时间及独立核验见 [provider-live readiness follow-up](evals/provider-live-readiness-followup-20261104.md)。
 
 适用范围：理解 v0.1、v0.2 历史版本和当前 v1.1 Solver Harness 规格；执行规则以根 [AGENTS.md](../AGENTS.md) 为准。
 

@@ -29,3 +29,18 @@
 - **#128：未覆盖/阻塞。** `run_pair()` 仍只做登记和 fail-closed 前置，不派发 baseline/variant 公共 Job；公共 Job 也没有 allowlisted 单组件配置接口。#127 readiness 未通过，不能启动配对结论。
 
 本记录不宣称数学正确率提升，也不把 usage UNKNOWN 改写为 PASS。
+
+## 2026-11-04 当前源码复验补充
+
+本次使用提交 `79d00e16c4cb57a826a62d7380853110783c48ba` 的干净源码身份。两个批次分别使用独立服务数据目录、独立 Run 身份和 `usage_policy=observe_only`。每个批次的输出上限为 32768 tokens，Run 总墙钟上限为 900 秒；传输层仍按连续 30 秒无流活动停止。以下时间均为 UTC。
+
+| Run | 结果 | 首个正文 | 最后正文 | 独立核验 |
+| --- | --- | --- | --- | --- |
+| `issue127-simple-live-20261104-01` | 完成 1/1 | `23:35:10.486352` | `23:35:12.427677` | `PASS` |
+| `issue127-medium-live-20261104-01` | 15 分钟截止，0/1 | `23:38:54.044304` | `23:53:49.691346` | `FAIL` |
+
+简单题 manifest SHA-256 为 `8c75e4269e9483158bfe875958c6897c9cb1e556b9332812981a1e01494fda3c`。核验结果为 coverage、task、transport `PASS`，usage `UNKNOWN`。简单题因此具备当前源码下的 provider-live 完成证据，但不产生数学正确率结论。
+
+中等题 manifest SHA-256 为 `c3653a4742b141f69e3856e07eac83e7b76d564a79f358443cfffcd1ad8e07ea`。Job 的公共终态为 `failed`，错误码为 `run_deadline_exhausted`；核验结果为 task `FAIL`、coverage `UNKNOWN`、transport `PASS`、usage `FAIL`。该批次没有 30 秒流空闲证据，主要失败归类为 Run 截止导致的执行未完成；它不能证明题目本身不可解，也不能证明模型答案正确。
+
+这次中等题仍未形成 #127 所需的自然多步 readiness。#127 保持 open。#128 继续保持 `NOT_COVERED`，因为 #127 前置条件未通过，且公共 Job 的组件配置、两臂派发和逐臂独立核验尚未接通。
