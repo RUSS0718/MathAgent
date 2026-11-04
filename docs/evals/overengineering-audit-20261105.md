@@ -105,11 +105,12 @@
 
 ### 本轮修复及新发现
 
-确认并修复 3 项实现/诊断 bug（与过度开发计数分开）：
+确认并修复 4 项实现/诊断 bug（与过度开发计数分开，其中第 4 项是收窄 schema 时发现并立即修正的兼容回归）：
 
 1. 观察器异常此前只保留安全 `code`，可能丢失 `category` 或异常类型；现只持久化受字符集/长度限制的安全类别或异常类型，并保留有限 HTTP status，不保留异常文本。
 2. provider message 的 `role` 若为 list/dict，会在集合成员检查时触发 `TypeError`；现先确认其为字符串，再正常拒绝非法消息形状。
 3. 最新 `handoffloose-02` 的自然多步 Job 于 **2026-11-05 00:43:25（北京时间）**以 `run_deadline_exhausted` 失败，Solver 留在 `STEP_VERIFY` / revision 10839，登记 Run 1/2 完成；末正文为 00:43:21.879，无 completion，未发生 30 秒空闲停止。独立报告为 task/process_path `FAIL`、coverage/usage `UNKNOWN`、transport 配置 `PASS`。旧 runner 却将批次 stop reason 记为 `incomplete_or_unresolved_usage`。回归测试复现了“running Job + 截止已过 + unresolved usage”优先显示 usage 的问题；现先按过期硬截止记 `hard_limit`，同时保留 UNKNOWN 请求状态、不恢复、不重发。这个分类修复不会让 Job 完成。
+4. 收窄 Meta handoff schema 时，曾把可选的 `role/action/findings/allowed_tools` 一并设成必填，可能拒绝运行时实际只消费 `decision/reason` 的合法响应。独立代码审查发现后，已将必填项收回到 `decision/reason`，其它登记字段仍按类型和枚举校验；`meta_strategist` 别名可返回 `meta` 或 `meta_strategist`。测试覆盖最小响应、两种别名、非法附带值和未登记字段拒绝。
 
 最新 Run 的 source revision 是 `e6b6b8919ac266694c36eb0205e5f79fb3ef3953`，source SHA-256 为 `bd1893119502900fd4f80651fbbefd43d4a089c093efd9f08e433ee160f1e192`，manifest SHA-256 为 `2a1d31d96a1789b7dd2a47e6222c9f34e80d805dcc4a5c1ae5cb86af88d0a005`。只确认了“3600 秒 Run 硬截止”这一直接停因；为什么步骤核验续接未能在截止前交付，不能据现有证据归结为数学错误或单一循环根因。
 
@@ -121,9 +122,9 @@
 
 ### 验证与 Issue 结论
 
-按独立根因计数，本轮**已确认并简化 2 项过度复杂度**（snapshot 重复/无界事件读取；全局 role schema 放宽范围）；**当前仍有 1 项疑似性能复杂度**（每个小流事件的完整状态提交，证据不足以安全改变崩溃恢复语义）。第三项空状态候选经消费者检查后归为必要复杂度，不计入过度设计问题。历史业务 schema 与传输准入耦合另在此前提交修复，不重复计数。已修复的 3 项代码 bug 单独计数，不混入复杂度统计。
+按独立根因计数，本轮**已确认并简化 2 项过度复杂度**（snapshot 重复/无界事件读取；全局 role schema 放宽范围）；**当前仍有 1 项疑似性能复杂度**（每个小流事件的完整状态提交，证据不足以安全改变崩溃恢复语义）。第三项空状态候选经消费者检查后归为必要复杂度，不计入过度设计问题。历史业务 schema 与传输准入耦合另在此前提交修复，不重复计数。已修复的 4 项代码 bug 单独计数，不混入复杂度统计。
 
-- 最终聚焦 unittest：`uv run python -m unittest tests.test_experiment_job_event_pagination tests.test_solver_harness_intern tests.test_star_product_explore_compute tests.test_star_product_candidate_counterexamples tests.test_showcase_experiment_execution tests.test_stream_preference_124 tests.test_experiment_usage_observation_policy tests.test_run_reader_isolation_127 tests.test_star_stream_late_race_98`：**84 项通过，1 项按条件跳过**。
+- 最终兼容修正后，聚焦 unittest `tests.test_solver_harness_intern`、`tests.test_solver_harness_star_routing`、`tests.test_solver_harness_explore` 和 `tests.test_stream_preference_124`：**41 项通过**。硬截止与观察器分类的两个定向回归也通过。修正前的更广聚焦组为 84 项通过、1 项按条件跳过；没有运行全仓测试。
 - Ruff 对改动的源码和测试通过；`git diff --check` 通过；`git diff --exit-code -- user_agent.py implementations BASELINE.json requirements.txt` 无差异。
 - 没有运行完整全仓门禁、耗时发布测试或新的 live Run。离线结果只验证受控合同，不等于线上能力证据。
 - **#127：FAIL / open**。缺自然多步的最终非空答案、整题审查和同文本绑定。`usage=UNKNOWN`，不作为答案完成的阻断理由，也不标 PASS。
