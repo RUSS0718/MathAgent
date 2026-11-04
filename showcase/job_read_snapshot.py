@@ -67,7 +67,7 @@ def read_job_snapshot(store, job_id, user_id):
         ).fetchone()
         payload["last_event_id"] = int(last_event["last_event_id"])
         star = (payload.get("result") or {}).get("solver_mode") in STAR_MODES
-        solver_snapshot = persisted_solver(connection, job_id) if star else None
+        solver_snapshot = persisted_solver(connection, job_id, projection_only=True) if star else None
         attempt_events = connection.execute(
             "SELECT payload_json FROM workspace_events "
             "WHERE job_id=? AND event_type='request_attempt' ORDER BY event_id",

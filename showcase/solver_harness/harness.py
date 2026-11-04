@@ -305,6 +305,7 @@ class SolverHarness:
             event=normalized_event,
             state_updates={**normalized_updates, **candidate_patch},
             request_hash=request_hash,
+            validated_run=current,
         )
         if self._event_observer is not None:
             self._event_observer(result, next(item for item in result["events"] if item["event_id"] == normalized_event["event_id"]))

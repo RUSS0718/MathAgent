@@ -10,6 +10,8 @@
 
 2026-11-05 的 `handoffloose-02` 自然多步运行停在 Run 硬截止，脱敏身份、Job/Solver 状态和停止分类修复见 [#127 线上运行记录](evals/provider-live-natural-20261104-handoffloose-02.md)。该运行未通过 #127，#128 线上 pair 仍为 `NOT_RUN`；当前过度复杂度审计与离线修复进度见 [审计与修复记录](evals/overengineering-audit-20261105.md)。
 
+较早的 `d6e9ea5-02` Run 在 `STEP_VERIFY` 失败，并记录 stream 清理时 SQLite 嵌套事务异常；该异常不能确认是 Job 首发失败根因。脱敏身份、独立核验和随后增加的事务回滚回归见[历史运行记录](evals/provider-live-natural-20261104-d6e9ea5-02.md)。
+
 适用范围：理解 v0.1、v0.2 历史版本和当前 v1.1 Solver Harness 规格；执行规则以根 [AGENTS.md](../AGENTS.md) 为准。
 
 ## 先读哪些文档
