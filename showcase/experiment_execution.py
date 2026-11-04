@@ -356,6 +356,13 @@ def _advance(
                 status["observer_error"] = observer_error
             return _stop(directory, status, "unknown_job_status")
         _record_execution_events(status, adapter, job_id)
+        if (
+            isinstance(observation, dict)
+            and observation.get("status") == "running"
+            and time.time() >= intent["deadline_at"]
+        ):
+            status["pending_intent"] = None
+            return _stop(directory, status, "hard_limit")
         stop_reason = _observation_stop_reason(
             observation, manifest["transport"], usage_policy=manifest.get("usage_policy", "required")
         )
@@ -552,17 +559,28 @@ def _stop(directory: Path, status: dict[str, Any], reason: str) -> dict[str, Any
 
 
 def _safe_observer_error(error: Exception) -> dict[str, Any] | None:
-    code = getattr(error, "code", None)
-    if not isinstance(code, str) or not code or not all(
-        character.isascii() and (character.isalnum() or character == "_")
-        for character in code
-    ):
-        return None
-    result = {"code": code}
+    def is_safe_label(value: Any) -> bool:
+        return (
+            isinstance(value, str)
+            and 0 < len(value) <= 80
+            and all(character.isascii() and (character.isalnum() or character == "_")
+                    for character in value)
+        )
+
+    result = {}
+    for key in ("code", "category"):
+        value = getattr(error, key, None)
+        if is_safe_label(value):
+            result[key] = value
+    if not result:
+        exception_type = type(error).__name__
+        result["exception_type"] = (
+            exception_type if is_safe_label(exception_type) else "Exception"
+        )
     status = getattr(error, "status", None)
     if type(status) is int and 100 <= status <= 599:
         result["http_status"] = status
-    return result
+    return result or None
 
 
 def _record_execution_events(status: dict[str, Any], adapter: Any, job_id: str) -> bool:
@@ -573,8 +591,12 @@ def _record_execution_events(status: dict[str, Any], adapter: Any, job_id: str) 
     previous_cursor = cursor
     try:
         events = read_events(job_id, after_id=cursor)
-    except Exception:
-        return False
+    except Exception as exc:
+        observer_error = _safe_observer_error(exc)
+        if observer_error is None or status.get("observer_error") == observer_error:
+            return False
+        status["observer_error"] = observer_error
+        return True
     if not isinstance(events, list):
         return False
     tail = status.setdefault("log_tail", [])

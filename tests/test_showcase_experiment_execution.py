@@ -298,6 +298,54 @@ class ExperimentExecutionTest(unittest.TestCase):
         self.assertEqual("unknown_job_status", result["stop_reason"])
         self.assertEqual({"code": "network_error", "http_status": 504}, saved["observer_error"])
 
+    def test_event_observer_error_persists_safe_category_without_error_text(self):
+        from showcase.experiment_execution import _safe_observer_error, run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+
+        class EventObserverError(RuntimeError):
+            category = "events_network_error"
+            status = 503
+
+        class EventFailureAdapter(_JobAdapter):
+            def execution_events(self, _job_id, *, after_id=0):
+                raise EventObserverError("prompt and credential must not be persisted")
+
+            def wait_for_job_with_progress(self, job_id, deadline_at, *, on_progress):
+                on_progress()
+                self.status_during_wait = read_status(
+                    "run-event-observer-error", output_root=temporary
+                )
+                return _snapshot({"status": "succeeded"}, deadline_at)
+
+        manifest = _manifest(source)
+        adapter = EventFailureAdapter()
+        with tempfile.TemporaryDirectory() as temporary:
+            result = run_batch(
+                manifest,
+                expected_sha256=manifest_digest(manifest),
+                run_id="run-event-observer-error",
+                output_root=temporary,
+                context=_context_for_run(manifest, adapter, "run-event-observer-error"),
+            )
+            saved = read_status("run-event-observer-error", output_root=temporary)
+
+        expected_error = {"category": "events_network_error", "http_status": 503}
+        self.assertEqual(expected_error, adapter.status_during_wait["observer_error"])
+        self.assertEqual(expected_error, saved["observer_error"])
+        self.assertEqual("completed", result["phase"])
+        self.assertNotIn("prompt and credential", str(saved))
+        self.assertNotIn("prompt and credential", str(adapter.status_during_wait))
+        self.assertEqual(
+            {"exception_type": "RuntimeError"},
+            _safe_observer_error(RuntimeError("private exception detail")),
+        )
+
     def test_nonzero_provider_retry_is_rejected_before_adapter_construction(self):
         from showcase.experiment_execution import run_batch
 
@@ -834,6 +882,52 @@ class ExperimentExecutionTest(unittest.TestCase):
         self.assertEqual(adapter.wait_deadlines[0], intent["deadline_at"])
         self.assertEqual(manifest["run_limits"], adapter.dispatch_inputs[0][0])
         self.assertEqual(0, result["current_index"])
+        self.assertEqual(0, result["completed"])
+        self.assertEqual(1, adapter.submissions)
+
+    def test_run_deadline_precedes_unresolved_usage_classification_for_running_job(self):
+        from showcase.experiment_execution import run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _manifest(source)
+        manifest["evidence_kind"] = "provider_live"
+        manifest["authorization"]["execution_authorized"] = True
+        manifest["usage_policy"] = "observe_only"
+        now = [1_000.0]
+
+        class StillRunningWithUnknownAttemptAdapter(_JobAdapter):
+            def wait_for_job(self, job_id, deadline_at):
+                observation = super().wait_for_job(job_id, deadline_at)
+                now[0] = deadline_at + 0.5
+                observation.update(
+                    status="running",
+                    budget={
+                        **observation["budget"],
+                        "unknown_attempts": 1,
+                        "unresolved_attempts": 1,
+                    },
+                )
+                return observation
+
+        adapter = StillRunningWithUnknownAttemptAdapter()
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch("showcase.experiment_execution.time.time", side_effect=lambda: now[0]):
+                result = run_batch(
+                    manifest,
+                    expected_sha256=manifest_digest(manifest),
+                    run_id="run-deadline-with-unknown-attempt",
+                    output_root=temporary,
+                    context=_context_for_run(
+                        manifest, adapter, "run-deadline-with-unknown-attempt"
+                    ),
+                )
+
+        self.assertEqual("hard_limit", result["stop_reason"])
         self.assertEqual(0, result["completed"])
         self.assertEqual(1, adapter.submissions)
 
