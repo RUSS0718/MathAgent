@@ -123,7 +123,8 @@ def _execute(harness, run, request, config, port, step_id, claim_index, *, recei
         if commit_state_receipts
         else None
     )
-    reason = _denial(state, run["run_id"], request, config, port)
+    reason = _denial(state, run["run_id"], request, config, port,
+                     role=receipt.get("source_role") or "reasoner")
     if reason:
         receipt["reason"] = reason
         run = harness.commit_event(
@@ -268,7 +269,7 @@ def _tool_quota_available(state, config):
     return used < limit
 
 
-def _denial(state, run_id, request, config, port):
+def _denial(state, run_id, request, config, port, *, role="reasoner"):
     if not isinstance(request, Mapping) or not isinstance(request.get("arguments"), Mapping):
         return "not_executed"
     args = request["arguments"]
@@ -280,7 +281,8 @@ def _denial(state, run_id, request, config, port):
     except (TypeError, ValueError):
         return "invalid_arguments"
     tool = request.get("tool")
-    if state.get("reasoning_mode") == "reason_noncoding":
+    if (state.get("reasoning_mode") == "reason_noncoding"
+            and role in {"reasoner", "reason_noncoding"}):
         return "pure_reasoning_denied"
     if (
         config.get("features", {}).get("local_code_tool") is not True
@@ -311,7 +313,8 @@ def allowed_tool_ids(run, role, config, port):
         config.get("features", {}).get("local_code_tool") is not True
         or port is None
         or role not in {"reasoner", "step_verifier", "whole_solution_verifier", "explore"}
-        or run["state"].get("reasoning_mode") == "reason_noncoding"
+        or (run["state"].get("reasoning_mode") == "reason_noncoding"
+            and role in {"reasoner", "reason_noncoding"})
     ):
         return []
     if not _tool_quota_available(run["state"], config):

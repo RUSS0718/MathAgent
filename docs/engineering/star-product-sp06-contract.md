@@ -10,3 +10,11 @@
 执行顺序：公共失败用例 → 最小实现 → 聚焦回归与依赖栅栏旁路敏感性 → 完整 offline → release。UI 全生命周期仍属 SP-12；此片使用现有时间线承载分类事件，无 UI 改动。传输层故障注入与 live 证据分开，官方冻结字节不变。
 
 上游核对：固定 `5f2a86b` 的 `src/state.py::_collect_rescued_results` 从 VERIFIED 步骤的审查文件提取 Verified Results 文本；`orchestrator_failure.py` 将 Meta reusable_results 文本作为 rescued_results 返回。本项目明确采用更严格适配：引用已有成果、检查有效性和依赖，不直接信任新生成救援文本；不猜测非法目标。该差异不声称与上游逐字一致。
+
+## 2026-11-05：纯推理策略的角色作用域
+
+用户明确选择：Meta的use_pure_reasoning仅限制Reasoner，不作为整个Run禁用工具的指令。Reasoner/ReasonNoncoding仍不能执行计算；独立Step/Whole Solution Verifier保留其原本拥有的工具能力，不新增工具种类或自动派发计算。可用工具提示与实际执行按同一角色作用域判断。
+
+Verifier计算继续经过原Registry白名单、隔离执行器、Run身份和共享S3账本；次数、deadline、输出和计算续接上限不变。角色取自运行时调用路径，不接受模型自报角色来绕过Reasoner限制。失败、未知、未执行回执不能作为成功计算；Verifier仍须独立裁定，整题审查、最终文本绑定与best-effort关闭保持。
+
+本次是明确的策略合同调整，不把readiness-17的旧行为追溯判为工程bug。需以公共Job验证纯推理Reasoner拒绝计算、Verifier在原额度内实际执行并消费回执、零剩余工具额度拒绝计算执行；新源码单独冻结真实Run，不升级旧批次结论或宣称数学能力提升。
