@@ -199,6 +199,9 @@ class StarProductChallengeTest(StarJobFixture, unittest.TestCase):
             item["round"] for item in resumed[0]["challenge_history"]
         ])
         self.assertEqual(CHALLENGE["objection"], resumed[0]["objection"])
+        strategy = resumed[0]["role_context"]["state"].get("meta_decision", {})
+        self.assertEqual(META_CONTINUE["plan_summary"], strategy.get("plan_summary"))
+        self.assertEqual("CONTINUE", strategy.get("decision"))
         decision = next(
             event for event in events if event.get("solver_event_type") == "meta_decided"
         )

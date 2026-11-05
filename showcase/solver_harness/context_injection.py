@@ -66,6 +66,13 @@ def prepare_role_context(run, request, *, include_exploration=False):
                 )
             ]
         context[key] = value
+    if role in {"reasoner", "reason_noncoding"}:
+        from .traceback import transition_decision
+
+        decision = state.get("meta_decision")
+        if transition_decision(run, state, decision) and decision.get("decision") == "CONTINUE":
+            # Strategy context only; it neither rewrites the goal nor proves it.
+            context["meta_decision"] = deepcopy(decision)
     if role in {"meta", "meta_strategist"}:
         from .computation_evidence import has_computation_output
 
