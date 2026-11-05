@@ -34,3 +34,7 @@ readiness12于15:44:38终态FAIL：完整Meta guidance将rationale拼为reasonal
 readiness13完成2/2，task/coverage/transport PASS、usage UNKNOWN，但vieta合法FASTPATH无计划，process_path NOT_RUN，不能启动128。不是新bug，不增加修复轮。独立样本审查代理01a1aabe-9ff3-7651-8fe3-f5016850f499确认Explore可直接SOLVED，因此数学多步不等于执行trace；建议14改用有限正八边形三色染色在D8与颜色置换下的轨道计数/分类。主线程采纳一次新过程覆盖批次：6561赋值、96联合群元素，合法性/固定点分类/汇总有依赖，预期较熟知vieta更易自然拆分，但尚未实测，仍可能FASTPATH或发生数学异议。无planner/工具提示、不改路由/预算/源码，不宣称能力提升。13原分母与结果保留，新14完整分母2独立登记不拼接；若再次FASTPATH，如实记未覆盖，不反复换题抽到PASS。详见忽略目录sample-review-readiness14.json。
 
 readiness14在派发前因新题CRLF字节与内存LF哈希不一致而失败，0 Job/0模型/0账本；是自身登记失误，保守记第6轮，非产品校验bug。独立代理01a1aac2-a6c1-7000-92a4-2193b6a212ec比较后选择新15复用现有FileSampleHashResolver.hashes/read_text，不新增生成框架、不关闭校验。14 mismatch RED，新15逐样本实际字节哈希与read_text GREEN；旧14 manifest不改。live_attempt仍6，pre_dispatch_failures=1，15实际派发后才加真实尝试。策略比较保存在strategy-review-round6.json。
+
+readiness15终态FAIL，完成1/2，前5步接受、第6步因challenge_meta_limit_reached停止，非TLS/硬预算。独立审查确认符合SP-05有界合同，不改cap。另确认Meta投影遗漏全局成果及ledger-only verifier成功回执；不能证明是单独失败根因。主线程进一步纠正“全部回执不可见”：step6成功回执已嵌报告，step1/2成功回执未嵌，只存在全局。选择局部Meta上下文补充，复用既有valid状态过滤、同scope真实成功摘要，当前目标/异议沿用steps，不新建统一投影框架。独立比较认为全角色简化范围/回归风险大于当前收益；strategy-review-round7.json记录限制。新消息接缝RED→GREEN，21项和fast/Ruff通过；子代理再补边界负例后才登记第7轮/冻结16，15原结果不升级，128仍NOT_RUN。
+
+第7轮集成完成：22项Meta/skills/格式修复/证据边界聚焦测试GREEN，新增边界用例包含9种负例及合法current-step回执，Ruff/diff/快速门禁通过，官方baseline无差异。测试worker01a1ab2b-906a-7fc3-b1f5-ccd31aee74ad确认无测试阻断，提醒摘要与步骤报告可能重复、2804 bytes并非tokens、真实执行不证明数学正确性；这是readiness15单个终态重放，不是15个样本。旧15不升级，新16同两题原字节预检通过后冻结真实重跑。
