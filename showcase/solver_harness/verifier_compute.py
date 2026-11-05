@@ -121,6 +121,13 @@ def continue_review(harness, run, *, role, step_id, round_number, attempt_index,
             attempt_index=attempt_index, seq=len(receipts), review_call_id=base_call_id,
             receipt_prefix=receipt_prefix)
     elif reply_from is not None:
+        if (role == "step_verifier" and reply.get("verdict") == "CHALLENGE"
+                and matching.get("status") == "success" and matching.get("executed") is True
+                and matching.get("output_available") is True and matching.get("exit_code") == 0):
+            # The computation is fulfilled; retain the objection without executing it again.
+            reviewed = dict(reply)
+            reviewed.pop("tool_request", None)
+            return run, reviewed, False
         # The reviewer repeated an already-answered request instead of continuing.
         return run, reply, True
     call_id = f"{base_call_id}:tool-{matching['request_index'] + 1}"
