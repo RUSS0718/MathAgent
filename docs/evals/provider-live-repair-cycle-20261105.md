@@ -25,3 +25,8 @@
 用户在第4轮冻结前明确授权增加预算。readiness11新登记每题128模型/HTTP、32工具、16777216 token预留、14400秒，2题批次256模型/HTTP、64工具、33554432预留、28800秒；单次900秒和30秒流空闲不变、best-effort关闭。服务实际limits与manifest同步核对，不在运行中扩预算，不改旧批次或官方baseline。上下文简化相关49项1跳过/快速门禁/Ruff通过。
 
 用户明确计数口径：只有自身设计/实现失误的修复计一轮；TLS连接故障或真实预算不足不计。把预算拒绝误分类为unknown、已终止timeout误计未知仍属自身实现缺陷，计入。当前自身修复4轮：工具错误反馈、成功回执CHALLENGE续审、预算/timeout分类、重复挑战历史注入简化；真实预算停止和外部TLS尝试另计live_attempt，不凑5轮。
+
+
+readiness12于15:44:38终态FAIL：完整Meta guidance将rationale拼为reasonale，invalid_role_schema；不是TLS/预算不足。Meta未复用既有单次格式修复是已确认自身实现缺口。本次修复只接入protocol_repair，保留新call身份、预算准入、unknown不重发、第二次错误终止，不加错拼别名。新增回归先RED后GREEN，相关17项、快速门禁、Ruff/diff通过。策略独立复核完成后登记第5次自身修复；live_attempt与repair_round分别累计。旧12非空partial文本未完成整题审查绑定，不能升级PASS，#128仍NOT_RUN。
+
+第5轮策略独立审查已完成（代理01a1aab5-5336-72c3-951f-b42e8c918600）：没有阻断项，推荐Meta局部复用既有单次protocol_repair。主线程采纳：局部约18行源码变更可覆盖实际故障，复用身份/预算/已知失败边界；全角色dispatch重构虽可统一流程，但要协调各角色事件、身份、二次错误及Planner结构校验，成本与回归面更大，缺乏收益证据。非阻断不确定处：修复预留先记计数/事件，后续准入拒绝时可能仍保留预留计数，本次测试未覆盖预算临界点，不能据此断言线上bug。完整比较保存于artifacts/provider-live-repair-cycle-20261105/strategy-review-round5.json。自身修复累计5轮；后续新根因或范围扩大、再次改代码前须据新证据复评，不因每次定时触发重复审查。
