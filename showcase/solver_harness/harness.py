@@ -229,6 +229,21 @@ class SolverHarness:
         call_audit patches of calls only; business state remains frozen.
         """
 
+        return self._commit_event(
+            run_id, expected_revision=expected_revision, event=event, state_updates=state_updates
+        )
+
+    def _commit_event(
+        self,
+        run_id: str,
+        *,
+        expected_revision: int,
+        event: Mapping[str, Any],
+        state_updates: Mapping[str, Any] | None = None,
+        current: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Reuse an internal caller's fresh snapshot; keep identity checks and storage CAS."""
+
         if not isinstance(run_id, str) or not run_id.strip():
             raise SolverValidationError("run_id must be a non-empty string")
         normalized_run_id = run_id.strip()
@@ -262,7 +277,7 @@ class SolverHarness:
             raise SolverValidationError("state_updates cannot change identity or revision fields")
 
         # Validate the persisted run identity before writing through this Harness.
-        current = self._state_store.get_run(normalized_run_id)
+        current = self._state_store.get_run(normalized_run_id) if current is None else current
         if current is None:
             raise SolverRunNotFoundError(normalized_run_id)
         self._validate_identity(current, normalized_run_id, None)

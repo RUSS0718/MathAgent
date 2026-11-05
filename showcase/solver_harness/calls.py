@@ -58,9 +58,10 @@ def _save(harness, run, record, *, status=None, event_type="call_audit", event_f
     updates.update(state_updates or {})
     if status is not None and latest["state"]["phase"] != "TERMINAL":
         updates["status"] = status
-    updated = harness.commit_event(
+    updated = harness._commit_event(
         run["run_id"],
         expected_revision=latest["state_revision"],
+        current=latest,
         event={
             "event_id": f"call-{record['call_id']}-{record['status']}-{latest['state_revision']}",
             "type": event_type,
@@ -258,9 +259,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
             def observe_activity(activity):
                 if not isinstance(activity, Mapping):
                     return
-                latest = harness.get_run(run["run_id"])
-                current = latest["state"].get("calls", {}).get(call_id, record)
-                metrics = dict(current.get("stream_metrics", record["stream_metrics"]))
+                metrics = dict(record["stream_metrics"])
                 kind = activity.get("kind")
                 at = activity.get("at")
                 if not isinstance(at, str) or not at.strip():
