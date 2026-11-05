@@ -23,7 +23,7 @@ import requests
 from .attempt_projection import bind_attempt_projection
 from .graph import AgentDecision
 from .request_attempts import record_attempts
-from .run_budget import current_budget, request_timeout, scoped_deadline
+from .run_budget import BudgetExhausted, current_budget, request_timeout, scoped_deadline
 from .run_control import controlled_action
 from .run_service import AgentResult, RunRequest
 from .tool_protocol import ToolProtocol, ToolRequest, parse_tool_requests
@@ -354,11 +354,13 @@ class InternStreamAdapter(InternModelAdapter):
         result = None
         activity_observer = (metadata or {}).get("activity_observer")
         activity_status = None
+        attempt_admitted = False
         try:
             from llm_client import _not_submitted, product_retry_delay
 
             from .request_transport import response_events
             for index in range(limit):
+                attempt_admitted = False
                 attempt_started = time.perf_counter()
                 try:
                     remaining = logical_deadline - clock()
@@ -367,6 +369,7 @@ class InternStreamAdapter(InternModelAdapter):
                     attempt_timeout = min(effective_timeout, remaining)
                     if call_budget is not None:
                         attempt_timeout = min(attempt_timeout, call_budget.before_attempt(attempt, len(body)))
+                        attempt_admitted = True
                     attempt["effective_timeout_seconds"] = attempt_timeout
 
                     late_state = {"lock": threading.Lock(), "event": None}
@@ -605,6 +608,7 @@ class InternStreamAdapter(InternModelAdapter):
                                    duration_seconds=round(time.perf_counter() - attempt_started, 3))
                     attempts.append(dict(attempt))
                     call_budget.after_attempt(attempt)
+                    attempt_admitted = False
                     response = None
                     if clock() + delay >= logical_deadline:
                         raise
@@ -664,6 +668,10 @@ class InternStreamAdapter(InternModelAdapter):
                 publish_attempts(result["attempts"])
             check_processing_deadline()
             yield result
+        except BudgetExhausted:
+            activity_status = "budget_rejected"
+            attempt_admitted = False
+            raise
         except AdapterError as exc:
             activity_status = "unknown"
             notify(activity_observer, "unknown")
@@ -707,7 +715,7 @@ class InternStreamAdapter(InternModelAdapter):
             attempt["duration_seconds"] = round(time.perf_counter() - attempt_started, 3)
             if not attempts:
                 attempts.append(dict(attempt))
-            if call_budget is not None:
+            if call_budget is not None and attempt_admitted:
                 # Never wait for a late settlement: if it owns the gate, it will
                 # either persist its evidence or leave the original reservation.
                 if late_state is None:
