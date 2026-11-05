@@ -38,3 +38,5 @@ readiness14在派发前因新题CRLF字节与内存LF哈希不一致而失败，
 readiness15终态FAIL，完成1/2，前5步接受、第6步因challenge_meta_limit_reached停止，非TLS/硬预算。独立审查确认符合SP-05有界合同，不改cap。另确认Meta投影遗漏全局成果及ledger-only verifier成功回执；不能证明是单独失败根因。主线程进一步纠正“全部回执不可见”：step6成功回执已嵌报告，step1/2成功回执未嵌，只存在全局。选择局部Meta上下文补充，复用既有valid状态过滤、同scope真实成功摘要，当前目标/异议沿用steps，不新建统一投影框架。独立比较认为全角色简化范围/回归风险大于当前收益；strategy-review-round7.json记录限制。新消息接缝RED→GREEN，21项和fast/Ruff通过；子代理再补边界负例后才登记第7轮/冻结16，15原结果不升级，128仍NOT_RUN。
 
 第7轮集成完成：22项Meta/skills/格式修复/证据边界聚焦测试GREEN，新增边界用例包含9种负例及合法current-step回执，Ruff/diff/快速门禁通过，官方baseline无差异。测试worker01a1ab2b-906a-7fc3-b1f5-ccd31aee74ad确认无测试阻断，提醒摘要与步骤报告可能重复、2804 bytes并非tokens、真实执行不证明数学正确性；这是readiness15单个终态重放，不是15个样本。旧15不升级，新16同两题原字节预检通过后冻结真实重跑。
+
+readiness16于19:04:44终态FAIL，完成1/2，第1步挑战/Meta限额终止；26calls/2tools、2189243/16777216本地charged、3219.83/14400秒，无未知远端请求。模型计划48与原题96冲突、Meta识别96却CONTINUE是模型策略事实，不据此做数学语义硬编码。另证实CONTINUE策略没有交接给续答Reasoner：公共旧流程新增断言RED为None。独立代理01a1ab6a-f7d2-75e0-9828-b7c29748895f确认，主线程选择复用现有scope helper只读注入同scope未消费CONTINUE（7行），优于新增交接/消费框架。Verifier保持独立，计划/goal/cap不变，不把建议当证明。24项聚焦含cap不重置GREEN、fast/Ruff/diff PASS，官方baseline无差异；策略比较保存strategy-review-round8.json。第8轮修复后新17同样本/同预算新身份真实重跑，16不升级，不保证数学正确或交付。
