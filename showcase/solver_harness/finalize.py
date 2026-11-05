@@ -85,11 +85,12 @@ def dispatch(harness, run, operation, request, _repair_attempt=0):
                     "summary": "Finalization reply failed the response protocol; one bounded repair follows",
                 },
             )
+            repaired = protocol_repair.repair_request(request, failed_call=failed)
+            repaired["call_id"] = base_call_id  # The recursive owner adds the single repair suffix.
             return dispatch(
                 harness, noted, operation,
-                {key: value for key, value in request.items()
-                 if key not in {"run_id", "allowed_tools", "tool_policy"}}
-                | {"repair_instruction": protocol_repair.REPAIR_INSTRUCTION},
+                {key: value for key, value in repaired.items()
+                 if key not in {"run_id", "allowed_tools", "tool_policy"}},
                 _repair_attempt=1,
             )
         raise
