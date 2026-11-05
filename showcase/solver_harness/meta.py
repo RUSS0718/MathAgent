@@ -190,7 +190,23 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
     request = harness.prepare_request(run, request)
     request.update(allowed_tools=[], tool_policy={"allow": []})
     try:
-        response = dict(harness.dispatch(run, meta_port.complete, request))
+        from . import protocol_repair
+        from .calls import CallInterrupted
+
+        try:
+            response = dict(harness.dispatch(run, meta_port.complete, request))
+        except CallInterrupted as exc:
+            run = protocol_repair.reserve_repair(
+                harness, run["run_id"], exc,
+                failure_event=lambda latest, failed: {
+                    "event_id": f"meta-parse-{revision}-{latest['state_revision']}",
+                    "type": "meta_parse_failed", "role": "meta",
+                },
+                dispatch_event={"event_id": f"meta-dispatched-{revision}-repair-1",
+                                "type": "meta_dispatched", "role": "meta"},
+            )
+            request = protocol_repair.repair_request(request)
+            response = dict(harness.dispatch(run, meta_port.complete, request))
         call = harness.get_run(run["run_id"])["state"].get("calls", {}).get(request["call_id"])
         transport = call.get("transport_decision") if isinstance(call, dict) else None
         usage_sidecar = (
