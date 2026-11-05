@@ -393,6 +393,8 @@ class InternModelPort:
             "Group candidate substitutions into one request when possible. Omit expected_output unless the exact registered output is known; a guessed shape will not match. "
             "A successful polynomial candidate check proves substitution only, not completeness. "
             "If a report already contains tool_receipts, review those actual inputs/outputs and continue the review; the runtime executed them, not you. "
+            "If a receipt reports tool_error or an error_category, inspect tool_argument_schemas and correct the arguments in a different request, or return a verdict retaining the unresolved objection. Never repeat an identical failed request. "
+            "polynomial_check accepts only numeric rational strings in coefficients and candidates, never symbolic parameters; use python_math for a permitted symbolic computation or review the symbolic argument without a tool. "
             "A reviewer may propose at most one tool_request per reply while its verdict is still pending; judge only from recorded receipts, never from assumed outputs."
         )
         if request.get("checkpoint_protocol"):

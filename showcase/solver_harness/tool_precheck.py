@@ -170,6 +170,15 @@ def _execute(harness, run, request, config, port, step_id, claim_index, *, recei
         if not isinstance(result, Mapping):
             raise ValueError("malformed_tool_result")
         status = result.get("status")
+        # Registry categories are actionable; arbitrary tool exception text stays private.
+        category = result.get("error")
+        if isinstance(category, str) and category in {
+            "tool_schema_invalid", "tool_not_registered", "tool_not_permitted_for_profile",
+            "tool_arguments_must_be_object", "tool_arguments_not_serializable",
+            "tool_input_too_large", "tool_budget_exhausted", "tool_timeout",
+            "tool_execution_error", "artifact_integrity_failed",
+        }:
+            receipt["error_category"] = category
         output = result.get("output")
         size = len(json.dumps(output, ensure_ascii=False, allow_nan=False).encode("utf-8"))
         receipt["status"] = (
