@@ -90,3 +90,7 @@
 ## readiness-06 最终结果
 
 06已执行未通过，完成1/2。自然多步30次模型/HTTP、2次工具后在第二步以challenge_meta_limit_reached结束；Meta出网和交接成功，最终没有最终生成或整题审查，不是硬预算/900秒/30秒流空闲停止或数学正确性判定。首末正文及独立FAIL证据见 [06最终记录](provider-live-natural-20261105-readiness-06.md)。终态对照又发现并修复独立verifier误滤attempt_index=0，另校正RB03过时调用次数预期；43项相关回归通过，旧Run不升级。#127保持open；#128两臂NOT_RUN/open。
+
+## 新授权修复循环第1轮
+
+07失败根因为工具参数非法、回执丢失错误码后重复请求；已修安全错误反馈与纠正提示，原次数限制不变。08已真实派发，简单题成功、多步运行中，尚未PASS。见 [08记录](provider-live-natural-20261105-readiness-08.md) 和 [循环规则](provider-live-repair-cycle-20261105.md)。每10分钟监控，超过5轮仍有新错误时先做小型简化重构；#128仍NOT_RUN。
