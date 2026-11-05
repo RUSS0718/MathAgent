@@ -66,3 +66,25 @@
 对 readiness-01 后的修复工作树再次独立审查，发现最后一题提交后删除 dispatch intent 的崩溃窗口，以及低层 pair 来源校验可被覆写 port/adapter/client 方法绕过的问题；另补足计数与已完成连续前缀不一致时不得清理 intent 的约束。逐项回归先复现缺陷后验证修复。
 
 当前定向聚焦 113 项测试、快速合同门禁、Ruff、`git diff --check` 均通过，官方 baseline 文件和 `user_agent.py`/`implementations/` 无差异。上述证据只证明离线工程边界；readiness-02 还未派发。readiness-01 原记录不修改，usage 继续 `UNKNOWN` 且按本轮授权不阻断答案完成、不标 PASS；#127/#128 Issue 状态待新 Run 及配对证据更新。
+
+### readiness-02 运行结果（2026-11-05）
+
+前述“readiness-02 还未派发”记录的是本追加编写时的状态，现由新的冻结 Run 结果取代。完整报告见 [readiness-02 独立记录](provider-live-natural-20261105-readiness-02.md)。
+
+该 Run 完成 `1/2`。简单题成功并通过整题审查及同文本绑定。自然多步题形成 5 步计划，报告 3 步、接受 2 步并调用工具 2 次，随后 Meta 因合法业务响应附带流式 `usage` 字段而产生 `meta_invalid`；Job 以 `star_needs_review` 失败。没有最终答案、整题审查或最终绑定。首个正文 token 为 07:49:16.763989，北京时间；最后正文 token 为 08:28:55.858159，流于 08:28:58.230553 完成。失败不是 30 秒流空闲、900 秒调用或 3600 秒 Run 截止。
+
+两个 Run 的本地 charged/reserved 分别为 `119,709` 和 `1,985,185`，各低于 `2,097,152` 单 Run 上限。批次总计 `2,104,894` 低于批次上限 `4,194,304`；先前将批次数与单 Run 上限相比的预算疑点已撤销。Provider usage 仍为 `UNKNOWN`。
+
+离线复现确认 Meta 解析器会拒绝完整业务响应中的传输 `usage` 附加字段。当前修复将把该容错限定到调用审计标记为 stream 的响应，并保留非流式和未登记业务字段的拒绝行为。独立 verifier 的运行模式映射、未完成路径分类、角色 plan/attempt 归属和回执消费核验也正在修复。旧 Run 不恢复、不重发；#127 为已执行未通过 `FAIL / open`，#128 为 `NOT_RUN / open`。
+
+## 2026-11-05 readiness-05 执行观察器异常
+
+新批次已实际派发，runner 完成计数为 1/2。简单题已交付并审查、绑定；自然多步服务端 Job 仍在推进，但 runner 因状态文件原子替换 WinError 5 退出，服务目录也沿用了 readiness-04。详细事实、冻结身份与证据限制见 [readiness-05 记录](provider-live-natural-20261105-readiness-05.md)。临时读锁解释尚待复现，不把观察器退出说成模型错误。旧 Run 不恢复、不重发；#127 readiness 未通过，#128 两臂 NOT_RUN，usage UNKNOWN。
+
+## 2026-11-05 readiness-06 已派发
+
+状态写入WinError 5的有界重试修复及回归通过后，05因确认服务源码身份不匹配被取消，等待最后在途调用结束。06使用独立8127服务、数据目录及启动source/script/PID核对后串行派发；当前简单题成功，多步自然进入Planner，完成1/2，尚未完成整题交付。见 [06冻结与初始运行证据](provider-live-natural-20261105-readiness-06.md)。不拼接05结果；#127未验收/open，#128两臂NOT_RUN/open，usage UNKNOWN。
+
+## readiness-06 最终结果
+
+06已执行未通过，完成1/2。自然多步30次模型/HTTP、2次工具后在第二步以challenge_meta_limit_reached结束；Meta出网和交接成功，最终没有最终生成或整题审查，不是硬预算/900秒/30秒流空闲停止或数学正确性判定。首末正文及独立FAIL证据见 [06最终记录](provider-live-natural-20261105-readiness-06.md)。终态对照又发现并修复独立verifier误滤attempt_index=0，另校正RB03过时调用次数预期；43项相关回归通过，旧Run不升级。#127保持open；#128两臂NOT_RUN/open。

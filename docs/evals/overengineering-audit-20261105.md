@@ -199,3 +199,35 @@ GitHub #127/#128 评论已按以上终态更新；两个 Issue 均保持开放�
 单样本崩溃回归曾因断言位于临时目录销毁后而失效；修正后先稳定复现“completed 且 intent 仍存在”，再加恢复清理并验证通过。进一步的负向恢复用例证明计数不一致时不会清理 intent。当前聚焦 unittest 为 **113 项通过**，包含执行、独立核验、公共 Job API、pair CLI/来源、配对执行和 STAR gate；快速合同门禁及改动文件 Ruff 通过，`git diff --check` 通过，`BASELINE.json`、`user_agent.py` 与 `implementations/` 无差异。该数字是定向工程证据，不是全仓门禁或 provider-live readiness 结论。
 
 本次审查采取 3 类路径：复用 readiness-01 已冻结证据定位缺口；通过定向 unittest 与源码检查审查既有修复和 3 项审计简化；再用独立子智能体审查恢复、来源证明及新 Run 前置条件。readiness-01 保持原样并仍为已执行未通过；readiness-02 尚未派发；#128 仍 NOT_RUN。上述修复只是本次已知缺陷，不代表已穷尽整个仓库所有潜在 bug。
+
+## readiness-02 后续复核（2026-11-05）
+
+`readiness-02` 已于 2026-11-05 派发并完成 `1/2`，详见 [独立运行记录](provider-live-natural-20261105-readiness-02.md)。自然多步 Job 以 `star_needs_review` 失败；源码和持久事件确认 Meta 解析器拒绝合法业务响应上的流式 `usage` 附加字段。现有修复将只对调用审计证明的 stream 响应剥离该 sidecar，业务键集合仍严格。另一个独立 verifier 修复仍在进行；以上未完成的单测或投影不能记为已修 bug。
+
+此前的本地预算疑点已由独立核对撤销。`2,104,894` 是两 Run charged/reserved 的批次和，低于 `4,194,304` 批次限额；两个 Run 分别为 `119,709` 与 `1,985,185`，均低于各自 `2,097,152` 限额。Provider usage 仍为 `UNKNOWN`，本地预留值不代表 provider 实际计量。
+
+三项复杂度候选的当前处置：
+
+1. Job 事件读取已按游标分页，Solver 展示投影已只读相关工具事件；`readiness-02` SQLite 文件为 `100,626,432` bytes，仍有 `10,819` 条 Solver event 和 `10,825` 条 Job event。高频流片段写入及提交路径重复物化事件历史尚未 profile，归为疑似性能复杂度，保留 checkpoint/恢复语义并先量化。
+2. 所有 role 放宽顶层字段的全局复杂度已收窄到局部 Meta handoff 字段；其它 role 仍严格拒绝未登记字段。新 `usage` 兼容只适用于 transport audit 明确标记的 stream sidecar，不扩大业务 schema。
+3. `candidate_registry` 与 `best_effort_decision` 空状态有 opt-in Best-Effort、回放和结果投影消费者，保持为必要状态，不删除。
+
+本轮按独立根因计，当前已确认且仍存在的过度开发 **0 项**；疑似性能复杂度 **2 项**，两者都缺少成本剖析来证明应删。三项审计候选中，一项读取范围简化已完成，一项 schema 过度放宽已收窄，一项经消费者审查归为必要复杂度。#127 为 `FAIL / open`，#128 为 `NOT_RUN / open`。没有修改官方 baseline、预算、身份、审查、最终绑定，也没有宣称数学能力提升。
+
+## 2026-11-05 只读量化追加
+
+子智能体从静止的readiness-02数据库确认同一call_activity路径重复物化完整Solver历史：`calls.observe_activity`、`calls._save`、`Harness.commit_event`各读取一次；storage已通过validated_run避免第四次。该Run有10592事件、约8.0MB JSON，其中6924条call_activity。累计历史长度模型估算三次读取约77.13GiB逻辑JSON处理量（不是实测磁盘读取量）。只读SQL全历史查询中位约18.75ms、末条约0.08ms，未包含生产JSON解析/校验耗时。当前只确认可避免的重复工作，尚不能归因线上未交付。
+
+因此当前尚存候选更新为1项已确认重复成本（Solver活动路径重复全历史物化）、1项疑似写放大（每活动完整state_json写入，缺历史大小/恢复代价剖析）。初次三项候选的其它处置不变。建议在下一次必要修复窗口复用一次已验证快照，保留CAS、身份、事件追加和文本checkpoint；尚未实施，不另建框架。readiness-06源码已冻结，本次只补文档，不在运行中修改它。
+
+## 2026-11-05 readiness-06 终态后的最小简化
+
+06真实Run仍未通过：第二步在有界Meta继续处理后仍受有效CHALLENGE质疑，以challenge_meta_limit_reached终止。它不是传输拒绝或预算耗尽；不放宽预算或改写审查判据。终态证据另见06记录。
+
+已处理量化确认的重复历史读取：活动回调只用本调用自己维护的流metrics，保存时读取一次最新Run，并交给Harness内部提交路径复用。公开commit_event签名和其读取持久身份的路径保持；内部仍执行身份、终态检查和原存储CAS。没有持久缓存、新配置或通用框架。每次activity完整历史读取由3降至1，文本checkpoint由2降至1，逐活动事件、每个文本checkpoint及首末正文时间继续持久化。
+
+RED回归实测每次activity读取[3,3]；GREEN为[1,1]，checkpoint为[1]，同时验证首末正文、完整partial文本和两条活动事件。新增负向用例确认过期revision冲突、错误Run身份和终态业务冻结仍拒绝。基础20项通过；新增负向、迟到流、恢复、公开证据共33项通过，用时41.278秒，Ruff与diff-check通过。只证明读取路径成本减少及工程边界，不据此保证真实答案完成或数学能力提升。
+
+当前尚存过度复杂度候选：已确认待处理0项；疑似1项（每活动重写完整state_json的写放大，缺少恢复代价与历史大小测量，不删除原子checkpoint）。初次三项中，重复读取已进一步简化；role字段兼容保持局部；未启用功能的空状态有实际消费者，仍保留为必要复杂度。以上按独立根因计，不以文件数或重复出现次数累加。
+
+本续轮另外处理3个运行/实现缺陷（Windows原子替换短暂读锁、误连旧服务的源码身份隔离、verifier误滤零索引），以及1个过时测试预期（已有一次claim-target-repair应计5次调用）。重复读取单列为1项成本问题，不把模型核验分歧算代码bug。旧报告与Run身份均保留，下一次使用全新manifest。既有两个测试文件的4项F401/I001 lint诊断早于本轮并不在运行源码，本轮未顺手格式化或删除原有导入；新增源码/测试定向Ruff通过，不声称全仓质量门禁已过。

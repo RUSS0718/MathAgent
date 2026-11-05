@@ -12,6 +12,8 @@
 
 2026-11-05 最新 `readiness-01` 的自然多步 trace、矛盾步骤核验、交付缺口与修复后 Issue 状态见 [#127 readiness-01 运行记录](evals/provider-live-natural-20261105-readiness-01.md)；对应 #124–#128 CLI 阶段追加及复杂度审计口径更正见[实验 CLI 阶段记录](evals/showcase-experiment-cli-124-128.md)与[审计记录](evals/overengineering-audit-20261105.md)。#127 仍 FAIL/open，#128 仍 NOT_RUN/open。
 
+2026-11-05 `readiness-02` 在新冻结 Run 中完成简单题并实际尝试自然多步；多步 Job 因 Meta 拒绝带传输 `usage` 的合法响应而进入 `star_needs_review`，未交付最终答案。完整身份、停因、流时间、预算与验收缺口见 [#127 readiness-02 运行记录](evals/provider-live-natural-20261105-readiness-02.md)；#127 保持 FAIL/open，#128 仍 NOT_RUN/open。
+
 较早的 `d6e9ea5-02` Run 在 `STEP_VERIFY` 失败，并记录 stream 清理时 SQLite 嵌套事务异常；该异常不能确认是 Job 首发失败根因。脱敏身份、独立核验和随后增加的事务回滚回归见[历史运行记录](evals/provider-live-natural-20261104-d6e9ea5-02.md)。
 
 适用范围：理解 v0.1、v0.2 历史版本和当前 v1.1 Solver Harness 规格；执行规则以根 [AGENTS.md](../AGENTS.md) 为准。
@@ -192,3 +194,9 @@ v0.2 文档已归档为历史合同；v1.1 规格不覆盖这些 accepted ADR，
 能力报告中的文本、图文 pending 行与后续成功 probe 并存；读取“已完成的 live probes”小节和限制说明。当前仍未证明产品真实工具选择稳定，也没有独立数学正确率提升证据。详细核对依据见 [v0.2 规划调研](research/v0.2-planning-baseline.md)。
 
 新增版本时，在本索引更新该版本 PRD、技术设计、任务合同和能力报告入口；设计标为 accepted、任务关闭、能力通过应分别记录来源。
+
+最新 [readiness-05 执行观察器异常记录](evals/provider-live-natural-20261105-readiness-05.md) 区分 runner 写状态失败与服务端仍在运行的自然多步 Job；未获得 readiness PASS，#128 两臂仍 NOT_RUN。
+
+当前真实API批次为 [readiness-06](evals/provider-live-natural-20261105-readiness-06.md)，隔离服务与冻结源码已核对；简单题成功，多步运行中，尚未readiness PASS。
+
+readiness-06 已终态FAIL：有界Meta继续处理后仍未完成整题交付，详见 [06最终记录](evals/provider-live-natural-20261105-readiness-06.md)。后续零索引核验与重复历史读取修复不追溯升级旧Run。
