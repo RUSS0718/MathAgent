@@ -78,11 +78,31 @@ def prepare_session(run, request):
         raise SessionIdentityError("session role scope conflicts with registered identity")
     record = deepcopy(record or {**identity, "created_at": state["updated_at"], "history": []})
     request = deepcopy(dict(request))
+    history = deepcopy(record["history"])
+    current = request.get("challenge_history")
+    step_id = (request.get("step") or {}).get("step_id")
+    if isinstance(current, list) and current and step_id:
+        for exchange in history:
+            previous = exchange.get("request", {})
+            old = previous.get("challenge_history")
+            if ((previous.get("step") or {}).get("step_id") != step_id
+                    or not isinstance(old, list) or "challenge_history_prefix_ref" in previous):
+                continue
+            length = 0
+            for prior, latest in zip(old, current):
+                if prior != latest:
+                    break
+                length += 1
+            if length:
+                previous["challenge_history"] = old[length:]
+                previous["challenge_history_prefix_ref"] = {
+                    "source": "current_request.challenge_history", "length": length,
+                }
     request.update(
         {
             "session_key": identity["session_key"],
             "session_backend": "local",
-            "session_history": deepcopy(record["history"]),
+            "session_history": history,
             "session_history_authority": "historical_dialogue_only; current role projection and ledgers are authoritative",
         }
     )
