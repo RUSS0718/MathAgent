@@ -14,3 +14,12 @@
 
 
 第2轮09失败后，第3轮前修复两项已确认分类/计数缺陷：stream adapter对HTTP token预留拒绝原样透传BudgetExhausted，未获HTTP准入不进行不存在的attempt结算，沿既有calls预算终态处理；工具账本结算只保留明确布尔执行证据，timeout仅在unknown_outcome=false且cleanup_verified=true时不计未知，历史缺字段和清理未确认仍计未知。原账本限额及logical31/HTTP30历史不改。新stream回归先RED后GREEN，明确确认0出网、0伪HTTP结算、charged不变；相关集成24项通过，快速门禁通过。工具证据安全复核收窄到bool，不复制任意status/输出。修复只改善实际状态分类，不能凭此声称样本已交付；下一轮仍须真实API和独立核验。
+
+第3轮真实预算停止后提前做有界风险收益评估（不是凑足5轮）：独立审查确认sessions.append_exchange保留各轮challenge_history，prepare_session将其再次连同当前完整history注入，是累计前缀重复而非无限递归。选择先验证注入层精确前缀去重，优于同题盲重跑/prompt补丁/换题；仅同session且同plan/attempt/step且精确前缀相同时省略历史副本，持久原记录、当前完整history、各报告/响应/工具回执保留。字段不足/不匹配则不去重，需真实数据量化和RED/GREEN才能实施与新Run；不宣称必然交付。当前已实施仍3轮，未提前把验证候选记成已修复。
+
+
+第4轮前精确离线测量纠正：真实旧history每轮最后verdict有修订，整个旧数组并不与当前前缀完全相同，初始“整字段删除”方案不能应用。改为只省略逐项完全相同的最长公共前缀，并加current_request.challenge_history长度引用，保留不同尾部，可精确重建每条旧history。仅同session(scope校验含plan/attempt)、明确同step_id且无既有引用时做注入副本转换，持久record/当前完整history/全部报告响应回执不变，跨步骤或不匹配不省略。代码约20行，不加配置或通用框架。
+
+真实10DB只读prepare_session重放：session_history JSON由99032降到75345 bytes，净减少23687，4条引用，逐条断言旧history可精确还原且响应不变。是字节量，不等同provider token或必然交付收益。新RED因无引用字段失败，GREEN检查重建、原run不变、跨step/不同前缀保留；快速门禁通过，完整相关会话/挑战/恢复回归结果以随后追加为准。旧10仍真实预算FAIL，不追溯升级。
+
+用户在第4轮冻结前明确授权增加预算。readiness11新登记每题128模型/HTTP、32工具、16777216 token预留、14400秒，2题批次256模型/HTTP、64工具、33554432预留、28800秒；单次900秒和30秒流空闲不变、best-effort关闭。服务实际limits与manifest同步核对，不在运行中扩预算，不改旧批次或官方baseline。上下文简化相关49项1跳过/快速门禁/Ruff通过。
