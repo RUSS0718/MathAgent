@@ -46,3 +46,5 @@ readiness17终态FAIL，完成1/2，具体verification.reason为verifier_tool_re
 用户随后明确选择“纯推理仅限制Reasoner，Verifier保留原预算内计算”，解除待定范围。此次作为用户批准的设计合同调整单独计policy_change_rounds=1，不追溯把17判为旧工程bug；累计工程修复repair_round仍8，实施迭代implementation_round=9。独立代理01a1ab94-e473-7913-8383-5a1a1b598360建议局部调整既有执行/广告/只读三处gate，拒绝新增统一RolePolicy框架；未标执行角色默认Reasoner，Verifier只取内部source_role，不信任模型字段。合同SP06追加新作用域，旧单测按新合同调整，公共Job/Verifier/read scope先RED后GREEN。Registry/隔离/S3额度与deadline/回执保护/cap/审查绑定及best-effort关闭保持。新18同两题原字节与预算单独冻结；唯一监控待新Run启动后恢复。
 
 新作用域实现保持meta.py不动，仅执行/广告/只读gate按运行时角色判断。未标source_role的普通报告预检默认Reasoner，模型自报role/source_role不能授权；Verifier路径复用既有内部receipt_extras。公共新作用域与0工具额度、旧Reasoner拒绝、Verifier计算/整题复核/取消、deadline等共30项聚焦检查通过（29项后新增1项冒充角色检查单独通过），fast/Ruff/diff通过。旧的全局纯推理Verifier拒绝单测按用户批准新合同更新；不新增工具或预算，不修改旧17。
+
+用户追问非法JSON原因后发现新工程缺口：原repair没有失败原文/解析位置，sessions失败不追加历史，实际是在重问而非具体格式修复。选择第9轮局部上下文补充，独立比较不采用猜补parser/未验证provider JSON模式或新框架，详情provider-live-json-repair-20261105.md。两条真实出站接缝RED→GREEN、7项和fast/Ruff通过，18/19四条失败原文只读重放确认可进入修复；不声称在线已改善。新20同题/完整分母2/预算另行冻结，不扩一次repair上限。
