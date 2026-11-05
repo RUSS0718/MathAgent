@@ -218,8 +218,17 @@ def _process_coverage_summary(
             "process_path", {}
         )
         plan_version = summary.get("plan_version") if isinstance(summary, dict) else None
+        execution_started = (
+            isinstance(summary, dict) and summary.get("execution_started") is True
+        )
         if type(plan_version) is int and plan_version > 0:
             planned += 1
+        if process_reason in {
+            "natural_multistep_trace_incomplete",
+            "natural_multistep_delivery_unverified",
+        } and (execution_started or (type(plan_version) is int and plan_version > 0)):
+            incomplete += 1
+            continue
         if process_status != "NOT_RUN":
             continue
         if outcome.get("coverage", {}).get("status") != "PASS":
@@ -236,11 +245,6 @@ def _process_coverage_summary(
         elif type(plan_version) is int and plan_version > 0:
             if process_reason == "provider_live_trace_required":
                 not_provider_live += 1
-            elif process_reason in {
-                "natural_multistep_trace_incomplete",
-                "natural_multistep_delivery_unverified",
-            }:
-                incomplete += 1
             else:
                 not_run += 1
         else:
@@ -256,7 +260,7 @@ def _process_coverage_summary(
         "not_provider_live": not_provider_live,
         "unknown": statuses.count("UNKNOWN"),
         "not_run": not_run,
-        "failed": statuses.count("FAIL"),
+        "failed": statuses.count("FAIL") - incomplete,
     }
 
 
