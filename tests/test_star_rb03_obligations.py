@@ -191,7 +191,8 @@ class ProofObligationJobTest(StarJobFixture, unittest.TestCase):
                 self.assertEqual(4, self.report(job_id)["budget"]["logical_calls"])
 
     def test_invalid_declaration_target_and_type_cannot_be_accepted(self):
-        cases = [(dict(DECLARATION, claim_index=1), 4),
+        # A well-typed out-of-range target gets one bounded claim-target repair.
+        cases = [(dict(DECLARATION, claim_index=1), 5),
                  (dict(DECLARATION, claim_index=True), 5),
                  (dict(DECLARATION, claim_type="contains_digits"), 5),
                  (dict(DECLARATION, claim_type=None), 5),
