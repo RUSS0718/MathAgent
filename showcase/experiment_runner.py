@@ -6,6 +6,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -292,7 +293,14 @@ def _write_status(path: Path, status: dict[str, Any]) -> None:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        for attempt in range(3):
+            try:
+                os.replace(temporary, path)
+                break
+            except PermissionError as error:
+                if getattr(error, "winerror", None) != 5 or attempt == 2:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
