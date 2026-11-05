@@ -40,8 +40,18 @@ class MetaFormatRepairTest(unittest.TestCase):
         self.assertEqual(2, result["state"]["counters"]["model_calls"])
         self.assertEqual(GUIDANCE, {k: result["state"]["meta_guidance_decision"][k] for k in GUIDANCE})
 
+    def test_invalid_json_still_repairs_once(self):
+        port, result = self.run_meta(1, "invalid_json")
+        self.assertEqual(2, len(port.requests))
+        self.assertTrue(port.requests[1]["call_id"].endswith(":repair-1"))
+        self.assertEqual("STEP_EXECUTE", result["state"]["phase"])
+
     def test_second_schema_failure_and_unknown_transport_do_not_loop(self):
-        for failures, category, expected in ((2, "invalid_role_schema", 2), (1, "tls", 1)):
+        for failures, category, expected in (
+            (2, "invalid_role_schema", 2),
+            (1, "tls", 1),
+            (1, "unknown_outcome", 1),
+        ):
             with self.subTest(category=category):
                 port, result = self.run_meta(failures, category)
                 self.assertEqual(expected, len(port.requests))

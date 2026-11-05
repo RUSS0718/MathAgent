@@ -31,7 +31,8 @@ class InternPortError(RuntimeError):
 # reason and usage are known facts, unlike a network interruption or an
 # unfinished stream whose remote outcome stays unknown.
 KNOWN_PROTOCOL_FAILURES = frozenset({
-    "invalid_json", "invalid_role_schema", "empty_response", "truncated_response",
+    "invalid_json", "invalid_role_schema", "invalid_role_enum", "empty_response",
+    "truncated_response",
 })
 
 MAX_RESPONSE_EXCERPT_CHARS = 400
@@ -44,6 +45,22 @@ def _protocol_failure(category, record, text):
     error.finish_reason = record.get("finish_reason")
     error.response_excerpt = redact(str(text or ""))[:MAX_RESPONSE_EXCERPT_CHARS]
     return error
+
+
+def _invalid_meta_action_enum(parsed, schema, role):
+    """Identify a complete Meta action string excluded by its active schema."""
+    if role not in {"meta", "meta_strategist"} or not isinstance(parsed, Mapping):
+        return False
+    properties = schema.get("properties")
+    if not isinstance(properties, Mapping):
+        return False
+    for field in ("decision", "action_type"):
+        value = parsed.get(field)
+        field_schema = properties.get(field)
+        allowed = field_schema.get("enum") if isinstance(field_schema, Mapping) else None
+        if isinstance(value, str) and isinstance(allowed, list) and value not in allowed:
+            return True
+    return False
 
 
 def _request_metadata(request, deadlines=None, activity_observer=None):
@@ -280,6 +297,8 @@ class InternModelPort:
                 parsed = _loads_known_escape_rescue(response.text)
             except (TypeError, ValueError) as exc:
                 raise _protocol_failure("invalid_json", record, response.text) from exc
+            if _invalid_meta_action_enum(parsed, schema, request["role"]):
+                raise _protocol_failure("invalid_role_enum", record, response.text)
             if not isinstance(parsed, Mapping) or schema_error(parsed, schema):
                 raise _protocol_failure("invalid_role_schema", record, response.text)
             record["status"] = "success"
@@ -347,6 +366,8 @@ class InternModelPort:
                 parsed = _loads_known_escape_rescue(text)
             except (TypeError, ValueError) as exc:
                 raise _protocol_failure("invalid_json", record, text) from exc
+            if _invalid_meta_action_enum(parsed, schema, request["role"]):
+                raise _protocol_failure("invalid_role_enum", record, text)
             if not isinstance(parsed, Mapping) or schema_error(parsed, schema):
                 raise _protocol_failure("invalid_role_schema", record, text)
             record["status"] = "success"

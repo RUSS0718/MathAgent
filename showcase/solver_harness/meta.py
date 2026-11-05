@@ -196,6 +196,9 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         try:
             response = dict(harness.dispatch(run, meta_port.complete, request))
         except CallInterrupted as exc:
+            failed = protocol_repair.interrupted_call(harness, run["run_id"], exc)
+            if failed.get("error_category") == "invalid_role_enum":
+                raise ValueError("invalid_meta_action_enum") from None
             run = protocol_repair.reserve_repair(
                 harness, run["run_id"], exc,
                 failure_event=lambda latest, failed: {
