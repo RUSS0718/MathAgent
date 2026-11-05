@@ -328,7 +328,13 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(2, receipt["output"])
         self.assertEqual({"coefficients": [1]}, receipt["input"])
         evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
-        self.assertIn(receipt["receipt_id"], [t.get("tool_call_id") for t in evidence["tools"]])
+        public_receipt_id = next(
+            item["receipt"]["receipt_id"] for item in evidence["tools"]
+            if item.get("receipt", {}).get("receipt_status") == "success"
+        )
+        self.assertRegex(public_receipt_id, r"^solver_event_[0-9a-f]{32}$")
+        self.assertNotIn(receipt["receipt_id"], repr(evidence["tools"]))
+        self.assertIn(public_receipt_id, [item.get("receipt_id") for item in evidence["timeline"]])
         self.assertEqual("2", job["result"]["final_response"])
         self.assertEqual("same_artifact", self.report(job_id)["checks"]["binding"])
         self.assertEqual(8, job["result"]["budget"]["http_attempts"])

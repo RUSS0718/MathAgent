@@ -156,10 +156,21 @@ def dispatch(harness, run, operation, request, session_dispatch):
             raise CallInterrupted(run["run_id"])
         if latest["state"]["phase"] == "TERMINAL":
             raise CallInterrupted(run["run_id"])
+        report = prepared.get("report")
+        receipts = report.get("tool_receipts", []) if isinstance(report, Mapping) else []
         record = {
             "call_id": call_id,
             "role": prepared["role"],
             "run_id": run["run_id"],
+            "plan_version": latest["state"].get("plan_version"),
+            "attempt_index": latest["state"].get("attempt_index"),
+            "consumed_receipt_ids": [
+                receipt["receipt_id"]
+                for receipt in receipts
+                if isinstance(receipt, Mapping)
+                and isinstance(receipt.get("receipt_id"), str)
+                and receipt["receipt_id"]
+            ] if isinstance(receipts, list) else [],
             "problem_hash": latest["state"]["problem_hash"],
             "config_hash": latest["state"]["config_hash"],
             "session_key": prepared.get("session_key"),

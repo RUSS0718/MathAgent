@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from ..redaction import redact
 from ..run_budget import current_budget
+from ..star_product_events import public_solver_event_id
 from .computation_evidence import has_computation_output
 
 POLICY_VERSION = "solver-local-precheck-1"
@@ -92,6 +93,10 @@ def _execute(harness, run, request, config, port, step_id, claim_index, *, recei
     receipt_id = f"{receipt_prefix}:{run['run_id']}:{run['state_revision']}:{claim_index}"
     receipt = {
         "receipt_id": receipt_id,
+        "public_receipt_id": public_solver_event_id(run, {"event_id": receipt_id}),
+        "run_id": run["run_id"],
+        "plan_version": state.get("plan_version"),
+        "attempt_index": state.get("attempt_index"),
         "tool": request.get("tool") if isinstance(request, Mapping) else None,
         "step_id": step_id,
         "claim_index": claim_index,
