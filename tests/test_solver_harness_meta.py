@@ -89,6 +89,132 @@ class MetaTest(unittest.TestCase):
         self.assertEqual("SETUP", result["state"]["phase"])
         self.assertEqual("meta_invalid", result["events"][-1]["type"])
 
+    def test_stream_usage_sidecar_does_not_invalidate_meta_and_remains_in_call_audit(self):
+        decision = {
+            "decision": "CONTINUE",
+            "reason_summary": "proceed",
+            "plan_summary": "",
+            "forbidden_directions": [],
+            "reusable_results": [],
+            "trace_back_to": None,
+        }
+        usage = {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
+        class StreamingMetaPort(ScriptedModelPort):
+            def complete(self, request):
+                response = super().complete(request)
+                request["transport_decision_observer"](
+                    {"transport": "stream", "policy": "legacy"}, request
+                )
+                return iter([{"result": response, "usage": usage}])
+
+        port = StreamingMetaPort([decision])
+        with SolverHarness(
+            meta_port=port, config={"features": {"stream_recovery": True}}
+        ) as harness:
+            result = harness.solve("prove", {"run_id": "usage-meta", "meta_trigger": "plan-blocked"})
+
+        self.assertEqual("meta_decided", result["events"][-1]["type"])
+        committed = result["state"]["meta_decision"]
+        self.assertEqual(decision, {key: committed[key] for key in decision})
+        self.assertNotIn("usage", committed)
+        call = next(iter(result["state"]["calls"].values()))
+        self.assertEqual(usage, call["usage"])
+        self.assertEqual(usage, call["response"]["usage"])
+
+    def test_verified_intern_stream_keeps_usage_outside_meta_business_schema(self):
+        import json
+
+        from showcase.request_transport import INTERN_S2_LIVE_ENDPOINT
+        from showcase.solver_harness.intern_port import InternModelPort
+
+        decision = {
+            "decision": "CONTINUE",
+            "reason_summary": "proceed",
+            "plan_summary": "",
+            "forbidden_directions": [],
+            "reusable_results": [],
+            "trace_back_to": None,
+        }
+        usage = {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
+
+        class MockInternStreamAdapter:
+            model_id = "intern-s2"
+            temperature = 0.2
+            max_tokens = 32768
+            thinking_mode = False
+
+            class Client:
+                model = "intern-s2"
+                api_base = INTERN_S2_LIVE_ENDPOINT
+
+            def __init__(self, response):
+                self.client = self.Client()
+                self.response = response
+
+            def _get_client(self):
+                return self.client
+
+            def stream_complete(self, messages, *, metadata=None):
+                yield {"type": "text_delta", "text": json.dumps(self.response)}
+                yield {
+                    "type": "result",
+                    "text": json.dumps(self.response),
+                    "model": self.model_id,
+                    "finish_reason": "stop",
+                    "usage": usage,
+                }
+
+        for response, expected_event in (
+            (decision, "meta_decided"),
+            ({**decision, "unexpected_business_field": "value"}, "protocol_failure_unrepaired"),
+        ):
+            with self.subTest(expected_event=expected_event), SolverHarness(
+                meta_port=InternModelPort(
+                    MockInternStreamAdapter(response), original_problem="prove",
+                    transport_policy="stream_first"
+                ),
+                config={"features": {"stream_recovery": True}},
+            ) as harness:
+                result = harness.solve(
+                    "prove", {"run_id": f"verified-stream-{expected_event}", "meta_trigger": "plan-blocked"}
+                )
+
+            event_types = [event["type"] for event in result["events"]]
+            self.assertEqual(expected_event, event_types[-1])
+            call = next(iter(result["state"]["calls"].values()))
+            self.assertEqual("stream", call["transport_decision"]["transport"])
+            if expected_event == "meta_decided":
+                self.assertEqual(usage, call["usage"])
+                committed = result["state"]["meta_decision"]
+                self.assertEqual(decision, {key: committed[key] for key in decision})
+                self.assertNotIn("usage", result["state"]["meta_decision"])
+            else:
+                self.assertEqual("invalid_role_schema", call["error_category"])
+                self.assertEqual("protocol_failed", call["status"])
+                self.assertNotIn("meta_decision", result["state"])
+
+    def test_nonstream_usage_and_unknown_business_fields_are_rejected(self):
+        decision = {
+            "decision": "CONTINUE",
+            "reason_summary": "proceed",
+            "plan_summary": "",
+            "forbidden_directions": [],
+            "reusable_results": [],
+            "trace_back_to": None,
+        }
+        responses = [
+            {**decision, "usage": {"total_tokens": 1}},
+            {**decision, "unexpected_business_field": "value"},
+            {**decision, "decision": "UNREGISTERED"},
+        ]
+        for index, response in enumerate(responses):
+            with self.subTest(index=index), SolverHarness(
+                meta_port=ScriptedModelPort([response]),
+                config={"features": {"stream_recovery": True}},
+            ) as harness:
+                result = harness.solve("prove", {"run_id": f"invalid-meta-{index}", "meta_trigger": "plan-blocked"})
+                self.assertEqual("meta_invalid", result["events"][-1]["type"])
+
     def test_absent_port_makes_no_meta_dispatch(self):
         with SolverHarness() as harness:
             result = harness.solve("prove", {"meta_trigger": "plan-blocked"})
