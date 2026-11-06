@@ -95,7 +95,14 @@ class ExperimentServer:
             headers["Idempotency-Key"] = idempotency_key
         response = self.client.post(path, json=payload, headers=headers)
         if response.status_code not in {200, 202}:
-            raise ValueError("experiment_public_admission_failed")
+            body = response.get_json(silent=True)
+            candidate = body.get("code", body.get("error")) if isinstance(body, dict) else None
+            code = ("".join(char if char.isalnum() or char in "_.-" else "_"
+                            for char in candidate[:96])
+                    if isinstance(candidate, str) else "unknown")
+            raise ValueError(
+                f"experiment_public_admission_failed status={response.status_code} code={code}"
+            )
         return response.get_json()
 
     def preflight(self):
