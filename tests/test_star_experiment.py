@@ -27,9 +27,17 @@ def setUpModule():
     """Prepare the locked real-Docker image so integration checks stay strict in CI."""
     import showcase.star_experiment_server as experiment_server
 
-    original_image = experiment_server.CONTRACT_PYTHON_IMAGE_ID
-    unittest.addModuleCleanup(setattr, experiment_server, "CONTRACT_PYTHON_IMAGE_ID", original_image)
-    experiment_server.CONTRACT_PYTHON_IMAGE_ID = ensure_star_experiment_image()
+    global _original_image
+    image = ensure_star_experiment_image()
+    _original_image = experiment_server.CONTRACT_PYTHON_IMAGE_ID
+    experiment_server.CONTRACT_PYTHON_IMAGE_ID = image
+
+
+def tearDownModule():
+    # Qualification runs a nested unittest suite, which drains global module cleanups.
+    import showcase.star_experiment_server as experiment_server
+
+    experiment_server.CONTRACT_PYTHON_IMAGE_ID = _original_image
 
 
 class ExperimentPublicJobTest(unittest.TestCase):
