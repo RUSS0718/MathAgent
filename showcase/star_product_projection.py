@@ -3,8 +3,8 @@
 import json
 
 
-def persisted_solver(connection, run_id):
-    """Read only public math progress, including after Job projection is sealed."""
+def persisted_solver(connection, run_id, *, projection_only=False):
+    """Read persisted Solver data; projections retain only tool events used by recovery."""
     row = connection.execute("SELECT state_json FROM solver_states WHERE run_id=?", (run_id,)).fetchone()
     if row is None:
         return None
@@ -12,9 +12,14 @@ def persisted_solver(connection, run_id):
     saved = connection.execute("SELECT snapshot_json FROM runs WHERE run_id=?", (run_id,)).fetchone()
     snapshot = json.loads(saved[0]) if saved else {}
     answer = snapshot.get("final_response")
-    events = [json.loads(item[0]) for item in connection.execute(
-        "SELECT event_json FROM solver_events WHERE run_id=? ORDER BY sequence", (run_id,)
-    )]
+    event_query = (
+        "SELECT event_json FROM solver_events WHERE run_id=? AND "
+        "json_extract(event_json, '$.type') IN ('tool_dispatched', 'tool_receipt') "
+        "ORDER BY sequence"
+        if projection_only
+        else "SELECT event_json FROM solver_events WHERE run_id=? ORDER BY sequence"
+    )
+    events = [json.loads(item[0]) for item in connection.execute(event_query, (run_id,))]
     return {"run_id": run_id, "state_revision": state["state_revision"], "state": state,
             "events": events, "execution_status": snapshot.get("status")}, answer
 
@@ -22,7 +27,7 @@ def persisted_solver(connection, run_id):
 def current_solver(connection, run_id):
     from .star_product_pipeline import projection
 
-    persisted = persisted_solver(connection, run_id)
+    persisted = persisted_solver(connection, run_id, projection_only=True)
     if persisted is None:
         return None
     run, answer = persisted

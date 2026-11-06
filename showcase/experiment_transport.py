@@ -126,7 +126,7 @@ class ExperimentTransportAdapter:
         evidence_kind = profile.evidence_kind
         status = profile.status
         if evidence_kind == "provider_live" or status == "provider_live_verified":
-            return any(
+            return evidence_kind == "provider_live" and status == "provider_live_verified" and any(
                 _profile_identity(profile) == _profile_identity(verified)
                 for verified in VERIFIED_STREAM_PROFILES
             )

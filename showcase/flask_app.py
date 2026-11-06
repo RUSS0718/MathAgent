@@ -105,6 +105,10 @@ def create_app(
         else:
             service = RunService(database_path=resolved_database)
     shared_connection = getattr(getattr(service, "_store", None), "_connection", None)
+    # File-backed Run readers must not step the Job writer's connection from
+    # another thread. Job and budget writes still share Workspace's connection.
+    if getattr(getattr(service, "_store", None), "database_path", ":memory:") != ":memory:":
+        shared_connection = None
     workspace_service = WorkspaceService(
         resolved_database,
         connection=shared_connection,
@@ -420,7 +424,8 @@ def create_app(
                     or not isinstance(report, dict)
                     or hashlib.sha256(canonical_json(report)).hexdigest()
                     != pair["readiness_report_sha256"]
-                    or report.get("issue_number") != 127
+                    or type(report.get("issue_number")) is not int
+                    or report["issue_number"] != 127
                     or report.get("status") != "PASS"
                 ):
                     raise ValueError("experiment_readiness_mismatch")
@@ -455,8 +460,10 @@ def create_app(
                 report = payload.get("readiness_report")
                 report_hash = hashlib.sha256(canonical_json(report)).hexdigest()
                 if (
-                    report_hash != pair["readiness_report_sha256"]
-                    or not isinstance(report, dict)
+                    not isinstance(report, dict)
+                    or type(report.get("issue_number")) is not int
+                    or report["issue_number"] != 127
+                    or report_hash != pair["readiness_report_sha256"]
                     or report.get("status") != "PASS"
                 ):
                     raise ValueError("experiment_readiness_not_passed")

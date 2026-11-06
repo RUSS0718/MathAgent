@@ -199,6 +199,9 @@ class StarProductChallengeTest(StarJobFixture, unittest.TestCase):
             item["round"] for item in resumed[0]["challenge_history"]
         ])
         self.assertEqual(CHALLENGE["objection"], resumed[0]["objection"])
+        strategy = resumed[0]["role_context"]["state"].get("meta_decision", {})
+        self.assertEqual(META_CONTINUE["plan_summary"], strategy.get("plan_summary"))
+        self.assertEqual("CONTINUE", strategy.get("decision"))
         decision = next(
             event for event in events if event.get("solver_event_type") == "meta_decided"
         )
@@ -225,9 +228,23 @@ class StarProductChallengeTest(StarJobFixture, unittest.TestCase):
         self.assertEqual("meta", self.outbound[-1]["role"])
         self.assertEqual(11, len(self.outbound))
         self.assertEqual(1, sum(request["role"] == "meta" for request in self.outbound))
+        self.assertTrue(any(event.get("solver_event_type") == "meta_invalid" for event in events))
         self.assertFalse(any(event.get("verdict") == "ACCEPT" for event in events))
         self.assertEqual("unknown", job["result"]["verification"]["status"])
         self.assertNotIn(HIDDEN_ARGUMENT, json.dumps(events, ensure_ascii=False))
+
+        from showcase.solver_harness import SolverHarness
+
+        database_path = self.app.extensions["showcase_run_service"]._store.database_path
+        with SolverHarness(database_path=database_path) as audit:
+            run = audit._state_store.get_run(job_id)
+        meta_calls = [call for call in run["state"]["calls"].values() if call["role"] == "meta"]
+        self.assertEqual(1, len(meta_calls))
+        self.assertEqual("protocol_failed", meta_calls[0]["status"])
+        self.assertEqual("invalid_role_enum", meta_calls[0]["error_category"])
+        self.assertEqual("stop", meta_calls[0]["finish_reason"])
+        self.assertEqual(10, meta_calls[0]["usage"]["total_tokens"])
+        self.assertFalse(any(":repair-1" in call["call_id"] for call in meta_calls))
 
     def test_meta_cannot_trace_back_to_a_nonexistent_step(self):
         replies = [NEED_PLAN, PLAN, STEP, CHALLENGE]

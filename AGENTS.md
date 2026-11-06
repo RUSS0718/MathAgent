@@ -21,16 +21,16 @@
 1. 根目录 `user_agent.py`、`implementations/` 和其默认请求预算是官方评分骨架。没有经过独立验收的改动不得接入默认路径。
 2. 主观评测功能必须通过显式入口运行；任何新路由、校验器、工具、记忆或协作模块都以关闭为默认值，且未启用时不增加官方模型调用。
 3. `demo_server.py` 只服务本地展示，不会被 `user_agent.py` 导入。Demo 的 trace 只能包含脱敏的步骤、状态和摘要，不得包含凭证、完整 prompt、隐藏答案或个人信息。
-4. 本分支不携带实验题集、答案库、运行 raw、废弃 solver、旧脚本和历史实验文档。运行产物写入被忽略的 `artifacts/<run_id>/`，不进入提交分支。
+4. 本分支不携带实验题集、答案库、运行 raw、废弃 solver 和旧脚本；脱敏且用于版本或能力追溯的记录保留在 `docs/`。运行产物写入被忽略的 `artifacts/<run_id>/`，不进入提交分支。
 5. 根目录 `tests/test.md` 是用户保留的未跟踪文件：保持原样，不读取、不修改、不提交、不删除。
-5. 任何声称“能力提升”的结论都必须有独立、可复现的评测证据；Demo 可运行或结构测试通过只能证明工程可达性。
+6. 任何声称“能力提升”的结论都必须有独立、可复现的评测证据；Demo 可运行或结构测试通过只能证明工程可达性。
 
 ## 验收最低线
 
 - `user_agent.py` 可导入；`ReasoningAgent(client=...).solve(problem, metadata)` 返回带非空 `final_response` 的可 JSON 序列化字典。
 - 默认官方路径的调用预算、输出边界和失败回退保持可追踪。
-- `python -m unittest discover -s tests -p "test_*.py"` 通过；若环境未安装 pytest，不以此为理由改变运行时依赖。
-- `python demo_server.py --help` 成功；本地 Demo 的 `/health` 和 `/solve` 合同有测试覆盖。
+- `uv run python -m unittest discover -s tests -p "test_*.py"` 通过；若环境未安装 pytest，不以此为理由改变运行时依赖。
+- `uv run python demo_server.py --help` 成功；本地 Demo 的 `/health` 和 `/solve` 合同有测试覆盖。
 
 ## 合并纪律
 
@@ -52,39 +52,18 @@ Single-context: read the root `GLOSSARY.md` and relevant records in `docs/adr/` 
 
 ## Development workflow
 
-Follow the Matt Pocock engineering flow and keep every phase reviewable:
+产品实现前先确保 PRD、技术设计、任务合同与验收案例可审阅。对会影响设计、验收或交接的阶段，保留可审阅产物和退出条件；纯文档、诊断及小范围维护按任务范围处理，不为流程本身创建材料。
 
-```text
-Product Goal
-  → Research
-  → Risk Spike
-  → Technical Design + Spec
-  → Repository Inspection
-  → Implementation Plan + Acceptance Contract
-  → Short-lived branch
-  → Vertical Slice
-  → Incremental TDD Implementation
-  → Eval / Regression
-  → Demo Hardening
-  → Code Review + Simplification
-  → Release Gate
-  → Retro / Environment Improvements
-```
-
-Each phase writes an artifact and an exit condition. A failed risk spike returns to design; a failed acceptance gate returns to the smallest owning slice. Do not start product implementation before the PRD, technical design, task contract and acceptance cases are reviewable.
-
-For each slice: write a failing test or executable acceptance case, implement the smallest change, run the focused check, run the relevant full suite, review the diff, and commit one logical change. Keep official baseline files byte-stable unless a release decision explicitly authorizes a new baseline.
-
-The repository setup contract is documented in `docs/engineering-bootstrap-plan.md`; the baseline and product-sidecar boundary are documented in `BASELINE.json`, `docs/release-boundary.md`, and `GAP.md`.
+每个代码切片用失败测试或可执行验收案例确认目标，实施最小改动，运行聚焦检查与相关回归，审阅 diff；每次提交保持一个逻辑变更。官方 baseline 保持字节稳定，除非发布决定明确授权。初始化约定见 `docs/engineering-bootstrap-plan.md`；baseline 与 sidecar 边界见 `BASELINE.json`、`docs/release-boundary.md` 和 `GAP.md`。
 
 ## 搜索与检查入口
 
-搜索代码时使用 `rg` 或 `rg --files`，默认排除 `.venv/`、`__pycache__/`、`.pytest_cache/`、`.ruff_cache/`、`artifacts/` 和构建产物；不要递归读取虚拟环境。运行仓库合同检查使用 `python scripts/check.py --offline`，产品发布检查使用 `python scripts/check_showcase_release.py`。
+搜索代码使用 `rg` 或 `rg --files`，排除 `.venv/`、`__pycache__/`、`.pytest_cache/`、`.ruff_cache/`、`artifacts/` 和构建产物；不要递归读取虚拟环境。检查命令见 [工程门禁](docs/engineering/development-gates.md)。
 
 ## 运行环境入口
 
-Python 检查统一使用 `uv run`，不要依赖系统 `python` 命令；Windows 上的 WindowsApps shim 不是仓库运行时。前端检查在 `showcase/frontend/chat-frontend/` 执行 `npm ci --no-audit --no-fund`、`npm audit --audit-level=high` 和 `npm run check`。
+Python 命令使用 `uv run`；Python、前端检查及长测试观察入口见 [工程门禁](docs/engineering/development-gates.md)。
 
 ## Git 分支与提交规范
 
-创建或重命名分支、提交代码、合并分支或记录发布时，先读取 [`docs/engineering/commit-convention.md`](docs/engineering/commit-convention.md)。集成分支不使用工具前缀；提交主题使用 `type(scope): 中文描述`，例如 `feat(showcase): 增加 Run 快照与 Profile 边界`。新提交遵循该规范，已有历史不主动重写。
+创建或重命名分支、提交、合并或记录发布时，遵循[提交与分支规范](docs/engineering/commit-convention.md)；已有历史不主动重写。

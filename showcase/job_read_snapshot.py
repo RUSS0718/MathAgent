@@ -8,7 +8,7 @@ from pathlib import Path
 from .job_observation import observe_deadline
 from .run_budget import _summary
 from .star_product_modes import STAR_MODES
-from .star_product_projection import current_solver
+from .star_product_projection import current_solver, persisted_solver
 
 
 def read_job(service, job_id, user_id):
@@ -60,17 +60,32 @@ def read_job_snapshot(store, job_id, user_id):
         if row is None:
             raise WorkspaceError("job_not_found", status=404)
         payload = store._job_payload(row, include_result=True)
-        events = connection.execute(
-            "SELECT event_id,event_type,payload_json FROM workspace_events WHERE job_id=? ORDER BY event_id",
+        last_event = connection.execute(
+            "SELECT COALESCE(MAX(event_id), 0) AS last_event_id "
+            "FROM workspace_events WHERE job_id=?",
+            (job_id,),
+        ).fetchone()
+        payload["last_event_id"] = int(last_event["last_event_id"])
+        star = (payload.get("result") or {}).get("solver_mode") in STAR_MODES
+        solver_snapshot = persisted_solver(connection, job_id, projection_only=True) if star else None
+        attempt_events = connection.execute(
+            "SELECT payload_json FROM workspace_events "
+            "WHERE job_id=? AND event_type='request_attempt' ORDER BY event_id",
             (job_id,),
         ).fetchall()
-        payload["last_event_id"] = events[-1]["event_id"] if events else 0
-        star = (payload.get("result") or {}).get("solver_mode") in STAR_MODES
-        if star:
-            payload["result"]["solver"] = current_solver(connection, job_id)
-        attempts = [json.loads(event["payload_json"])["attempt"] for event in events
-                    if event["event_type"] == "request_attempt"]
+        attempts = [json.loads(event["payload_json"])["attempt"] for event in attempt_events]
         ledger = connection.execute("SELECT ledger_json FROM run_budgets WHERE run_id=?", (job_id,)).fetchone()
+        # Projection only uses the fetched snapshot. Release its SQLite read
+        # lock before computing it so stream progress writers can commit.
+        connection.commit()
+        if star:
+            from .star_product_pipeline import projection
+
+            run, answer = solver_snapshot if solver_snapshot is not None else (None, None)
+            payload["result"]["solver"] = (
+                projection(run, answer=answer, verification_mode=row["verification_mode"])
+                if run is not None else None
+            )
         budget, ledger_attempts = None, []
         if ledger is not None:
             state = json.loads(ledger[0])

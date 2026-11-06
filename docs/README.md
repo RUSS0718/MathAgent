@@ -1,5 +1,17 @@
 # MathAgent 文档索引
 
+## 当前入口与归档状态（2026-11-06）
+
+- 本窗口所有Run的停因、根因边界和冻结身份统一见[逐Run错误索引](evals/provider-live-run-error-index-20261106.md)，不再另建重复错误流水账。原始实验数据按用户授权清理，证据恢复限制见索引末节。
+
+- 安装、组件与运行方式：[Showcase 首页](../README.md)。
+- 本轮环境复盘及后续候选：[provider-live retro](evals/provider-live-retro-20261106.md)；技术栈与STAR上下文能力：[研究记录](research/star-context-memory-paper-20261106.md)。压缩和记忆方案尚未接入当前STAR直连路径。
+- 最新两批：[readiness-30](evals/provider-live-natural-20261106-readiness-30.md)为第12步单调用截止、结果未知；[readiness-31](evals/provider-live-natural-20261106-readiness-31.md)为较简单题第6步流中连接异常、结果未知。两批均未完成最终生成、整题审查及文本绑定，不能统称预算耗尽。
+- [工程交接合同](engineering/handoff-delivery-contract.md)是显式实验模式，不替代旧Issue验收；#127未通过且保持开放，#128线上两臂NOT_RUN，provider usage UNKNOWN。用户已要求归档线上实验，不自动重跑。
+- [版本与失败对照](evals/provider-live-version-comparison-20261106.md)、[迭代审计](evals/provider-live-iteration-audit-20261106.md)、[修复循环历史](evals/provider-live-repair-cycle-20261105.md)用于追溯，不作为当前运行配置。
+
+下方按日期保留历史入口；其中“最新”仅指各记录撰写时的状态，以本节和各批次终态为准。
+
 文档职责：为开发者和 agent 提供版本、开发阶段、能力验收及官方边界的阅读入口。
 
 2026-11-03 的 #124–#128 后续进展见 [provider-live 协议与 readiness 补充记录](evals/provider-live-readiness-followup-20261103.md)。该记录区分角色协议探测、公共 CLI readiness、usage 暂缓验收和未实现的配对路径。
@@ -8,9 +20,19 @@
 
 2026-11-04 的 #128 离线配对执行切片与覆盖状态见 [实验 CLI #124–#128 阶段记录](evals/showcase-experiment-cli-124-128.md)；#127 provider-live readiness 与 live 配对结论仍待单独验收。
 
+2026-11-05 的 `handoffloose-02` 自然多步运行停在 Run 硬截止，脱敏身份、Job/Solver 状态和停止分类修复见 [#127 线上运行记录](evals/provider-live-natural-20261104-handoffloose-02.md)。该运行未通过 #127，#128 线上 pair 仍为 `NOT_RUN`；当前过度复杂度审计与离线修复进度见 [审计与修复记录](evals/overengineering-audit-20261105.md)。
+
+2026-11-05 最新 `readiness-01` 的自然多步 trace、矛盾步骤核验、交付缺口与修复后 Issue 状态见 [#127 readiness-01 运行记录](evals/provider-live-natural-20261105-readiness-01.md)；对应 #124–#128 CLI 阶段追加及复杂度审计口径更正见[实验 CLI 阶段记录](evals/showcase-experiment-cli-124-128.md)与[审计记录](evals/overengineering-audit-20261105.md)。#127 仍 FAIL/open，#128 仍 NOT_RUN/open。
+
+2026-11-05 `readiness-02` 在新冻结 Run 中完成简单题并实际尝试自然多步；多步 Job 因 Meta 拒绝带传输 `usage` 的合法响应而进入 `star_needs_review`，未交付最终答案。完整身份、停因、流时间、预算与验收缺口见 [#127 readiness-02 运行记录](evals/provider-live-natural-20261105-readiness-02.md)；#127 保持 FAIL/open，#128 仍 NOT_RUN/open。
+
+较早的 `d6e9ea5-02` Run 在 `STEP_VERIFY` 失败，并记录 stream 清理时 SQLite 嵌套事务异常；该异常不能确认是 Job 首发失败根因。脱敏身份、独立核验和随后增加的事务回滚回归见[历史运行记录](evals/provider-live-natural-20261104-d6e9ea5-02.md)。
+
 适用范围：理解 v0.1、v0.2 历史版本和当前 v1.1 Solver Harness 规格；执行规则以根 [AGENTS.md](../AGENTS.md) 为准。
 
 ## 先读哪些文档
+
+2026-11-06 最新 #127 `readiness-28` 的简单题成功；自然多步只完成 1/7 步，末次 Verifier 因工具证据不适用于目标而以 `verifier_tool_request_unfulfilled` 停止。6 次隔离工具均 exit 0 且清理已确认，未发现新的应用缺陷；整题审查未绑定，#127 仍未通过，#128 两臂仍为 `NOT_RUN`。详见 [readiness-28 运行记录](evals/provider-live-natural-20261106-readiness-28.md)。此前 readiness-27 的模型生成代码失败见 [readiness-27 运行记录](evals/provider-live-natural-20261106-readiness-27.md)；readiness-26 的四步自然 trace 与流中 connectivity UNKNOWN 见 [readiness-26 运行记录](evals/provider-live-natural-20261106-readiness-26.md)。
 
 2026-11-03 的[实验 CLI #124–#128 阶段记录](evals/showcase-experiment-cli-124-128.md)区分已实现的流式、串行实验执行与独立核验，以及仍未运行的 provider-live readiness 和配对执行。
 
@@ -186,3 +208,9 @@ v0.2 文档已归档为历史合同；v1.1 规格不覆盖这些 accepted ADR，
 能力报告中的文本、图文 pending 行与后续成功 probe 并存；读取“已完成的 live probes”小节和限制说明。当前仍未证明产品真实工具选择稳定，也没有独立数学正确率提升证据。详细核对依据见 [v0.2 规划调研](research/v0.2-planning-baseline.md)。
 
 新增版本时，在本索引更新该版本 PRD、技术设计、任务合同和能力报告入口；设计标为 accepted、任务关闭、能力通过应分别记录来源。
+
+最新 [readiness-05 执行观察器异常记录](evals/provider-live-natural-20261105-readiness-05.md) 区分 runner 写状态失败与服务端仍在运行的自然多步 Job；未获得 readiness PASS，#128 两臂仍 NOT_RUN。
+
+当前真实API批次为 [readiness-06](evals/provider-live-natural-20261105-readiness-06.md)，隔离服务与冻结源码已核对；简单题成功，多步运行中，尚未readiness PASS。
+
+readiness-06 已终态FAIL：有界Meta继续处理后仍未完成整题交付，详见 [06最终记录](evals/provider-live-natural-20261105-readiness-06.md)。后续零索引核验与重复历史读取修复不追溯升级旧Run。

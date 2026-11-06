@@ -137,9 +137,8 @@ def run_exploration(
         guidance_task = current["state"].get("pending_guidance_task")
         if isinstance(guidance_task, str) and guidance_task.strip():
             request["specific_task"] = guidance_task
-        from .calls import CallInterrupted
-
         from . import protocol_repair
+        from .calls import CallInterrupted
 
         successful_request = request
         try:

@@ -525,7 +525,7 @@ class WorkspaceStore:
     def append_event(self, job_id: str, event: Mapping[str, Any]) -> None:
         """Append one already-redacted public pipeline event."""
 
-        with self._lock:
+        with self._lock, self._connection:
             row = self._connection.execute(
                 "SELECT status FROM workspace_jobs WHERE job_id=?", (job_id,)
             ).fetchone()
@@ -566,7 +566,7 @@ class WorkspaceStore:
             if isinstance(state.get("verification"), Mapping)
             else {"status": "unknown"},
         }
-        result.update({key: state[key] for key in ("solver_mode", "preset_version", "missing_capabilities", "evidence_kind", "solver") if key in state})
+        result.update({key: state[key] for key in ("solver_mode", "preset_version", "missing_capabilities", "evidence_kind", "solver", "acceptance_mode", "engineering_delivery") if key in state})
         result["verification"] = bind_verification(result["final_response"], result["verification"])
         error = state.get("error") if isinstance(state.get("error"), Mapping) else None
         error_code = str(error.get("category")) if error else None
@@ -693,15 +693,22 @@ class WorkspaceStore:
             rows = self._connection.execute(query, params).fetchall()
         return [self._job_payload(row) for row in rows]
 
-    def events(self, job_id: str, user_id: str, after_id: int = 0) -> list[dict[str, Any]]:
+    def events(
+        self, job_id: str, user_id: str, after_id: int = 0, *, limit: int | None = None
+    ) -> list[dict[str, Any]]:
         with self._lock:
             row = self._connection.execute("SELECT 1 FROM workspace_jobs WHERE job_id=? AND user_id=?", (job_id, user_id)).fetchone()
             if row is None:
                 raise WorkspaceError("job_not_found", status=404)
-            events = self._connection.execute(
-                "SELECT event_id,event_type,payload_json,created_at FROM workspace_events WHERE job_id=? AND event_id>? ORDER BY event_id",
-                (job_id, after_id),
-            ).fetchall()
+            query = (
+                "SELECT event_id,event_type,payload_json,created_at FROM workspace_events "
+                "WHERE job_id=? AND event_id>? ORDER BY event_id"
+            )
+            params: tuple[Any, ...] = (job_id, after_id)
+            if limit is not None:
+                query += " LIMIT ?"
+                params += (limit,)
+            events = self._connection.execute(query, params).fetchall()
         return [
             {
                 "id": int(event["event_id"]),
@@ -1059,7 +1066,10 @@ class WorkspaceService:
                 if self.checkpointer is not None:
                     self.checkpointer.stop(job_id, "FAILED", exc.category)
             return
-        except Exception:
+        except Exception as exc:
+            from .job_failure import record_job_failure
+
+            record_job_failure(job_id, exc)
             self.store.fail_job(job_id, "job_execution_failed", execution_mode=self.execution_mode)
             if self.checkpointer is not None:
                 self.checkpointer.stop(job_id, "FAILED", "job_execution_failed")
@@ -1092,8 +1102,10 @@ class WorkspaceService:
             payload["last_event_id"] = self.store.last_event_id(payload["job_id"], user_id)
         return payloads
 
-    def events(self, job_id: str, user_id: str, after_id: int = 0) -> list[dict[str, Any]]:
-        return self.store.events(job_id, user_id, after_id)
+    def events(
+        self, job_id: str, user_id: str, after_id: int = 0, *, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        return self.store.events(job_id, user_id, after_id, limit=limit)
 
     def status(self, job_id: str, user_id: str) -> str:
         return self.store.status(job_id, user_id)

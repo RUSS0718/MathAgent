@@ -31,7 +31,8 @@ class InternPortError(RuntimeError):
 # reason and usage are known facts, unlike a network interruption or an
 # unfinished stream whose remote outcome stays unknown.
 KNOWN_PROTOCOL_FAILURES = frozenset({
-    "invalid_json", "invalid_role_schema", "empty_response", "truncated_response",
+    "invalid_json", "invalid_role_schema", "invalid_role_enum", "empty_response",
+    "truncated_response",
 })
 
 MAX_RESPONSE_EXCERPT_CHARS = 400
@@ -44,6 +45,22 @@ def _protocol_failure(category, record, text):
     error.finish_reason = record.get("finish_reason")
     error.response_excerpt = redact(str(text or ""))[:MAX_RESPONSE_EXCERPT_CHARS]
     return error
+
+
+def _invalid_meta_action_enum(parsed, schema, role):
+    """Identify a complete Meta action string excluded by its active schema."""
+    if role not in {"meta", "meta_strategist"} or not isinstance(parsed, Mapping):
+        return False
+    properties = schema.get("properties")
+    if not isinstance(properties, Mapping):
+        return False
+    for field in ("decision", "action_type"):
+        value = parsed.get(field)
+        field_schema = properties.get(field)
+        allowed = field_schema.get("enum") if isinstance(field_schema, Mapping) else None
+        if isinstance(value, str) and isinstance(allowed, list) and value not in allowed:
+            return True
+    return False
 
 
 def _request_metadata(request, deadlines=None, activity_observer=None):
@@ -272,6 +289,8 @@ class InternModelPort:
             )
             if response.finish_reason == "length":
                 raise _protocol_failure("truncated_response", record, response.text)
+            if response.finish_reason == "error":
+                raise _protocol_failure("provider_generation_error", record, response.text)
             if response.error_category:
                 raise InternPortError(response.error_category)
             if not response.text.strip():
@@ -280,6 +299,8 @@ class InternModelPort:
                 parsed = _loads_known_escape_rescue(response.text)
             except (TypeError, ValueError) as exc:
                 raise _protocol_failure("invalid_json", record, response.text) from exc
+            if _invalid_meta_action_enum(parsed, schema, request["role"]):
+                raise _protocol_failure("invalid_role_enum", record, response.text)
             if not isinstance(parsed, Mapping) or schema_error(parsed, schema):
                 raise _protocol_failure("invalid_role_schema", record, response.text)
             record["status"] = "success"
@@ -340,6 +361,8 @@ class InternModelPort:
             )
             if envelope.get("finish_reason") == "length":
                 raise _protocol_failure("truncated_response", record, envelope.get("text"))
+            if envelope.get("finish_reason") == "error":
+                raise _protocol_failure("provider_generation_error", record, envelope.get("text"))
             text = envelope.get("text")
             if not isinstance(text, str) or not text.strip():
                 raise _protocol_failure("empty_response", record, text)
@@ -347,6 +370,8 @@ class InternModelPort:
                 parsed = _loads_known_escape_rescue(text)
             except (TypeError, ValueError) as exc:
                 raise _protocol_failure("invalid_json", record, text) from exc
+            if _invalid_meta_action_enum(parsed, schema, request["role"]):
+                raise _protocol_failure("invalid_role_enum", record, text)
             if not isinstance(parsed, Mapping) or schema_error(parsed, schema):
                 raise _protocol_failure("invalid_role_schema", record, text)
             record["status"] = "success"
@@ -393,6 +418,8 @@ class InternModelPort:
             "Group candidate substitutions into one request when possible. Omit expected_output unless the exact registered output is known; a guessed shape will not match. "
             "A successful polynomial candidate check proves substitution only, not completeness. "
             "If a report already contains tool_receipts, review those actual inputs/outputs and continue the review; the runtime executed them, not you. "
+            "If a receipt reports tool_error or an error_category, inspect tool_argument_schemas and correct the arguments in a different request, or return a verdict retaining the unresolved objection. Never repeat an identical failed request. "
+            "polynomial_check accepts only numeric rational strings in coefficients and candidates, never symbolic parameters; use python_math for a permitted symbolic computation or review the symbolic argument without a tool. "
             "A reviewer may propose at most one tool_request per reply while its verdict is still pending; judge only from recorded receipts, never from assumed outputs."
         )
         if request.get("checkpoint_protocol"):

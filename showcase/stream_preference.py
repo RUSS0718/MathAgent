@@ -12,7 +12,7 @@ from .request_transport import INTERN_S2_LIVE_ENDPOINT
 
 @dataclass(frozen=True)
 class StreamProfile:
-    """One exact request profile with an explicit evidence class."""
+    """One provider transport profile or a strict controlled-test fixture."""
 
     endpoint: str
     model: str
@@ -29,51 +29,18 @@ class StreamProfile:
 
 
 _VERIFIED_ENDPOINT = INTERN_S2_LIVE_ENDPOINT
-_VERIFIED_MESSAGE = ("system", ("content", "role"))
-_VERIFIED_USER_MESSAGE = ("user", ("content", "role"))
-_VERIFIED_MESSAGE_SHAPES = (
-    (_VERIFIED_MESSAGE, _VERIFIED_USER_MESSAGE),
-    (_VERIFIED_MESSAGE, _VERIFIED_MESSAGE, _VERIFIED_MESSAGE, _VERIFIED_MESSAGE,
-     _VERIFIED_USER_MESSAGE),
-)
-_SHAPE_2_SCHEMA_FINGERPRINTS = (
-    "89fbfab654098a2025a0b69375f8dc8a7d8000391507639243712ca85a3a1473",
-    "54ac692b082da9544bf9ee6ebc6c71cbf38396b8863aeb2e9d932de7f2cb6c10",
-    "edaea8b9ad088955e19001ef3b3bc6479028b604003ddf6dee7feeef56507aec",
-)
-_SHAPE_5_SCHEMA_FINGERPRINTS = (
-    *_SHAPE_2_SCHEMA_FINGERPRINTS,
-    "47d696ba141a0df8916096620b35e322e402c59c41a80fca7b268a4c2ee2efee",
-    "8836d710fac9532e05ef506e19a3da7fee87bb4a96b588396dd9842e83d986ef",
-    "f45df661a9c9ae45dee4ed363ed244c934a60b951d5cd4eeb2464b3fd2606eb7",
-    "db00d390d3dd387091b0ead73c45125c45094bf98ea7f04df5dce1257dd238ee",
-    "818c4d7d0098f6117fa023907d53dc161f8d45bfbd847285ff07d0d890877b87",
-    "e5b9cd4d259add409204822298e4ed299c8eb2a02f27a359b688058b90721a4f",
-)
-
-# These thirteen immutable entries cover ten schemas across only the probe-tested
-# message shapes. Any other endpoint/configuration/schema remains unverified.
-VERIFIED_STREAM_PROFILES: tuple[StreamProfile, ...] = tuple(
+VERIFIED_STREAM_PROFILES: tuple[StreamProfile, ...] = (
     StreamProfile(
         endpoint=_VERIFIED_ENDPOINT,
         model="intern-s2",
         temperature=0.2,
         max_tokens=32_768,
         thinking_mode=False,
-        messages_schema=messages_schema,
+        messages_schema=(),
         evidence_kind="provider_live",
         status="provider_live_verified",
-        schema_fingerprint=schema_fingerprint,
-    )
-    for schema_fingerprint, message_shapes in (
-        *((fingerprint, (_VERIFIED_MESSAGE_SHAPES[0],))
-          for fingerprint in _SHAPE_2_SCHEMA_FINGERPRINTS),
-        *((fingerprint, (_VERIFIED_MESSAGE_SHAPES[1],))
-          for fingerprint in _SHAPE_5_SCHEMA_FINGERPRINTS),
-        ("d34c4ad6068e396ff084b945939e6bb3839bc2af86603e7aa2784161ac59a097",
-         (_VERIFIED_MESSAGE_SHAPES[1],)),
-    )
-    for messages_schema in message_shapes
+        schema_fingerprint=None,
+    ),
 )
 
 
@@ -105,19 +72,23 @@ def _controlled_endpoint(client, profile):
 
 
 def _profile_identity(profile):
-    """Return the complete allow-list entry used for durable Run identity."""
-    return {
+    """Return transport identity, retaining legacy detail only for test fixtures."""
+    identity = {
         "endpoint": profile.endpoint,
         "model": profile.model,
         "temperature": profile.temperature,
         "max_tokens": profile.max_tokens,
         "thinking_mode": profile.thinking_mode,
-        "messages_schema": profile.messages_schema,
         "payload_keys": sorted(profile.payload_keys),
-        "evidence_kind": profile.evidence_kind,
-        "schema_fingerprint": profile.schema_fingerprint,
-        "status": profile.status,
     }
+    if profile.evidence_kind == "controlled_test" and profile.status == "controlled_test":
+        identity.update({
+            "messages_schema": profile.messages_schema,
+            "evidence_kind": profile.evidence_kind,
+            "schema_fingerprint": profile.schema_fingerprint,
+            "status": profile.status,
+        })
+    return identity
 
 
 def _fingerprint(value):
@@ -197,13 +168,25 @@ def select_transport(adapter, messages, *, policy="legacy", native_tools=False, 
     for profile in configured_profiles:
         if profile.status == "provider_live_verified":
             valid_evidence = profile.evidence_kind == "provider_live" and any(
-                _profile_identity(profile) == _profile_identity(verified)
+                verified.evidence_kind == "provider_live"
+                and verified.status == "provider_live_verified"
+                and _profile_identity(profile) == _profile_identity(verified)
                 for verified in VERIFIED_STREAM_PROFILES
             )
         else:
             valid_evidence = _controlled_endpoint(client, profile)
         if not valid_evidence:
             continue
+        live_profile = (
+            profile.evidence_kind == "provider_live"
+            and profile.status == "provider_live_verified"
+        )
+        messages_match = (
+            _valid_text_chat_messages(messages)
+            if live_profile
+            else shape == profile.messages_schema
+            and profile.schema_fingerprint == schema_fingerprint
+        )
         if (
             endpoint == profile.endpoint
             and model == profile.model
@@ -211,8 +194,7 @@ def select_transport(adapter, messages, *, policy="legacy", native_tools=False, 
             and adapter.max_tokens == profile.max_tokens
             and (type(thinking_mode) is bool or thinking_mode is None)
             and thinking_mode == profile.thinking_mode
-            and shape == profile.messages_schema
-            and profile.schema_fingerprint == schema_fingerprint
+            and messages_match
             and frozenset(payload) == profile.payload_keys
         ):
             if callable(getattr(adapter, "stream_complete", None)):
@@ -241,3 +223,19 @@ def select_transport(adapter, messages, *, policy="legacy", native_tools=False, 
         "new_run_required": True,
         "profile_set_fingerprint": profile_set_id,
     }
+
+
+def _valid_text_chat_messages(messages):
+    """Accept ordinary text chat messages and exclude tool or multimodal payloads."""
+    if not isinstance(messages, (list, tuple)) or not messages:
+        return False
+    for message in messages:
+        if (
+            not isinstance(message, dict)
+            or set(message) != {"role", "content"}
+            or not isinstance(message["role"], str)
+            or message["role"] not in {"system", "developer", "user", "assistant"}
+            or not isinstance(message["content"], str)
+        ):
+            return False
+    return True

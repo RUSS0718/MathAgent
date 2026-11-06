@@ -1,12 +1,12 @@
 """Strict structured replies for the explicit Intern Solver ports."""
 
 
-def obj(properties, required=None):
+def obj(properties, required=None, *, additional_properties=False):
     return {
         "type": "object",
         "properties": properties,
         "required": list(properties) if required is None else required,
-        "additionalProperties": False,
+        "additionalProperties": additional_properties,
     }
 
 
@@ -66,8 +66,8 @@ SCHEMAS = {
         ["assessment", "worked", "failed", "candidates"],
     ),
     "explore_polish": obj({"solution_candidate": TEXT}),
-    "reasoner": STEP,
-    "reason_noncoding": STEP,
+    "reasoner": obj(STEP["properties"], STEP["required"]),
+    "reason_noncoding": obj(STEP["properties"], STEP["required"]),
     "step_verifier": obj(
         {
             "goal_gate": {"enum": ["YES", "PARTIAL", "NO"]},
@@ -237,7 +237,17 @@ def response_schema(request):
     if role in {"meta", "meta_strategist"} and request.get("action") == "preplan_hint":
         return obj({"hint": TEXT})
     if role in {"meta", "meta_strategist"} and request.get("action") == "partial_exploration":
-        return obj({"decision": {"enum": ["RETRY", "PLAN"]}, "reason": TEXT})
+        return obj(
+            {
+                "decision": {"enum": ["RETRY", "PLAN"]},
+                "reason": TEXT,
+                "role": {"enum": ["meta", "meta_strategist"]},
+                "action": {"const": "partial_exploration", "type": "string"},
+                "findings": TEXTS,
+                "allowed_tools": {"type": "array", "items": TEXT},
+            },
+            ["decision", "reason"],
+        )
     if role in {"meta", "meta_strategist"}:
         return SCHEMAS["meta_guidance" if request.get("guidance_request") else "meta"]
     if role not in SCHEMAS:

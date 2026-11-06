@@ -15,8 +15,13 @@ from llm_client import InternChatClient
 from showcase.adapters import InternModelAdapter, InternStreamAdapter
 from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
-from tests.star_product_support import (ACCEPT, POLISH, SOLVED, StarJobFixture,
-                                        assert_no_uncalibrated_probability)
+from tests.star_product_support import (
+    ACCEPT,
+    POLISH,
+    SOLVED,
+    StarJobFixture,
+    assert_no_uncalibrated_probability,
+)
 from tests.test_star_product_planning import FEATURES, STEP
 from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
 

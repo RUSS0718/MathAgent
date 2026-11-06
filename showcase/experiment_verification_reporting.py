@@ -36,6 +36,7 @@ def _safe_evidence(
     budget: Any,
     expected_model: str,
     allowed_roles: set[str],
+    manifest_evidence_kind: str,
 ) -> dict[str, Any]:
     """Project public API responses into a report with no answer or prompt text."""
     projected_attempts = []
@@ -107,13 +108,30 @@ def _safe_evidence(
     artifact = latest.get("artifact") if isinstance(latest.get("artifact"), dict) else {}
     job_result = job.get("result") if isinstance(job.get("result"), dict) else {}
     report_body = report.get("report") if isinstance(report.get("report"), dict) else {}
+    solver_evidence = evidence.get("solver")
+    solver_evidence_kind = (
+        solver_evidence.get("evidence_kind")
+        if isinstance(solver_evidence, dict)
+        else None
+    )
+    execution_mode = (
+        "live"
+        if manifest_evidence_kind == "provider_live" and solver_evidence_kind == "live"
+        else _safe_choice(
+            solver_evidence_kind,
+            {"scripted", "fault_injection"}
+            if manifest_evidence_kind != "provider_live"
+            else set(),
+            "unavailable",
+        )
+    )
     return {
         "sample_id": sample["id"],
         "job_id": record.get("job_id"),
         "job_status": _safe_choice(
             job.get("status"), {"queued", "running", "succeeded", "failed", "canceled"}, "unknown"
         ),
-        "execution_mode": _safe_choice(report.get("mode"), _EXECUTION_MODES, "unavailable"),
+        "execution_mode": execution_mode,
         "request_attempts": projected_attempts,
         "tools": _safe_tool_summaries(report_body.get("tool_summaries")),
         "budget": _safe_budget(budget),

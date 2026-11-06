@@ -2,8 +2,9 @@
 
 from collections.abc import Mapping
 
-from . import reasoner_checkpoint
+from . import protocol_repair, reasoner_checkpoint
 from .budget import budget_reason
+from .calls import CallInterrupted
 from .finalize import finish
 from .step import _normalize_report, run_step
 from .traceback import apply_traceback, transition_decision
@@ -152,6 +153,22 @@ def run_challenges(
                 run,
                 model_port.complete,
                 request,
+            )
+        except CallInterrupted as exc:
+            run = protocol_repair.reserve_repair(
+                harness, run["run_id"], exc,
+                failure_event=lambda latest, failed: {
+                    "event_id": f"challenge-parse-{step_id}-{number}{suffix}-{latest['state_revision']}",
+                    "type": "reasoner_parse_failed", "step_id": step_id, "role": "reasoner",
+                },
+                dispatch_event={
+                    "event_id": f"challenge-dispatched-{step_id}-{number}{suffix}-repair-1",
+                    "type": "challenge_dispatched", "round": number, "role": "reasoner",
+                },
+            )
+            reply = harness.dispatch(
+                run, model_port.complete, protocol_repair.repair_request(
+                    request, failed_call=protocol_repair.interrupted_call(harness, run["run_id"], exc)),
             )
         except Exception:
             reply = {"blocked": True}

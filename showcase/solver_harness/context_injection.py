@@ -16,6 +16,10 @@ def prepare_role_context(run, request, *, include_exploration=False):
         "confirmed_failures_ledger",
     )
     context = {key: deepcopy(state[key]) for key in keys if key in state}
+    if request.get("acceptance_mode") == "handoff":
+        context["acceptance_mode"] = "handoff"
+        if "reviewed_drafts" in request:
+            context["reviewed_drafts_ref"] = "current_request.reviewed_drafts"
     if request.get("finalization_scope") is True:
         # Final synthesis and review receive the already dependency-checked facts
         # plus the proof bodies of still-valid accepted steps with their real
@@ -36,7 +40,8 @@ def prepare_role_context(run, request, *, include_exploration=False):
         if isinstance(result, dict) and "result_id" in result
     }
     if role in {"meta", "meta_strategist"}:
-        keys = ("steps", "failure_records", "meta_interventions", "replan_count")
+        keys = ("plan", "steps", "accepted_results", "verified_results_ledger",
+                "failure_records", "meta_interventions", "replan_count")
     else:
         keys = (
             "plan",
@@ -65,6 +70,36 @@ def prepare_role_context(run, request, *, include_exploration=False):
                 )
             ]
         context[key] = value
+    if role in {"reasoner", "reason_noncoding"}:
+        from .traceback import transition_decision
+
+        decision = state.get("meta_decision")
+        if transition_decision(run, state, decision) and decision.get("decision") == "CONTINUE":
+            # Strategy context only; it neither rewrites the goal nor proves it.
+            context["meta_decision"] = deepcopy(decision)
+    if role in {"meta", "meta_strategist"}:
+        from .computation_evidence import has_computation_output
+
+        relevant_steps = {state.get("current_step")} | {
+            step_id for step_id, step in state.get("steps", {}).items()
+            if step.get("verification", {}).get("valid") is True
+            and step["verification"].get("verdict") == "ACCEPT"
+        }
+        # Verifier computations need not be copied into the Reasoner's report.
+        # Supply their actual output without duplicating code or failed attempts.
+        fields = ("receipt_id", "step_id", "plan_version", "attempt_index", "tool",
+                  "status", "executed", "exit_code", "input_ref", "output", "stdout_ref", "source")
+        context["tool_receipts"] = [
+            {key: deepcopy(receipt[key]) for key in fields if key in receipt}
+            for receipt in state.get("tool_receipts", [])
+            if receipt.get("run_id") == run["run_id"]
+            and receipt.get("plan_version") == state["plan_version"]
+            and receipt.get("attempt_index") == state["attempt_index"]
+            and receipt.get("step_id") in relevant_steps
+            and receipt.get("executed") is True and receipt.get("status") == "success"
+            and receipt.get("exit_code") == 0 and receipt.get("unknown_outcome") is not True
+            and has_computation_output(receipt)
+        ]
     return {
         "run_id": run["run_id"],
         "state_revision": run["state_revision"],

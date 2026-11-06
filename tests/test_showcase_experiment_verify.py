@@ -10,8 +10,14 @@ from pathlib import Path
 
 from showcase.cli import build_parser, run
 from showcase.experiment_manifest import canonical_json, manifest_digest
-from showcase.experiment_verification_process import _check_process_path, _safe_process_path
-from showcase.experiment_verification_state import _overall_status, _process_coverage_summary
+from showcase.experiment_verification_process import (
+    _check_process_path,
+    _safe_process_path,
+)
+from showcase.experiment_verification_state import (
+    _overall_status,
+    _process_coverage_summary,
+)
 from showcase.run_budget import public_solver_call_id
 
 
@@ -388,13 +394,16 @@ class ExperimentVerifyCliTest(unittest.TestCase):
             "process_path": {
                 "evidence_kind": "provider_live",
                 "plan_version": 1,
+                "attempt_index": 1,
                 "planned_steps": 1,
                 "reported_steps": 1,
                 "accepted_steps": 1,
                 "successful_roles": ["planner", "reasoner", "step_verifier", "final_generator"],
                 "tool_calls": 0,
+                "verified_tool_calls": 0,
                 "review_origin": "final_generator",
                 "review_plan_version": 1,
+                "review_attempt_index": 1,
             },
         }
 
@@ -466,26 +475,30 @@ class ExperimentVerifyCliTest(unittest.TestCase):
     def test_failed_delivery_is_counted_as_failed_after_multistep_path_started(self):
         evidence = {
             "process_path": {
+                "evidence_kind": "provider_live",
                 "plan_version": 1,
-                "planned_steps": 1,
-                "reported_steps": 0,
-                "accepted_steps": 0,
+                "attempt_index": 1,
+                "execution_started": True,
+                "planned_steps": 2,
+                "reported_steps": 1,
+                "accepted_steps": 1,
                 "tool_calls": 0,
                 "successful_roles": ["planner", "reasoner", "step_verifier"],
                 "review_plan_version": 1,
+                "review_attempt_index": 1,
                 "review_origin": "final_generator",
             }
         }
 
         result = _check_process_path(
             {"type": "multistep"},
-            evidence,
+            {"execution_mode": "live", **evidence},
             {"status": "FAIL"},
             {"status": "PASS"},
         )
 
         self.assertEqual("FAIL", result["status"])
-        self.assertEqual("natural_multistep_delivery_failed", result["reason"])
+        self.assertEqual("natural_multistep_trace_incomplete", result["reason"])
 
     def test_process_counts_keep_incomplete_distinct_from_failed_and_not_run(self):
         summary = _process_coverage_summary(
@@ -497,7 +510,7 @@ class ExperimentVerifyCliTest(unittest.TestCase):
             [{
                 "coverage": {"status": "PASS"},
                 "process_path": {
-                    "status": "NOT_RUN",
+                    "status": "FAIL",
                     "reason": "natural_multistep_trace_incomplete",
                 },
             }, {
@@ -513,7 +526,7 @@ class ExperimentVerifyCliTest(unittest.TestCase):
                 },
             }],
             [
-                {"sample_id": "s1", "process_path": {"plan_version": 1}},
+                {"sample_id": "s1", "process_path": {"execution_started": True}},
                 {"sample_id": "s2", "process_path": {"plan_version": 1}},
                 {"sample_id": "s3", "process_path": {"plan_version": None}},
             ],
@@ -525,6 +538,260 @@ class ExperimentVerifyCliTest(unittest.TestCase):
         self.assertEqual(1, summary["incomplete"])
         self.assertEqual(1, summary["failed"])
         self.assertEqual(0, summary["not_run"])
+
+    def test_started_plan_with_missing_progress_is_incomplete_not_unknown(self):
+        evidence = {
+            "evidence_id": "job-1",
+            "timeline": [{
+                "run_id": "job-1",
+                "solver_event_type": "initial_plan_generated",
+                "solver_revision": 4,
+                "plan_version": 1,
+                "attempt_index": 1,
+            }],
+            "solver": {"solver": {}},
+            "budget": {"tool_calls": 0},
+        }
+
+        process = _safe_process_path(evidence, [], {"planner"}, "provider_live")
+        result = _check_process_path(
+            {"type": "multistep"},
+            {"execution_mode": "live", "process_path": process},
+            {"status": "FAIL"},
+            {"status": "PASS"},
+        )
+
+        self.assertEqual("FAIL", result["status"])
+        self.assertEqual("natural_multistep_trace_incomplete", result["reason"])
+
+    def test_roles_are_bound_to_current_plan_attempt_and_successful_public_call(self):
+        attempts = []
+        timeline = []
+        for role, plan, plan_attempt, call_id, revision in (
+            ("planner", 2, 1, "solver_call_" + "1" * 32, 2),
+            ("reasoner", 1, 1, "solver_call_" + "2" * 32, 3),
+            ("reasoner", 2, 2, "solver_call_" + "3" * 32, 4),
+            ("step_verifier", 2, 1, "solver_call_" + "4" * 32, 5),
+            ("final_generator", 2, 1, "solver_call_" + "5" * 32, 6),
+        ):
+            attempts.append({
+                "run_id": "job-1",
+                "role": role,
+                "status": "success",
+                "dispatch_status": "transport_observed",
+                "solver_call_id": call_id,
+            })
+            timeline.append({
+                "run_id": "job-1",
+                "solver_event_type": "call_audit",
+                "solver_revision": revision,
+                "plan_version": plan,
+                "attempt_index": plan_attempt,
+                "solver_call_id": call_id,
+                "call_status": "completed",
+                "role": role,
+            })
+        evidence = {
+            "evidence_id": "job-1",
+            "timeline": timeline,
+            "solver": {"solver": {"progress": {
+                "plan_version": 2,
+                "attempt_index": 1,
+                "steps": [{"reported": True, "verdict": "ACCEPT", "valid": True}],
+            }}},
+            "budget": {"tool_calls": 0},
+            "verification": {"history": []},
+        }
+
+        process = _safe_process_path(evidence, attempts, {"planner", "reasoner", "step_verifier", "final_generator"}, "provider_live")
+
+        self.assertEqual(["final_generator", "planner", "step_verifier"], process["successful_roles"])
+
+    def test_initial_planner_call_is_bound_to_the_plan_it_created(self):
+        planner_call = "solver_call_" + "a" * 32
+        timeline = [
+            {
+                "run_id": "job-1", "solver_event_type": "call_audit",
+                "solver_revision": 2, "plan_version": 0, "attempt_index": 0,
+                "solver_call_id": planner_call, "call_status": "completed", "role": "planner",
+            },
+            {
+                "run_id": "job-1", "solver_event_type": "initial_plan_generated",
+                "solver_revision": 3, "plan_version": 1, "attempt_index": 1, "role": "planner",
+            },
+            {
+                "run_id": "job-1", "solver_event_type": "call_audit",
+                "solver_revision": 4, "plan_version": 1, "attempt_index": 1,
+                "solver_call_id": "solver_call_" + "b" * 32,
+                "call_status": "completed", "role": "reasoner",
+            },
+            {
+                "run_id": "job-1", "solver_event_type": "call_audit",
+                "solver_revision": 5, "plan_version": 1, "attempt_index": 1,
+                "solver_call_id": "solver_call_" + "c" * 32,
+                "call_status": "completed", "role": "step_verifier",
+            },
+            {
+                "run_id": "job-1", "solver_event_type": "call_audit",
+                "solver_revision": 6, "plan_version": 1, "attempt_index": 1,
+                "solver_call_id": "solver_call_" + "d" * 32,
+                "call_status": "completed", "role": "final_generator",
+            },
+        ]
+        attempts = [
+            {
+                "run_id": "job-1", "solver_call_id": event["solver_call_id"],
+                "role": event["role"], "status": "success",
+                "dispatch_status": "transport_observed",
+            }
+            for event in timeline if event["solver_event_type"] == "call_audit"
+        ]
+        evidence = {
+            "evidence_id": "job-1", "timeline": timeline,
+            "solver": {"solver": {"progress": {
+                "plan_version": 1, "attempt_index": 1,
+                "steps": [{"reported": True, "verdict": "ACCEPT", "valid": True}],
+            }}},
+            "budget": {"tool_calls": 0},
+            "verification": {"history": [{"source": {
+                "origin": "final_generator", "plan_version": 1, "attempt_index": 1,
+            }}]},
+        }
+
+        process = _safe_process_path(
+            evidence, attempts, {"planner", "reasoner", "step_verifier", "final_generator"},
+            "provider_live",
+        )
+        result = _check_process_path(
+            {"type": "multistep"},
+            {"execution_mode": "live", "process_path": process},
+            {"status": "PASS"}, {"status": "PASS"},
+        )
+
+        self.assertIn("planner", process["successful_roles"])
+        self.assertEqual("PASS", result["status"])
+
+    def test_tool_receipt_requires_matching_later_successful_same_run_call(self):
+        receipt_id = "receipt_public_1"
+        call_id = "solver_call_" + "a" * 32
+        timeline = [
+            {
+                "run_id": "job-1", "solver_event_type": "tool_receipt",
+                "solver_revision": 5, "plan_version": 2, "attempt_index": 1,
+                "receipt_id": receipt_id, "receipt_status": "success",
+                "receipt_executed": True,
+            },
+            {
+                "run_id": "job-1", "solver_event_type": "call_audit",
+                "solver_revision": 6, "plan_version": 2, "attempt_index": 1,
+                "solver_call_id": call_id, "call_status": "completed",
+                "role": "reasoner", "consumed_receipt_ids": [receipt_id],
+            },
+        ]
+        attempts = [{
+            "run_id": "job-1", "solver_call_id": call_id, "role": "reasoner",
+            "status": "success", "dispatch_status": "transport_observed",
+        }]
+        evidence = {
+            "evidence_id": "job-1", "timeline": timeline,
+            "solver": {"solver": {"progress": {
+                "plan_version": 2, "attempt_index": 1,
+                "steps": [{"reported": True, "verdict": "ACCEPT", "valid": True}],
+            }}},
+            "budget": {"tool_calls": 1},
+            "verification": {"history": []},
+        }
+
+        process = _safe_process_path(evidence, attempts, {"reasoner"}, "provider_live")
+
+        self.assertEqual(1, process["verified_tool_calls"])
+        timeline[1]["consumed_receipt_ids"] = ["different_receipt"]
+        process = _safe_process_path(evidence, attempts, {"reasoner"}, "provider_live")
+        self.assertIsNone(process["verified_tool_calls"])
+
+    def test_tool_receipts_from_completed_plan_attempts_remain_auditable(self):
+        receipts = [
+            ("receipt_public_1", 1, 1, 3, "solver_call_" + "1" * 32, 4),
+            ("receipt_public_2", 2, 2, 8, "solver_call_" + "2" * 32, 9),
+        ]
+        timeline = []
+        attempts = []
+        for receipt_id, plan, plan_attempt, receipt_revision, call_id, call_revision in receipts:
+            timeline.extend([
+                {
+                    "run_id": "job-1", "solver_event_type": "tool_receipt",
+                    "solver_revision": receipt_revision, "plan_version": plan,
+                    "attempt_index": plan_attempt, "receipt_id": receipt_id,
+                    "receipt_status": "success", "receipt_executed": True,
+                },
+                {
+                    "run_id": "job-1", "solver_event_type": "call_audit",
+                    "solver_revision": call_revision, "plan_version": plan,
+                    "attempt_index": plan_attempt, "solver_call_id": call_id,
+                    "call_status": "completed", "role": "reasoner",
+                    "consumed_receipt_ids": [receipt_id],
+                },
+            ])
+            attempts.append({
+                "run_id": "job-1", "solver_call_id": call_id, "role": "reasoner",
+                "status": "success", "dispatch_status": "transport_observed",
+            })
+        evidence = {
+            "evidence_id": "job-1", "timeline": timeline,
+            "solver": {"solver": {"progress": {
+                "plan_version": 2, "attempt_index": 2,
+                "steps": [{"reported": True, "verdict": "ACCEPT", "valid": True}],
+            }}},
+            "budget": {"tool_calls": 2},
+            "verification": {"history": []},
+        }
+
+        process = _safe_process_path(evidence, attempts, {"reasoner"}, "provider_live")
+
+        self.assertEqual(2, process["verified_tool_calls"])
+
+    def test_explore_and_whole_reviewer_can_consume_run_tool_receipts(self):
+        timeline = []
+        attempts = []
+        for index, role in enumerate(("explore", "whole_solution_verifier"), start=1):
+            receipt_id = f"receipt_public_{index}"
+            call_id = "solver_call_" + str(index) * 32
+            timeline.extend([
+                {
+                    "run_id": "job-1", "solver_event_type": "tool_receipt",
+                    "solver_revision": index * 2, "plan_version": 1, "attempt_index": 1,
+                    "receipt_id": receipt_id, "receipt_status": "success",
+                    "receipt_executed": True,
+                },
+                {
+                    "run_id": "job-1", "solver_event_type": "call_audit",
+                    "solver_revision": index * 2 + 1, "plan_version": 1,
+                    "attempt_index": 1, "solver_call_id": call_id,
+                    "call_status": "completed", "role": role,
+                    "consumed_receipt_ids": [receipt_id],
+                },
+            ])
+            attempts.append({
+                "run_id": "job-1", "solver_call_id": call_id, "role": role,
+                "status": "success", "dispatch_status": "transport_observed",
+            })
+        evidence = {
+            "evidence_id": "job-1", "timeline": timeline,
+            "solver": {"solver": {"progress": {
+                "plan_version": 1, "attempt_index": 1,
+                "steps": [{"reported": True, "verdict": "ACCEPT", "valid": True}],
+            }}},
+            "budget": {"tool_calls": 2},
+            "verification": {"history": []},
+        }
+
+        process = _safe_process_path(
+            evidence, attempts,
+            {"explore", "whole_solution_verifier"},
+            "provider_live",
+        )
+
+        self.assertEqual(2, process["verified_tool_calls"])
 
     def test_overall_status_keeps_usage_required_by_default(self):
         checks = {
@@ -667,6 +934,122 @@ class ExperimentVerifyCliTest(unittest.TestCase):
             self.assertEqual(
                 "UNKNOWN", json.loads(export_path.read_text(encoding="utf-8"))["status"]
             )
+
+    def test_verify_reports_terminal_failed_job_as_coverage_failure_with_preserved_intent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, run_dir, _, _, responses = prepare_run(root)
+            status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+            record = status["run_records"][0]
+            status.update(
+                phase="stopped",
+                completed=0,
+                completed_samples=[],
+                stop_reason="job_failed_or_canceled",
+                current_index=0,
+                current_job_id="job-1",
+            )
+            (run_dir / "status.json").write_text(json.dumps(status), encoding="utf-8")
+            responses["/api/agent/jobs/job-1"]["status"] = "failed"
+            responses["/api/agent/jobs/job-1/report"]["status"] = "failed"
+            (run_dir / "dispatch_intent.json").write_text(
+                json.dumps({
+                    "index": 0,
+                    "sample_id": record["sample_id"],
+                    "session_id": record["session_id"],
+                    "idempotency_key": record["idempotency_key"],
+                    "request_digest": record["request_digest"],
+                    "deadline_at": record["deadline_at"],
+                }),
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": ReadOnlyShowcaseClient(responses)},
+                )
+
+            report = json.loads(output.getvalue())
+            self.assertEqual(1, result)
+            self.assertEqual("FAIL", report["checks"]["task"]["status"])
+            self.assertEqual("FAIL", report["checks"]["coverage"]["status"])
+            self.assertEqual("batch_stopped_before_completion", report["checks"]["coverage"]["reason"])
+
+    def test_nonterminal_job_with_other_task_failure_keeps_dispatch_unknown(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, run_dir, _, _, responses = prepare_run(
+                root, mismatch="status_snapshot"
+            )
+            status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+            record = status["run_records"][0]
+            status.update(
+                phase="stopped",
+                completed=0,
+                completed_samples=[],
+                stop_reason="job_failed_or_canceled",
+                current_index=0,
+                current_job_id="job-1",
+            )
+            (run_dir / "status.json").write_text(json.dumps(status), encoding="utf-8")
+            responses["/api/agent/jobs/job-1/report"]["evidence_id"] = "job-other"
+            (run_dir / "dispatch_intent.json").write_text(
+                json.dumps({
+                    "index": 0,
+                    "sample_id": record["sample_id"],
+                    "session_id": record["session_id"],
+                    "idempotency_key": record["idempotency_key"],
+                    "request_digest": record["request_digest"],
+                    "deadline_at": record["deadline_at"],
+                }),
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": ReadOnlyShowcaseClient(responses)},
+                )
+
+            report = json.loads(output.getvalue())
+
+        self.assertEqual(1, result)
+        self.assertEqual("FAIL", report["checks"]["task"]["status"])
+        self.assertEqual("UNKNOWN", report["checks"]["coverage"]["status"])
+        self.assertEqual("dispatch_intent_unresolved", report["checks"]["coverage"]["reason"])
+
+    def test_unmatched_dispatch_intent_remains_unknown(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_root, run_dir, _, _, _ = prepare_run(root, not_run=True)
+            status = json.loads((run_dir / "status.json").read_text(encoding="utf-8"))
+            status.update(phase="stopped", stop_reason="unknown_dispatch")
+            (run_dir / "status.json").write_text(json.dumps(status), encoding="utf-8")
+            (run_dir / "dispatch_intent.json").write_text(
+                json.dumps({
+                    "index": 0,
+                    "sample_id": "sample-1",
+                    "session_id": "session-unknown",
+                    "idempotency_key": "12345678-1234-4234-8234-123456789012",
+                    "request_digest": "f" * 64,
+                    "deadline_at": 9999999999,
+                }),
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                result = run(
+                    verify_args(root, output_root),
+                    experiment_context={"read_client": ReadOnlyShowcaseClient({})},
+                )
+
+            report = json.loads(output.getvalue())
+            self.assertEqual(1, result)
+            self.assertEqual("UNKNOWN", report["checks"]["coverage"]["status"])
+            self.assertEqual("dispatch_intent_unresolved", report["checks"]["coverage"]["reason"])
 
     def test_multistep_without_progress_is_audited_but_not_counted_as_path_coverage(self):
         with tempfile.TemporaryDirectory() as temporary:

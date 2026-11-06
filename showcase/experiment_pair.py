@@ -208,6 +208,7 @@ def run_pair(
         state["phase"] = f"running_{name}"
         state["arms"][name].update(status="running", verification_status="NOT_RUN")
         save_execution_status(directory, state)
+        result = {}
 
         arm_context = dict(context)
         arm_context["authorization"] = InvocationAuthorization(
@@ -234,7 +235,6 @@ def run_pair(
                 verified = arm_verifier(run_id, output_root=output_root, context=arm_context)
         except Exception:
             verified = {"status": "UNKNOWN", "reason": "experiment_pair_arm_unavailable"}
-            result = locals().get("result", {})
 
         arm_state = state["arms"][name]
         arm_state.update(
@@ -302,6 +302,8 @@ def _admission_blocker(
     except (TypeError, ValueError, OverflowError):
         return "experiment_readiness_mismatch"
     if report_hash != pair["readiness_report_sha256"]:
+        return "experiment_readiness_mismatch"
+    if type(report.get("issue_number")) is not int or report["issue_number"] != 127:
         return "experiment_readiness_mismatch"
     if report.get("status") != "PASS":
         return "experiment_readiness_not_passed"

@@ -85,11 +85,12 @@ def dispatch(harness, run, operation, request, _repair_attempt=0):
                     "summary": "Finalization reply failed the response protocol; one bounded repair follows",
                 },
             )
+            repaired = protocol_repair.repair_request(request, failed_call=failed)
+            repaired["call_id"] = base_call_id  # The recursive owner adds the single repair suffix.
             return dispatch(
                 harness, noted, operation,
-                {key: value for key, value in request.items()
-                 if key not in {"run_id", "allowed_tools", "tool_policy"}}
-                | {"repair_instruction": protocol_repair.REPAIR_INSTRUCTION},
+                {key: value for key, value in repaired.items()
+                 if key not in {"run_id", "allowed_tools", "tool_policy"}},
                 _repair_attempt=1,
             )
         raise
@@ -216,16 +217,20 @@ def proof_basis(state):
 
 
 def run_finalization(harness, run, *, problem, model_port, verifier_port, config):
+    from .handoff import enabled, reviewed_drafts
+
     features = config.get("features", {})
     if not features.get("final_generation") or run["state"]["phase"] != "FINAL_GENERATE":
         return run
     state = run["state"]
     plan_steps = state.get("plan", {}).get("steps", [])
-    if not plan_steps or any(
+    handoff_mode = enabled(config)
+    unfinished = len(reviewed_drafts(state)) != len(plan_steps) if handoff_mode else any(
         state["steps"].get(step["step_id"], {}).get("verification", {}).get("verdict") != "ACCEPT"
         or state["steps"].get(step["step_id"], {}).get("verification", {}).get("valid") is not True
         for step in plan_steps
-    ):
+    )
+    if not plan_steps or unfinished:
         return finish(harness, run, "partial_aborted", "unaccepted_plan_steps")
     retries = config.get("max_final_solution_retries", 2)
     if isinstance(retries, bool) or not isinstance(retries, int) or not 0 <= retries <= 20:
@@ -267,7 +272,10 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
                     "step_proofs": deepcopy(proofs),
                     "previous_review": previous_review,
                     "instruction": "Synthesize a complete answer to the original problem from "
-                    "only the accepted facts and the delivered step proofs. Return final_response.",
+                    + ("the accepted facts and reviewed_drafts. Drafts are unproven: address their "
+                       "recorded objections explicitly; do not describe them as accepted proofs. "
+                       if handoff_mode else "only the accepted facts and the delivered step proofs. ")
+                    + "Return final_response.",
                 },
             )
             candidate = reply.get("final_response") if isinstance(reply, Mapping) else None
@@ -363,6 +371,8 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
         )
         if not valid:
             return finish(harness, run, "completed_unverified", "final_verifier_failed", candidate)
+        if handoff_mode:
+            return finish(harness, run, "completed_unverified", "handoff_final_reviewed", candidate)
         if review["verdict"] == "ACCEPT":
             return finish(
                 harness, run, "completed_llm_reviewed", "final_verifier_accepted", candidate

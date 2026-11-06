@@ -191,7 +191,8 @@ class ProofObligationJobTest(StarJobFixture, unittest.TestCase):
                 self.assertEqual(4, self.report(job_id)["budget"]["logical_calls"])
 
     def test_invalid_declaration_target_and_type_cannot_be_accepted(self):
-        cases = [(dict(DECLARATION, claim_index=1), 4),
+        # A well-typed out-of-range target gets one bounded claim-target repair.
+        cases = [(dict(DECLARATION, claim_index=1), 5),
                  (dict(DECLARATION, claim_index=True), 5),
                  (dict(DECLARATION, claim_type="contains_digits"), 5),
                  (dict(DECLARATION, claim_type=None), 5),
@@ -217,7 +218,14 @@ class ProofObligationJobTest(StarJobFixture, unittest.TestCase):
         review = {**ACCEPT, "answer_claim": {**DECLARATION, "claim_type": "sharp_bound"}}
         replies = [NEED_PLAN, plan, step, review, NOT_FOUND]
         replies += [step, review, NOT_FOUND] * 3
-        replies += [{"decision": "ABORT", "reason": "Missing proof after bounded challenges"}]
+        replies += [{
+            "decision": "ABORT",
+            "reason_summary": "Missing proof after bounded challenges",
+            "plan_summary": "",
+            "forbidden_directions": [],
+            "reusable_results": [],
+            "trace_back_to": None,
+        }]
         job_id, job, events = self.run_job(replies, problem=statement, limit=20)
         self.assertEqual("failed", job["status"])
         self.assertEqual(15, self.post.call_count)

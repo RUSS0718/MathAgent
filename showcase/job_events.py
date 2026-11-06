@@ -120,10 +120,10 @@ def register_job_event_route(
                 return json_error("invalid_event_limit", 400)
 
         try:
-            # Validate ownership before returning a lazy streaming response.
-            workspace_service.get_job(job_id, session.user_id)
             if snapshot == "1":
-                raw_events = workspace_service.events(job_id, session.user_id, after_id)
+                raw_events = workspace_service.events(
+                    job_id, session.user_id, after_id, limit=limit + 1
+                )
                 raw_page = raw_events[:limit]
                 events = [
                     {"id": event["id"], **summary}
@@ -133,6 +133,8 @@ def register_job_event_route(
                 next_cursor = raw_page[-1]["id"] if raw_page else after_id
                 has_more = len(raw_events) > limit
             else:
+                # Validate ownership before returning a lazy streaming response.
+                workspace_service.get_job(job_id, session.user_id)
                 events = workspace_service.stream_events(job_id, session.user_id, after_id)
         except WorkspaceError as exc:
             return workspace_error(exc)

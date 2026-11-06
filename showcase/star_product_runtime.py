@@ -43,6 +43,7 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
             max_tool_calls=2 if image_enabled else 0)
 
     return StarProductPipeline(database_path,
+        acceptance_mode=config.get("SHOWCASE_STAR_ACCEPTANCE_MODE", "strict"),
         adapter=config.get("SHOWCASE_STAR_ADAPTER"),
         budget=budget,
         features=features,

@@ -24,10 +24,17 @@ _GUIDANCE_KEYS = {
 }
 
 
-def _parse(reply, guidance):
+def _parse(reply, guidance, *, usage_sidecar=False):
     keys = _GUIDANCE_KEYS if guidance else _DECISION_KEYS
-    if not isinstance(reply, dict) or set(reply) != keys:
+    if not isinstance(reply, dict):
         raise ValueError("invalid_meta_schema")
+    reply_keys = set(reply)
+    if reply_keys - keys - {"usage"} or keys - reply_keys:
+        raise ValueError("invalid_meta_schema")
+    if "usage" in reply and not usage_sidecar:
+        raise ValueError("invalid_meta_schema")
+    if usage_sidecar:
+        reply = {key: value for key, value in reply.items() if key != "usage"}
     texts = ("specific_task", "rationale") if guidance else ("reason_summary", "plan_summary")
     if any(not isinstance(reply[k], str) for k in texts):
         raise ValueError("invalid_meta_text")
@@ -183,7 +190,34 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
     request = harness.prepare_request(run, request)
     request.update(allowed_tools=[], tool_policy={"allow": []})
     try:
-        decision = _parse(dict(harness.dispatch(run, meta_port.complete, request)), guidance is not None)
+        from . import protocol_repair
+        from .calls import CallInterrupted
+
+        try:
+            response = dict(harness.dispatch(run, meta_port.complete, request))
+        except CallInterrupted as exc:
+            failed = protocol_repair.interrupted_call(harness, run["run_id"], exc)
+            if failed.get("error_category") == "invalid_role_enum":
+                raise ValueError("invalid_meta_action_enum") from None
+            run = protocol_repair.reserve_repair(
+                harness, run["run_id"], exc,
+                failure_event=lambda latest, failed: {
+                    "event_id": f"meta-parse-{revision}-{latest['state_revision']}",
+                    "type": "meta_parse_failed", "role": "meta",
+                },
+                dispatch_event={"event_id": f"meta-dispatched-{revision}-repair-1",
+                                "type": "meta_dispatched", "role": "meta"},
+            )
+            request = protocol_repair.repair_request(request)
+            response = dict(harness.dispatch(run, meta_port.complete, request))
+        call = harness.get_run(run["run_id"])["state"].get("calls", {}).get(request["call_id"])
+        transport = call.get("transport_decision") if isinstance(call, dict) else None
+        usage_sidecar = (
+            isinstance(transport, dict)
+            and transport.get("transport") == "stream"
+            and "usage" in response
+        )
+        decision = _parse(response, guidance is not None, usage_sidecar=usage_sidecar)
         target = decision["trace_back_to"]
         if target is not None:
             steps = state.get("plan", {}).get("steps", [])

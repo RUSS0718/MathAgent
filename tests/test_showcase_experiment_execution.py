@@ -298,6 +298,54 @@ class ExperimentExecutionTest(unittest.TestCase):
         self.assertEqual("unknown_job_status", result["stop_reason"])
         self.assertEqual({"code": "network_error", "http_status": 504}, saved["observer_error"])
 
+    def test_event_observer_error_persists_safe_category_without_error_text(self):
+        from showcase.experiment_execution import _safe_observer_error, run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+
+        class EventObserverError(RuntimeError):
+            category = "events_network_error"
+            status = 503
+
+        class EventFailureAdapter(_JobAdapter):
+            def execution_events(self, _job_id, *, after_id=0):
+                raise EventObserverError("prompt and credential must not be persisted")
+
+            def wait_for_job_with_progress(self, job_id, deadline_at, *, on_progress):
+                on_progress()
+                self.status_during_wait = read_status(
+                    "run-event-observer-error", output_root=temporary
+                )
+                return _snapshot({"status": "succeeded"}, deadline_at)
+
+        manifest = _manifest(source)
+        adapter = EventFailureAdapter()
+        with tempfile.TemporaryDirectory() as temporary:
+            result = run_batch(
+                manifest,
+                expected_sha256=manifest_digest(manifest),
+                run_id="run-event-observer-error",
+                output_root=temporary,
+                context=_context_for_run(manifest, adapter, "run-event-observer-error"),
+            )
+            saved = read_status("run-event-observer-error", output_root=temporary)
+
+        expected_error = {"category": "events_network_error", "http_status": 503}
+        self.assertEqual(expected_error, adapter.status_during_wait["observer_error"])
+        self.assertEqual(expected_error, saved["observer_error"])
+        self.assertEqual("completed", result["phase"])
+        self.assertNotIn("prompt and credential", str(saved))
+        self.assertNotIn("prompt and credential", str(adapter.status_during_wait))
+        self.assertEqual(
+            {"exception_type": "RuntimeError"},
+            _safe_observer_error(RuntimeError("private exception detail")),
+        )
+
     def test_nonzero_provider_retry_is_rejected_before_adapter_construction(self):
         from showcase.experiment_execution import run_batch
 
@@ -674,6 +722,140 @@ class ExperimentExecutionTest(unittest.TestCase):
         self.assertEqual(initial["run_records"], resumed["run_records"])
         self.assertEqual(1, adapter.submissions)
 
+    def test_resume_clears_committed_last_sample_intent_before_completing(self):
+        from showcase.experiment_execution import resume_batch, run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _manifest(source)
+        manifest["samples"] = manifest["samples"][:1]
+        manifest_hash = manifest_digest(manifest)
+        adapter = _JobAdapter()
+        run_id = "run-last-sample-intent-crash"
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch(
+                "showcase.experiment_execution._remove_intent",
+                side_effect=SystemExit("simulated process death after completion save"),
+            ):
+                with self.assertRaises(SystemExit):
+                    run_batch(
+                        manifest,
+                        expected_sha256=manifest_hash,
+                        run_id=run_id,
+                        output_root=temporary,
+                        context=_context_for_run(manifest, adapter, run_id),
+                    )
+
+            run_dir = Path(temporary) / run_id
+            status = read_status(run_id, output_root=temporary)
+            self.assertEqual(1, status["completed"])
+            self.assertEqual(len(manifest["samples"]), status["current_index"])
+            self.assertTrue((run_dir / "dispatch_intent.json").exists())
+
+            resumed = resume_batch(
+                run_id,
+                expected_sha256=manifest_hash,
+                output_root=temporary,
+                context=_context_for_run(manifest, adapter, run_id),
+            )
+            self.assertFalse((run_dir / "dispatch_intent.json").exists())
+
+        self.assertEqual("completed", resumed["phase"], resumed)
+        self.assertEqual(1, adapter.submissions)
+
+    def test_resume_preserves_intent_when_committed_prefix_count_disagrees(self):
+        from showcase.experiment_execution import resume_batch, run_batch
+        from showcase.experiment_execution_state import save_execution_status
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _two_sample_manifest(source)
+        manifest_hash = manifest_digest(manifest)
+        adapter = _JobAdapter()
+        run_id = "run-intent-inconsistent-count"
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch(
+                "showcase.experiment_execution._remove_intent",
+                side_effect=SystemExit("simulated process death after completion save"),
+            ):
+                with self.assertRaises(SystemExit):
+                    run_batch(
+                        manifest,
+                        expected_sha256=manifest_hash,
+                        run_id=run_id,
+                        output_root=temporary,
+                        context=_context_for_run(manifest, adapter, run_id),
+                    )
+
+            run_dir = Path(temporary) / run_id
+            status = read_status(run_id, output_root=temporary)
+            status["completed"] = 0
+            save_execution_status(run_dir, status)
+            resumed = resume_batch(
+                run_id,
+                expected_sha256=manifest_hash,
+                output_root=temporary,
+                context=_context_for_run(manifest, adapter, run_id),
+            )
+
+            self.assertTrue((run_dir / "dispatch_intent.json").exists())
+
+        self.assertEqual("stopped", resumed["phase"])
+        self.assertEqual("unknown_session", resumed["stop_reason"])
+        self.assertEqual(1, adapter.submissions)
+
+    def test_resume_advances_after_committed_sample_and_removes_its_stale_intent(self):
+        from showcase.experiment_execution import resume_batch, run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _two_sample_manifest(source)
+        manifest_hash = manifest_digest(manifest)
+        adapter = _JobAdapter()
+        run_id = "run-committed-sample-intent"
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch(
+                "showcase.experiment_execution._remove_intent",
+                side_effect=SystemExit("simulated process death after completion save"),
+            ):
+                with self.assertRaises(SystemExit):
+                    run_batch(
+                        manifest,
+                        expected_sha256=manifest_hash,
+                        run_id=run_id,
+                        output_root=temporary,
+                        context=_context_for_run(manifest, adapter, run_id),
+                    )
+            run_dir = Path(temporary) / run_id
+            status = read_status(run_id, output_root=temporary)
+            self.assertEqual(1, status["completed"])
+            self.assertEqual(1, status["current_index"])
+            self.assertTrue((run_dir / "dispatch_intent.json").exists())
+
+            resumed = resume_batch(
+                run_id,
+                expected_sha256=manifest_hash,
+                output_root=temporary,
+                context=_context_for_run(manifest, adapter, run_id),
+            )
+
+        self.assertEqual("completed", resumed["phase"], resumed)
+        self.assertEqual(2, resumed["completed"])
+        self.assertEqual(2, adapter.submissions)
+        self.assertFalse((run_dir / "dispatch_intent.json").exists())
+
     def test_ambiguous_dispatch_stops_without_retry_or_next_sample(self):
         from showcase.experiment_execution import run_batch
 
@@ -834,6 +1016,130 @@ class ExperimentExecutionTest(unittest.TestCase):
         self.assertEqual(adapter.wait_deadlines[0], intent["deadline_at"])
         self.assertEqual(manifest["run_limits"], adapter.dispatch_inputs[0][0])
         self.assertEqual(0, result["current_index"])
+        self.assertEqual(0, result["completed"])
+        self.assertEqual(1, adapter.submissions)
+
+    def test_known_terminal_failure_clears_dispatch_intent_without_completing_sample(self):
+        from showcase.experiment_execution import run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _manifest(source)
+        adapter = _JobAdapter([{"status": "failed"}])
+        with tempfile.TemporaryDirectory() as temporary:
+            result = run_batch(
+                manifest,
+                expected_sha256=manifest_digest(manifest),
+                run_id="run-terminal-failure",
+                output_root=temporary,
+                context=_context_for_run(manifest, adapter, "run-terminal-failure"),
+            )
+            run_dir = Path(temporary) / "run-terminal-failure"
+
+            self.assertEqual("stopped", result["phase"])
+            self.assertEqual("job_failed_or_canceled", result["stop_reason"])
+            self.assertEqual(0, result["completed"])
+            self.assertIsNone(result["pending_intent"])
+            self.assertEqual("job-1", result["current_job_id"])
+            self.assertFalse((run_dir / "dispatch_intent.json").exists())
+
+    def test_untrusted_terminal_failure_keeps_dispatch_intent_for_review(self):
+        from showcase.experiment_execution import run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _manifest(source)
+        adapter = _JobAdapter([{"status": "failed", "ledger_consistent": False}])
+        with tempfile.TemporaryDirectory() as temporary:
+            result = run_batch(
+                manifest,
+                expected_sha256=manifest_digest(manifest),
+                run_id="run-untrusted-terminal-failure",
+                output_root=temporary,
+                context=_context_for_run(manifest, adapter, "run-untrusted-terminal-failure"),
+            )
+            run_dir = Path(temporary) / "run-untrusted-terminal-failure"
+
+            self.assertEqual("ledger_or_binding_defect", result["stop_reason"])
+            self.assertFalse(result["pending_intent"])
+            self.assertTrue((run_dir / "dispatch_intent.json").exists())
+
+    def test_unrecognized_job_status_stops_as_unknown_and_keeps_intent(self):
+        from showcase.experiment_execution import run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _manifest(source)
+        adapter = _JobAdapter([{"status": "waiting_input"}])
+        with tempfile.TemporaryDirectory() as temporary:
+            result = run_batch(
+                manifest,
+                expected_sha256=manifest_digest(manifest),
+                run_id="run-waiting-input",
+                output_root=temporary,
+                context=_context_for_run(manifest, adapter, "run-waiting-input"),
+            )
+            intent_path = Path(temporary) / "run-waiting-input" / "dispatch_intent.json"
+            self.assertTrue(intent_path.exists())
+
+        self.assertEqual("unknown_job_status", result["stop_reason"])
+        self.assertEqual(0, result["completed"])
+
+    def test_run_deadline_precedes_unresolved_usage_classification_for_running_job(self):
+        from showcase.experiment_execution import run_batch
+
+        source = {
+            "revision": "a" * 40,
+            "source_sha256": "b" * 64,
+            "dirty_status": "clean",
+            "dirty_paths": [],
+        }
+        manifest = _manifest(source)
+        manifest["evidence_kind"] = "provider_live"
+        manifest["authorization"]["execution_authorized"] = True
+        manifest["usage_policy"] = "observe_only"
+        now = [1_000.0]
+
+        class StillRunningWithUnknownAttemptAdapter(_JobAdapter):
+            def wait_for_job(self, job_id, deadline_at):
+                observation = super().wait_for_job(job_id, deadline_at)
+                now[0] = deadline_at + 0.5
+                observation.update(
+                    status="running",
+                    budget={
+                        **observation["budget"],
+                        "unknown_attempts": 1,
+                        "unresolved_attempts": 1,
+                    },
+                )
+                return observation
+
+        adapter = StillRunningWithUnknownAttemptAdapter()
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch("showcase.experiment_execution.time.time", side_effect=lambda: now[0]):
+                result = run_batch(
+                    manifest,
+                    expected_sha256=manifest_digest(manifest),
+                    run_id="run-deadline-with-unknown-attempt",
+                    output_root=temporary,
+                    context=_context_for_run(
+                        manifest, adapter, "run-deadline-with-unknown-attempt"
+                    ),
+                )
+
+        self.assertEqual("hard_limit", result["stop_reason"])
         self.assertEqual(0, result["completed"])
         self.assertEqual(1, adapter.submissions)
 

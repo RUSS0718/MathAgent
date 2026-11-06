@@ -1,9 +1,28 @@
 """Condition validation for one allowlisted paired strategy difference."""
 
 from copy import deepcopy
+from urllib.parse import urlsplit
 
 STRATEGIES = frozenset({"skills", "reexplore_after_replan", "candidate_registry", "best_effort"})
 ROLES = {"model_port": "reasoner", "verifier_port": "verifier", "meta_port": "meta"}
+
+
+def _uses_pinned_dispatch(port):
+    from llm_client import InternChatClient
+
+    from ..adapters import InternModelAdapter, InternStreamAdapter
+    from .intern_port import InternModelPort
+
+    adapter = getattr(port, "adapter", None)
+    client = getattr(adapter, "_client", None)
+    return (
+        type(port) is InternModelPort
+        and not any(name in vars(port) for name in ("complete", "verify", "_complete_stream"))
+        and type(adapter) in {InternModelAdapter, InternStreamAdapter}
+        and not any(name in vars(adapter) for name in ("complete", "stream_complete", "_get_client"))
+        and type(client) is InternChatClient
+        and not any(name in vars(client) for name in ("chat", "chat_response"))
+    )
 
 
 def validate_conditions(control, variant, conditions, ports, feature):
@@ -45,6 +64,56 @@ def validate_conditions(control, variant, conditions, ports, feature):
     allowed_keys = {"source", "model_port", "verifier_port", "meta_port", "tool_port"}
     if any(set(arm) - allowed_keys for arm in ports):
         raise ValueError("unknown_port")
+    if left["source"] == "offline_injected":
+        from llm_client import InternChatClient
+
+        for role_key in ROLES:
+            for port in (left.get(role_key), right.get(role_key)):
+                if port is None:
+                    continue
+                adapter = getattr(port, "adapter", None)
+                if (
+                    not _uses_pinned_dispatch(port)
+                ):
+                    raise ValueError("offline_source_requires_loopback_transport")
+                client = getattr(adapter, "_client", None)
+                api_base = getattr(client, "api_base", None) if client else None
+                try:
+                    endpoint = urlsplit(api_base) if isinstance(api_base, str) else None
+                except ValueError:
+                    endpoint = None
+                if (
+                    type(client) is not InternChatClient
+                    or getattr(client, "loopback_only", False) is not True
+                    or endpoint is None
+                    or endpoint.scheme != "http"
+                    or endpoint.hostname != "127.0.0.1"
+                    or endpoint.username is not None
+                    or endpoint.password is not None
+                ):
+                    raise ValueError("offline_source_requires_loopback_transport")
+    if left["source"] == "provider_live":
+        from llm_client import InternChatClient
+
+        from ..request_transport import INTERN_S2_LIVE_ENDPOINT
+
+        if left.get("model_port") is None or right.get("model_port") is None:
+            raise ValueError("provider_live_requires_model_port")
+        for role_key in ROLES:
+            for port in (left.get(role_key), right.get(role_key)):
+                if port is None:
+                    continue
+                adapter = getattr(port, "adapter", None)
+                client = getattr(adapter, "_client", None)
+                if (
+                    not _uses_pinned_dispatch(port)
+                    or client is None
+                    or type(client) is not InternChatClient
+                    or getattr(client, "provider_endpoint_only", False) is not True
+                    or getattr(client, "loopback_only", False) is not False
+                    or getattr(client, "api_base", None) != INTERN_S2_LIVE_ENDPOINT
+                ):
+                    raise ValueError("provider_live_requires_pinned_transport")
     if left.get("tool_port") is not None:
         if getattr(left["tool_port"], "registered_tools", None) != getattr(
             right["tool_port"], "registered_tools", None

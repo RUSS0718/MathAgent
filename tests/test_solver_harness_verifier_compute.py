@@ -58,14 +58,14 @@ class VerifierReplySchemaTest(unittest.TestCase):
 
 
 class VerifierComputeFenceTest(unittest.TestCase):
-    def test_pure_reasoning_request_is_denied_and_never_executes(self):
+    def test_pure_reasoner_mode_preserves_independent_verifier_computation(self):
         blocked = {"argument": "stuck", "claims": [], "blocked": True}
         guidance = {"action_type": "retry_different_method",
                     "specific_task": "Try a different route", "use_pure_reasoning": True,
                     "trace_back_to": None, "rationale": "stuck"}
         retry = {"argument": "pure", "claims": [
             {"statement": "2+2=4", "label": "hard-verify"}]}
-        tool = ScriptedToolPort([])
+        tool = ScriptedToolPort([{"status": "success", "output": 2, "exit_code": 0}])
         with SolverHarness(
             config={**CONFIG, "features": {**CONFIG["features"], "meta_guidance": True}},
             model_port=ScriptedModelPort([blocked, retry]),
@@ -74,12 +74,12 @@ class VerifierComputeFenceTest(unittest.TestCase):
             tool_port=tool,
         ) as harness:
             result = harness.solve("2+2", {"plan": PLAN, "run_id": "pure"})
-        self.assertEqual([], tool.requests)
-        self.assertEqual(0, result["state"]["counters"]["tool_calls"])
+        self.assertEqual(1, len(tool.requests))
+        self.assertEqual(1, result["state"]["counters"]["tool_calls"])
         receipt = result["state"]["tool_receipts"][-1]
-        self.assertEqual("pure_reasoning_denied", receipt["reason"])
+        self.assertEqual("success", receipt["status"])
         self.assertEqual("step_verifier", receipt["source_role"])
-        self.assertFalse(receipt["executed"])
+        self.assertTrue(receipt["executed"])
         verification = result["state"]["steps"]["s1"]["verification"]
         self.assertEqual("ACCEPT", verification["verdict"])
         self.assertTrue(verification["valid"])

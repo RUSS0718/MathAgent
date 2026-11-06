@@ -6,7 +6,7 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from .experiment_execution_state import load_registered_manifest
+from .experiment_execution_state import load_registered_manifest, read_json_object
 from .experiment_manifest import canonical_json, manifest_digest
 from .experiment_runner import read_status
 from .experiment_verification_checks import _verify_job
@@ -132,8 +132,65 @@ def verify_experiment_run(
     if integrity_failures:
         for name in _CHECKS:
             checks[name] = _check("FAIL", "persisted_state_inconsistent")
+    pending_intent = directory_has_intent
+    index = status.get("current_index")
+    sample = (
+        manifest["samples"][index]
+        if type(index) is int and 0 <= index < len(manifest["samples"])
+        else None
+    )
+    current_record = records.get(sample["id"]) if sample else None
+    current_outcome = per_sample[index] if sample and index < len(per_sample) else {}
+    current_task = current_outcome.get("task", {})
+    current_evidence = next(
+        (
+            item
+            for item in archived_evidence
+            if sample is not None and item.get("sample_id") == sample["id"]
+        ),
+        {},
+    )
+    try:
+        intent = read_json_object(directory / "dispatch_intent.json") if pending_intent else None
+    except ValueError:
+        intent = None
+    intent_matches_job = (
+        isinstance(intent, dict)
+        and isinstance(current_record, dict)
+        and intent.get("index") == index
+        and all(
+            intent.get(key) == current_record.get(key)
+            for key in (
+                "sample_id",
+                "session_id",
+                "idempotency_key",
+                "request_digest",
+                "deadline_at",
+            )
+        )
+    )
+    if (
+        pending_intent
+        and intent_matches_job
+        and status.get("pending_intent") is None
+        and status.get("phase") == "stopped"
+        and status.get("stop_reason") == "job_failed_or_canceled"
+        and isinstance(current_record, dict)
+        and current_record.get("job_id") == status.get("current_job_id")
+        and current_task.get("status") == "FAIL"
+        and current_task.get("reason") == "job_failed_or_canceled"
+        and current_evidence.get("job_status") in {"failed", "canceled"}
+        and current_outcome.get("transport", {}).get("status") == "PASS"
+    ):
+        pending_intent = False
     checks["coverage"] = _coverage_check(
-        status, manifest, records, completed, directory_has_intent, integrity_failures, per_sample
+        status,
+        manifest,
+        records,
+        completed,
+        pending_intent,
+        integrity_failures,
+        per_sample,
     )
     checks["process_path"] = (
         _check("FAIL", "persisted_state_inconsistent")
