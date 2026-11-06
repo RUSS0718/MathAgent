@@ -13,7 +13,7 @@ MODE_ORDER = ("legacy", *LIMITED_MODE_ORDER, *FULL_MODE_ORDER)
 def mode_identity(mode="legacy", config=None):
     from .star_product_config import core_gaps
 
-    return {
+    identity = {
         "solver_mode": mode,
         "preset_version": ("sp13-v1" if mode in FULL_MODES else
                            "sp11-v1" if mode == "star_limited_best_effort" else "sp02-v1"),
@@ -21,6 +21,9 @@ def mode_identity(mode="legacy", config=None):
         "missing_capabilities": ((["star_not_enabled"] if config is None else core_gaps(config))
                                  if mode in LIMITED_MODES else []),
     }
+    if mode in STAR_MODES and config is not None and config.get("acceptance_mode") == "handoff":
+        identity.update(acceptance_mode="handoff", preset_version="handoff-v1")
+    return identity
 
 
 def validate_mode(mode, *, enabled, verification_mode="auto", options=None, pipeline=None):
@@ -31,6 +34,9 @@ def validate_mode(mode, *, enabled, verification_mode="auto", options=None, pipe
     if options is not None:
         raise WorkspaceError("solver_options_unsupported", status=400)
     if mode in STAR_MODES:
+        if (getattr(pipeline, "acceptance_mode", "strict") == "handoff"
+                and mode in BEST_EFFORT_MODES):
+            raise WorkspaceError("handoff_best_effort_forbidden", status=400)
         if verification_mode == "off":
             raise WorkspaceError("star_review_required", status=400)
         if not enabled:
@@ -59,5 +65,7 @@ def capabilities(enabled, pipeline=None):
             # Observed admission state only; the receipt is independently verifiable bytes.
             if preflight is not None:
                 record["last_preflight"] = preflight
+        if getattr(pipeline, "acceptance_mode", "strict") == "handoff" and mode in BEST_EFFORT_MODES:
+            record.update(enabled=False, missing_capabilities=["handoff_best_effort_forbidden"])
         records.append(record)
     return records

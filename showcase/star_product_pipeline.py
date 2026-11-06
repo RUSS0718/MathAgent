@@ -26,12 +26,15 @@ class StarProductPipeline:
     def __init__(self, database_path, *, adapter=None, evidence_kind="live", budget=None,
                  features=None, registry=None, hint_mode="none", full_enabled=False,
                  full_features=None, full_budget=None, experiment_policy=None,
-                 transport_policy="legacy", stream_profiles=None):
+                 transport_policy="legacy", stream_profiles=None, acceptance_mode="strict"):
         from .star_experiment_policy import ExperimentRunPolicy
 
         if experiment_policy is not None and not isinstance(experiment_policy, ExperimentRunPolicy):
             raise ValueError("star_experiment_policy_invalid")
         self.experiment_policy = experiment_policy
+        if not isinstance(acceptance_mode, str) or acceptance_mode not in {"strict", "handoff"}:
+            raise ValueError("star_acceptance_mode_invalid")
+        self.acceptance_mode = acceptance_mode
         if evidence_kind not in {"live", "scripted", "fault_injection"}:
             raise ValueError("star_evidence_kind_invalid")
         if adapter is not None and not isinstance(adapter, InternModelAdapter):
@@ -58,6 +61,8 @@ class StarProductPipeline:
         if not isinstance(self.full_budget, RunBudgetLimits):
             raise ValueError("star_budget_invalid")
         self.full_config = full_config(self.full_budget, full_features)
+        if acceptance_mode == "handoff":
+            self.config["acceptance_mode"] = self.full_config["acceptance_mode"] = acceptance_mode
         self.full_config["hint_mode"] = hint_mode
         # The registered executor owns the real wall-clock budget; tool_precheck
         # reads config["tool_timeout_seconds"] and its 3s default silently
@@ -266,6 +271,10 @@ class StarProductPipeline:
                                      else "verification_needs_review" if reviewed
                                      else "star_needs_review")},
                 }
+                if self.acceptance_mode == "handoff":
+                    from .solver_harness.handoff import delivery_check
+
+                    result["engineering_delivery"] = delivery_check(run, answer)
                 check_control(allow_expired_selection=math.get("best_effort_decision") is not None)
                 return result
 

@@ -16,6 +16,9 @@ def prepare_role_context(run, request, *, include_exploration=False):
         "confirmed_failures_ledger",
     )
     context = {key: deepcopy(state[key]) for key in keys if key in state}
+    if request.get("acceptance_mode") == "handoff":
+        context["acceptance_mode"] = "handoff"
+        context["reviewed_drafts"] = deepcopy(request.get("reviewed_drafts", []))
     if request.get("finalization_scope") is True:
         # Final synthesis and review receive the already dependency-checked facts
         # plus the proof bodies of still-valid accepted steps with their real

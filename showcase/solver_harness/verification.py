@@ -422,6 +422,13 @@ def verify_step(
             "TRACE_BACK": "TRACE_BACK",
             "PROPOSE_REPLAN": "META_DECIDE",
         }[verification["verdict"]]
+    from .handoff import enabled
+
+    reviewed = (enabled(harness._config) and verification["valid"] and not checkpoint_accepted
+                and verification["verdict"] in {"ACCEPT", "CHALLENGE"})
+    if reviewed:
+        phase = "STEP_EXECUTE" if index + 1 < len(plan["steps"]) else "FINAL_GENERATE"
+        current_step = plan["steps"][index + 1]["step_id"] if index + 1 < len(plan["steps"]) else None
     # The classified ledger is the single authoritative record: proven entries
     # reach final synthesis and rescue through its dependency-checked readers,
     # while Conjectures stay confined there and never become proven premises.
@@ -434,7 +441,7 @@ def verify_step(
             **state["steps"],
             step_id: {
                 **state["steps"][step_id],
-                "status": "ACCEPTED" if accepted else "CHECKPOINT_ACCEPTED" if checkpoint_accepted else "VERIFYING",
+                "status": "ACCEPTED" if accepted else "REVIEWED" if reviewed else "CHECKPOINT_ACCEPTED" if checkpoint_accepted else "VERIFYING",
                 "verification": verification,
                 **({"checkpoint_verification": checkpoint_review}
                    if checkpoint_review is not None else {}),

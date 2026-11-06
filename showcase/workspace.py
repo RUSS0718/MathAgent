@@ -566,7 +566,7 @@ class WorkspaceStore:
             if isinstance(state.get("verification"), Mapping)
             else {"status": "unknown"},
         }
-        result.update({key: state[key] for key in ("solver_mode", "preset_version", "missing_capabilities", "evidence_kind", "solver") if key in state})
+        result.update({key: state[key] for key in ("solver_mode", "preset_version", "missing_capabilities", "evidence_kind", "solver", "acceptance_mode", "engineering_delivery") if key in state})
         result["verification"] = bind_verification(result["final_response"], result["verification"])
         error = state.get("error") if isinstance(state.get("error"), Mapping) else None
         error_code = str(error.get("category")) if error else None

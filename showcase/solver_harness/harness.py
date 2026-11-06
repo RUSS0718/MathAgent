@@ -339,6 +339,10 @@ class SolverHarness:
         from .tool_precheck import allowed_tool_ids
 
         latest = self.get_run(run["run_id"])
+        from . import handoff
+
+        if handoff.enabled(self._config):
+            request = handoff.prepare_request(latest, request)
         prepared = (
             compose_request(latest, request)
             if self._config.get("features", {}).get("skills") is True
