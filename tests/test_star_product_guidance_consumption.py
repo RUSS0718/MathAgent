@@ -12,7 +12,8 @@ from unittest.mock import patch
 from showcase.run_budget import RunBudgetLimits
 from showcase.tools import ToolRegistry
 from tests.star_product_support import ACCEPT, StarJobFixture
-from tests.star_recovery_worker import config as worker_config, provider as worker_provider
+from tests.star_recovery_worker import config as worker_config
+from tests.star_recovery_worker import provider as worker_provider
 from tests.test_star_product_challenge import META_ABORT
 from tests.test_star_product_tools import FEATURES, NEED_PLAN, VERDICT
 
