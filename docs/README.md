@@ -1,5 +1,15 @@
 # MathAgent 文档索引
 
+## 当前入口与归档状态（2026-11-06）
+
+- 安装、组件与运行方式：[Showcase 首页](../README.md)。
+- 本轮环境复盘及后续候选：[provider-live retro](evals/provider-live-retro-20261106.md)；技术栈与STAR上下文能力：[研究记录](research/star-context-memory-paper-20261106.md)。压缩和记忆方案尚未接入当前STAR直连路径。
+- 最新两批：[readiness-30](evals/provider-live-natural-20261106-readiness-30.md)为第12步单调用截止、结果未知；[readiness-31](evals/provider-live-natural-20261106-readiness-31.md)为较简单题第6步流中连接异常、结果未知。两批均未完成最终生成、整题审查及文本绑定，不能统称预算耗尽。
+- [工程交接合同](engineering/handoff-delivery-contract.md)是显式实验模式，不替代旧Issue验收；#127未通过且保持开放，#128线上两臂NOT_RUN，provider usage UNKNOWN。用户已要求归档线上实验，不自动重跑。
+- [版本与失败对照](evals/provider-live-version-comparison-20261106.md)、[迭代审计](evals/provider-live-iteration-audit-20261106.md)、[修复循环历史](evals/provider-live-repair-cycle-20261105.md)用于追溯，不作为当前运行配置。
+
+下方按日期保留历史入口；其中“最新”仅指各记录撰写时的状态，以本节和各批次终态为准。
+
 文档职责：为开发者和 agent 提供版本、开发阶段、能力验收及官方边界的阅读入口。
 
 2026-11-03 的 #124–#128 后续进展见 [provider-live 协议与 readiness 补充记录](evals/provider-live-readiness-followup-20261103.md)。该记录区分角色协议探测、公共 CLI readiness、usage 暂缓验收和未实现的配对路径。
@@ -19,6 +29,8 @@
 适用范围：理解 v0.1、v0.2 历史版本和当前 v1.1 Solver Harness 规格；执行规则以根 [AGENTS.md](../AGENTS.md) 为准。
 
 ## 先读哪些文档
+
+2026-11-06 最新 #127 `readiness-28` 的简单题成功；自然多步只完成 1/7 步，末次 Verifier 因工具证据不适用于目标而以 `verifier_tool_request_unfulfilled` 停止。6 次隔离工具均 exit 0 且清理已确认，未发现新的应用缺陷；整题审查未绑定，#127 仍未通过，#128 两臂仍为 `NOT_RUN`。详见 [readiness-28 运行记录](evals/provider-live-natural-20261106-readiness-28.md)。此前 readiness-27 的模型生成代码失败见 [readiness-27 运行记录](evals/provider-live-natural-20261106-readiness-27.md)；readiness-26 的四步自然 trace 与流中 connectivity UNKNOWN 见 [readiness-26 运行记录](evals/provider-live-natural-20261106-readiness-26.md)。
 
 2026-11-03 的[实验 CLI #124–#128 阶段记录](evals/showcase-experiment-cli-124-128.md)区分已实现的流式、串行实验执行与独立核验，以及仍未运行的 provider-live readiness 和配对执行。
 
