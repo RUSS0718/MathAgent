@@ -128,7 +128,14 @@ class StarGuidanceConsumptionTest(StarJobFixture, unittest.TestCase):
     def test_bypassing_the_consumption_gate_reproduces_stale_preemption(self):
         from showcase.solver_harness import traceback as traceback_module
 
-        with patch.object(traceback_module, "transition_decision", lambda *arguments: True):
+        transition_decision = traceback_module.transition_decision
+
+        def bypass_traceback_gate(run, state, decision):
+            if state.get("phase") == "TRACE_BACK":
+                return True
+            return transition_decision(run, state, decision)
+
+        with patch.object(traceback_module, "transition_decision", bypass_traceback_gate):
             job_id, job, events = self.run_public(list(REPLIES))
         applied = self.applied_events(events)
         self.assertEqual(2, len(applied), applied)
