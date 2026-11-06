@@ -49,7 +49,7 @@
         <span class="run-mark" aria-hidden="true">M</span>
         <div><strong>求范围内正整数解并证明完备性</strong><small>Run MA-081 · Revision 7 · 计划 P2</small></div>
       </div>
-      <div class="run-meta"><span id="runStatus" class="status running">数学推理中</span><span>7 个工作块</span><span id="agentCount">5 个子智能体</span><span>仅公开摘要</span></div>
+      <div class="run-meta"><span id="runStatus" class="status running">数学推理中</span><span id="unitCount">6 个工作块</span><span id="agentCount">6 个子智能体</span><span>仅公开摘要</span></div>
     </header>
 
     <div class="layout">
@@ -97,7 +97,7 @@ const obligationSeed=[
   {id:"O4",title:"按约定格式输出",status:"pending",evidence:"等待原始答案绑定"}
 ];
 const agentSeed=[
-  {id:"planner",name:"Planner",label:"计划者",kind:"planner",initials:"PL",status:"done",summary:"冻结计划 P2，拆分 7 个可调度工作块"},
+  {id:"planner",name:"Planner",label:"计划者",kind:"planner",initials:"PL",status:"done",summary:"冻结计划 P2，拆分 6 个可调度工作块"},
   {id:"explore-71",name:"Explore-71",label:"探索者",kind:"explore",initials:"EX",status:"done",summary:"枚举候选解并生成整除分类线索"},
   {id:"reasoner-71",name:"Reasoner-71",label:"推理者",kind:"reasoner",initials:"R1",status:"done",summary:"构造递推关系与归纳证明草案"},
   {id:"verifier-71",name:"Verifier-71",label:"步骤核验者",kind:"verifier",initials:"V1",status:"done",summary:"核对定义域、归纳步与筛选结论"},
@@ -113,7 +113,7 @@ const unitSeed=[
   {id:"WU-06",title:"核对输出格式",detail:"验证 JSON 可解析且字段齐全",status:"queued",agentIds:["final-72"],obligationIds:["O4"],artifact:"尚未生成"}
 ];
 const eventSeed=[
-  {time:"13:04:12",title:"计划 P2 已冻结",detail:"Planner 派发 7 个工作块；根义务数固定为 4。",kind:"done",entityType:"agent",entityId:"planner"},
+  {time:"13:04:12",title:"计划 P2 已冻结",detail:"Planner 派发 6 个工作块；根义务数固定为 4。",kind:"done",entityType:"agent",entityId:"planner"},
   {time:"13:05:31",title:"候选解集合已提交",detail:"Explore-71 提交 C-01，关联 O1。",kind:"done",entityType:"unit",entityId:"WU-02"},
   {time:"13:07:08",title:"完整性证明通过局部核验",detail:"Verifier-71 核对递推、定义域和归纳步，关联 O1、O2。",kind:"done",entityType:"unit",entityId:"WU-03"},
   {time:"13:08:44",title:"整除分类表已提交",detail:"D-02 支持 O3；没有增加根义务计数。",kind:"done",entityType:"unit",entityId:"WU-04"},
@@ -208,7 +208,7 @@ function renderInspector(){
   else if(selected.type==="event"){const ev=state.events.find(function(x){return x.entityId===selected.id});if(ev){title=ev.title;description=ev.time+" · "+ev.detail;tags=[ev.entityType==="unit"?"工作块":ev.entityType==="agent"?"子智能体":ev.entityType==="obligation"?"根义务":"运行事件"];}}
   box.innerHTML='<div class="inspector-head"><strong>'+esc(title)+'</strong><span>'+((selected.type==="agent"&&getAgent(selected.id))?statusLabel(getAgent(selected.id).status):"")+'</span></div><p>'+esc(description)+'</p>'+(tags.length?'<div class="inspector-tags">'+tags.map(function(tag){return '<span class="inspector-tag">'+esc(tag)+'</span>'}).join("")+'</div>':'')+(artifact?'<div class="inspector-artifact">公开产物：'+esc(artifact)+'</div>':"");
 }
-function renderCounts(){const active=state.agents.filter(function(a){return a.status==="active"}).length;document.getElementById("agentCount").textContent=state.agents.length+" 个子智能体";document.getElementById("boardCount").textContent=active+" 个正在运行";}
+function renderCounts(){const active=state.agents.filter(function(a){return a.status==="active"}).length;document.getElementById("unitCount").textContent=state.units.length+" 个工作块";document.getElementById("agentCount").textContent=state.agents.length+" 个子智能体";document.getElementById("boardCount").textContent=active+" 个正在运行";}
 function render(){renderLedger();renderChat();renderView();renderInspector();renderCounts();document.getElementById("scenario").value=scenario;}
 function bindViewEvents(){
   document.querySelectorAll("[data-expand-obligation]").forEach(function(b){b.addEventListener("click",function(){const id=b.dataset.expandObligation;expanded.obligations=expanded.obligations===id?null:id;selected={type:"obligation",id:id};renderView();renderInspector()})});
