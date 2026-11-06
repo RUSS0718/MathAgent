@@ -103,7 +103,6 @@ class StarVerifierComputeTest(StarJobFixture, unittest.TestCase):
         recomputation. The precheck already ran the claim's own request; the
         reviewer then picks its own check of the same claim and the recomputed
         receipt — not the Reasoner's — is what its continuation sees."""
-        from showcase.run_budget import current_budget
 
         actual = []
         registry = ToolRegistry()
