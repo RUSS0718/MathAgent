@@ -2,6 +2,8 @@
 
 ## 当前入口与归档状态（2026-11-06）
 
+- 本窗口所有Run的停因、根因边界和冻结身份统一见[逐Run错误索引](evals/provider-live-run-error-index-20261106.md)，不再另建重复错误流水账。原始实验数据按用户授权清理，证据恢复限制见索引末节。
+
 - 安装、组件与运行方式：[Showcase 首页](../README.md)。
 - 本轮环境复盘及后续候选：[provider-live retro](evals/provider-live-retro-20261106.md)；技术栈与STAR上下文能力：[研究记录](research/star-context-memory-paper-20261106.md)。压缩和记忆方案尚未接入当前STAR直连路径。
 - 最新两批：[readiness-30](evals/provider-live-natural-20261106-readiness-30.md)为第12步单调用截止、结果未知；[readiness-31](evals/provider-live-natural-20261106-readiness-31.md)为较简单题第6步流中连接异常、结果未知。两批均未完成最终生成、整题审查及文本绑定，不能统称预算耗尽。
