@@ -5,13 +5,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
+import time
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, g, jsonify, request, send_from_directory, stream_with_context
+from flask import Flask, Response, g, jsonify, request, send_from_directory
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 from presentation_pages import render_presentation_page
@@ -26,9 +28,11 @@ else:
 from .campaign_api import register_campaigns
 from .evidence import EvidencePackExporter, replay_evidence
 from .final_evidence import checked_verification
+from .job_events import register_job_event_route
 from .loopback import AuthSession, LoopbackStore
 from .polynomial import PolynomialChecker
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
+from .run_budget import RunBudgetLimits
 from .run_service import (
     RunNotFoundError,
     RunResumeUnavailable,
@@ -68,6 +72,8 @@ def create_app(
         SHOWCASE_JOB_DELAY_SECONDS=0.05,
         SHOWCASE_WORKER_ENABLED=True,
         SHOWCASE_WAITING_INPUT_MARKER="",
+        SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED=False,
+        SHOWCASE_EXPERIMENT_PAIR_ENABLED=False,
     )
     if config:
         app.config.from_mapping(dict(config))
@@ -99,6 +105,10 @@ def create_app(
         else:
             service = RunService(database_path=resolved_database)
     shared_connection = getattr(getattr(service, "_store", None), "_connection", None)
+    # File-backed Run readers must not step the Job writer's connection from
+    # another thread. Job and budget writes still share Workspace's connection.
+    if getattr(getattr(service, "_store", None), "database_path", ":memory:") != ":memory:":
+        shared_connection = None
     workspace_service = WorkspaceService(
         resolved_database,
         connection=shared_connection,
@@ -203,12 +213,13 @@ def create_app(
             "mime": "image/png",
             "max_bytes": MAX_PNG_BYTES,
         }
-        return jsonify(
+        solver_modes = star_capabilities(star_pipeline is not None, star_pipeline)
+        response = jsonify(
             {
                 "profile": profile,
                 "jobs": {"enabled": True, "status": "available"},
                 "sse": {"enabled": True, "status": "available"},
-                "solver_modes": star_capabilities(star_pipeline is not None, star_pipeline),
+                "solver_modes": solver_modes,
                 "verification_mode": VERIFICATION_MODES,
                 "files": {"upload": upload},
                 "execution": {
@@ -216,6 +227,7 @@ def create_app(
                     "provider": "fake" if getattr(live_pipeline, "execution_mode", app.config.get("SHOWCASE_MODE")) == "fake" else "intern",
                     "status": "configured" if os.getenv("INTERN_API_KEY") else "missing_credentials",
                 },
+                "applied_model_config": _applied_model_config(star_pipeline, solver_modes),
                 "capabilities": {
                     "jobs": True,
                     "sse": True,
@@ -224,6 +236,8 @@ def create_app(
                 },
             }
         )
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/api/files")
     def files() -> Response:
@@ -348,6 +362,28 @@ def create_app(
                 return _json_error("capability_unavailable", 503)
             if file_id not in app.extensions["showcase_files"]:
                 return _json_error("file_not_found", 404)
+        budget_limits = None
+        deadline_at = payload.get("deadline_at")
+        raw_limits = payload.get("budget_limits")
+        if raw_limits is not None:
+            expected_limit_keys = {
+                "max_model_calls", "max_http_attempts", "max_tool_calls",
+                "max_tokens", "max_runtime_seconds",
+            }
+            if not isinstance(raw_limits, dict) or set(raw_limits) != expected_limit_keys:
+                return _json_error("run_budget_invalid", 400)
+            try:
+                budget_limits = RunBudgetLimits(**raw_limits)
+            except (TypeError, ValueError):
+                return _json_error("run_budget_invalid", 400)
+            if (
+                type(deadline_at) not in {int, float}
+                or not math.isfinite(deadline_at)
+                or deadline_at <= 0
+            ):
+                return _json_error("run_budget_deadline_invalid", 400)
+        elif deadline_at is not None:
+            return _json_error("run_budget_invalid", 400)
         idempotency_key = request.headers.get("Idempotency-Key", "")
         try:
             job, existing = workspace_service.create_job(
@@ -358,6 +394,8 @@ def create_app(
                 web_search_enabled=payload.get("web_search_enabled", False) is True,
                 input_user_file_id=file_id,
                 verification_mode=payload.get("verification_mode", "auto"),
+                budget_limits=budget_limits,
+                deadline_at=deadline_at,
                 solver_mode=payload.get("solver_mode", "legacy"),
                 solver_options=payload.get("solver_options"),
                 solver_hint=payload.get("solver_hint"),
@@ -366,6 +404,151 @@ def create_app(
             return _workspace_error(exc)
         status = 200 if existing else 202
         return jsonify({"success": True, "job_id": job["job_id"], "status": job["status"], "existing": existing}), status
+
+    if app.config.get("SHOWCASE_EXPERIMENT_PAIR_ENABLED") is True:
+        @app.post("/api/experiments/pairs/<pair_id>/readiness")
+        def verify_experiment_pair_readiness(pair_id: str) -> tuple[Response, int]:
+            _require_auth(g.auth_session)
+            payload = _request_object()
+            if isinstance(payload, tuple):
+                return payload
+            try:
+                from .experiment_manifest import canonical_json
+                from .experiment_pair import pair_manifest_digest, validate_pair_manifest
+
+                pair = validate_pair_manifest(payload.get("pair_manifest"))
+                report = payload.get("readiness_report")
+                if (
+                    pair["pair_id"] != pair_id
+                    or payload.get("pair_sha256") != pair_manifest_digest(pair)
+                    or not isinstance(report, dict)
+                    or hashlib.sha256(canonical_json(report)).hexdigest()
+                    != pair["readiness_report_sha256"]
+                    or type(report.get("issue_number")) is not int
+                    or report["issue_number"] != 127
+                    or report.get("status") != "PASS"
+                ):
+                    raise ValueError("experiment_readiness_mismatch")
+                verifier = app.config.get("SHOWCASE_EXPERIMENT_READINESS_VERIFIER")
+                if not callable(verifier):
+                    raise ValueError("experiment_readiness_not_verified")
+                verified = verifier(report)
+                if not isinstance(verified, dict) or verified.get("status") != "PASS":
+                    raise ValueError("experiment_readiness_not_verified")
+                return jsonify({"status": "PASS"}), 200
+            except Exception:
+                return _json_error("experiment_readiness_not_verified", 400)
+
+        @app.post("/api/experiments/pairs/<pair_id>/arms/<arm>/jobs")
+        def create_experiment_pair_job(pair_id: str, arm: str) -> tuple[Response, int]:
+            session = _require_auth(g.auth_session)
+            payload = _request_object()
+            if isinstance(payload, tuple):
+                return payload
+            try:
+                from .experiment_manifest import canonical_json
+                from .experiment_pair import pair_manifest_digest, validate_pair_manifest
+
+                pair = validate_pair_manifest(payload.get("pair_manifest"))
+                if pair["pair_id"] != pair_id:
+                    raise ValueError("experiment_pair_id_mismatch")
+                pair_sha256 = payload.get("pair_sha256")
+                if pair_manifest_digest(pair) != pair_sha256:
+                    raise ValueError("experiment_pair_manifest_hash_mismatch")
+                if arm not in {"baseline", "variant"}:
+                    raise ValueError("experiment_pair_arm_invalid")
+                report = payload.get("readiness_report")
+                report_hash = hashlib.sha256(canonical_json(report)).hexdigest()
+                if (
+                    not isinstance(report, dict)
+                    or type(report.get("issue_number")) is not int
+                    or report["issue_number"] != 127
+                    or report_hash != pair["readiness_report_sha256"]
+                    or report.get("status") != "PASS"
+                ):
+                    raise ValueError("experiment_readiness_not_passed")
+                readiness_verifier = app.config.get("SHOWCASE_EXPERIMENT_READINESS_VERIFIER")
+                if not callable(readiness_verifier) or readiness_verifier(report).get("status") != "PASS":
+                    raise ValueError("experiment_readiness_not_verified")
+
+                arm_registration = pair[arm]
+                manifest = arm_registration["manifest"]
+                sample_id = payload.get("sample_id")
+                samples = [sample for sample in manifest["samples"] if sample["id"] == sample_id]
+                if len(samples) != 1:
+                    raise ValueError("experiment_sample_invalid")
+                message = payload.get("message")
+                if not isinstance(message, str) or not message.strip():
+                    raise ValueError("message_must_be_non_empty")
+                if hashlib.sha256(message.encode("utf-8")).hexdigest() != samples[0]["text_sha256"]:
+                    raise ValueError("experiment_sample_hash_mismatch")
+
+                raw_limits = payload.get("budget_limits")
+                if raw_limits != manifest["run_limits"]:
+                    raise ValueError("run_budget_invalid")
+                budget_limits = RunBudgetLimits(**raw_limits)
+                deadline_at = payload.get("deadline_at")
+                if (
+                    type(deadline_at) not in {int, float}
+                    or not math.isfinite(deadline_at)
+                    or deadline_at <= 0
+                    or deadline_at > time.time() + budget_limits.max_runtime_seconds
+                ):
+                    raise ValueError("run_budget_deadline_invalid")
+
+                binding = {
+                    "pair_id": pair["pair_id"],
+                    "pair_sha256": pair_sha256,
+                    "arm": arm,
+                    "arm_run_id": arm_registration["run_id"],
+                    "factor": pair["factor"],
+                    "features": dict(arm_registration["features"]),
+                    "applied_config_status": "pre_execution",
+                    "applied_component_config": None,
+                }
+                job, existing = workspace_service.create_job(
+                    user_id=session.user_id,
+                    session_id=payload.get("session_id"),
+                    problem=message.strip(),
+                    idempotency_key=request.headers.get("Idempotency-Key", ""),
+                    verification_mode=manifest["model"]["verification_mode"],
+                    budget_limits=budget_limits,
+                    deadline_at=deadline_at,
+                    solver_mode=manifest["model"]["solver_mode"],
+                    experiment_binding=binding,
+                )
+            except WorkspaceError as exc:
+                return _workspace_error(exc)
+            except Exception:
+                return _json_error("experiment_pair_request_invalid", 400)
+            status = 200 if existing else 202
+            return jsonify({"success": True, "job_id": job["job_id"], "status": job["status"], "existing": existing}), status
+
+    if app.config.get("SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED") is True:
+        @app.get("/api/agent/jobs/by-idempotency")
+        def get_job_by_idempotency_key() -> tuple[Response, int] | Response:
+            session = _require_auth(g.auth_session)
+            idempotency_key = request.headers.get("Idempotency-Key", "")
+            request_digest = request.headers.get("X-Request-Digest", "")
+            try:
+                if uuid.UUID(idempotency_key).version != 4:
+                    raise ValueError
+            except (AttributeError, TypeError, ValueError):
+                return _json_error("idempotency_key_invalid", 400)
+            if (
+                len(request_digest) != 64
+                or any(character not in "0123456789abcdef" for character in request_digest)
+            ):
+                return _json_error("request_digest_invalid", 400)
+            try:
+                result = workspace_service.get_job_by_idempotency_key(
+                    user_id=session.user_id,
+                    idempotency_key=idempotency_key,
+                    request_digest=request_digest,
+                )
+            except WorkspaceError as exc:
+                return _workspace_error(exc)
+            return jsonify(result)
 
     @app.get("/api/agent/jobs/<job_id>/artifacts/<digest>")
     def tool_artifact(job_id, digest):
@@ -417,39 +600,13 @@ def create_app(
         except WorkspaceError as exc:
             return _workspace_error(exc)
 
-    @app.get("/api/agent/jobs/<job_id>/events")
-    def get_job_events(job_id: str) -> Response | tuple[Response, int]:
-        session = _require_auth(g.auth_session)
-        raw_cursor = request.args.get("last_event_id")
-        if raw_cursor is None:
-            raw_cursor = request.headers.get("Last-Event-ID", "0")
-        after_id = _parse_event_cursor(raw_cursor)
-        if after_id is None:
-            return _json_error("invalid_last_event_id", 400)
-        try:
-            # Validate ownership before returning a lazy streaming response.
-            workspace_service.get_job(job_id, session.user_id)
-            events = workspace_service.stream_events(job_id, session.user_id, after_id)
-        except WorkspaceError as exc:
-            return _workspace_error(exc)
-
-        def generate():
-            for event in events:
-                data = json.dumps(event["data"], ensure_ascii=False, separators=(",", ":"))
-                if event["id"] is None:
-                    yield f"event: {event['event']}\ndata: {data}\n\n"
-                else:
-                    yield (
-                        f"id: {int(event['id'])}\n"
-                        f"event: {event['event']}\n"
-                        f"data: {data}\n\n"
-                    )
-
-        return Response(
-            stream_with_context(generate()),
-            content_type="text/event-stream; charset=utf-8",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+    register_job_event_route(
+        app,
+        workspace_service,
+        require_auth=_require_auth,
+        json_error=_json_error,
+        workspace_error=_workspace_error,
+    )
 
     @app.post("/api/agent/jobs/<job_id>/resume")
     def resume_job(job_id: str) -> tuple[Response, int]:
@@ -659,6 +816,69 @@ def create_app(
     return app
 
 
+def _applied_model_config(star_pipeline: Any, solver_modes: list[dict[str, Any]]) -> dict[str, Any]:
+    """Project only the active STAR adapter settings needed by frozen experiment preflight."""
+    from .stream_preference import profile_set_fingerprint
+
+    adapter = getattr(star_pipeline, "adapter", None)
+    read_applied_config = getattr(adapter, "applied_config", None)
+    try:
+        model = read_applied_config() if callable(read_applied_config) else None
+    except Exception:
+        model = None
+    modes = sorted(
+        record["solver_mode"]
+        for record in solver_modes
+        if record.get("solver_mode", "").startswith("star_") and record.get("enabled") is True
+    )
+    transport = None
+    if star_pipeline is not None:
+        transport = {
+            "policy": star_pipeline.transport_policy,
+            "profile_set_fingerprint": profile_set_fingerprint(
+                star_pipeline.stream_profiles
+            ),
+        }
+    available = (
+        star_pipeline is not None
+        and isinstance(model, dict)
+        and set(model) == {
+            "name",
+            "thinking_mode",
+            "temperature",
+            "max_output_tokens",
+            "request_timeout_seconds",
+            "retry",
+        }
+        and isinstance(model["name"], str)
+        and bool(model["name"].strip())
+        and isinstance(model["thinking_mode"], bool)
+        and type(model["temperature"]) in {int, float}
+        and math.isfinite(model["temperature"])
+        and model["temperature"] >= 0
+        and type(model["max_output_tokens"]) is int
+        and model["max_output_tokens"] > 0
+        and type(model["request_timeout_seconds"]) is int
+        and model["request_timeout_seconds"] > 0
+        and type(model["retry"]) is int
+        and model["retry"] >= 0
+        and transport is not None
+    )
+    projection = {
+        "schema_version": 1,
+        "status": "available" if available else "unavailable",
+        "model": model if available else None,
+        "solver_modes": modes if available else [],
+        "verification_modes": VERIFICATION_MODES if available else [],
+        "transport": transport if available else None,
+    }
+    canonical = json.dumps(
+        projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    projection["config_sha256"] = hashlib.sha256(canonical).hexdigest()
+    return projection
+
+
 def main() -> None:
     """Run the loopback Flask Showcase server."""
 
@@ -669,9 +889,15 @@ def main() -> None:
     parser.add_argument("--data-dir", default=None)
     parser.add_argument("--star-limited", action="store_true", help="Enable explicit limited STAR selection")
     parser.add_argument("--star-full", action="store_true", help="Enable full STAR presets after isolated runtime preflight; requires exact image configuration")
+    parser.add_argument(
+        "--experiment-idempotency-lookup",
+        action="store_true",
+        help="Enable the experiment CLI's idempotency lookup Job route",
+    )
     args = parser.parse_args()
     config: dict[str, Any] = {"SHOWCASE_MODE": args.mode, "SHOWCASE_STAR_ENABLED": args.star_limited,
-                              "SHOWCASE_STAR_FULL_ENABLED": args.star_full}
+                              "SHOWCASE_STAR_FULL_ENABLED": args.star_full,
+                              "SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED": args.experiment_idempotency_lookup}
     if args.data_dir:
         config["SHOWCASE_DATA_DIR"] = args.data_dir
     app = create_app(config)
@@ -714,20 +940,6 @@ def _set_auth_cookie(response: Response, session: AuthSession) -> None:
     response.set_cookie(AUTH_COOKIE, session.session_id, httponly=True, samesite="Lax", path="/")
 
 
-def _parse_event_cursor(value: str | None) -> int | None:
-    if value is None or not value.isdigit():
-        return None
-    if value.startswith("+") or value.startswith("-"):
-        return None
-    try:
-        cursor = int(value, 10)
-    except ValueError:
-        return None
-    if cursor < 0 or cursor > 9_007_199_254_740_991:
-        return None
-    return cursor
-
-
 def _json_error(error: str, status: int) -> tuple[Response, int]:
     messages = {
         "auth_required": "请先完成本地登录。",
@@ -744,6 +956,8 @@ def _json_error(error: str, status: int) -> tuple[Response, int]:
         "solver_options_unsupported": "当前 STAR 使用固定受限预设，不接受自定义开关。",
         "solver_hint_invalid": "STAR 提示须为 1 至 2000 字的非空文本。",
         "invalid_last_event_id": "事件游标无效。",
+        "invalid_event_snapshot": "事件快照模式无效。",
+        "invalid_event_limit": "事件快照数量无效。",
     }
     response = jsonify({
         "success": False,

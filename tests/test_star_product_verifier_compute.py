@@ -73,14 +73,22 @@ class StarVerifierComputeTest(StarJobFixture, unittest.TestCase):
             [item["tool_call_id"] for item in public if item["receipt"].get("source_role")
              == "step_verifier"])
         evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
-        self.assertIn(receipt["receipt_id"], [item.get("tool_call_id") for item in evidence["tools"]])
+        public_receipt_id = next(
+            item["receipt"]["receipt_id"] for item in evidence["tools"]
+            if item.get("receipt", {}).get("receipt_status") == "success"
+        )
+        self.assertRegex(public_receipt_id, r"^solver_event_[0-9a-f]{32}$")
+        self.assertNotEqual(receipt["receipt_id"], public_receipt_id)
+        self.assertIn(public_receipt_id, [item.get("receipt_id") for item in evidence["timeline"]])
+        self.assertNotIn(receipt["receipt_id"], repr(evidence["tools"]))
         report = self.report(job_id)
-        self.assertIn(receipt["receipt_id"],
-                      [item.get("tool_call_id") for item in report["tool_summaries"]])
+        self.assertIn(public_receipt_id,
+                      [item.get("receipt", {}).get("receipt_id") for item in report["tool_summaries"]])
         self.assertEqual(
             "Finite computation only; not a completeness proof",
             next(item["result_summary"] for item in report["tool_summaries"]
-                 if item["tool_call_id"] == receipt["receipt_id"]))
+                 if item.get("receipt", {}).get("receipt_id") == public_receipt_id))
+        self.assertNotIn(receipt["receipt_id"], repr(report["tool_summaries"]))
         events = self.solver_events(job_id)
         kinds = [kind for kind, _ in events]
         self.assertIn("tool_dispatched", kinds)
@@ -95,7 +103,6 @@ class StarVerifierComputeTest(StarJobFixture, unittest.TestCase):
         recomputation. The precheck already ran the claim's own request; the
         reviewer then picks its own check of the same claim and the recomputed
         receipt — not the Reasoner's — is what its continuation sees."""
-        from showcase.run_budget import current_budget
 
         actual = []
         registry = ToolRegistry()

@@ -43,6 +43,7 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
             max_tool_calls=2 if image_enabled else 0)
 
     return StarProductPipeline(database_path,
+        acceptance_mode=config.get("SHOWCASE_STAR_ACCEPTANCE_MODE", "strict"),
         adapter=config.get("SHOWCASE_STAR_ADAPTER"),
         budget=budget,
         features=features,
@@ -51,5 +52,7 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
         full_features=config.get("SHOWCASE_STAR_FULL_FEATURES"),
         full_budget=config.get("SHOWCASE_STAR_FULL_BUDGET"),
         experiment_policy=config.get("SHOWCASE_STAR_EXPERIMENT_POLICY"),
+        transport_policy=config.get("SHOWCASE_STAR_TRANSPORT_POLICY", "legacy"),
+        stream_profiles=config.get("SHOWCASE_STAR_TRANSPORT_PROFILES"),
         hint_mode=config.get("SHOWCASE_STAR_HINT_MODE", "none"),
         evidence_kind=config.get("SHOWCASE_STAR_EVIDENCE_KIND", "live"))

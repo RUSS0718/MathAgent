@@ -13,6 +13,8 @@
 9. [S5 同题配对 Runner](s5-paired-runner.md)：显式运行、公共 API、未知 / 失败保留和归档合同；不代表 live 或数学提升验收。
 10. [STAR 架构健壮性与组件作用实验方案](star-architecture-robustness-plan.md)：历史提案，未采纳为当前执行合同；保留组件测试映射。
 11. [#97 非流式两题登记草案](star-readiness-97-preregistration-draft.md)：独立样本、预算及停止条件；当前仍无真实调用授权。工程结果见[就绪核对记录](../evals/star-readiness-97-status.md)。
+12. [#122 Demo 覆盖矩阵与 CLI readiness 合同](demo-coverage-122.md)：固定来源、当前离线与 live 证据、#124–#128 的 PRD/设计/验收合同；机器可读矩阵记录 NOT_RUN 与 NOT_COVERED。
+13. [Showcase applied model config response](showcase-capabilities-applied-model-config.md)：`GET /api/capabilities` 的版本化字段白名单、摘要和 unavailable 合同。
 
 ## 离线预检入口
 

@@ -9,8 +9,8 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from ..run_control import RunStopped
 from ..run_budget import public_solver_call_id
+from ..run_control import RunStopped
 from .product_control import controlled_patch
 
 _SOLVER_STORAGE_LOCK = threading.RLock()
@@ -154,8 +154,9 @@ class SolverStateStore:
         state_updates: Mapping[str, Any],
         event: Mapping[str, Any],
         request_hash: str,
+        validated_run: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Atomically compare-and-swap the snapshot and append one event."""
+        """Compare-and-swap one event, reusing a matching validated history when supplied."""
 
         connection = self._connection
         with _SOLVER_STORAGE_LOCK:
@@ -182,7 +183,7 @@ class SolverStateStore:
 
                 row = connection.execute(
                     """
-                    SELECT state_json, state_revision
+                    SELECT state_json, problem_hash, config_hash, state_revision
                     FROM solver_states WHERE run_id = ?
                     """,
                     (run_id,),
@@ -254,7 +255,41 @@ class SolverStateStore:
                         now,
                     ),
                 )
-                result = self._read_run(run_id)
+                if validated_run is not None:
+                    validated_state = validated_run.get("state")
+                    if (
+                        validated_run.get("run_id") != run_id
+                        or validated_run.get("state_revision") != expected_revision
+                        or not isinstance(validated_run.get("events"), list)
+                        or not isinstance(validated_state, Mapping)
+                        or validated_state.get("run_id") != run_id
+                        or validated_state.get("problem_hash") != row["problem_hash"]
+                        or validated_state.get("config_hash") != row["config_hash"]
+                        or validated_state.get("state_revision") != expected_revision
+                    ):
+                        raise SolverPersistenceError("commit_event")
+                    events = [dict(item) for item in validated_run["events"]]
+                    public_event = dict(stored_event)
+                    public_event.pop("_request_hash", None)
+                    events.append(public_event)
+                else:
+                    event_rows = connection.execute(
+                        """
+                        SELECT event_json FROM solver_events
+                        WHERE run_id = ? ORDER BY sequence
+                        """,
+                        (run_id,),
+                    ).fetchall()
+                    events = [json.loads(item["event_json"]) for item in event_rows]
+                result = self._materialize_run(
+                    run_id,
+                    state,
+                    row["problem_hash"],
+                    row["config_hash"],
+                    next_revision,
+                    events,
+                    "commit_event",
+                )
                 if result is None:
                     raise SolverPersistenceError("commit_event")
                 connection.commit()
@@ -280,17 +315,6 @@ class SolverStateStore:
             ).fetchone()
             if row is None:
                 return None
-            state = json.loads(row["state_json"])
-            if (
-                not isinstance(state, dict)
-                or state.get("run_id") != run_id
-                or state.get("problem_hash") != row["problem_hash"]
-                or state.get("config_hash") != row["config_hash"]
-                or state.get("state_revision") != row["state_revision"]
-            ):
-                raise SolverPersistenceError("get_run")
-            if isinstance(state.get("calls"), dict):
-                state["calls"] = _PublicCallLookup(run_id, state["calls"])
             event_rows = self._connection.execute(
                 """
                 SELECT event_json FROM solver_events
@@ -299,21 +323,51 @@ class SolverStateStore:
                 (run_id,),
             ).fetchall()
             events = [json.loads(item["event_json"]) for item in event_rows]
-            if any(
-                not isinstance(event, dict) or event.get("run_id") != run_id for event in events
-            ):
-                raise SolverPersistenceError("get_run")
-            for event in events:
-                event.pop("_request_hash", None)
+            return self._materialize_run(
+                run_id,
+                json.loads(row["state_json"]),
+                row["problem_hash"],
+                row["config_hash"],
+                row["state_revision"],
+                events,
+                "get_run",
+            )
         except SolverPersistenceError:
             raise
         except (sqlite3.Error, TypeError, ValueError) as exc:
             raise SolverPersistenceError("get_run") from exc
+
+    @staticmethod
+    def _materialize_run(
+        run_id: str,
+        state: Any,
+        problem_hash: str,
+        config_hash: str,
+        state_revision: int,
+        events: list[Any],
+        operation: str,
+    ) -> dict[str, Any]:
+        """Build a public Run projection from already-read snapshot data."""
+
+        if (
+            not isinstance(state, dict)
+            or state.get("run_id") != run_id
+            or state.get("problem_hash") != problem_hash
+            or state.get("config_hash") != config_hash
+            or state.get("state_revision") != state_revision
+        ):
+            raise SolverPersistenceError(operation)
+        if isinstance(state.get("calls"), dict):
+            state["calls"] = _PublicCallLookup(run_id, state["calls"])
+        if any(not isinstance(event, dict) or event.get("run_id") != run_id for event in events):
+            raise SolverPersistenceError(operation)
+        for event in events:
+            event.pop("_request_hash", None)
         return {
             "run_id": run_id,
             "state": state,
             "events": events,
-            "state_revision": int(row["state_revision"]),
+            "state_revision": int(state_revision),
         }
 
 

@@ -25,18 +25,26 @@ class StarProductPipeline:
 
     def __init__(self, database_path, *, adapter=None, evidence_kind="live", budget=None,
                  features=None, registry=None, hint_mode="none", full_enabled=False,
-                 full_features=None, full_budget=None, experiment_policy=None):
+                 full_features=None, full_budget=None, experiment_policy=None,
+                 transport_policy="legacy", stream_profiles=None, acceptance_mode="strict"):
         from .star_experiment_policy import ExperimentRunPolicy
 
         if experiment_policy is not None and not isinstance(experiment_policy, ExperimentRunPolicy):
             raise ValueError("star_experiment_policy_invalid")
         self.experiment_policy = experiment_policy
+        if not isinstance(acceptance_mode, str) or acceptance_mode not in {"strict", "handoff"}:
+            raise ValueError("star_acceptance_mode_invalid")
+        self.acceptance_mode = acceptance_mode
         if evidence_kind not in {"live", "scripted", "fault_injection"}:
             raise ValueError("star_evidence_kind_invalid")
         if adapter is not None and not isinstance(adapter, InternModelAdapter):
             raise ValueError("star_adapter_invalid")
         self.database_path = database_path
         self.adapter = adapter or InternModelAdapter(client_timeout=180, client_retry=3)
+        if transport_policy not in {"legacy", "stream_first"}:
+            raise ValueError("star_transport_policy_invalid")
+        self.transport_policy = transport_policy
+        self.stream_profiles = stream_profiles
         self.evidence_kind = evidence_kind
         if budget is not None and not isinstance(budget, RunBudgetLimits):
             raise ValueError("star_budget_invalid")
@@ -53,6 +61,8 @@ class StarProductPipeline:
         if not isinstance(self.full_budget, RunBudgetLimits):
             raise ValueError("star_budget_invalid")
         self.full_config = full_config(self.full_budget, full_features)
+        if acceptance_mode == "handoff":
+            self.config["acceptance_mode"] = self.full_config["acceptance_mode"] = acceptance_mode
         self.full_config["hint_mode"] = hint_mode
         # The registered executor owns the real wall-clock budget; tool_precheck
         # reads config["tool_timeout_seconds"] and its 3s default silently
@@ -110,7 +120,9 @@ class StarProductPipeline:
         return self.full_budget if mode in FULL_MODES else self.budget
 
     def run(self, run_id, problem, *, verification_mode="auto", emit=None, solver_hint=None,
-            retry_call=None, solver_mode="star_limited"):
+            retry_call=None, solver_mode="star_limited", component_features=None,
+            on_component_config_applied=None):
+        """Execute STAR, applying and recording pair-only feature overrides when present."""
         if solver_mode not in STAR_MODES:
             raise ValueError("star_mode_invalid")
         if solver_mode in FULL_MODES and self.full_gaps():
@@ -130,19 +142,44 @@ class StarProductPipeline:
             features["candidate_registry"] = True
         if solver_mode in BEST_EFFORT_MODES:
             features["best_effort"] = True
+        if component_features is not None:
+            from .solver_harness.paired_conditions import STRATEGIES
+
+            if (
+                not isinstance(component_features, dict)
+                or set(component_features) != STRATEGIES
+                or any(type(enabled) is not bool for enabled in component_features.values())
+                or component_features["best_effort"]
+                or solver_mode in BEST_EFFORT_MODES
+                or not callable(on_component_config_applied)
+            ):
+                raise ValueError("experiment_pair_features_invalid")
+            features.update(component_features)
         config = {**base, **({"hint_mode": "user_hint"} if solver_hint is not None else {}),
                   "features": features}
+        if component_features is not None:
+            config["reexplore_after_replan"] = component_features["reexplore_after_replan"]
+        if self.transport_policy == "stream_first":
+            config["transport_policy"] = self.transport_policy
         port = InternModelPort(
             self.adapter,
             original_problem=problem,
             deadlines=deadlines,
             streaming=config["features"].get("stream_activity") is True,
+            transport_policy=self.transport_policy,
+            stream_profiles=self.stream_profiles,
         )
         if self.experiment_policy is not None:
             limits = current_budget().snapshot()["limits"]
             config.update(max_model_calls=limits["max_model_calls"],
                           max_tool_calls=limits["max_tool_calls"],
                           max_total_duration_seconds=max(1, int(limits["max_runtime_seconds"])))
+        if component_features is not None:
+            applied_components = {
+                key: config["features"].get(key, False)
+                for key in ("skills", "reexplore_after_replan", "candidate_registry", "best_effort")
+            }
+            on_component_config_applied(applied_components)
 
         def observe(run, event):
             if event:
@@ -165,6 +202,10 @@ class StarProductPipeline:
                                event_observer=observe) as harness:
                 existing = harness._state_store.get_run(run_id)
                 harness._product_recovery = existing is not None
+                if existing is not None:
+                    port.restore_transport_policy(
+                        run_id, existing["state"].get("transport_policy")
+                    )
                 from .solver_harness.budget import HardBudgetStop
                 from .solver_harness.calls import CallInterrupted
 
@@ -223,11 +264,19 @@ class StarProductPipeline:
                     "request_attempts": attempts,
                     "tool_results": public_tools(math),
                     "error": None if reviewed and verification_mode != "required" else {
-                        "category": ("protocol_failure_unrepaired"
+                        "category": ("provider_generation_error"
+                                     if math.get("result_reason") == "provider_generation_error"
+                                     else "protocol_failure_unrepaired"
                                      if math.get("result_reason") == "protocol_failure_unrepaired"
+                                     else "invalid_verifier_verdict"
+                                     if math.get("result_reason") == "invalid_verifier_verdict"
                                      else "verification_needs_review" if reviewed
                                      else "star_needs_review")},
                 }
+                if self.acceptance_mode == "handoff":
+                    from .solver_harness.handoff import delivery_check
+
+                    result["engineering_delivery"] = delivery_check(run, answer)
                 check_control(allow_expired_selection=math.get("best_effort_decision") is not None)
                 return result
 

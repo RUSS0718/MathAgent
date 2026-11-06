@@ -1,6 +1,8 @@
 """STAR resource admission observed through real Job and Adapter boundaries."""
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import requests
 
@@ -9,6 +11,25 @@ from tests.star_product_support import ACCEPT, POLISH, SOLVED, StarJobFixture
 
 
 class StarBudgetTest(StarJobFixture, unittest.TestCase):
+    def test_missing_usage_reservation_is_not_counted_twice(self):
+        from showcase.solver_harness.budget import budget_reason
+
+        shared = SimpleNamespace(snapshot=lambda: {
+            "deadline_at": 2_000_000_000,
+            "logical_calls": 1,
+            "http_attempts": 1,
+            "charged_tokens": 1_122_419,
+            "reserved_tokens": 1_122_419,
+            "limits": {
+                "max_model_calls": 32,
+                "max_http_attempts": 32,
+                "max_tokens": 2_097_152,
+            },
+        })
+
+        with patch("showcase.solver_harness.budget.current_budget", return_value=shared):
+            self.assertIsNone(budget_reason({}, {}))
+
     def test_token_reservation_rejects_before_real_http(self):
         self.open_star([], SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_tokens=1))
         job_id = self.create_job()

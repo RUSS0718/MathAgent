@@ -37,6 +37,11 @@ def _normalize_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
         raise SolverValidationError("config must be JSON serializable") from exc
     if not isinstance(normalized, dict):
         raise SolverValidationError("config must be a mapping")
+    mode = normalized.get("acceptance_mode", "strict")
+    if not isinstance(mode, str) or mode not in {"strict", "handoff"}:
+        raise SolverValidationError("config.acceptance_mode must be strict or handoff")
+    if mode == "handoff" and normalized.get("features", {}).get("best_effort") is True:
+        raise SolverValidationError("handoff delivery cannot enable best_effort")
     return normalized
 
 

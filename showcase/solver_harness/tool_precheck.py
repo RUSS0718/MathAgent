@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from ..redaction import redact
 from ..run_budget import current_budget
+from ..star_product_events import public_solver_event_id
 from .computation_evidence import has_computation_output
 
 POLICY_VERSION = "solver-local-precheck-1"
@@ -92,6 +93,10 @@ def _execute(harness, run, request, config, port, step_id, claim_index, *, recei
     receipt_id = f"{receipt_prefix}:{run['run_id']}:{run['state_revision']}:{claim_index}"
     receipt = {
         "receipt_id": receipt_id,
+        "public_receipt_id": public_solver_event_id(run, {"event_id": receipt_id}),
+        "run_id": run["run_id"],
+        "plan_version": state.get("plan_version"),
+        "attempt_index": state.get("attempt_index"),
         "tool": request.get("tool") if isinstance(request, Mapping) else None,
         "step_id": step_id,
         "claim_index": claim_index,
@@ -118,7 +123,8 @@ def _execute(harness, run, request, config, port, step_id, claim_index, *, recei
         if commit_state_receipts
         else None
     )
-    reason = _denial(state, run["run_id"], request, config, port)
+    reason = _denial(state, run["run_id"], request, config, port,
+                     role=receipt.get("source_role") or "reasoner")
     if reason:
         receipt["reason"] = reason
         run = harness.commit_event(
@@ -165,6 +171,15 @@ def _execute(harness, run, request, config, port, step_id, claim_index, *, recei
         if not isinstance(result, Mapping):
             raise ValueError("malformed_tool_result")
         status = result.get("status")
+        # Registry categories are actionable; arbitrary tool exception text stays private.
+        category = result.get("error")
+        if isinstance(category, str) and category in {
+            "tool_schema_invalid", "tool_not_registered", "tool_not_permitted_for_profile",
+            "tool_arguments_must_be_object", "tool_arguments_not_serializable",
+            "tool_input_too_large", "tool_budget_exhausted", "tool_timeout",
+            "tool_execution_error", "artifact_integrity_failed",
+        }:
+            receipt["error_category"] = category
         output = result.get("output")
         size = len(json.dumps(output, ensure_ascii=False, allow_nan=False).encode("utf-8"))
         receipt["status"] = (
@@ -254,7 +269,7 @@ def _tool_quota_available(state, config):
     return used < limit
 
 
-def _denial(state, run_id, request, config, port):
+def _denial(state, run_id, request, config, port, *, role="reasoner"):
     if not isinstance(request, Mapping) or not isinstance(request.get("arguments"), Mapping):
         return "not_executed"
     args = request["arguments"]
@@ -266,7 +281,8 @@ def _denial(state, run_id, request, config, port):
     except (TypeError, ValueError):
         return "invalid_arguments"
     tool = request.get("tool")
-    if state.get("reasoning_mode") == "reason_noncoding":
+    if (state.get("reasoning_mode") == "reason_noncoding"
+            and role in {"reasoner", "reason_noncoding"}):
         return "pure_reasoning_denied"
     if (
         config.get("features", {}).get("local_code_tool") is not True
@@ -297,7 +313,8 @@ def allowed_tool_ids(run, role, config, port):
         config.get("features", {}).get("local_code_tool") is not True
         or port is None
         or role not in {"reasoner", "step_verifier", "whole_solution_verifier", "explore"}
-        or run["state"].get("reasoning_mode") == "reason_noncoding"
+        or (run["state"].get("reasoning_mode") == "reason_noncoding"
+            and role in {"reasoner", "reason_noncoding"})
     ):
         return []
     if not _tool_quota_available(run["state"], config):

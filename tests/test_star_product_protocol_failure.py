@@ -17,8 +17,12 @@ import uuid
 import requests
 
 from showcase.run_budget import RunBudgetLimits
-from tests.star_product_support import (ACCEPT, RawProviderContent, StarJobFixture,
-                                        assert_no_uncalibrated_probability)
+from tests.star_product_support import (
+    ACCEPT,
+    RawProviderContent,
+    StarJobFixture,
+    assert_no_uncalibrated_probability,
+)
 from tests.test_star_product_planning import FEATURES, STEP
 from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
 
@@ -47,7 +51,7 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
     def test_stream_transport_respects_adapter_timeout_inside_public_job_budget(self):
         from llm_client import InternChatClient
         from showcase.adapters import InternStreamAdapter
-        from tests.star_product_support import SOLVED, POLISH
+        from tests.star_product_support import POLISH, SOLVED
 
         adapter = InternStreamAdapter(InternChatClient(timeout=5, retry=1), max_tokens=256)
         self.open_star([SOLVED, POLISH, ACCEPT],
@@ -305,7 +309,7 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
 
     def test_repaired_verifier_request_is_executed_before_acceptance(self):
         from showcase.tools import ToolRegistry
-        from tests.test_star_product_verifier_compute import PREMATURE, CONTINUE
+        from tests.test_star_product_verifier_compute import CONTINUE, PREMATURE
 
         actual = []
         registry = ToolRegistry()
@@ -328,7 +332,13 @@ class StarProtocolFailureTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(2, receipt["output"])
         self.assertEqual({"coefficients": [1]}, receipt["input"])
         evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
-        self.assertIn(receipt["receipt_id"], [t.get("tool_call_id") for t in evidence["tools"]])
+        public_receipt_id = next(
+            item["receipt"]["receipt_id"] for item in evidence["tools"]
+            if item.get("receipt", {}).get("receipt_status") == "success"
+        )
+        self.assertRegex(public_receipt_id, r"^solver_event_[0-9a-f]{32}$")
+        self.assertNotIn(receipt["receipt_id"], repr(evidence["tools"]))
+        self.assertIn(public_receipt_id, [item.get("receipt_id") for item in evidence["timeline"]])
         self.assertEqual("2", job["result"]["final_response"])
         self.assertEqual("same_artifact", self.report(job_id)["checks"]["binding"])
         self.assertEqual(8, job["result"]["budget"]["http_attempts"])

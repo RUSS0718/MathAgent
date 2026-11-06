@@ -153,7 +153,8 @@ def run_step(
         reply = harness.dispatch(
             reserved,
             model_port.complete,
-            protocol_repair.repair_request(request),
+            protocol_repair.repair_request(
+                request, failed_call=protocol_repair.interrupted_call(harness, run["run_id"], exc)),
         )
     except Exception:
         reply = {"blocked": True}

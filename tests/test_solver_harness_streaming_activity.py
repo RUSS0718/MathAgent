@@ -2,9 +2,8 @@
 
 import unittest
 
-from showcase.solver_harness import SolverHarness
 from showcase.evidence import EvidencePackExporter
-
+from showcase.solver_harness import SolverHarness
 
 CONFIG = {
     "max_model_calls": 3,
@@ -43,6 +42,7 @@ class StreamingActivityTest(unittest.TestCase):
         self.assertEqual("2026-11-01T00:00:01Z", metrics["response_headers_at"])
         self.assertEqual("2026-11-01T00:00:02Z", metrics["first_reasoning_at"])
         self.assertEqual("2026-11-01T00:00:03Z", metrics["first_content_at"])
+        self.assertEqual("2026-11-01T00:00:03Z", metrics["last_content_at"])
         self.assertEqual(12, metrics["reasoning_chars"])
         self.assertEqual(4, metrics["content_bytes"])
         activity_events = [event for event in result["events"] if event["type"] == "call_activity"]
@@ -63,6 +63,11 @@ class StreamingActivityTest(unittest.TestCase):
                     "at": "2026-11-01T00:00:04Z",
                     "content_bytes": 7,
                 })
+                request["activity_observer"]({
+                    "kind": "content",
+                    "at": "2026-11-01T00:00:05Z",
+                    "content_bytes": 12,
+                })
 
                 def stream():
                     yield {"type": "text_delta", "text": "partial"}
@@ -78,6 +83,7 @@ class StreamingActivityTest(unittest.TestCase):
         call = next(iter(result["state"]["calls"].values()))
         self.assertEqual("unknown_outcome", call["status"])
         self.assertEqual("2026-11-01T00:00:04Z", call["stream_metrics"]["first_content_at"])
+        self.assertEqual("2026-11-01T00:00:05Z", call["stream_metrics"]["last_content_at"])
         self.assertEqual(result, again)
         self.assertEqual(1, port.calls)
 

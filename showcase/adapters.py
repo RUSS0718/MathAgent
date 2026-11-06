@@ -23,7 +23,7 @@ import requests
 from .attempt_projection import bind_attempt_projection
 from .graph import AgentDecision
 from .request_attempts import record_attempts
-from .run_budget import current_budget, request_timeout, scoped_deadline
+from .run_budget import BudgetExhausted, current_budget, request_timeout, scoped_deadline
 from .run_control import controlled_action
 from .run_service import AgentResult, RunRequest
 from .tool_protocol import ToolProtocol, ToolRequest, parse_tool_requests
@@ -139,6 +139,22 @@ class InternModelAdapter:
         self.client_retry = client_retry
         self.thinking_mode = thinking_mode
 
+    def applied_config(self) -> dict[str, Any]:
+        """Return resolved request settings without creating a lazy provider client."""
+        client = self._client
+        return {
+            "name": getattr(client, "model", None) or self.model_id,
+            "thinking_mode": (
+                self.thinking_mode
+                if self.thinking_mode is not None
+                else getattr(client, "thinking_mode", None)
+            ),
+            "temperature": self.temperature,
+            "max_output_tokens": self.max_tokens,
+            "request_timeout_seconds": getattr(client, "timeout", self.client_timeout),
+            "retry": getattr(client, "retry", self.client_retry),
+        }
+
     @controlled_action
     def complete(
         self,
@@ -203,8 +219,8 @@ class InternModelAdapter:
         if budget is None:
             text, usage, parsed = normalize_response()
         else:
-            from .processing_deadline import process_before_deadline
             from .deadline_clock import guarded_utc_clock
+            from .processing_deadline import process_before_deadline
 
             source_attempts = raw.get("attempts", ()) if isinstance(raw, Mapping) else ()
             absolute = source_attempts[-1].get("deadline_at") if source_attempts else None
@@ -338,11 +354,13 @@ class InternStreamAdapter(InternModelAdapter):
         result = None
         activity_observer = (metadata or {}).get("activity_observer")
         activity_status = None
+        attempt_admitted = False
         try:
             from llm_client import _not_submitted, product_retry_delay
 
             from .request_transport import response_events
             for index in range(limit):
+                attempt_admitted = False
                 attempt_started = time.perf_counter()
                 try:
                     remaining = logical_deadline - clock()
@@ -351,6 +369,7 @@ class InternStreamAdapter(InternModelAdapter):
                     attempt_timeout = min(effective_timeout, remaining)
                     if call_budget is not None:
                         attempt_timeout = min(attempt_timeout, call_budget.before_attempt(attempt, len(body)))
+                        attempt_admitted = True
                     attempt["effective_timeout_seconds"] = attempt_timeout
 
                     late_state = {"lock": threading.Lock(), "event": None}
@@ -405,7 +424,7 @@ class InternStreamAdapter(InternModelAdapter):
                             missing = "invalid_response"
                         elif body_complete and not late_done:
                             missing = "missing_stream_terminal" if strict else "connectivity"
-                        elif body_complete and strict and late_finish is None:
+                        elif body_complete and strict and not late_finish:
                             missing = "missing_finish_reason"
                         else:
                             missing = None
@@ -519,7 +538,7 @@ class InternStreamAdapter(InternModelAdapter):
                         if clock() < logical_deadline:
                             return
                         attempt.update({key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")})
-                        if stream_complete and saw_done and (not (metadata or {}).get("strict_completion") or finish_reason is not None):
+                        if stream_complete and saw_done and (not (metadata or {}).get("strict_completion") or bool(finish_reason)):
                             attempt.update(status="success", finish_reason=finish_reason, response_model_id=model_id)
                             local_processing_timeout = True
                         raise requests.ReadTimeout("logical_deadline_exceeded_during_processing")
@@ -565,7 +584,7 @@ class InternStreamAdapter(InternModelAdapter):
                             yield delta_chunk
                             check_processing_deadline()
                     check_processing_deadline()
-                    if (metadata or {}).get("strict_completion") is True and stream_complete and (not saw_done or finish_reason is None):
+                    if (metadata or {}).get("strict_completion") is True and stream_complete and (not saw_done or not finish_reason):
                         attempt.update({key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")})
                         raise AdapterError("missing_stream_terminal" if not saw_done else "missing_finish_reason")
                     if not stream_complete or not saw_done:
@@ -589,6 +608,7 @@ class InternStreamAdapter(InternModelAdapter):
                                    duration_seconds=round(time.perf_counter() - attempt_started, 3))
                     attempts.append(dict(attempt))
                     call_budget.after_attempt(attempt)
+                    attempt_admitted = False
                     response = None
                     if clock() + delay >= logical_deadline:
                         raise
@@ -648,6 +668,10 @@ class InternStreamAdapter(InternModelAdapter):
                 publish_attempts(result["attempts"])
             check_processing_deadline()
             yield result
+        except BudgetExhausted:
+            activity_status = "budget_rejected"
+            attempt_admitted = False
+            raise
         except AdapterError as exc:
             activity_status = "unknown"
             notify(activity_observer, "unknown")
@@ -691,7 +715,7 @@ class InternStreamAdapter(InternModelAdapter):
             attempt["duration_seconds"] = round(time.perf_counter() - attempt_started, 3)
             if not attempts:
                 attempts.append(dict(attempt))
-            if call_budget is not None:
+            if call_budget is not None and attempt_admitted:
                 # Never wait for a late settlement: if it owns the gate, it will
                 # either persist its evidence or leave the original reservation.
                 if late_state is None:

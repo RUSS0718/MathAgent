@@ -1,0 +1,25 @@
+# 新预算批准与工程交接目标边界
+
+用户明确批准：每题512模型/HTTP、128工具、8小时（28800秒）、67108864本地token预留；单调用1200秒、30秒无流停止、输出32768保持。本地token预留不是provider实际用量或费用。两题批次上限1024模型/HTTP、256工具、57600秒、134217728本地预留，完整分母仍simple/octagon-colorings，旧Run和官方baseline不变，best-effort=false。
+
+已准备新的issue127-natural-20261106-readiness-29-run01配置（独立8144），未注册/派发模型或工具，状态NOT_RUN。manifest SHA cf93d6f991b2efc7177cdc0295558f3fcd9df373107efc6f11561e4e13cdead2，source SHA36e33434835b8338488f68248f876d3d8466fe086732062299042f8e4b261b94，revision13a3ccc444b2cfe5dd824483e4674bbe4baed760；该身份只代表当前预算配置草案，若后续产品源码改变，必须重新冻结新身份，不能拿本草案身份派发不同实现。
+
+静态验证：manifest校验、样本实际字节、服务脚本AST中的RunBudgetLimits构造值、execution-policy和model timeout全部一致。没有启动服务，因此不声称已核对线上actual applied config；实际派发前仍须核对capabilities、Job limits、PID/创建时间、监听、source/server/data目录。
+
+当前已经使用Python orchestrator：StarProductPipeline.run构建SolverHarness，advance_product推进角色阶段，RunBudgetLedger控制动作准入；LangGraph主要承载状态投影。此处是本项目控制链，不能等同于直接执行上游某个orchestrator.py文件。
+
+用户新优先级是角色信息可靠交接、格式答案交付，数学审查结果可以保留为未通过。但当前star_reference仍在verification.py以valid且ACCEPT为步骤推进条件，finalize仅从有效接受成果合成，审查REJECT不能宣称completed_llm_reviewed。因此提高预算并不会消除现有数学门槛。
+
+后续最小合同切片应独立核验工程与数学状态：角色/action/schema/同Run-plan-attempt归属/真实工具回执消费、完整final文本、真实whole review调用及同文本身份绑定；数学意见按ACCEPT/REJECT/未验证原样记录，不把REJECT伪造为ACCEPT，不把未执行或失败回执升级为验证成功。unknown远端请求、身份错配、未修复协议错误、回执丢失、硬预算和缺审查/绑定仍是硬停止。
+
+该交接目标尚未由当前运行时实现，不能通过开启best-effort、强制接受步骤、把未接受事实写成已验证事实等方式冒充完成。它与现有#127严格多步验收的差异必须明确登记；在旧验收未满足之前#127保持open，#128两臂NOT_RUN，不因新预算或新目标草案关闭Issue。
+
+本轮仅配置和合同准备，未改产品源码、未运行线上调用、未重置修复计数。预算批准不等于已有应用缺陷被修好；后续若调整交接合同，按独立策略调整记录，先做能区分“有效数学REJECT已交接”与“协议/身份/回执损坏”的快速公共接缝，再冻结新源码身份。
+
+## 用户继续授权后的实现
+
+显式`SHOWCASE_STAR_ACCEPTANCE_MODE=handoff`已按[独立合同](../engineering/handoff-delivery-contract.md)接入既有Python编排。默认strict不变；合法CHALLENGE报告以reviewed_drafts交接，既有TRACE_BACK/PROPOSE_REPLAN继续走控制路由。最终REJECT按真实来源绑定，公共结果仍NEEDS_REVIEW，工程判定另列，不冒充旧#127数学接受或开启best-effort。
+
+修改前已由独立子智能体比较局部接线和独立编排器，选择局部接线以复用预算、身份、工具和审查。复审发现控制指令可能被草稿推进覆盖，已收紧裁决集合并添加两种控制请求负例。Harness与公共Job共8项通过；此前finalization/绑定/证明/规划相关回归通过，runtime/mode另9项通过、12项条件跳过，fast及Ruff通过。公共Job用例由另一子智能体编写、主线程集成执行，发现并补齐workspace结果白名单中的工程判定字段。实际HTTP上下文、后步草稿、最终REJECT、公共NEEDS_REVIEW及绑定均已核对。
+
+这是一项用户批准的策略调整，repair_round维持12；原预算草案身份不得用于新源码，真实29身份以随后运行记录为准。这里的离线检查不代表线上完成或数学能力提升。

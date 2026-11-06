@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from showcase.solver_harness import (
     SolverEventConflictError,
@@ -15,6 +16,39 @@ from showcase.solver_harness import (
 
 
 class SolverHarnessEventTest(unittest.TestCase):
+    def test_successful_commit_reuses_validated_history_for_its_return_value(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database_path = Path(directory) / "showcase.sqlite3"
+            with SolverHarness(database_path=database_path) as harness:
+                initial = harness.solve("题目", {"run_id": "solver-single-history-read"})
+                statements = []
+                connection = harness._showcase_store._connection
+                connection.set_trace_callback(statements.append)
+                with patch.object(
+                    harness._state_store,
+                    "_read_run",
+                    wraps=harness._state_store._read_run,
+                ) as read_run:
+                    committed = harness.commit_event(
+                        "solver-single-history-read",
+                        expected_revision=initial["state_revision"],
+                        event={"event_id": "plan", "type": "plan_selected"},
+                        state_updates={"phase": "PLAN"},
+                    )
+                connection.set_trace_callback(None)
+
+                self.assertEqual(1, read_run.call_count)
+                history_reads = [
+                    statement
+                    for statement in statements
+                    if "SELECT event_json FROM solver_events" in statement
+                    and "ORDER BY sequence" in statement
+                    and "AND event_id =" not in statement
+                ]
+                self.assertEqual(1, len(history_reads))
+                self.assertEqual(2, len(committed["events"]))
+                self.assertEqual(committed, harness.get_run("solver-single-history-read"))
+
     def test_stale_revision_does_not_overwrite_a_successful_commit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             database_path = Path(directory) / "showcase.sqlite3"

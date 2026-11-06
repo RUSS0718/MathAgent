@@ -1,125 +1,105 @@
-# Challenge Cup 2026 — 88分数学推理基线
+# MathAgent Showcase
 
-本仓库保存2026年10月11日官方评测得到 **88 correct / 12 incorrect / 0 invalid** 的数学推理智能体运行骨架。
-来源提交为 `447a3a26b13141844bd1c529abd6f69d68db33a8`。运行代码与依赖清单逐字节导出；
-本仓库使用独立的 Git 历史，`main` 为该基线，不包含旧仓库历史、实验数据、答案库或评测产物。
+MathAgent 的 Showcase 用于本地主观评测演示和工程验收。它包含 Vue 工作区、Flask API、命令行客户端，以及独立的官方入口演示页。fake 模式可离线查看交互；live 模式会调用 Intern 服务。fake、回放和结构测试不能证明数学正确性或能力提升。
 
-88分是一次官方观测结果，不保证复跑分数。完整旧仓库与原始评测证据保存在本地归档。
-文件来源和 SHA-256 校验值见 [BASELINE.json](BASELINE.json)。
+## Showcase 组件
 
-## 评分入口
+- **工作区前端**：会话与文件管理、Job 提交与恢复、SSE 执行时间线、结果报告和配对实验审阅页。源码位于 `showcase/frontend/chat-frontend/`。
+- **Flask 后端**：提供工作区 API、Job 与事件流、报告和 Evidence；默认 `fake` 模式，运行数据写入忽略目录 `artifacts/`。
+- **STAR SolverHarness**：显式 Showcase 路径中的 Python 编排与求解运行时，包含 Explore、Planner、Reasoner、Verifier、Meta 和 Researcher 角色；通过共享预算、隔离工具、持久状态和整题最终答案绑定组织运行。冻结实验 CLI 负责受控派发，独立核验器复核运行身份、事件与交付证据。它不是官方评分入口，也不因安装依赖而自动启用。
+- **CLI**：`showcase_cli.py` 调用同一套会话、Job、事件和报告 API。
+- **独立演示页**：`demo_server.py` 展示官方 `ReasoningAgent` 的 `/solve` 合同，不属于工作区，也不改变官方评分入口。
 
-平台从根目录导入 `user_agent.ReasoningAgent`，注入模型 client，然后调用：
+### 编排框架边界
 
-```python
-from user_agent import ReasoningAgent
+LangGraph 承载工作区图执行及检查点；当前 STAR 产品入口在求解结束后保存图投影，不由 LangGraph 接管角色循环或自动压缩。STAR 的具体业务决策、角色协议、工具准入、预算、证据及最终绑定由仓库自己的 Python SolverHarness 实现。`pyproject.toml` 将 LangGraph 与 DeepAgents 列为 `showcase` 可选依赖。DeepAgents 只通过 `AgentAdapter` 边界提供可选角色适配器，不是 STAR 编排器，也不代表当前 STAR 路径默认使用它。
 
-agent = ReasoningAgent(client=official_client)
-result = agent.solve(problem, metadata)
-# result 为可 JSON 序列化字典；final_response 为非空字符串。
+## 安装与运行
+
+需要 Python 3.11 或 3.12、uv，以及 Node.js/npm。先在仓库根目录安装依赖：
+
+```powershell
+uv sync --locked --all-groups
 ```
 
-模型访问由注入的 client 提供。仓库不保存凭证、不提供本地 HTTP client，也不读取题集或标准答案。
-安装运行依赖：
+### 离线 fake 模式
 
-```shell
-python -m pip install -r requirements.txt
+在仓库根目录启动后端：
+
+```powershell
+uv run python showcase_server.py --host 127.0.0.1 --port 8090 --mode fake --data-dir artifacts/showcase-local
 ```
 
-依赖为 `sympy==1.13.3`、`mpmath==1.3.0`；其他运行依赖均为 Python 标准库。
+如需前端开发服务器，在另一个终端运行：
 
-## 架构与执行流程
-
-1. **入口与截止控制**：根 `user_agent.py` 继承求解器，为每道题建立1150秒共享截止。
-   支持 POSIX 主线程信号抢占；Windows或工作线程使用协作式截止。每次 solve 重置本题状态。
-2. **首路独立求解**：识别题型、条件、定义域和答案形式，给出完整且紧凑的推导；
-   完成一次必要复核后收束为“最终答案：...”。首路温度0.2，主调用最多16384 tokens。
-3. **受控恢复**：根据返回内容决定是否续写、纠错或简短收口。所有路径共享最多6次 Agent 调用，
-   续写不重置整题截止；平台 client 内部重试可能产生额外物理请求。
-4. **条件式加路**：首路有可用答案、完整首路耗时占预算4%–28%、调用与时间预测均放得下时，
-   尝试第二、第三路；每路启动前再次核对剩余时间，因此第三路可能不执行。
-5. **候选选择与输出**：对答案做保守规范化，通过文本、受限 SymPy 等价判断分组投票；
-   票数相同时优先首路。本地 verifier 的适用范围有限，不能视为通用正确性证明。
-
-这里“可用答案”只表示通过该版本的可用性检查，不等于数学正确。
-首路无可用答案时不启动额外独立路径，这是原始基线行为。
-
-### 三路提示
-
-| 路径 | 温度 | 提示重点 |
-| --- | ---: | --- |
-| 第一路 | 0.2 | 通用严谨求解、必要复核、及时收束 |
-| 第二路 | 0.6 | 在通用提示后增加条件、解集完整性、必要充分性和边界检查 |
-| 第三路 | 0.6 | 与第一路相同的提示，独立采样 |
-
-第二、第三路不接收首路答案。基础提示见求解器的 `SYSTEM_PROMPT`；
-第二路增量见 [path_prompts.py](implementations/candidates/sl_v3_cont/path_prompts.py)。
-没有加入新增复算提示或草图规划提示。
-
-### 预算
-
-| 项目 | 上限 / 配置 |
-| --- | ---: |
-| 整题共享截止 | 1150秒 |
-| 整题累计 Agent 调用 | 6次 |
-| 主调用输出预算 | 16384 tokens |
-| 完整推导续写 | 8192 tokens |
-| 普通续写 / 纠错 | 各3072 tokens |
-| 简短收口 | 512 tokens |
-| 加路耗时窗口 | 首路耗时占整题4%–28% |
-
-主调用配置 `thinking_mode=True`；部分恢复调用请求关闭思考。
-实际思考模式与 token 统计取决于平台 client；不能把输出长度限制解释为内部推理预算保证。
-保留的特殊题号分支不会增加预算，因为普通与扩展截止均为1150秒。
-
-## 文件布局
-
-```text
-user_agent.py                         平台入口、单题截止
-requirements.txt                      评分运行依赖
-BASELINE.json                         原始提交与运行文件哈希
-implementations/
-  candidates/sl_v3_cont/
-    user_agent.py                     求解、恢复、加路与选择
-    path_prompts.py                   第二路提示增量
-    postprocess.py                    输出规范化与收口辅助
-    verifier.py                       受限确定性验证
-  postprocess/normalizer.py            保守答案规范化
-tests/                                无模型调用的冻结与路径回归
+```powershell
+Set-Location showcase/frontend/chat-frontend
+npm ci --no-audit --no-fund
+npm run dev -- --host 127.0.0.1
 ```
 
-## 已知边界
+打开 `http://127.0.0.1:5174/dashboard-assets/`。Vite 将 `/api` 请求代理到本机 8090 端口。也可先构建前端，再直接访问后端的 `http://127.0.0.1:8090/dashboard`：
 
-- 原始版本向 client 传入请求级 `thinking_mode`。严格只接受
-  `chat(messages, temperature, max_tokens)` 的 client 与该版本不兼容；
-  导出不修复该问题，避免改变88分对应的行为。迁移至其他平台前需独立验收接口。
-- Windows或工作线程的协作式截止不能保证抢占阻塞请求，调用超时需要平台 client 配合。
-- 没有启用旧 Protection、答案库、RAG、Skills、旧架构回退或实验 selector。
-- 规范化和候选一致不能证明数学正确；官方汇总日志无法提供逐题组件归因。
-- 本仓库在 GitHub 上用于私有开发与保存基线；创建它不会自动更换赛事关联的提交仓库。
-
-## 本地回归
-
-无需 API key 或真实模型请求，使用 Python 标准库 unittest：
-
-```shell
-python -m unittest discover -s tests -v
+```powershell
+npm run build
 ```
 
-测试检查运行文件哈希，以及真实入口下的第二路提示隔离、共享调用预算、续写、异常回退和状态重置。
-它们确认导出结构与脚本行为，不产生新的数学能力或官方成绩结论。
+以下 CLI 命令在仓库根目录执行，可检查服务或创建本地会话：
 
-## 产品设计文档
+```powershell
+uv run python showcase_cli.py health
+uv run python showcase_cli.py session create
+```
 
-- [版本、开发阶段与能力验收索引](docs/README.md)
-- [v0.1 PRD](docs/prd/subjective-agent-platform-prd-v0.1.md)、[技术设计](docs/architecture/subjective-agent-platform-technical-design-v0.1.md)、[能力基线与 live probes](docs/evals/v0.1-capability-baseline.md)
-- [v0.2 PRD Lite（待评审）](docs/prd/subjective-agent-platform-prd-v0.2.md)、[v0.2 实现规格](docs/specs/subjective-agent-platform-v0.2-spec.md)、[GitHub Issue #12](https://github.com/RUSS0718/MathAgent/issues/12)、[现状与前端接口调研](docs/research/v0.2-planning-baseline.md)
+fake 模式返回确定性的演示结果，不访问模型。需要浏览器演示时，运行 `npm run dev`；前端不是后端启动的前置条件。
 
-以下未版本化 PRD / 架构为早期总体设想，当前版本范围与验收状态从上方索引进入。
+### Intern live 模式
 
-- [主观评测 Agent Workbench PRD](docs/prd/subjective-agent-platform-prd.md)
-- [技术架构与开源项目机制映射](docs/architecture/subjective-agent-platform-technical-design.md)
-- [开源 Agent 项目调研](docs/research/open_source_agent_landscape.md)
-- [Codespace 初始化调研](docs/research/codespace-bootstrap-landscape.md)
-- [成熟工程初始化蓝图](docs/engineering-bootstrap-plan.md)
-- [黑客松冠军仓库调研](docs/research/hackathon-winning-repo-landscape.md)
+在仓库根目录的未跟踪 `.env` 中配置 `INTERN_API_KEY`，然后启动 live 后端：
+
+```powershell
+uv run python showcase_server.py --host 127.0.0.1 --port 8090 --mode live --data-dir artifacts/showcase-live
+```
+
+前端开发服务器命令与 fake 模式相同。确认设置页显示 live 且凭证已配置后，CLI 的 `probe` 会创建 Job 并调用模型：
+
+```powershell
+uv run python showcase_cli.py capabilities
+uv run python showcase_cli.py probe "求解 x^2-1=0，并检查候选根。"
+```
+
+`probe` 会产生真实 provider 请求；不要将其当作无 API 的本地检查。CLI 默认拒绝 fake 服务上的 `probe`。服务和 CLI 默认使用 loopback 地址及本地 cookie 文件。
+
+官方评分入口位于根目录 `user_agent.py`，其演示页和 `/solve` 用法见 [Demo 使用说明](docs/demo.md)。
+
+## 工程状态与验收边界
+
+官方客观评测入口是根目录 `user_agent.py` 的 `ReasoningAgent`，评分实现位于 `implementations/`。Showcase 作为独立展示路径；未经独立验收的改动不得接入官方默认路径或改变其请求预算。官方文件和基线哈希见 [BASELINE.json](BASELINE.json)。
+
+截至 2026-11-06，Issue #127 的 provider-live readiness **未通过**；最新 readiness-31 的自然多步结果为 UNKNOWN，未完成最终答案、整题审查和同文本绑定。Issue #128 的线上两臂均为 **NOT_RUN**。这些结果不支持数学能力提升结论；详见 [readiness-31 记录](docs/evals/provider-live-natural-20261106-readiness-31.md) 和 [文档索引](docs/README.md)。
+
+仓库提供以下工程门禁命令：
+
+```powershell
+uv run python scripts/check_fast.py
+uv run python scripts/check.py --offline
+uv run python scripts/check_showcase_release.py
+```
+
+快速门禁、离线完整检查和发布检查覆盖不同范围；通过离线门禁不等于真实 provider 验收。前端检查在 `showcase/frontend/chat-frontend/` 执行：
+
+```powershell
+npm ci --no-audit --no-fund
+npm audit --audit-level=high
+npm run check
+```
+
+当前运行结果以实际门禁输出和对应评测记录为准；本 README 不据此宣称所有门禁已通过。发布判定及验收限制见 [v0.2 发布证据](docs/evals/v0.2-release-evidence.md)，检查范围见 [工程门禁说明](docs/engineering/development-gates.md)。
+
+## 文档导航
+
+- [版本、开发阶段与能力证据索引](docs/README.md)
+- [Demo、Showcase 与 CLI 使用细节](docs/demo.md)
+- [工程门禁与最终验收入口](docs/engineering/development-gates.md)
+- [官方评分路径合并边界](docs/release-boundary.md)
+- [v0.2 发布验收记录](docs/evals/v0.2-release-evidence.md)
