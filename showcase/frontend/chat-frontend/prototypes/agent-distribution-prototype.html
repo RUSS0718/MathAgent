@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MathAgent · 子智能体分布原型</title>
+<style>
+:root{color-scheme:dark;--canvas:#111315;--panel:#191c1f;--panel-2:#202428;--panel-3:#252a2f;--line:#30363b;--line-soft:#292e32;--text:#e8ecee;--muted:#909ba2;--quiet:#68747c;--green:#53c99a;--green-bg:#17362c;--amber:#f0a744;--amber-bg:#392a18;--blue:#65aef5;--blue-bg:#1b2c3c;--violet:#aa8cff;--violet-bg:#2e2641;--red:#f27676;--red-bg:#3e2224;--shadow:0 16px 40px #0005;--font:"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--canvas);color:var(--text);font:13px/1.5 var(--font)}button,select{font:inherit}button{color:inherit;cursor:pointer}button:focus-visible,select:focus-visible{outline:2px solid var(--blue);outline-offset:2px}.page{max-width:1600px;min-height:100vh;margin:auto;padding:22px 24px 72px}.intro{display:flex;justify-content:space-between;gap:20px;align-items:end;margin:0 0 15px}.intro h1{font-size:20px;line-height:1.25;margin:0 0 5px;font-weight:650;letter-spacing:-.02em}.intro p{margin:0;color:var(--muted);font-size:12px}.eyebrow{color:#aeb8be;font-size:11px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px}.controls{display:flex;align-items:center;gap:8px;flex-shrink:0}.controls label{color:var(--muted);font-size:12px}.controls select,.controls button{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:7px 9px}.controls select{color:var(--text)}.controls button:hover{background:var(--panel-3)}.run{overflow:hidden;border:1px solid var(--line);border-radius:9px;background:var(--panel);box-shadow:var(--shadow)}.run-head{height:58px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 16px;border-bottom:1px solid var(--line)}.run-name{display:flex;align-items:center;gap:10px;min-width:0}.run-mark{width:28px;height:28px;display:grid;place-items:center;border:1px solid #45544e;border-radius:7px;background:#202b26;color:var(--green);font-weight:700}.run-name strong{font-size:13px}.run-name small{display:block;color:var(--muted);font-size:11px}.run-meta{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:11px}.status{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:11px;white-space:nowrap}.status:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--quiet)}.status.running{border-color:#496b5b;background:#1a2c23;color:#a6e6c8}.status.running:before{background:var(--green);box-shadow:0 0 7px #53c99a88}.status.done{border-color:#496b5b;background:#1a2c23;color:#a6e6c8}.status.done:before{background:var(--green)}.status.warn{border-color:#72552e;background:#30271d;color:#f1c47f}.status.warn:before{background:var(--amber)}.status.error{border-color:#744146;background:#332124;color:#ffaaaa}.status.error:before{background:var(--red)}.layout{display:grid;grid-template-columns:245px minmax(340px,1fr) 440px;min-height:690px}.ledger{padding:16px 14px;background:#171a1c;border-right:1px solid var(--line);min-width:0}.section-title{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px}.section-title h2,.board-head h2{font-size:12px;margin:0;font-weight:650}.section-title small,.board-head small{color:var(--muted);font-size:10px}.progress-wrap{padding:11px 11px 12px;margin-bottom:16px;background:var(--panel-2);border:1px solid var(--line-soft);border-radius:7px}.progress-label{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;font-size:11px}.progress-label strong{font-size:12px}.progress{height:5px;border-radius:10px;background:#343a3e;overflow:hidden}.progress span{display:block;height:100%;background:var(--green);border-radius:inherit;transition:width .2s}.progress-wrap small{display:block;color:var(--muted);font-size:10px;margin-top:7px}.obligation-list{display:grid;gap:5px}.ledger-row{width:100%;display:grid;grid-template-columns:23px minmax(0,1fr) auto;gap:7px;align-items:start;text-align:left;padding:9px 8px;background:transparent;border:1px solid transparent;border-radius:6px}.ledger-row:hover,.ledger-row.selected{background:var(--panel-2);border-color:var(--line)}.ledger-index{width:20px;height:20px;display:grid;place-items:center;border:1px solid #495158;border-radius:5px;color:var(--muted);font-size:9px;font-weight:650}.ledger-row.done .ledger-index{color:var(--green);border-color:#35634f;background:#1b3027}.ledger-row.pending .ledger-index{color:var(--amber);border-color:#72552e;background:#30271d}.ledger-row.blocked .ledger-index,.ledger-row.unknown .ledger-index{color:var(--red);border-color:#744146;background:#332124}.ledger-copy{min-width:0}.ledger-copy strong{display:block;font-size:11px;font-weight:550;line-height:1.4}.ledger-copy small{display:block;margin-top:3px;color:var(--muted);font-size:10px;line-height:1.35}.ledger-state{font-size:9px;color:var(--muted);white-space:nowrap;padding-top:2px}.ledger-hint{margin-top:14px;padding:10px;border-top:1px solid var(--line-soft);color:var(--muted);font-size:10px;line-height:1.55}
+/* Chat and public artifacts */
+.chat{display:grid;grid-template-rows:auto 1fr auto;min-width:0;background:#141618}.chat-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line-soft)}.chat-head strong{font-size:12px}.chat-head small{display:block;color:var(--muted);font-size:10px;margin-top:2px}.quiet-button{padding:5px 8px;background:transparent;border:1px solid var(--line);border-radius:5px;color:var(--muted);font-size:10px}.quiet-button:hover{background:var(--panel-2);color:var(--text)}.chat-flow{display:grid;align-content:start;gap:13px;padding:18px;overflow:auto}.message{max-width:780px;padding:12px 13px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}.message.user{margin-left:auto;background:#202529}.message-head{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:10px;margin-bottom:6px}.message-head strong{color:#cbd2d6;font-weight:600}.message p{margin:0;white-space:pre-wrap;font-size:12px;line-height:1.65}.artifact{padding:12px 13px;border:1px solid #345544;border-left:3px solid var(--green);border-radius:7px;background:#18241e}.artifact h3{margin:0 0 5px;font-size:11px}.artifact p{margin:0;color:#c4d7cd;font-size:11px;line-height:1.55}.artifact-meta{display:flex;gap:12px;margin-top:9px;color:var(--muted);font-size:9px}.notice{padding:10px 11px;border:1px solid var(--line-soft);border-radius:6px;color:#bbc3c8;background:#191d20;font-size:10px;line-height:1.55}.notice.warn{border-color:#5b482d;background:#272219;color:#ebca91}.notice.error{border-color:#624044;background:#2c2022;color:#f1b3b3}.composer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-top:1px solid var(--line-soft);color:var(--muted);font-size:10px}.composer-actions{display:flex;gap:7px}.primary,.secondary{border:1px solid var(--line);border-radius:5px;padding:6px 9px;background:var(--panel-2);font-size:10px}.primary{background:#24543f;border-color:#357353;color:#d5f4e3}.primary:hover{background:#2e684e}.secondary:hover{background:var(--panel-3)}
+/* Shared distribution board */
+.board{display:grid;grid-template-rows:auto auto minmax(280px,1fr) auto;border-left:1px solid var(--line);background:#17191c;min-width:0}.board-head{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:13px 14px 11px;border-bottom:1px solid var(--line-soft)}.board-title{display:flex;align-items:center;gap:8px}.board-icon{width:22px;height:22px;display:grid;place-items:center;border-radius:5px;background:#24292d;color:#aab4ba;font-size:11px}.board-count{color:var(--muted);font-size:10px;white-space:nowrap}.view-tabs{display:flex;gap:3px;padding:8px 10px;border-bottom:1px solid var(--line-soft)}.view-tab{padding:6px 9px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--muted);font-size:10px}.view-tab:hover{color:var(--text);background:var(--panel-2)}.view-tab[aria-pressed="true"]{color:#e5ebee;border-color:#3b444a;background:#262c31}.view-content{padding:9px 10px;overflow:auto;min-height:0}.tree{display:grid;gap:4px}.tree-group{border:1px solid transparent;border-radius:6px}.tree-group.open{background:#1c2023;border-color:#2b3135}.tree-parent{width:100%;display:grid;grid-template-columns:16px 1fr auto;align-items:center;gap:8px;padding:8px 8px;text-align:left;border:0;border-radius:5px;background:transparent}.tree-parent:hover{background:#24292d}.chevron{width:14px;color:#87939a;font-size:10px;transition:transform .15s}.tree-group.open .chevron{transform:rotate(90deg)}.node-title{min-width:0}.node-title strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:550}.node-title small{display:block;margin-top:2px;color:var(--muted);font-size:9px}.node-meta{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:9px;white-space:nowrap}.tree-children{display:grid;gap:3px;padding:0 7px 7px 31px}.connector{position:relative}.connector:before{content:"";position:absolute;left:-13px;top:-7px;bottom:15px;border-left:1px solid #3a4247}.unit-row{position:relative;width:100%;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:7px 8px;border:1px solid transparent;border-radius:5px;background:#202428;text-align:left}.unit-row:before{content:"";position:absolute;left:-13px;top:50%;width:11px;border-top:1px solid #3a4247}.unit-row:hover,.unit-row.selected{border-color:#43515a;background:#272d32}.unit-row strong{display:block;font-size:10px;font-weight:550}.unit-row small{display:block;margin-top:2px;color:var(--muted);font-size:9px}.unit-status{color:var(--muted);font-size:9px;white-space:nowrap}.agent-chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}.agent-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:4px;padding:2px 5px;background:#252a2f;color:#c5cdd2;font-size:9px}.agent-chip:hover{border-color:#58666e;background:#2c3338}.avatar{width:14px;height:14px;display:grid;place-items:center;border-radius:4px;font-size:8px;font-weight:700}.avatar.planner{background:var(--amber-bg);color:var(--amber)}.avatar.explore{background:var(--green-bg);color:var(--green)}.avatar.reasoner{background:var(--blue-bg);color:var(--blue)}.avatar.verifier{background:var(--violet-bg);color:var(--violet)}.avatar.final{background:#3b292d;color:#fa9aaa}.mini-status{display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-size:9px}.mini-status:before{content:"";width:5px;height:5px;border-radius:50%;background:var(--quiet)}.mini-status.active:before{background:var(--amber);box-shadow:0 0 6px #f0a74477}.mini-status.done:before{background:var(--green)}.mini-status.blocked:before,.mini-status.unknown:before,.mini-status.failed:before{background:var(--red)}.mini-status.queued:before{background:#75818a}.empty-state{padding:24px 14px;color:var(--muted);text-align:center;font-size:11px}
+/* Agent-centric view */
+.agent-group{border:1px solid var(--line-soft);border-radius:6px;background:#1c2023;overflow:hidden}.agent-head{width:100%;display:grid;grid-template-columns:25px minmax(0,1fr) auto 15px;align-items:center;gap:7px;padding:8px;text-align:left;border:0;background:transparent}.agent-head:hover{background:#24292d}.agent-avatar{width:24px;height:24px;display:grid;place-items:center;border-radius:6px;font-size:9px;font-weight:750}.agent-avatar.planner{background:var(--amber-bg);color:var(--amber)}.agent-avatar.explore{background:var(--green-bg);color:var(--green)}.agent-avatar.reasoner{background:var(--blue-bg);color:var(--blue)}.agent-avatar.verifier{background:var(--violet-bg);color:var(--violet)}.agent-avatar.final{background:#3b292d;color:#fa9aaa}.agent-name strong{display:block;font-size:10px;font-weight:600}.agent-name small{display:block;color:var(--muted);font-size:9px}.agent-body{display:grid;gap:3px;padding:0 8px 8px 40px}.agent-unit{width:100%;padding:6px 7px;border:1px solid transparent;border-radius:5px;background:#24292d;text-align:left}.agent-unit:hover,.agent-unit.selected{border-color:#455159;background:#2a3035}.agent-unit strong{display:block;font-size:9px;font-weight:550}.agent-unit small{display:block;color:var(--muted);font-size:9px;margin-top:2px}
+/* Inspector */
+.inspector{padding:10px 12px 12px;border-top:1px solid var(--line);background:#1b1e21;min-height:115px}.inspector-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:7px}.inspector-head strong{font-size:10px}.inspector p{margin:0;color:#b7c0c5;font-size:10px;line-height:1.5}.inspector-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}.inspector-tag{padding:3px 6px;border:1px solid var(--line);border-radius:4px;color:#c4cdd2;font-size:9px;background:#24292d}.inspector-artifact{margin-top:7px;color:#8bc9aa;font-size:9px}
+.footnote{max-width:1600px;margin:9px auto 0;color:var(--muted);font-size:10px}
+@media(max-width:1100px){.page{padding:16px 12px 56px}.layout{grid-template-columns:220px minmax(0,1fr)}.board{grid-column:1/-1;grid-template-rows:auto auto minmax(300px,auto) auto;border-left:0;border-top:1px solid var(--line)}.view-content{max-height:480px}.intro{align-items:start;flex-direction:column}.controls{flex-wrap:wrap}}
+@media(max-width:650px){.layout{grid-template-columns:1fr}.ledger{border-right:0;border-bottom:1px solid var(--line)}.chat{min-height:520px}.board{grid-column:auto}.run-head{height:auto;min-height:58px;align-items:flex-start;padding:11px;flex-direction:column}.run-meta{width:100%;justify-content:space-between;flex-wrap:wrap}.composer{align-items:flex-start;flex-direction:column}.composer-actions{width:100%}.composer-actions button{flex:1}.controls label{display:grid;gap:4px}.controls{width:100%}.controls select{max-width:210px}}
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="intro">
+    <div>
+      <div class="eyebrow">Wayfinder #138 · 可交互原型</div>
+      <h1>同一个数学 Run，三种子智能体分布视图</h1>
+      <p>用树形任务节点展开子智能体，并按义务、智能体或时间线检查同一份运行快照。所有内容均为脱敏示例，不连接真实模型。</p>
+    </div>
+    <div class="controls">
+      <label for="scenario">运行场景</label>
+      <select id="scenario" aria-label="运行场景">
+        <option value="normal">正常并行推进</option>
+        <option value="rollback">依赖失效与局部重审</option>
+        <option value="reconnect">断线后恢复观察</option>
+        <option value="unknown">上游结果未知</option>
+        <option value="style-fail">派生报告失败</option>
+        <option value="expired">Run 到期后读取</option>
+      </select>
+      <button id="reset" type="button">重置</button>
+      <button id="advance" type="button">推进一步</button>
+    </div>
+  </header>
+
+  <section class="run" aria-label="MathAgent 运行工作区">
+    <header class="run-head">
+      <div class="run-name">
+        <span class="run-mark" aria-hidden="true">M</span>
+        <div><strong>求范围内正整数解并证明完备性</strong><small>Run MA-081 · Revision 7 · 计划 P2</small></div>
+      </div>
+      <div class="run-meta"><span id="runStatus" class="status running">数学推理中</span><span>7 个工作块</span><span id="agentCount">5 个子智能体</span><span>仅公开摘要</span></div>
+    </header>
+
+    <div class="layout">
+      <aside class="ledger" aria-label="根义务台账">
+        <div class="section-title"><h2>题目义务</h2><small>根义务进度</small></div>
+        <div class="progress-wrap">
+          <div class="progress-label"><span>已审查满足</span><strong id="progressCount">3 / 4</strong></div>
+          <div class="progress" role="progressbar" aria-label="根义务完成进度" aria-valuemin="0" aria-valuemax="4" aria-valuenow="3"><span id="progressBar" style="width:75%"></span></div>
+          <small>辅助工作块可关联多条义务，但不重复计数。</small>
+        </div>
+        <div class="section-title"><h2>原题交付要求</h2><small id="coveredLabel">3 项有证据</small></div>
+        <div id="ledgerRows" class="obligation-list"></div>
+        <div class="ledger-hint">选择一项义务，可在右侧切换到“按义务”视图，查看支撑它的工作块与子智能体。</div>
+      </aside>
+
+      <section class="chat" aria-label="聊天与公开产物">
+        <header class="chat-head"><div><strong>运行对话</strong><small>公开过程摘要 · 不展示隐藏推理</small></div><button class="quiet-button" id="showRun" type="button">运行详情</button></header>
+        <div class="chat-flow" id="chatFlow"></div>
+        <footer class="composer"><span id="notice">正在完成最后一项输出义务；数学证据进度独立于子智能体数量。</span><div class="composer-actions"><button class="secondary" id="showEvidence" type="button">查看关联证据</button><button class="primary" id="nextAction" type="button">查看下一步</button></div></footer>
+      </section>
+
+      <section class="board" aria-label="子智能体工作分布">
+        <header class="board-head">
+          <div class="board-title"><span class="board-icon" aria-hidden="true">⌘</span><div><h2>工作流 · 子智能体</h2><small id="boardSubtitle">点击工作节点，展开相关子智能体</small></div></div>
+          <span class="board-count" id="boardCount">1 个正在运行</span>
+        </header>
+        <nav class="view-tabs" aria-label="子智能体分布视图">
+          <button class="view-tab" type="button" data-view="obligations" aria-pressed="false">按义务</button>
+          <button class="view-tab" type="button" data-view="agents" aria-pressed="true">按子智能体</button>
+          <button class="view-tab" type="button" data-view="timeline" aria-pressed="false">时间线</button>
+        </nav>
+        <div id="viewContent" class="view-content" aria-live="polite"></div>
+        <aside class="inspector" id="inspector" aria-label="选中节点详情"></aside>
+      </section>
+    </div>
+  </section>
+  <p class="footnote">视图只改变同一份状态快照的组织方式。根义务覆盖数始终由可审查证据计算；派发、重试、恢复和辅助工作块都不会额外增加进度。</p>
+</main>
+
+<script>
+const obligationSeed=[
+  {id:"O1",title:"范围内解列表",status:"done",evidence:"候选解集合 C-01 · 已核验"},
+  {id:"O2",title:"解的完整性证明",status:"done",evidence:"递推归纳证明 P-04 · 已核验"},
+  {id:"O3",title:"指定整除子集",status:"done",evidence:"整除分类表 D-02 · 已核验"},
+  {id:"O4",title:"按约定格式输出",status:"pending",evidence:"等待原始答案绑定"}
+];
+const agentSeed=[
+  {id:"planner",name:"Planner",label:"计划者",kind:"planner",initials:"PL",status:"done",summary:"冻结计划 P2，拆分 7 个可调度工作块"},
+  {id:"explore-71",name:"Explore-71",label:"探索者",kind:"explore",initials:"EX",status:"done",summary:"枚举候选解并生成整除分类线索"},
+  {id:"reasoner-71",name:"Reasoner-71",label:"推理者",kind:"reasoner",initials:"R1",status:"done",summary:"构造递推关系与归纳证明草案"},
+  {id:"verifier-71",name:"Verifier-71",label:"步骤核验者",kind:"verifier",initials:"V1",status:"done",summary:"核对定义域、归纳步与筛选结论"},
+  {id:"final-71",name:"Final-71",label:"答案生成者",kind:"final",initials:"F1",status:"active",summary:"将已核验成果绑定到原始答案文本"},
+  {id:"final-72",name:"Final-72",label:"格式检查者",kind:"final",initials:"F2",status:"queued",summary:"检查 JSON 字段与最终交付格式"}
+];
+const unitSeed=[
+  {id:"WU-01",title:"冻结计划并拆分工作",detail:"将原题要求映射到根义务",status:"done",agentIds:["planner"],obligationIds:["O1","O2","O3","O4"],artifact:"计划 P2"},
+  {id:"WU-02",title:"枚举范围内候选解",detail:"保留可复核的候选集合",status:"done",agentIds:["explore-71","reasoner-71"],obligationIds:["O1"],artifact:"候选解集合 C-01"},
+  {id:"WU-03",title:"证明候选集合无遗漏",detail:"递推关系与归纳步检查",status:"done",agentIds:["reasoner-71","verifier-71"],obligationIds:["O1","O2"],artifact:"完整性证明 P-04"},
+  {id:"WU-04",title:"筛选指定整除子集",detail:"逐项核对余数分类",status:"done",agentIds:["explore-71","verifier-71"],obligationIds:["O3"],artifact:"整除分类表 D-02"},
+  {id:"WU-05",title:"合并可审查成果",detail:"按根义务顺序组合答案片段",status:"active",agentIds:["final-71","final-72"],obligationIds:["O4"],artifact:"答案草稿 A-07"},
+  {id:"WU-06",title:"核对输出格式",detail:"验证 JSON 可解析且字段齐全",status:"queued",agentIds:["final-72"],obligationIds:["O4"],artifact:"尚未生成"}
+];
+const eventSeed=[
+  {time:"13:04:12",title:"计划 P2 已冻结",detail:"Planner 派发 7 个工作块；根义务数固定为 4。",kind:"done",entityType:"agent",entityId:"planner"},
+  {time:"13:05:31",title:"候选解集合已提交",detail:"Explore-71 提交 C-01，关联 O1。",kind:"done",entityType:"unit",entityId:"WU-02"},
+  {time:"13:07:08",title:"完整性证明通过局部核验",detail:"Verifier-71 核对递推、定义域和归纳步，关联 O1、O2。",kind:"done",entityType:"unit",entityId:"WU-03"},
+  {time:"13:08:44",title:"整除分类表已提交",detail:"D-02 支持 O3；没有增加根义务计数。",kind:"done",entityType:"unit",entityId:"WU-04"},
+  {time:"13:10:02",title:"原始答案整理中",detail:"Final-71 与 Final-72 正在处理 O4。",kind:"active",entityType:"unit",entityId:"WU-05"}
+];
+const scenarioNotes={
+  normal:"3/4 项根义务已有可审查证据；答案生成和格式检查正在并行处理最后一项。",
+  rollback:"假设 H1 被撤回，完整性义务回退；只重开依赖它的工作块，无关成果保留。",
+  reconnect:"浏览器恢复到同一个 Run revision；读取权威快照，没有创建新的求解调用。",
+  unknown:"上游回包未知，不将它算作失败或新证据；保持待复核，不自动重发。",
+  "style-fail":"整题审查通过、原始答案已绑定；派生报告生成失败不影响答案交付。",
+  expired:"Run 到期后仍可读取已绑定原始答案；不会因整理动作偷偷重新求解。"
+};
+let scenario="normal",view="agents",expanded={obligations:"O2",agents:"final-71"},selected={type:"agent",id:"final-71"},state;
+function clone(value){return JSON.parse(JSON.stringify(value))}
+function baseState(){return{obligations:clone(obligationSeed),agents:clone(agentSeed),units:clone(unitSeed),events:clone(eventSeed),status:"running",statusText:"数学推理中",notice:scenarioNotes.normal,answer:"范围内候选解、完整性证明和指定整除子集均已通过对应核验。答案正在绑定最后一项输出要求，完成后还会进行独立整题审查。",artifactTitle:"当前公开产物",artifact:"答案草稿 A-07 · 含已核验的解列表、完整性证明与整除子集。",step:0}}
+function setScenario(name){scenario=name;state=baseState();
+  expanded={obligations:"O2",agents:"final-71"};selected={type:"agent",id:"final-71"};
+  if(name==="rollback"){
+    state.obligations[1]={id:"O2",title:"解的完整性证明",status:"blocked",evidence:"依赖假设 H1 已撤回 · 需重审"};
+    state.obligations[3].status="pending";state.obligations[3].evidence="等待受影响证明恢复";
+    state.units[2].status="blocked";state.units[4].status="queued";state.units[5].status="queued";
+    state.agents.find(x=>x.id==="reasoner-71").status="blocked";state.agents.find(x=>x.id==="verifier-71").status="blocked";state.agents.find(x=>x.id==="final-71").status="queued";state.agents.find(x=>x.id==="final-72").status="queued";
+    state.events=[{time:"13:09:18",title:"Verifier 发现依赖失效",detail:"H1 与原题定义域不一致，撤销关联证明的有效性。",kind:"error",entityType:"unit",entityId:"WU-03"},{time:"13:09:20",title:"局部义务回退",detail:"O2 回到待重审；O1、O3 的有效证据保留。",kind:"active",entityType:"obligation",entityId:"O2"}];
+    state.status="error";state.statusText="需要局部重审";state.notice="完整性证明依赖的 H1 已撤回。已阻止相同动作原样重复，等待局部修复或替代路线。";state.answer="O2 的证据已失效并回退；仍保留 O1、O3 的已审查证据。最终答案暂不绑定。";state.artifactTitle="证据失效通知";state.artifact="H1 已撤回；完整性证明 P-04 不再作为有效证据。";expanded={obligations:"O2",agents:"reasoner-71"};selected={type:"obligation",id:"O2"};
+  }else if(name==="reconnect"){
+    state.events.push({time:"13:11:10",title:"浏览器已恢复观察",detail:"补齐事件并读取同一 Job 的 revision 7；本次新增求解调用为 0。",kind:"active",entityType:"event",entityId:"reconnect"});
+    state.status="running";state.statusText="已恢复观察";state.notice="已连接到同一个 Run。可继续查看当前子智能体与持久化产物。";state.answer="重连已恢复对同一 Run 的观察；已有进度与答案草稿保持不变。";expanded={obligations:"O4",agents:"final-71"};selected={type:"event",id:"reconnect"};
+  }else if(name==="unknown"){
+    state.obligations[1].status="pending";state.obligations[1].evidence="等待未知调用的显式复核";state.obligations[2].status="pending";state.obligations[2].evidence="尚无可审查证据";state.obligations[3].status="pending";
+    state.units[2].status="unknown";state.units[3].status="queued";state.units[4].status="queued";state.units[5].status="queued";
+    state.agents.find(x=>x.id==="reasoner-71").status="unknown";state.agents.find(x=>x.id==="verifier-71").status="queued";state.agents.find(x=>x.id==="final-71").status="queued";state.agents.find(x=>x.id==="final-72").status="queued";
+    state.events=[{time:"13:06:44",title:"Reasoner 请求回包未知",detail:"无法确认上游是否完成；保留原 attempt 与调用身份。",kind:"error",entityType:"unit",entityId:"WU-03"},{time:"13:06:45",title:"控制器未自动重发",detail:"未知结果不视为新证据；需用户显式决定是否创建新调用身份。",kind:"active",entityType:"agent",entityId:"reasoner-71"}];
+    state.status="error";state.statusText="待复核";state.notice="上游响应无法证实；原调用身份和预留状态仍保留，系统没有自动重发。";state.answer="完整性证明尚未确认为完成。可以查看既有证据，或显式决定是否创建新的调用身份。";state.artifactTitle="待复核记录";state.artifact="unknown_outcome · 未计入义务进度，也未标成失败。";expanded={obligations:"O2",agents:"reasoner-71"};selected={type:"unit",id:"WU-03"};
+  }else if(name==="style-fail"||name==="expired"){
+    state.obligations.forEach(x=>{x.status="done";x.evidence="已审查满足 · answer@7"});
+    state.units.forEach(x=>x.status="done");state.agents.forEach(x=>x.status="done");
+    state.units.push({id:"WU-07",title:name==="style-fail"?"生成派生报告":"读取既有答案",detail:name==="style-fail"?"报告样式转换失败，不影响原始答案":"Run 已过期，只读取已持久化产物",status:name==="style-fail"?"failed":"done",agentIds:["final-72"],obligationIds:[],artifact:name==="style-fail"?"无派生产物":"answer@7 可读取"});
+    state.events=[{time:"13:06:44",title:"独立整题审查通过",detail:"完整原题、根义务证据与实际答案文本已一起核验。",kind:"done",entityType:"obligation",entityId:"O4"},{time:"13:07:02",title:"原始答案绑定 answer@7",detail:"答案可独立交付，和后续报告整理分离。",kind:"done",entityType:"unit",entityId:"WU-05"},{time:name==="style-fail"?"13:07:18":"13:12:00",title:name==="style-fail"?"派生报告生成失败":"Run 已到期",detail:name==="style-fail"?"原始答案仍可交付；整理失败不触发重新求解。":"允许读取已持久化的 answer@7，不创建新求解调用。",kind:"active",entityType:"unit",entityId:"WU-07"}];
+    state.status=name==="style-fail"?"warn":"done";state.statusText=name==="style-fail"?"答案已完成 · 报告失败":"已完成 · Run 已到期";state.notice=name==="style-fail"?"原始答案已通过整题审查并绑定；报告样式生成失败，不影响原答案交付。":"Run 已到期；可读取原始答案，当前不重新启动求解。";state.answer=name==="style-fail"?"原始答案 answer@7 已完成整题审查并可交付。报告样式失败，但不会改变这份答案。":"已从原 Run 读取经整题审查的原始答案 answer@7。";state.artifactTitle="原始已审查答案";state.artifact="answer@7 · 已绑定 · 可复制或下载";expanded={obligations:"O4",agents:"final-72"};selected={type:"unit",id:"WU-07"};
+  }
+  render();
+}
+function esc(value){return String(value).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
+function statusText(value){return({done:"已完成",active:"进行中",queued:"待开始",blocked:"需重审",unknown:"结果未知",failed:"失败",pending:"待处理"})[value]||value}
+function statusClass(value){return value==="done"?"done":value==="active"?"active":value==="blocked"?"blocked":value==="unknown"?"unknown":value==="failed"?"failed":"queued"}
+function statusBadgeClass(){return state.status==="running"?"running":state.status==="done"?"done":state.status==="warn"?"warn":"error"}
+function doneCount(){return state.obligations.filter(x=>x.status==="done").length}
+function getAgent(id){return state.agents.find(x=>x.id===id)}
+function getUnit(id){return state.units.find(x=>x.id===id)}
+function getObligation(id){return state.obligations.find(x=>x.id===id)}
+function linkedUnits(obligationId){return state.units.filter(x=>x.obligationIds.includes(obligationId))}
+function agentUnits(agentId){return state.units.filter(x=>x.agentIds.includes(agentId))}
+function statusLabel(status){return '<span class="mini-status '+statusClass(status)+'">'+esc(statusText(status))+'</span>'}
+function renderLedger(){
+  const holder=document.getElementById("ledgerRows");
+  holder.innerHTML=state.obligations.map(function(item){return '<button type="button" class="ledger-row '+esc(item.status)+(selected.type==="obligation"&&selected.id===item.id?" selected":"")+'" data-obligation="'+esc(item.id)+'" aria-label="'+esc(item.title+"，"+statusText(item.status))+'"><span class="ledger-index">'+esc(item.id)+'</span><span class="ledger-copy"><strong>'+esc(item.title)+'</strong><small>'+esc(item.evidence)+'</small></span><span class="ledger-state">'+esc(statusText(item.status))+'</span></button>'}).join("");
+  const n=doneCount();document.getElementById("progressCount").textContent=n+" / "+state.obligations.length;document.getElementById("coveredLabel").textContent=n+" 项有证据";
+  const bar=document.getElementById("progressBar");bar.style.width=(n/state.obligations.length*100)+"%";bar.parentElement.setAttribute("aria-valuenow",String(n));
+}
+function renderChat(){
+  const flow=document.getElementById("chatFlow");
+  const noticeClass=state.status==="error"?"error":state.status==="warn"?"warn":"";
+  flow.innerHTML='<div class="message user"><div class="message-head"><strong>用户题目</strong><span>原题已绑定</span></div><p>求范围内全部正整数解，证明没有遗漏，标记指定整除子集，并按约定格式输出。</p></div><div class="notice '+noticeClass+'">'+esc(state.notice)+'</div><div class="message"><div class="message-head"><strong>MathAgent · 公开摘要</strong><span>'+esc(state.statusText)+'</span></div><p>'+esc(state.answer)+'</p></div><div class="artifact"><h3>'+esc(state.artifactTitle)+'</h3><p>'+esc(state.artifact)+'</p><div class="artifact-meta"><span>公开产物</span><span>来源身份已绑定</span><span>进度按根义务计算</span></div></div>';
+  document.getElementById("notice").textContent=state.notice;
+  document.getElementById("runStatus").className="status "+statusBadgeClass();document.getElementById("runStatus").textContent=state.statusText;
+}
+function renderObligationView(){
+  document.getElementById("boardSubtitle").textContent="展开一项根义务，查看关联工作块与执行者";
+  return '<div class="tree">'+state.obligations.map(function(ob){const isOpen=expanded.obligations===ob.id;const units=linkedUnits(ob.id);return '<section class="tree-group '+(isOpen?"open":"")+'"><button type="button" class="tree-parent" data-expand-obligation="'+esc(ob.id)+'" aria-expanded="'+String(isOpen)+'"><span class="chevron">›</span><span class="node-title"><strong>'+esc(ob.title)+'</strong><small>'+esc(ob.id)+' · '+esc(ob.evidence)+'</small></span><span class="node-meta">'+esc(statusText(ob.status))+' · '+units.length+' 块</span></button>'+(isOpen?'<div class="tree-children">'+(units.length?units.map(renderUnitRow).join(""):'<div class="empty-state">尚无关联工作块</div>')+'</div>':'')+'</section>'}).join("")+'</div>';
+}
+function renderUnitRow(unit){
+  const isSelected=selected.type==="unit"&&selected.id===unit.id;
+  const chips=unit.agentIds.map(function(id){const a=getAgent(id);return a?'<button class="agent-chip" type="button" data-agent="'+esc(a.id)+'" aria-label="查看 '+esc(a.name)+'"><span class="avatar '+a.kind+'">'+esc(a.initials)+'</span>'+esc(a.name)+'</button>':""}).join("");
+  return '<div class="connector"><div class="unit-entry"><button class="unit-row '+(isSelected?"selected":"")+'" type="button" data-unit="'+esc(unit.id)+'"><span><strong>'+esc(unit.title)+'</strong><small>'+esc(unit.id)+' · '+unit.obligationIds.map(esc).join("、")+'</small></span><span class="unit-status">'+statusLabel(unit.status)+'</span></button><div class="agent-chips">'+chips+'</div></div></div>';
+}
+function renderAgentView(){
+  document.getElementById("boardSubtitle").textContent="按执行者分组；展开后可见工作块、义务与产物";
+  const grouped=state.agents.map(function(agent){const units=agentUnits(agent.id);const isOpen=expanded.agents===agent.id;return '<section class="agent-group"><button class="agent-head" type="button" data-expand-agent="'+esc(agent.id)+'" aria-expanded="'+String(isOpen)+'"><span class="agent-avatar '+agent.kind+'">'+esc(agent.initials)+'</span><span class="agent-name"><strong>'+esc(agent.name)+' <span style="font-weight:400;color:var(--muted)">· '+esc(agent.label)+'</span></strong><small>'+esc(agent.summary)+'</small></span>'+statusLabel(agent.status)+'<span class="chevron">'+(isOpen?"⌄":"›")+'</span></button>'+(isOpen?'<div class="agent-body">'+(units.length?units.map(function(u){return '<button class="agent-unit '+(selected.type==="unit"&&selected.id===u.id?"selected":"")+'" type="button" data-unit="'+esc(u.id)+'"><strong>'+esc(u.title)+'</strong><small>'+esc(u.id)+' · '+u.obligationIds.map(esc).join("、")+' · '+esc(statusText(u.status))+'</small></button>'}).join(""):'<div class="empty-state">当前没有关联工作块</div>')+'</div>':'')+'</section>'}).join("");
+  return '<div class="tree">'+grouped+'</div>';
+}
+function renderTimelineView(){
+  document.getElementById("boardSubtitle").textContent="按派发、执行、回执与恢复顺序查看事件";
+  return '<div class="tree">'+state.events.map(function(ev,i){const entity=ev.entityType==="unit"?getUnit(ev.entityId):ev.entityType==="agent"?getAgent(ev.entityId):ev.entityType==="obligation"?getObligation(ev.entityId):null;const isSelected=selected.type==="event"&&selected.id===ev.entityId;return '<button type="button" class="unit-row '+(isSelected?"selected":"")+'" data-event="'+esc(ev.entityId)+'" data-event-index="'+i+'"><span><strong>'+esc(ev.title)+'</strong><small>'+esc(ev.time)+' · '+esc(ev.detail)+(entity?" · "+esc(entity.id||entity.name):"")+'</small></span><span>'+statusLabel(ev.kind==="active"?"active":ev.kind==="error"?"failed":"done")+'</span></button>'}).join("")+'</div>';
+}
+function renderView(){const target=document.getElementById("viewContent");document.querySelectorAll("[data-view]").forEach(function(button){button.setAttribute("aria-pressed",String(button.dataset.view===view))});target.innerHTML=view==="obligations"?renderObligationView():view==="agents"?renderAgentView():renderTimelineView();bindViewEvents();}
+function renderInspector(){
+  const box=document.getElementById("inspector");let title="运行概览",description="按义务、子智能体或时间线查看同一份状态。选择节点可检查关联对象与公开产物。",tags=[],artifact="";
+  if(selected.type==="agent"){const a=getAgent(selected.id);if(a){const units=agentUnits(a.id);const obligations=Array.from(new Set(units.flatMap(function(u){return u.obligationIds})));title=a.name+" · "+a.label;description=a.summary+"。关联 "+units.length+" 个工作块。";tags=obligations.map(function(id){const o=getObligation(id);return o?id+" "+o.title:id});artifact=units.map(function(u){return u.artifact}).filter(Boolean).join(" · ");}}
+  else if(selected.type==="unit"){const u=getUnit(selected.id);if(u){title=u.id+" · "+u.title;description=u.detail+"。状态："+statusText(u.status)+"。";tags=u.obligationIds.map(function(id){const o=getObligation(id);return o?id+" "+o.title:id});artifact=u.artifact;}}
+  else if(selected.type==="obligation"){const o=getObligation(selected.id);if(o){title=o.id+" · "+o.title;description=o.evidence+"。关联 "+linkedUnits(o.id).length+" 个工作块；根义务仅计数一次。";tags=linkedUnits(o.id).map(function(u){return u.id+" "+u.title});artifact=linkedUnits(o.id).map(function(u){return u.artifact}).filter(Boolean).join(" · ");}}
+  else if(selected.type==="event"){const ev=state.events.find(function(x){return x.entityId===selected.id});if(ev){title=ev.title;description=ev.time+" · "+ev.detail;tags=[ev.entityType==="unit"?"工作块":ev.entityType==="agent"?"子智能体":ev.entityType==="obligation"?"根义务":"运行事件"];}}
+  box.innerHTML='<div class="inspector-head"><strong>'+esc(title)+'</strong><span>'+((selected.type==="agent"&&getAgent(selected.id))?statusLabel(getAgent(selected.id).status):"")+'</span></div><p>'+esc(description)+'</p>'+(tags.length?'<div class="inspector-tags">'+tags.map(function(tag){return '<span class="inspector-tag">'+esc(tag)+'</span>'}).join("")+'</div>':'')+(artifact?'<div class="inspector-artifact">公开产物：'+esc(artifact)+'</div>':"");
+}
+function renderCounts(){const active=state.agents.filter(function(a){return a.status==="active"}).length;document.getElementById("agentCount").textContent=state.agents.length+" 个子智能体";document.getElementById("boardCount").textContent=active+" 个正在运行";}
+function render(){renderLedger();renderChat();renderView();renderInspector();renderCounts();document.getElementById("scenario").value=scenario;}
+function bindViewEvents(){
+  document.querySelectorAll("[data-expand-obligation]").forEach(function(b){b.addEventListener("click",function(){const id=b.dataset.expandObligation;expanded.obligations=expanded.obligations===id?null:id;selected={type:"obligation",id:id};renderView();renderInspector()})});
+  document.querySelectorAll("[data-expand-agent]").forEach(function(b){b.addEventListener("click",function(){const id=b.dataset.expandAgent;expanded.agents=expanded.agents===id?null:id;selected={type:"agent",id:id};renderView();renderInspector()})});
+  document.querySelectorAll("[data-unit]").forEach(function(b){b.addEventListener("click",function(){selected={type:"unit",id:b.dataset.unit};renderView();renderInspector()})});
+  document.querySelectorAll("[data-agent]").forEach(function(b){b.addEventListener("click",function(e){e.stopPropagation();selected={type:"agent",id:b.dataset.agent};view="agents";expanded.agents=b.dataset.agent;renderView();renderInspector()})});
+  document.querySelectorAll("[data-event]").forEach(function(b){b.addEventListener("click",function(){selected={type:"event",id:b.dataset.event};renderView();renderInspector()})});
+}
+function bindStaticEvents(){
+  document.getElementById("scenario").addEventListener("change",function(e){setScenario(e.target.value)});
+  document.getElementById("reset").addEventListener("click",function(){setScenario(scenario)});
+  document.querySelectorAll("[data-view]").forEach(function(button){button.addEventListener("click",function(){view=button.dataset.view;renderView();renderInspector()})});
+  document.addEventListener("click",function(event){const button=event.target.closest("[data-obligation]");if(!button)return;const id=button.dataset.obligation;view="obligations";expanded.obligations=id;selected={type:"obligation",id:id};renderView();renderInspector();renderLedger()});
+  document.getElementById("advance").addEventListener("click",advance);
+  document.getElementById("showRun").addEventListener("click",function(){view="timeline";selected={type:"event",id:state.events[state.events.length-1].entityId};renderView();renderInspector()});
+  document.getElementById("showEvidence").addEventListener("click",function(){view="obligations";expanded.obligations=selected.type==="obligation"?selected.id:"O4";renderView();renderInspector()});
+  document.getElementById("nextAction").addEventListener("click",function(){document.getElementById("notice").textContent=scenario==="unknown"?"未知调用仍需显式复核；没有自动创建新调用。":scenario==="rollback"?"选择局部修复或替代路线；未重复执行已阻断的动作。":scenario==="expired"?"只读取 answer@7；没有重新启动求解。":scenario==="style-fail"?"原始答案保持可交付；可以单独重试派生整理。":"已打开当前活动工作块；查看右侧执行者与关联义务。";});
+}
+function advance(){
+  if(scenario!=="normal"){document.getElementById("notice").textContent="此场景的状态固定用于观察；选择“正常并行推进”后可逐步模拟。";return}
+  state.step++;
+  if(state.obligations[3].status!=="done"){state.obligations[3].status="done";state.obligations[3].evidence="原始答案 answer@7 · 已绑定";state.units[4].status="done";state.units[5].status="done";state.agents.find(x=>x.id==="final-71").status="done";state.agents.find(x=>x.id==="final-72").status="done";state.status="running";state.statusText="整题审查中";state.notice="4/4 根义务已有证据且收尾资源就绪；独立 Verifier 正在检查完整原题与答案文本。";state.answer="原始答案已绑定 answer@7。现在由独立整题审查核对全部根义务、跨义务假设和实际交付文本。";state.artifactTitle="原始答案已绑定";state.artifact="answer@7 · 可交付候选 · 整题审查尚未结束";state.events.push({time:"13:11:20",title:"4/4 根义务满足，进入整题审查",detail:"进度只计根义务；新增 Whole Verifier，不重复计入辅助工作。",kind:"active",entityType:"obligation",entityId:"O4"});expanded.obligations="O4";expanded.agents="final-71";selected={type:"obligation",id:"O4"};
+  }else{state.status="done";state.statusText="已完成 · 答案可交付";state.notice="独立整题审查通过，原始答案 answer@7 可交付。";state.answer="整题审查已通过，原始答案 answer@7 已绑定并可交付。";state.events.push({time:"13:12:04",title:"整题审查通过并绑定答案",detail:"Whole Verifier 核对完整原题和答案文本，Final Binding 固定 answer@7。",kind:"done",entityType:"event",entityId:"whole-review"});state.units.push({id:"WU-07",title:"整题独立审查与答案绑定",detail:"核对全题义务、跨义务假设及实际交付文本",status:"done",agentIds:["verifier-71"],obligationIds:["O1","O2","O3","O4"],artifact:"answer@7 已绑定"});expanded.obligations="O4";selected={type:"unit",id:"WU-07"};}
+  render();
+}
+bindStaticEvents();setScenario("normal");
+</script>
+</body>
+</html>
