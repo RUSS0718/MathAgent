@@ -289,6 +289,8 @@ class InternModelPort:
             )
             if response.finish_reason == "length":
                 raise _protocol_failure("truncated_response", record, response.text)
+            if response.finish_reason == "error":
+                raise _protocol_failure("provider_generation_error", record, response.text)
             if response.error_category:
                 raise InternPortError(response.error_category)
             if not response.text.strip():
@@ -359,6 +361,8 @@ class InternModelPort:
             )
             if envelope.get("finish_reason") == "length":
                 raise _protocol_failure("truncated_response", record, envelope.get("text"))
+            if envelope.get("finish_reason") == "error":
+                raise _protocol_failure("provider_generation_error", record, envelope.get("text"))
             text = envelope.get("text")
             if not isinstance(text, str) or not text.strip():
                 raise _protocol_failure("empty_response", record, text)

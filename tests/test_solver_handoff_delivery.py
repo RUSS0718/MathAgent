@@ -37,7 +37,7 @@ class HandoffDeliveryTest(unittest.TestCase):
         self.assertEqual("handoff_final_reviewed", state["result_reason"])
         self.assertEqual([], state["accepted_results"])
         self.assertEqual(["REVIEWED", "REVIEWED"], [s["status"] for s in state["steps"].values()])
-        prior = model.requests[1]["role_context"]["state"]["reviewed_drafts"]
+        prior = model.requests[1]["reviewed_drafts"]
         self.assertEqual("unproven first draft", prior[0]["report"]["argument"])
         self.assertEqual("CHALLENGE", prior[0]["review"]["verdict"])
         self.assertEqual([], model.requests[-1]["accepted_results"])

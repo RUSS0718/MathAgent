@@ -55,7 +55,10 @@ def _save(harness, run, record, *, status=None, event_type="call_audit", event_f
           state_updates=None):
     latest = harness.get_run(run["run_id"])
     updates = {"calls": {**latest["state"].get("calls", {}), record["call_id"]: redact(record)}}
-    updates.update(state_updates or {})
+    # Use the same snapshot/revision fence for the provider failure and its audit;
+    # a cancellation that committed first must keep its terminal math state.
+    if latest["state"]["phase"] != "TERMINAL" or record.get("status") != "provider_failed":
+        updates.update(state_updates or {})
     if status is not None and latest["state"]["phase"] != "TERMINAL":
         updates["status"] = status
     updated = harness._commit_event(
@@ -357,8 +360,10 @@ def dispatch(harness, run, operation, request, session_dispatch):
             # known protocol failure, not an unknown remote outcome: keep the
             # provider finish reason, known usage and a safe response reference.
             known_protocol = category in KNOWN_PROTOCOL_FAILURES
+            known_provider = category == "provider_generation_error"
             record.update(
                 status="tool_error" if getattr(exc, "tool_error", False)
+                else "provider_failed" if known_provider
                 else "protocol_failed" if known_protocol else "unknown_outcome",
                 partial_text="".join(partial),
                 usage=getattr(exc, "usage", None),
@@ -367,7 +372,16 @@ def dispatch(harness, run, operation, request, session_dispatch):
                 error_type=type(exc).__name__,
                 error_category=category,
             )
-            _save(harness, run, record, status=None if known_protocol else "interrupted")
+            provider_updates = {}
+            if known_provider:
+                provider_updates = {
+                    "phase": "TERMINAL", "status": "partial_aborted",
+                    "result_reason": category,
+                    "final_response": "No final answer is available: the provider reported a generation error.",
+                }
+            _save(harness, run, record,
+                  status=None if known_protocol or known_provider else "interrupted",
+                  state_updates=provider_updates)
             raise CallInterrupted(run["run_id"], record["call_id"]) from None
         latest = harness.get_run(run["run_id"])
         if latest["state"]["phase"] == "TERMINAL":

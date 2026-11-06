@@ -33,9 +33,24 @@ def reviewed_drafts(state):
 
 def prepare_request(run, request):
     request = {**request, "acceptance_mode": "handoff"}
+    if "session_history" in request:
+        request["session_history"] = deepcopy(request["session_history"])
     if request.get("role") in {"reasoner", "reason_noncoding", "step_verifier",
                                "final_generator", "whole_solution_verifier"}:
         request["reviewed_drafts"] = reviewed_drafts(run["state"])
+        current = request["reviewed_drafts"]
+        for exchange in request.get("session_history", []):
+            previous = exchange.get("request", {})
+            old = previous.get("reviewed_drafts")
+            if (isinstance(old, list) and old and old == current[:len(old)]
+                    and isinstance(request.get("session_key"), str) and request["session_key"]
+                    and previous.get("run_id") == run["run_id"]
+                    and previous.get("session_key") == request.get("session_key")
+                    and previous.get("acceptance_mode") == "handoff"):
+                previous.pop("reviewed_drafts")
+                previous["reviewed_drafts_prefix_ref"] = {
+                    "source": "current_request.reviewed_drafts", "length": len(old),
+                }
     return request
 
 
@@ -51,7 +66,7 @@ def delivery_check(run, answer):
         and binding["binding"] == "same_artifact"
         and binding["whole_review"] in {"accepted", "rejected"}
         and len(reviewed_drafts(state)) == len(state.get("plan", {}).get("steps", []))
-        and not any(call.get("status") in {"dispatched", "unknown_outcome"}
+        and not any(call.get("status") in {"dispatched", "unknown_outcome", "provider_failed"}
                     for call in state.get("calls", {}).values())
         and not any(receipt.get("unknown_outcome") is True
                     or (receipt.get("executed") is True

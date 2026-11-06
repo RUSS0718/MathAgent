@@ -264,7 +264,9 @@ class StarProductPipeline:
                     "request_attempts": attempts,
                     "tool_results": public_tools(math),
                     "error": None if reviewed and verification_mode != "required" else {
-                        "category": ("protocol_failure_unrepaired"
+                        "category": ("provider_generation_error"
+                                     if math.get("result_reason") == "provider_generation_error"
+                                     else "protocol_failure_unrepaired"
                                      if math.get("result_reason") == "protocol_failure_unrepaired"
                                      else "invalid_verifier_verdict"
                                      if math.get("result_reason") == "invalid_verifier_verdict"
