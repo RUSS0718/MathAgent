@@ -101,6 +101,10 @@ Python Orchestrator、Rater、APRS、Specification Checker、MemoryManager 和 E
 
 S08 首版只实现串行主路线与至多一条停滞后替代路线。完整并发 Population/APRS 是后续目标，必须在取得串行真实运行、规模和恢复证据后另行确定并发合同，不能由 F2 或 A–G 的串行结果宣称已实现。
 
+CandidateRoute 使用 `created → eligible → active → stalled/completed/terminated/pruned` 生命周期。任一时刻只有一条路线执行；替代路线引用父路线、当前有效图证据和共享 Run 账本，不复制或提升权威证据。`completed`、`terminated`、`pruned` 为终态；恢复必须创建新 `route_id`，保留 `parent_route_id`，并重新校验图版本、相关依赖、frontier 和 `policy_version`。路线生成、继承、变异、切换和淘汰原因写入 Search Lineage Graph。
+
+Population Memory 仅保存带来源身份、状态、适用条件、图/计划/策略版本和真实成本的路线观察；历史路线不能直接创建有效前提。Global Goal Cache 键至少包括规范化 Lean Goal、局部假设、声明身份、导入环境、Lean/Mathlib 版本、模板版本、公理政策、ProblemSpec/形式目标版本和证明项身份。只有 L2+ 完整内核及依赖审计结果可写入；命中后必须在当前环境复核。用户可查看来源、作用域、等级、复核和失效原因，可禁用、清理或显式跨域导入；禁用与清理保留审计墓碑且不删除权威 Run Memory。
+
 ### AC11–AC28 实施映射
 
 #### Rater/APRS 的确定性合同
