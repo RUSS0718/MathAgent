@@ -34,6 +34,20 @@ S01 → S02 → S03 → S04；S05 等 S01、S03；S06 等 S03、S05。F1 等 S03
 
 当前首个确认缺口属于 S01：流式 Adapter 将客户端 timeout 用作整次请求绝对截止，尚无新合同所需的显式版本化活跃/首包/空闲策略和 1300 秒虚拟时钟证据。先补这个前置纵切，不越过依赖实施 F1。该描述不声称整个 S01 已经验收。
 
+## S02–S06 静态证据核验
+
+独立只读审计对实际起点及 `b7038798` 的代表性源码、测试和历史验收文档进行核对，没有运行测试。`git rev-list --left-right --count b7038798...e6b6b89` 为 `57 0`：实际起点是审计基线的祖先。以下“未验收”表示没有找到满足新退出条件的实现与证据组合，不能由旧同名阶段或 Issue 关闭替代。
+
+| 切片 | 可复用证据入口 | 新合同缺口与当前结论 |
+| --- | --- | --- |
+| S02 | `context_injection.py`、`sessions.py`；`test_solver_harness_sessions.py` | 未见版本化 ContextPack 容量治理及长 history、巨大固定层、摘要失败、回执配对的完整失败矩阵；未验收，等 S01 |
+| S03 | `plan.py`、`verification.py`、`finalize.py`；`test_star_rb03_obligations.py` | 步骤与 claim 类型不等于原题根义务；未见 ProblemSpec→根义务→WorkUnit 映射、合并工作块和根义务进度分母验收；等 S02 |
+| S04 | `controller.py`、`challenge.py`、`meta.py`、`replan.py`；Challenge/replan 公共测试 | 有界 Challenge 不能代替按数学证据计量的停滞；缺连续三回合无进展、同动作两次、改名和无关引理的统一验收；等 S03 |
+| S05 | `star_product_events.py`、`star_product_projection.py`、`AgentTimeline.vue`、SSE cursor | 旧 Workbench/campaign 浏览器记录不覆盖新义务台账和子智能体视图；缺规定的完整浏览器矩阵及事件到页面 P95 证据；等 S01、S03 |
+| S06 | `final_binding.py`、`final_evidence.py`；`test_star_product_final_binding.py` | 既有 GET report 是查询端点；未见三种独立输出模式、PresentationArtifact、段落来源及整理失败回退的完整验收；等 S03、S05 |
+
+上述 Python 源码位于 `showcase/solver_harness/`（除另列的公开事件模块），测试位于 `tests/`。审计完整笔记保存在仓库之外的 `C:/Users/CQX/.codex/faithful-s02-s06-audit.md`，不作为运行证据。旧 Intern S1–S6、STAR SP 与新 S01–S06 的命名不得混用。固定基线也没有上述新阶段的完整退出证据，因此同步基线后仍须从缺失前置切片开始。
+
 ## 已执行检查
 
 在实际起点的隔离工作树运行，Python 使用 `uv run`：
