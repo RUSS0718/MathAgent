@@ -147,7 +147,8 @@ def review_solution(
                 "type": "solution_review_dispatched", "role": "whole_solution_verifier",
             },
         )
-        request = protocol_repair.repair_request(request)
+        request = protocol_repair.repair_request(
+            request, failed_call=protocol_repair.interrupted_call(harness, run["run_id"], exc))
         base_call_id = request["call_id"]
         reply = harness.dispatch(reserved, verifier_port.verify, request)
     except Exception:

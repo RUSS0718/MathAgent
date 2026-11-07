@@ -16,10 +16,28 @@ from showcase.star_experiment_scoring import admit
 from showcase.star_experiment_server import ExperimentServer
 from tests.star_experiment_support import (
     LoopbackProvider,
+    ensure_star_experiment_image,
     independent_review,
     saved_batch,
     synthetic_registration,
 )
+
+
+def setUpModule():
+    """Prepare the locked real-Docker image so integration checks stay strict in CI."""
+    import showcase.star_experiment_server as experiment_server
+
+    global _original_image
+    image = ensure_star_experiment_image()
+    _original_image = experiment_server.CONTRACT_PYTHON_IMAGE_ID
+    experiment_server.CONTRACT_PYTHON_IMAGE_ID = image
+
+
+def tearDownModule():
+    # Qualification runs a nested unittest suite, which drains global module cleanups.
+    import showcase.star_experiment_server as experiment_server
+
+    experiment_server.CONTRACT_PYTHON_IMAGE_ID = _original_image
 
 
 class ExperimentPublicJobTest(unittest.TestCase):
@@ -356,3 +374,21 @@ class ExperimentDeadlineJobTest(unittest.TestCase):
                              "Preflight and admission delay must not extend the round deadline")
         self.assertLessEqual(server.preflight()["budget"]["deadline_at"], policy.deadline_at,
                              "Environment preflight must also retain the round absolute deadline")
+
+
+class ExperimentAdmissionDiagnosticsTest(unittest.TestCase):
+    def test_rejected_public_post_reports_bounded_status_and_error_code(self):
+        folder = self.enterContext(tempfile.TemporaryDirectory())
+        provider = LoopbackProvider("all_fast")
+        self.addCleanup(provider.close)
+        policy = ExperimentRunPolicy(time.time() + 30)
+        server = ExperimentServer(Path(folder), "nonstream", provider.adapters()["nonstream"], policy, "scripted")
+        self.addCleanup(server.close)
+
+        with self.assertRaises(ValueError) as raised:
+            server.post("/api/agent/jobs", {})
+
+        diagnostic = str(raised.exception)
+        self.assertIn("status=400", diagnostic)
+        self.assertIn("code=message_must_be_non_empty", diagnostic)
+        self.assertLessEqual(len(diagnostic), 200)

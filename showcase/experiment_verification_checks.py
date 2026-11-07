@@ -46,6 +46,7 @@ def _verify_job(
             budget,
             manifest["model"]["name"],
             {item["call_id"] for item in manifest["transport"]["calls"]},
+            manifest["evidence_kind"],
         ), {}
 
     usage = _check_usage(manifest, record, attempts, budget, report_body, evidence, lookup)
@@ -105,6 +106,7 @@ def _verify_job(
         budget,
         manifest["model"]["name"],
         {item["call_id"] for item in manifest["transport"]["calls"]},
+        manifest["evidence_kind"],
     )
     safe["applied_config"] = applied["config"] if applied["status"] == "PASS" else None
     safe["process_path"] = _safe_process_path(

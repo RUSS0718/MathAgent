@@ -8,6 +8,7 @@ import math
 import sqlite3
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
@@ -97,7 +98,7 @@ class RunBudgetLedger:
 
     @contextmanager
     def _transaction(self, run_id):
-        from .run_budget_late import _shared_gate, _settlement_timeout
+        from .run_budget_late import _settlement_timeout, _shared_gate
 
         timeout = _settlement_timeout.get()
         with _shared_gate(self, timeout=timeout) as admitted:
@@ -248,6 +249,8 @@ class RunBudgetLedger:
                         else:
                             dispatch_status = "transport_observed"
                         action["public_attempt"] = {**projection, "started_at_utc": previous_attempt.get("started_at_utc") or event.get("started_at_utc"), "dispatch_status": dispatch_status, "solver_call_id": public_solver_call_id(run_id, action.get("solver_call_id"))}
+                    if "execution_evidence" in event:
+                        action["execution_evidence"] = event["execution_evidence"]
                     action.update(
                         status=event.get("status", "unknown"),
                         usage=usage,
@@ -409,7 +412,18 @@ def _summary(state):
             a.get("duration_seconds") or 0 for a in state["actions"] if a["kind"] == "tool"
         ),
         "unknown_tool_calls": sum(
-            a["kind"] == "tool" and a["status"] in {"reserved", "unknown", "timeout"}
+            a["kind"] == "tool"
+            and (
+                a["status"] in {"reserved", "unknown"}
+                or (a.get("execution_evidence") or {}).get("unknown_outcome") is True
+                or (
+                    a["status"] == "timeout"
+                    and not (
+                        (a.get("execution_evidence") or {}).get("unknown_outcome") is False
+                        and (a.get("execution_evidence") or {}).get("cleanup_verified") is True
+                    )
+                )
+            )
             for a in state["actions"]
         ),
         "started_at": state["started_at"],
@@ -457,14 +471,26 @@ def budgeted_tool(function):
         budget.ledger.settle(
             budget.run_id,
             action_id,
-            {
-                "status": result.status,
-                "duration_seconds": time.monotonic() - started,
-            },
+            _tool_settlement(result, time.monotonic() - started),
         )
         return result
 
     return invoke
+
+
+def _tool_settlement(result, duration_seconds):
+    """Settle a tool action while retaining only safe executor outcome evidence."""
+    settlement = {"status": result.status, "duration_seconds": duration_seconds}
+    value = getattr(result, "value", None)
+    if isinstance(value, Mapping):
+        evidence = {
+            key: value[key]
+            for key in ("unknown_outcome", "cleanup_verified", "executed", "timeout")
+            if type(value.get(key)) is bool
+        }
+        if evidence:
+            settlement["execution_evidence"] = evidence
+    return settlement
 
 
 def execute_graph(ledger, limits, loop, state, *, run_id, resume=False):

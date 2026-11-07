@@ -40,6 +40,16 @@ def normalize_verdict(reply: Any, current_index: int) -> dict[str, Any]:
     }
 
 
+def _reject_contradictory_acceptance(verification: dict[str, Any]) -> dict[str, Any]:
+    """Reject an ACCEPT verdict whose gates do not prove acceptance."""
+    if (
+        verification["verdict"] == "ACCEPT"
+        and (verification["goal_gate"] != "YES" or verification["logic_gate"] != "PASS")
+    ):
+        verification.update(valid=False, reason="invalid_verifier_verdict")
+    return verification
+
+
 def verify_step(
     harness: _HarnessOperations,
     run: dict[str, Any],
@@ -185,7 +195,8 @@ def verify_step(
                         "role": "step_verifier",
                     },
                 )
-                request = protocol_repair.repair_request(request)
+                request = protocol_repair.repair_request(
+                    request, failed_call=protocol_repair.interrupted_call(harness, run["run_id"], exc))
                 call_id = request["call_id"]
                 reply = harness.dispatch(reserved, verifier_port.verify, request)
     except CallInterrupted:
@@ -237,7 +248,7 @@ def verify_step(
         reply=reply,
         reserve_and_dispatch=reserve_and_dispatch,
     )
-    verification = normalize_verdict(reply, index + 1)
+    verification = _reject_contradictory_acceptance(normalize_verdict(reply, index + 1))
     if unfulfilled:
         # A computation the reviewer asked for never completed; its verdict is not
         # an acceptance and must not promote any evidence.
@@ -296,7 +307,9 @@ def verify_step(
                         reply = None
                         repair_failure_reason = "invalid_verifier_response"
                     else:
-                        verification = normalize_verdict(reply, index + 1)
+                        verification = _reject_contradictory_acceptance(
+                            normalize_verdict(reply, index + 1)
+                        )
                         if unfulfilled:
                             verification.update(valid=False, reason="verifier_tool_request_unfulfilled")
                         declared = (
@@ -342,7 +355,10 @@ def verify_step(
         else ""
     )
     if isinstance(reply, Mapping):
-        if isinstance(reply.get("reason"), str):
+        if (
+            isinstance(reply.get("reason"), str)
+            and verification.get("reason") != "invalid_verifier_verdict"
+        ):
             verification["reason"] = reply["reason"]
         directions = reply.get("forbidden_directions")
         if isinstance(directions, list) and all(isinstance(item, str) for item in directions):
@@ -406,6 +422,13 @@ def verify_step(
             "TRACE_BACK": "TRACE_BACK",
             "PROPOSE_REPLAN": "META_DECIDE",
         }[verification["verdict"]]
+    from .handoff import enabled
+
+    reviewed = (enabled(harness._config) and verification["valid"] and not checkpoint_accepted
+                and verification["verdict"] in {"ACCEPT", "CHALLENGE"})
+    if reviewed:
+        phase = "STEP_EXECUTE" if index + 1 < len(plan["steps"]) else "FINAL_GENERATE"
+        current_step = plan["steps"][index + 1]["step_id"] if index + 1 < len(plan["steps"]) else None
     # The classified ledger is the single authoritative record: proven entries
     # reach final synthesis and rescue through its dependency-checked readers,
     # while Conjectures stay confined there and never become proven premises.
@@ -418,7 +441,7 @@ def verify_step(
             **state["steps"],
             step_id: {
                 **state["steps"][step_id],
-                "status": "ACCEPTED" if accepted else "CHECKPOINT_ACCEPTED" if checkpoint_accepted else "VERIFYING",
+                "status": "ACCEPTED" if accepted else "REVIEWED" if reviewed else "CHECKPOINT_ACCEPTED" if checkpoint_accepted else "VERIFYING",
                 "verification": verification,
                 **({"checkpoint_verification": checkpoint_review}
                    if checkpoint_review is not None else {}),
@@ -431,6 +454,8 @@ def verify_step(
     }
     if not verification["valid"] and not checkpoint_accepted:
         state_updates["status"] = "partial_aborted"
+        if verification.get("reason") == "invalid_verifier_verdict":
+            state_updates["result_reason"] = "invalid_verifier_verdict"
     event = {
         "event_id": f"step-reviewed-{step_id}{suffix}",
         "type": "step_reviewed",

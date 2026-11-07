@@ -131,9 +131,50 @@ def _event_summary(event: Mapping[str, Any], index: int) -> dict[str, Any]:
         "summary": event.get("summary", ""),
         "error_category": event.get("error_category"),
     }
+    for key in ("job_id", "run_id"):
+        value = event.get(key)
+        if isinstance(value, str) and value:
+            summary[key] = value
+    for key in ("plan_version", "attempt_index", "solver_revision"):
+        value = event.get(key)
+        if type(value) is int and value >= 0:
+            summary[key] = value
+    solver_event_type = event.get("solver_event_type")
+    if isinstance(solver_event_type, str) and solver_event_type:
+        summary["solver_event_type"] = solver_event_type
+    solver_event_id = event.get("solver_event_id")
+    if isinstance(solver_event_id, str) and re.fullmatch(r"solver_event_[0-9a-f]{32}", solver_event_id):
+        summary["solver_event_id"] = solver_event_id
+    call_id = event.get("solver_call_id")
+    if isinstance(call_id, str) and re.fullmatch(r"solver_call_[0-9a-f]{32}", call_id):
+        summary["solver_call_id"] = call_id
+    call_status = event.get("call_status")
+    if isinstance(call_status, str) and call_status in {"completed", "failed", "unknown"}:
+        summary["call_status"] = call_status
+    role = event.get("role")
+    if isinstance(role, str) and role in {
+        "reasoner", "reason_noncoding", "explore", "explore_polish", "planner", "researcher",
+        "step_verifier", "final_generator", "whole_solution_verifier", "meta", "meta_strategist",
+    }:
+        summary["role"] = role
+    consumed_receipt_ids = event.get("consumed_receipt_ids")
+    if isinstance(consumed_receipt_ids, list):
+        summary["consumed_receipt_ids"] = [
+            item for item in consumed_receipt_ids
+            if isinstance(item, str) and re.fullmatch(r"solver_event_[0-9a-f]{32}", item)
+        ]
+    receipt_id = event.get("receipt_id")
+    if isinstance(receipt_id, str) and re.fullmatch(r"solver_event_[0-9a-f]{32}", receipt_id):
+        summary["receipt_id"] = receipt_id
+    receipt_status = event.get("receipt_status")
+    if isinstance(receipt_status, str) and receipt_status in {"success", "failed", "unknown"}:
+        summary["receipt_status"] = receipt_status
+    receipt_executed = event.get("receipt_executed")
+    if type(receipt_executed) is bool:
+        summary["receipt_executed"] = receipt_executed
     for key in (
-        "tool_call_id", "protocol", "tool_name", "solver_event_id", "solver_revision",
-        "solver_event_type", "role", "failure_type", "action_type", "use_pure_reasoning",
+        "protocol", "tool_name",
+        "failure_type", "action_type", "use_pure_reasoning",
         "specific_task_consumed", "triggered_by", "active_skill_ids", "skill_protocol_version",
         "skill_protocols", "prompt_fingerprint", "prompt_layers_fingerprint",
         "schema_fingerprint", "input_fingerprint", "stream_metrics", "stream_activity",
@@ -171,7 +212,8 @@ def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         "error_category": result.get("error_category"),
     }
     if isinstance(result.get("receipt"), Mapping):
-        summary["receipt"] = redact(dict(result["receipt"]))
+        summary["receipt"] = _tool_receipt_summary(result["receipt"])
+        summary.pop("tool_call_id", None)
     value = result.get("value")
     if result.get("name") == "polynomial_check" and isinstance(value, Mapping):
         candidates = value.get('candidates', [])
@@ -181,6 +223,37 @@ def _tool_summary(result: Mapping[str, Any]) -> dict[str, Any]:
         summary["coverage_status"] = value.get("coverage_status", "unknown")
         summary["limitations"] = value.get("limitations", [])
         summary["checker_evidence_id"] = value.get("evidence_id")
+    return summary
+
+
+def _tool_receipt_summary(receipt: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep receipt identity and outcome while excluding tool inputs and outputs."""
+    public_id = receipt.get("public_receipt_id")
+    status = receipt.get("status")
+    summary = {}
+    if isinstance(public_id, str) and re.fullmatch(r"solver_event_[0-9a-f]{32}", public_id):
+        summary["receipt_id"] = public_id
+    for key in ("run_id", "plan_version", "attempt_index"):
+        value = receipt.get(key)
+        if key == "run_id" and isinstance(value, str) and value:
+            summary[key] = value
+        elif key != "run_id" and type(value) is int and value >= 0:
+            summary[key] = value
+    step_id = receipt.get("step_id")
+    if isinstance(step_id, str) and re.fullmatch(r"步骤 [1-9][0-9]*", step_id):
+        summary["step_id"] = step_id
+    if status == "success" and receipt.get("executed") is True:
+        summary["receipt_status"] = "success"
+    elif isinstance(status, str) and status in {
+        "not_executed", "output_limit", "canceled", "unavailable", "timeout", "tool_error",
+        "network_error", "parse_error", "unknown_outcome", "rejected",
+    }:
+        summary["receipt_status"] = "failed"
+    elif isinstance(status, str):
+        summary["receipt_status"] = "unknown"
+    executed = receipt.get("executed")
+    if type(executed) is bool:
+        summary["receipt_executed"] = executed
     return summary
 
 

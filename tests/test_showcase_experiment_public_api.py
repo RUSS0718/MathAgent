@@ -140,6 +140,31 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
                 },
             )
 
+            wrong_readiness = {
+                "schema_version": 1,
+                "issue_number": 126,
+                "status": "PASS",
+            }
+            wrong_pair = _pair("pair-api-wrong-readiness", wrong_readiness)
+            for arm_name in ("baseline", "variant"):
+                wrong_pair[arm_name]["manifest"]["model"]["solver_mode"] = "star_limited"
+            wrong = client.post(
+                f"/api/experiments/pairs/{wrong_pair['pair_id']}/arms/baseline/jobs",
+                json={
+                    "pair_manifest": wrong_pair,
+                    "pair_sha256": pair_manifest_digest(wrong_pair),
+                    "readiness_report": wrong_readiness,
+                    "sample_id": "sample-01",
+                    "sample_text_sha256": wrong_pair["baseline"]["manifest"]["samples"][0]["text_sha256"],
+                    "session_id": session,
+                    "message": "x+1=2\n",
+                    "budget_limits": wrong_pair["baseline"]["manifest"]["run_limits"],
+                    "deadline_at": time.time() + 60,
+                },
+                headers={"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())},
+            )
+            self.assertEqual(400, wrong.status_code)
+
             invalid = client.post(
                 f"/api/experiments/pairs/{pair['pair_id']}/arms/other/jobs",
                 json={

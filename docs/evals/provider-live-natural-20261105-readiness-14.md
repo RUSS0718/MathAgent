@@ -1,0 +1,13 @@
+# readiness-14：样本登记在派发前失败
+
+本批不是线上模型失败。北京时间2026-11-05 16:09:31启动runner后，公共实验入口在派发前报experiment_sample_hash_mismatch。runner实际PID9808/创建16:09:31.178165，随后已退出；独立8135服务PID39512/创建16:09:10.505966。没有创建Run状态目录；只读DB确认solver_states、workspace_jobs、run_budgets均0，provider-live NOT_RUN，无正文首末时间、无工具/模型调用、无usage观察。
+
+保留冻结revision e30a5548389b7644e8dddd2365b4ddafd14ebe8f、source SHA a30dab8ae9701d3c0014d8f54ce63c60ea897139ba5f1abe9038510d04e3f754、manifest SHA 2867e7aa3b85dabbfca80a33168637fb8b2834208c28b24e09127bbb3300c524。旧manifest不改写，不在原身份内重试。
+
+直接原因已复现：我为新octagon-colorings样本在内存LF文本上计算SHA256，但Windows Path.write_text实际写入CRLF。登记SHA aa70ddbd773c5195beebd2020be7ae468b356bd112d5cf3bf6e73500da5e85c3，实际文件SHA 395f5e9269c997fcc111fcd86b4a35bda59f6f63e15160bb41d63fbfc6f0be94；实际文件归一化LF后恰好等于登记值。简单题哈希一致。FileSampleHashResolver按实际文件字节核验是正确行为，不应放宽为忽略换行。
+
+这是自身样本准备错误，拟保守单独计入第6轮修复，不归为TLS/预算不足或产品数学错误；live_attempt仍6，因为14没有模型派发，另记pre_dispatch_failures=1。更正方案仅在新15使用现有FileSampleHashResolver.hashes登记实际文件字节，并逐样本read_text预检，不新建跨平台生成框架。独立子智能体正在比较最小更正与扩大重构的风险收益；通过后才冻结15。
+
+#127尚未取得自然多步PASS，#128两臂NOT_RUN/open。13完整答案交付成功但FASTPATH的结果单独保留，不能拼接为本批成功。
+
+独立复评已完成（代理01a1aac2-a6c1-7000-92a4-2193b6a212ec）：推荐仅复用现有resolver，建立跨平台生成框架收益不足、维护面不成比例。主线程采纳；新15逐样本hashes/read_text已GREEN，14原始mismatch为RED。只更正新批次登记，不改产品源码或旧manifest。保守累计自身修复6轮，真实模型尝试仍6，14本地派发前失败单记1。

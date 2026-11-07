@@ -22,6 +22,7 @@ class FlaskShowcaseContractTest(unittest.TestCase):
         self.client = self.app.test_client()
 
     def tearDown(self) -> None:
+        self.app.extensions["showcase_workspace_service"].close()
         self.app.extensions["showcase_run_service"].close()
         self.app.extensions["loopback_store"].close()
         self.temp_dir.cleanup()
@@ -162,6 +163,7 @@ class FlaskShowcaseContractTest(unittest.TestCase):
             self.assertEqual(200, removed.status_code)
             self.assertEqual([], client.get("/api/files").get_json())
         finally:
+            app.extensions["showcase_workspace_service"].close()
             app.extensions["showcase_run_service"].close()
             app.extensions["loopback_store"].close()
 
@@ -179,6 +181,7 @@ class FlaskShowcaseContractTest(unittest.TestCase):
             report = client.get(f"/api/agent/jobs/{created.get_json()['job_id']}/report")
             self.assertEqual(uploaded["file_id"], report.get_json()["report"].get("asset_refs", [{}])[0].get("file_id"))
         finally:
+            app.extensions["showcase_workspace_service"].close()
             app.extensions["showcase_run_service"].close()
             app.extensions["loopback_store"].close()
 

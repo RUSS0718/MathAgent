@@ -27,18 +27,23 @@ class StarGateTest(StarJobFixture, unittest.TestCase):
         for goal, logic in (("NO", "PASS"), ("PARTIAL", "PASS"), ("YES", "FAIL"), ("YES", "UNCERTAIN")):
             with self.subTest(goal=goal, logic=logic):
                 job_id, job, events = self.start([
-                    NEED_PLAN, TWO_STEPS, STEP, {**VERDICT, "goal_gate": goal, "logic_gate": logic},
+                    NEED_PLAN, TWO_STEPS, STEP, {
+                        **VERDICT,
+                        "goal_gate": goal,
+                        "logic_gate": logic,
+                    },
                 ])
+                gate = next(e for e in events if e.get("solver_event_type") == "step_reviewed")
+                self.assertFalse(gate["valid"])
+                self.assertEqual("步骤 1", gate["step_id"])
+                self.assertEqual("STEP_VERIFY", gate["solver"]["phase"])
                 self.assertEqual("failed", job["status"])
+                self.assertEqual("invalid_verifier_verdict", job["error"])
                 self.assertEqual(4, len(self.outbound))
                 self.assertEqual("partial_aborted", job["result"]["solver"]["status"])
                 self.assertEqual("STEP_VERIFY", job["result"]["solver"]["phase"])
                 run = self.client.get(f"/api/runs/{job_id}").get_json()
                 self.assertEqual("partial_aborted", run["result"]["solver"]["status"])
-                gate = next(e for e in events if e.get("solver_event_type") == "step_reviewed")
-                self.assertFalse(gate["valid"])
-                self.assertEqual("步骤 1", gate["step_id"])
-                self.assertEqual("STEP_VERIFY", gate["solver"]["phase"])
 
     def test_malformed_verifier_reply_is_persisted_as_needs_review(self):
         # The verifier owns one bounded format repair (ALIGN-10 round 2), so

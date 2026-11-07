@@ -1,10 +1,14 @@
 """Real loopback provider and Docker; no solver, ledger or Job outcomes mocked."""
 
+import atexit
 import json
 import os
+import re
 import sqlite3
+import subprocess
 import threading
 import unittest
+import uuid
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,6 +27,41 @@ ANSWERS = {
     "sum": "Separate the two terms and add. Final answer: 5",
 }
 ENUMERATION = "print(3)\n"
+
+
+def ensure_star_experiment_image():
+    """Use the pinned image or build its locked Dockerfile for strict integration tests."""
+    from showcase.star_product_runtime import CONTRACT_PYTHON_IMAGE_ID
+
+    def image_id(reference):
+        result = subprocess.run(
+            ["docker", "image", "inspect", reference, "--format", "{{.Id}}"],
+            capture_output=True, text=True, check=False,
+        )
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    pinned = image_id(CONTRACT_PYTHON_IMAGE_ID)
+    if pinned == CONTRACT_PYTHON_IMAGE_ID:
+        return pinned
+
+    tag = f"mathagent-python:star-experiment-{uuid.uuid4().hex}"
+    root = Path(__file__).resolve().parents[1]
+    built = subprocess.run(
+        ["docker", "build", "--pull=false", "--tag", tag, str(root / "docker/math-python")],
+        capture_output=True, text=True, check=False,
+    )
+    if built.returncode:
+        detail = built.stderr[-400:].strip().replace("\n", " ")
+        raise RuntimeError("experiment_test_image_build_failed:" + detail)
+    created = image_id(tag)
+    if not isinstance(created, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", created):
+        raise RuntimeError("experiment_test_image_identity_unavailable")
+
+    def remove_tag():
+        subprocess.run(["docker", "image", "rm", tag], capture_output=True, check=False)
+
+    atexit.register(remove_tag)
+    return created
 
 
 def synthetic_registration():

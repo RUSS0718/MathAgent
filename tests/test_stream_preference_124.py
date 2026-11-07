@@ -5,7 +5,7 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from showcase.stream_preference import StreamProfile
+from showcase.stream_preference import StreamProfile, _valid_text_chat_messages
 
 
 def _schema_fingerprint(role):
@@ -33,6 +33,13 @@ class StreamPreferenceSelectorTest(unittest.TestCase):
             thinking_mode=True,
             stream_complete=lambda *_args, **_kwargs: iter(()),
         )
+
+    def test_non_string_message_roles_are_rejected(self):
+        for role in ([], {}):
+            with self.subTest(role_type=type(role).__name__):
+                self.assertFalse(_valid_text_chat_messages([
+                    {"role": role, "content": "synthetic"},
+                ]))
 
     def test_stream_first_without_live_profile_rejects_before_dispatch(self):
         from showcase.stream_preference import select_transport

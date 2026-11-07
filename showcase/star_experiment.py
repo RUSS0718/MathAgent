@@ -6,6 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from .star_experiment_archive import ExperimentArchive, source_identity
+from .star_experiment_diagnostics import failure_diagnostic
 from .star_experiment_gates import Qualification
 from .star_experiment_policy import ExperimentRunPolicy
 from .star_experiment_registration import digest, registration
@@ -46,7 +47,7 @@ class ExperimentCoordinator:
         archive.put("prerequisites.json", self.qualification.report)
         archive.put("independent-oracles.json", frozen["independent_oracles"])
         servers, records, probes, dispatched = {}, [], [], []
-        stop = None
+        stop, diagnostic = None, None
 
         def capture_probe(server):
             observed = server.preflight()
@@ -139,7 +140,8 @@ class ExperimentCoordinator:
                 stop = "completed" if passed else "e2_gate_failed"
         except Exception as exc:  # Stop and preserve evidence on reviewer/configuration failure.
             stop = "experiment_defect:" + type(exc).__name__
-            archive.put("failure.json", dict(category=stop))
+            diagnostic = failure_diagnostic(exc)
+            archive.put("failure.json", dict(category=stop, diagnostic=diagnostic))
         finally:
             for server in servers.values():
                 try:
@@ -152,7 +154,7 @@ class ExperimentCoordinator:
         if uncollected:
             usage = dict(accounting_complete=False, observed_s3_subtotal=usage,
                          uncollected=uncollected, cost=None)
-        return archive.finish(dict(stop_reason=stop, executed_runs=len(dispatched),
+        return archive.finish(dict(stop_reason=stop, failure_diagnostic=diagnostic, executed_runs=len(dispatched),
             evidence_kind=self.evidence_kind,
             unexecuted=[e["index"] for e in frozen["schedule"][len(dispatched):]],
             uncollected=uncollected, usage=usage, preflights=len(probes),

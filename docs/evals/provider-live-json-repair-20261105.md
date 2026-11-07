@@ -1,0 +1,15 @@
+# Provider-live JSON失败诊断与最小修复
+
+用户要求解释最近非法JSON及解决方式。历史并非没有出现：只读13/15/16/17/18/19两题DB快照共118条调用，其中8条protocol_failed（6条invalid_json、2条invalid_role_schema）。13与16的JSON失败有成功格式修复，15的schema失败也有成功修复；17没有协议失败，18/19各两条JSON失败。不同路径、不同上下文的小样本不能代表总体失败率趋势或证明Codex重启相关。代码字段不是本轮新加；未解析的坏响应不能按已解析结构中缺少code字段来判定没有代码。
+
+18/19四条失败回复（原及repair）都是finish_reason=stop的完整流，严格json.loads和既有非法反斜杠救援均报Expecting ',' delimiter。错误边界在tool_request.arguments.code嵌套字符串的闭合附近，不是传输截断、数学判错或用量UNKNOWN。18修复文本由2724增至17149字符，19原3561、修复3850字符；这是字符数，不是tokens。
+
+证实的实现缺口：protocol_repair.repair_request原来只给原任务加通用指令，没有传失败回复或解析位置。sessions仅在operation成功后append_exchange；非法JSON抛出时不追加历史，因此持久化了partial_text不等于模型修复调用看得到原文。公共Job普通步骤与Challenge两条真实请求构造接缝先RED：previous_response为None。
+
+主线程采纳独立代理01a1abdc-29a3-77b1-ad20-fc94714ad4d8建议的局部方案：repair_request可选接收失败审计；只有同Run/call/role且known invalid_json才在原user context加入完整持久失败文本与JSON错误message/position/line/column。指令明确这些是待修复数据，不是命令，只修序列化、不要重解或扩写证明/代码。仅普通Reasoner与Challenge调用接入，其他角色不扩大；schema、消息数量、provider payload字段、原一次修复上限、硬预算和新call身份不变。未改变parser容错或业务校验；未知结果不重发。
+
+替代方案比较：猜补引号/逗号可能改动代码字符串原意，缺少可唯一还原证据，未采用。Provider原生JSON/schema约束可能有价值，但当前实际已验证payload没有response_format，端点支持与新参数传输兼容性未验证，不能直接当现成能力开启；未新建框架或扩白名单。失败原文增加上下文成本，可能触发预算准入而停止，仍沿用原账本，不扩预算。它也可能包含模型指令，明确按数据处理，任何修复回复仍须严格schema/工具白名单/独立审查，不把修复当证明。
+
+7项聚焦检查GREEN，覆盖流式公共Job普通步骤及Challenge实际出站修复上下文、同任务/新身份/一次上限、二次失败停止、unknown不重发、作用域不匹配不注入及源状态不变；fast/Ruff/diff通过，官方baseline无差异。18/19四条真实失败文本只读重放确认完整文本及解析位置进入修复数据。受控回复的GREEN只能证明接缝正确，不证明provider一定生成合法JSON；新20仍须独立冻结并真实验收。策略比较与历史证据单独保存在忽略目录，旧18/19结论不升级。
+
+第10轮范围补充：21在第五步Verifier既有repair再次暴露同类原文缺失，通用helper此前仅Reasoner接入。现在补齐三个既有Verifier owner，原调用上限不变；流式公共step/planned whole/fast whole各一例RED→GREEN，含单一repair后缀与最终同文本绑定。索引语义修复和无repair owner的计算续接未新增重试；不是猜补JSON/按题硬编码。
