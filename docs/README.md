@@ -2,6 +2,7 @@
 
 ## Faithful 实施入口（2026-11-07）
 
+- [S01 首纵切集成验收](evals/faithful-s01-first-slice-20261107.md)：流式策略、六阶段门禁与终审补丁证据；完整 S01 及后续阶段仍未验收。
 - [实施起点与 S01–S06 证据核验](engineering/faithful-implementation-entry-146.md)：实际 checkout、冻结基线同步、旧起点失败及聚焦复核；新阶段未因旧 SP 或 Intern 同名记录解除门槛。
 - [完整并发实施交接](engineering/faithful-concurrency-handoff-155.md)：承接 #155 的独立 [实施票 #156](https://github.com/RUSS0718/MathAgent/issues/156)，包含原生依赖、八组验收与交付/结算边界。串行 F2 不覆盖完整并发；文档和建票不代表产品已实现。
 
