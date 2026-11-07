@@ -768,8 +768,15 @@ class InternStreamAdapter(InternModelAdapter):
                 "local_processing_timeout"
                 if local_processing_failure else _request_failure_category(exc)
             )
-            activity_status = "deadline" if category == "timeout" else "disconnect" if category == "connectivity" else "unknown"
-            notify(activity_observer, activity_status)
+            if local_processing_failure:
+                if activity_status != "completed":
+                    activity_status = "completed"
+                    notify(activity_observer, "completion", event_count=attempt["event_count"],
+                           reasoning_chars=attempt["reasoning_chars"],
+                           content_bytes=attempt["content_bytes"], usage_known=bool(usage))
+            else:
+                activity_status = "deadline" if category == "timeout" else "disconnect" if category == "connectivity" else "unknown"
+                notify(activity_observer, activity_status)
             from llm_client import _not_submitted
             from llm_response import public_attempt
             if not local_processing_timeout:

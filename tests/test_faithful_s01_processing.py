@@ -44,6 +44,10 @@ class FaithfulS01ProcessingAcceptance(StarJobFixture, unittest.TestCase):
         from showcase.request_attempts import record_attempts
 
         class ReasonerStreamAdapter(InternStreamAdapter):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.activities = []
+
             def stream_complete(self, messages, *, metadata=None):
                 if (metadata or {}).get("role") != "reasoner":
                     response = self.complete(messages, metadata=metadata)
@@ -56,6 +60,15 @@ class FaithfulS01ProcessingAcceptance(StarJobFixture, unittest.TestCase):
                         "attempts": response.request_attempts,
                     }
                     return
+                metadata = dict(metadata or {})
+                observer = metadata.get("activity_observer")
+
+                def observe(activity):
+                    self.activities.append(activity)
+                    if callable(observer):
+                        observer(activity)
+
+                metadata["activity_observer"] = observe
                 yield from super().stream_complete(messages, metadata=metadata)
 
         deadline = time.time() + 4.5
@@ -63,13 +76,12 @@ class FaithfulS01ProcessingAcceptance(StarJobFixture, unittest.TestCase):
         registry = ToolRegistry()
         executed = []
         registry.register("polynomial_check", lambda arguments: executed.append(arguments) or 2)
+        adapter = ReasonerStreamAdapter(InternChatClient(retry=1), max_tokens=256)
         self.open_stream(
             [NEED_PLAN, PLAN, STEP],
             freeze_policy=freeze_policy,
             SHOWCASE_STAR_FEATURES=FEATURES,
-            SHOWCASE_STAR_ADAPTER=ReasonerStreamAdapter(
-                InternChatClient(retry=1), max_tokens=256
-            ),
+            SHOWCASE_STAR_ADAPTER=adapter,
             SHOWCASE_STAR_EXPERIMENT_POLICY=run_policy,
             SHOWCASE_STAR_REGISTRY=registry,
         )
@@ -109,10 +121,13 @@ class FaithfulS01ProcessingAcceptance(StarJobFixture, unittest.TestCase):
         self.assertEqual(events_before, events_after)
         self.assertEqual([], executed)
         self.assertEqual(3, len(self.outbound))
-        return settled, job_id
+        return settled, job_id, adapter.activities
 
     def test_frozen_complete_stream_local_assembly_failure_is_not_unknown(self):
-        settled, job_id = self.run_eof_local_assembly_timeout(freeze_policy=True)
+        settled, job_id, activities = self.run_eof_local_assembly_timeout(freeze_policy=True)
+        activity_kinds = [item["kind"] for item in activities]
+        self.assertIn("completion", activity_kinds)
+        self.assertNotIn("unknown", activity_kinds)
         recovery = settled["result"]["solver"]["recovery"]
         self.assertEqual([], recovery["unknown_calls"])
         self.assertEqual("needs_review", recovery["status"])
@@ -139,7 +154,7 @@ class FaithfulS01ProcessingAcceptance(StarJobFixture, unittest.TestCase):
         self.assertEqual(3, len(self.outbound))
 
     def test_legacy_complete_stream_timeout_keeps_unknown_dto_shape(self):
-        settled, _ = self.run_eof_local_assembly_timeout(freeze_policy=False)
+        settled, _, _ = self.run_eof_local_assembly_timeout(freeze_policy=False)
         recovery = settled["result"]["solver"]["recovery"]
         self.assertEqual(1, len(recovery["unknown_calls"]))
         self.assertEqual({"status", "unknown_calls", "unknown_tools", "retries",
