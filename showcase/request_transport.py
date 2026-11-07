@@ -84,7 +84,10 @@ def response_events(
     *,
     deadline: float,
     clock: Callable[[], float] | None = None,
-    timeout: float,
+    timeout: float | tuple[float, float | None],
+    effective_idle_deadline: Callable[[], float | None] | None = None,
+    soft_deadline_at: float | None = None,
+    on_soft_deadline: Callable[[], None] | None = None,
     loopback_only: bool = False,
     provider_endpoint_only: bool = False,
     on_late_response: _LateResponseCallback | None = None,
@@ -102,6 +105,7 @@ def response_events(
     canceled = threading.Event()
     detached = threading.Event()
     deadline_hit = False
+    soft_deadline_sent = False
     started = time.perf_counter()
 
     def publish(event: tuple[str, Any]) -> bool:
@@ -119,9 +123,12 @@ def response_events(
     body_complete = False
     reader_finished = False
     late_callback_invoked = False
+    reader_eof = threading.Event()
     late_lock = threading.Lock()
     dispatch_lock = threading.Lock()
     dispatch_started = False
+    read_timeout = timeout[1] if isinstance(timeout, tuple) else timeout
+    request_timeout = timeout
 
     def settle_late(complete):
         nonlocal late_callback_invoked
@@ -156,7 +163,9 @@ def response_events(
             # Once dispatch is committed the caller must retain an unconfirmed reservation.
             if canceled.is_set() or detached.is_set() or clock() >= deadline:
                 return
-            response = post(url, timeout=timeout, stream=True, **request_kwargs)
+            response = post(url, timeout=request_timeout, stream=True, **request_kwargs)
+            if canceled.is_set():
+                return
             status_code = getattr(response, "status_code", None)
             if type(status_code) is int and 300 <= status_code < 400:
                 raise requests.HTTPError("metered_redirect_rejected", response=response)
@@ -175,10 +184,11 @@ def response_events(
                         response_body.extend(chunk)
                     if not detached.is_set():
                         publish(("bytes", chunk))
-                if detached.is_set() and clock() >= deadline + timeout:
+                if detached.is_set() and read_timeout is not None and clock() >= deadline + read_timeout:
                     settle_late(False)
                     return
             body_complete = True
+            reader_eof.set()
             if detached.is_set():
                 settle_late(body_complete)
             else:
@@ -234,16 +244,62 @@ def response_events(
     worker.start()
     try:
         while True:
-            remaining = deadline - clock()
-            if remaining <= 0:
+            now = clock()
+            if now >= deadline:
                 deadline_hit = True
                 if detach_reader():
                     raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
                 raise requests.ReadTimeout("logical_deadline_exceeded")
-            try:
-                kind, value = events.get(timeout=min(remaining, 0.05))
-            except queue.Empty:
+            if (soft_deadline_at is not None and not soft_deadline_sent
+                    and now >= soft_deadline_at):
+                soft_deadline_sent = True
+                if callable(on_soft_deadline):
+                    on_soft_deadline()
                 continue
+            idle_deadline = (
+                effective_idle_deadline()
+                if not reader_eof.is_set() and callable(effective_idle_deadline)
+                else None
+            )
+            active_deadline = min(deadline, idle_deadline) if idle_deadline is not None else deadline
+            if now >= active_deadline:
+                deadline_hit = True
+                if detach_reader():
+                    raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
+                reason = (
+                    "effective_idle_deadline_exceeded"
+                    if idle_deadline is not None and idle_deadline <= deadline
+                    else "logical_deadline_exceeded"
+                )
+                raise requests.ReadTimeout(reason)
+            try:
+                event = events.get_nowait()
+            except queue.Empty:
+                remaining = active_deadline - now
+                wait_seconds = min(remaining, 0.05)
+                if soft_deadline_at is not None and not soft_deadline_sent:
+                    wait_seconds = min(wait_seconds, max(0.0, soft_deadline_at - now))
+                try:
+                    event = events.get(timeout=wait_seconds)
+                except queue.Empty:
+                    continue
+            now = clock()
+            if now >= deadline:
+                deadline_hit = True
+                if detach_reader():
+                    raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
+                raise requests.ReadTimeout("logical_deadline_exceeded")
+            idle_deadline = (
+                effective_idle_deadline()
+                if not reader_eof.is_set() and callable(effective_idle_deadline)
+                else None
+            )
+            if idle_deadline is not None and now >= idle_deadline:
+                deadline_hit = True
+                if detach_reader():
+                    raise DeadlineNotSubmitted("logical_deadline_before_dispatch")
+                raise requests.ReadTimeout("effective_idle_deadline_exceeded")
+            kind, value = event
             if kind == "error":
                 raise value
             yield kind, value

@@ -74,6 +74,7 @@ def create_app(
         SHOWCASE_WAITING_INPUT_MARKER="",
         SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED=False,
         SHOWCASE_EXPERIMENT_PAIR_ENABLED=False,
+        SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION=None,
     )
     if config:
         app.config.from_mapping(dict(config))
@@ -118,6 +119,7 @@ def create_app(
         waiting_input_marker=str(app.config.get("SHOWCASE_WAITING_INPUT_MARKER", "")),
         pipeline=live_pipeline,
         star_pipeline=star_pipeline,
+        stream_timeout_policy_version=app.config.get("SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION"),
     )
     app.extensions["loopback_store"] = loopback_store
     app.extensions["showcase_run_service"] = service

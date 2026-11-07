@@ -327,6 +327,8 @@ class InternStreamAdapter(InternModelAdapter):
         }
         budget = current_budget()
         call_budget = budget.model_call(role, solver_call_id=attempt["solver_call_id"], deadline_at=scoped_deadline(metadata), strict_completion=(metadata or {}).get("strict_completion") is True) if budget else None
+        stream_timeout_policy = call_budget.stream_timeout_policy() if call_budget else None
+        stream_lifecycle = None
         configured = getattr(client, "timeout", self.client_timeout)
         requested = request_timeout(metadata)
         effective_timeout = configured or requested or 30
@@ -339,14 +341,27 @@ class InternStreamAdapter(InternModelAdapter):
             from .deadline_clock import guarded_utc_clock
             clock = guarded_utc_clock(time.time)
         started = clock()
-        logical_deadline = started + effective_timeout
-        if call_budget is not None:
-            logical_deadline = min(logical_deadline, call_budget.absolute_deadline())
-        limit = min(getattr(client, "retry", 1), 3) if call_budget else 1
-        attempt.update(effective_timeout_seconds=effective_timeout,
+        if stream_timeout_policy is not None:
+            from .stream_timeout_policy import StreamCallLifecycle, StreamTimeoutPolicy
+
+            policy = StreamTimeoutPolicy.from_snapshot(stream_timeout_policy)
+            logical_deadline = call_budget.absolute_deadline()
+            stream_lifecycle = StreamCallLifecycle(policy.snapshot(), started, logical_deadline)
+            effective_timeout = call_budget.remaining_seconds()
+        else:
+            logical_deadline = started + effective_timeout
+            if call_budget is not None:
+                logical_deadline = min(logical_deadline, call_budget.absolute_deadline())
+        limit = (
+            None if stream_lifecycle is not None
+            else min(getattr(client, "retry", 1), 3) if call_budget else 1
+        )
+        attempt.update(effective_timeout_seconds=None if stream_lifecycle else effective_timeout,
                        deadline_at=logical_deadline if call_budget is not None else
                        time.time() + max(0, logical_deadline - clock()))
-        attempt["requests_timeout_seconds"] = configured or effective_timeout
+        attempt["requests_timeout_seconds"] = (
+            None if stream_lifecycle is not None else configured or effective_timeout
+        )
         attempt["retry_limit"] = limit
         local_processing_timeout = False
         timeout_attempts = None
@@ -359,18 +374,25 @@ class InternStreamAdapter(InternModelAdapter):
             from llm_client import _not_submitted, product_retry_delay
 
             from .request_transport import response_events
-            for index in range(limit):
+            index = 0
+            while limit is None or index < limit:
                 attempt_admitted = False
                 attempt_started = time.perf_counter()
+                usage: dict[str, Any] = {}
                 try:
                     remaining = logical_deadline - clock()
                     if remaining <= 0:
                         raise requests.ReadTimeout("logical_deadline_exceeded")
                     attempt_timeout = min(effective_timeout, remaining)
                     if call_budget is not None:
-                        attempt_timeout = min(attempt_timeout, call_budget.before_attempt(attempt, len(body)))
+                        reservation_remaining = call_budget.before_attempt(attempt, len(body))
+                        attempt_timeout = min(attempt_timeout, reservation_remaining)
                         attempt_admitted = True
                     attempt["effective_timeout_seconds"] = attempt_timeout
+                    request_timeout_value = (
+                        (min(configured or attempt_timeout, attempt_timeout), attempt_timeout)
+                        if stream_lifecycle is not None else configured or effective_timeout
+                    )
 
                     late_state = {"lock": threading.Lock(), "event": None}
 
@@ -453,20 +475,38 @@ class InternStreamAdapter(InternModelAdapter):
                         self.outbound_observer(normalized)
                     line_buffer = bytearray()
                     parts: list[str] = []
-                    usage: dict[str, Any] = {}
                     finish_reason = None
                     saw_done = False
+                    current_event_id = None
 
                     def parse_line(raw_line, late_state=late_state):
-                        nonlocal finish_reason, model_id, saw_done
+                        nonlocal finish_reason, model_id, saw_done, current_event_id
                         line = raw_line.decode("utf-8", errors="replace").strip()
+                        if not line:
+                            current_event_id = None
+                            return
+                        if line.startswith("id:"):
+                            event_id = line[len("id:"):].strip()
+                            current_event_id = event_id or None
+                            return
+                        if line.startswith(":"):
+                            return
                         if not line.startswith("data:"):
                             return
                         content = line[len("data:"):].strip()
+                        if stream_lifecycle is not None and not content:
+                            return
                         attempt["event_count"] += 1
                         if attempt["first_event_seconds"] is None:
                             attempt["first_event_seconds"] = time.perf_counter() - attempt_started
                         notify(activity_observer, "event", event_count=attempt["event_count"])
+                        if (
+                            stream_lifecycle is not None
+                            and stream_lifecycle.record_event_id(current_event_id)
+                        ):
+                            current_event_id = None
+                            return
+                        current_event_id = None
                         if content == "[DONE]":
                             saw_done = True
                             return
@@ -510,11 +550,19 @@ class InternStreamAdapter(InternModelAdapter):
                         reasoning = delta.get("reasoning_content") if isinstance(delta, Mapping) else None
                         piece = delta.get("content") if isinstance(delta, Mapping) else None
                         if isinstance(reasoning, str) and reasoning:
+                            if stream_lifecycle is not None:
+                                stream_lifecycle.record_delta(
+                                    content=content, reasoning=reasoning, now=clock()
+                                )
                             if attempt["first_reasoning_seconds"] is None:
                                 attempt["first_reasoning_seconds"] = time.perf_counter() - attempt_started
                             attempt["reasoning_chars"] += len(reasoning)
                             notify(activity_observer, "reasoning", event_count=attempt["event_count"], reasoning_chars=attempt["reasoning_chars"])
                         if isinstance(piece, str) and piece:
+                            if stream_lifecycle is not None:
+                                stream_lifecycle.record_delta(
+                                    content=piece, reasoning=None, now=clock()
+                                )
                             if attempt["first_content_seconds"] is None:
                                 attempt["first_content_seconds"] = time.perf_counter() - attempt_started
                             parts.append(piece)
@@ -543,13 +591,27 @@ class InternStreamAdapter(InternModelAdapter):
                             local_processing_timeout = True
                         raise requests.ReadTimeout("logical_deadline_exceeded_during_processing")
 
+                    def soft_prompt():
+                        if stream_lifecycle is not None and stream_lifecycle.soft_prompt_due(clock()):
+                            notify(
+                                activity_observer,
+                                "soft_timeout_warning",
+                                elapsed_seconds=1200,
+                                policy_version=stream_lifecycle.policy.policy_version,
+                            )
+
                     transport_events = response_events(
                         client.api_base,
                         headers=headers,
                         data=body,
                         deadline=logical_deadline,
                         clock=clock,
-                        timeout=configured or effective_timeout,
+                        timeout=request_timeout_value,
+                        **({
+                            "effective_idle_deadline": stream_lifecycle.deadline,
+                            "soft_deadline_at": started + 1200,
+                            "on_soft_deadline": soft_prompt,
+                        } if stream_lifecycle is not None else {}),
                         loopback_only=getattr(client, "loopback_only", False),
                         provider_endpoint_only=getattr(client, "provider_endpoint_only", False),
                         on_late_response=settle_late,
@@ -576,6 +638,8 @@ class InternStreamAdapter(InternModelAdapter):
                                 pending_chunks.clear()
                         elif kind == "complete":
                             stream_complete = True
+                            if stream_lifecycle is not None:
+                                stream_lifecycle.complete()
                             attempt["completion_seconds"] = time.perf_counter() - attempt_started
                     if line_buffer:
                         parse_line(line_buffer)
@@ -591,6 +655,10 @@ class InternStreamAdapter(InternModelAdapter):
                         raise requests.ConnectionError("incomplete_stream")
                     break
                 except requests.RequestException as failure:
+                    attempt.update({
+                        key: usage.get(key)
+                        for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+                    })
                     if response is None and getattr(failure, "response", None) is not None:
                         response = failure.response
                         attempt["http_status"] = getattr(response, "status_code", None)
@@ -600,7 +668,7 @@ class InternStreamAdapter(InternModelAdapter):
                                        completion_tokens=0, total_tokens=0)
                     elif not local_processing_timeout:
                         attempt.update(status="error")
-                    if delay is None or index + 1 >= limit:
+                    if delay is None or (limit is not None and index + 1 >= limit):
                         raise
                     attempt.update(error_category=_request_failure_category(failure),
                                    error_type=type(failure).__name__,
@@ -626,6 +694,7 @@ class InternStreamAdapter(InternModelAdapter):
                                 "error_category", "error_type", "http_status"):
                         attempt.pop(key, None)
                     attempt["effective_timeout_seconds"] = min(effective_timeout, logical_deadline - clock())
+                    index += 1
             attempt.update(status="success", http_status=getattr(response, "status_code", None))
             attempt.update(
                 finish_reason=finish_reason,

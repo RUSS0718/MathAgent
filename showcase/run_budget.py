@@ -134,9 +134,12 @@ class RunBudgetLedger:
             self.connection.rollback()
             raise
 
-    def ensure(self, run_id, limits, *, deadline_at=None):
+    def ensure(self, run_id, limits, *, deadline_at=None, stream_timeout_policy=None):
         if deadline_at is not None and (type(deadline_at) not in {int, float} or not math.isfinite(deadline_at)):
             raise ValueError("run_budget_deadline_invalid")
+        from .stream_timeout_policy import validate_snapshot
+
+        stream_timeout_policy = validate_snapshot(stream_timeout_policy)
         with self._transaction(run_id) as state:
             if state is None:
                 now = time.time()
@@ -147,9 +150,16 @@ class RunBudgetLedger:
                     if deadline_at is not None else now + limits.max_runtime_seconds,
                     "actions": [],
                 }
+                if stream_timeout_policy is not None:
+                    state["stream_timeout_policy"] = stream_timeout_policy
                 self.connection.execute(
                     "INSERT INTO run_budgets VALUES (?,?)", (run_id, json.dumps(state))
                 )
+            elif (
+                stream_timeout_policy is not None
+                and state.get("stream_timeout_policy") != stream_timeout_policy
+            ):
+                raise ValueError("run_timeout_policy_binding_mismatch")
         return RunBudget(self, run_id)
 
     def reserve(
@@ -300,6 +310,16 @@ class RunBudgetLedger:
         row = self._read_row(run_id)
         return _summary(json.loads(row[0])) if row is not None else None
 
+    def stream_timeout_policy(self, run_id):
+        """Read the exact stream policy frozen in this Run's durable budget row."""
+
+        row = self._read_row(run_id)
+        if row is None:
+            return None
+        state = json.loads(row[0])
+        policy = state.get("stream_timeout_policy")
+        return dict(policy) if isinstance(policy, Mapping) else None
+
 
 class RunBudget:
     def __init__(self, ledger, run_id):
@@ -330,6 +350,11 @@ class RunBudget:
 
     def snapshot(self):
         return self.ledger.snapshot(self.run_id)
+
+    def stream_timeout_policy(self):
+        """Return the frozen call policy, or ``None`` for legacy Runs."""
+
+        return self.ledger.stream_timeout_policy(self.run_id)
 
     def absolute_deadline(self):
         """Keep the original UTC deadline; never round-trip through duration clocks."""
@@ -390,6 +415,8 @@ def _summary(state):
         charged += max(usage["total_tokens"] or 0, accounted)
     return {
         "limits": state["limits"],
+        **({"stream_timeout_policy": state["stream_timeout_policy"]}
+           if "stream_timeout_policy" in state else {}),
         "logical_calls": sum(a["kind"] == "logical" for a in state["actions"]),
         "http_attempts": len(attempts),
         "tool_calls": sum(a["kind"] == "tool" for a in state["actions"]),

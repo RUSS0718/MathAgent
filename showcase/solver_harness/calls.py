@@ -7,7 +7,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 
 from ..redaction import redact
-from ..run_budget import public_solver_call_id
+from ..run_budget import current_budget, public_solver_call_id
 from .intern_port import KNOWN_PROTOCOL_FAILURES
 
 
@@ -194,6 +194,10 @@ def dispatch(harness, run, operation, request, session_dispatch):
         if prepared.get("retry_of"):
             record["retry_of_internal"] = prepared["retry_of"]
         activity_enabled = harness._config.get("features", {}).get("stream_activity") is True
+        active_budget = current_budget()
+        timeout_warning_enabled = (
+            active_budget is not None and active_budget.stream_timeout_policy() is not None
+        )
         if activity_enabled:
             record["stream_metrics"] = {
                 "status": "dispatched",
@@ -258,12 +262,29 @@ def dispatch(harness, run, operation, request, session_dispatch):
             return not mismatch
 
         prepared["transport_decision_observer"] = observe_transport
-        if activity_enabled:
+        if activity_enabled or timeout_warning_enabled:
             def observe_activity(activity):
                 if not isinstance(activity, Mapping):
                     return
-                metrics = dict(record["stream_metrics"])
                 kind = activity.get("kind")
+                if not activity_enabled:
+                    if kind != "soft_timeout_warning":
+                        return
+                    warning = {
+                        "elapsed_seconds": activity.get("elapsed_seconds")
+                        if type(activity.get("elapsed_seconds")) is int else None,
+                        "policy_version": activity.get("policy_version")
+                        if isinstance(activity.get("policy_version"), str) else None,
+                    }
+                    _save(
+                        harness,
+                        run,
+                        record,
+                        event_type="call_activity",
+                        event_fields={"activity_kind": kind, "stream_timeout_warning": warning},
+                    )
+                    return
+                metrics = dict(record["stream_metrics"])
                 at = activity.get("at")
                 if not isinstance(at, str) or not at.strip():
                     at = datetime.now(UTC).isoformat()

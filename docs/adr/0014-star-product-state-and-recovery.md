@@ -13,3 +13,7 @@
 ## 2026-10-25：显式产品传输策略
 
 STAR 默认请求 timeout 保持 180 秒（实际发送仍取剩余 Run deadline 与配置的较小值），最多三次总尝试，不增加 Run 预算。仅 requests ConnectTimeout 或底层 NewConnectionError 等明确建连前失败可自动重试，退避 1、2 秒；其 token 预留结算为零，attempt 仍计数。429 只有明确、可解析且未超出原 deadline 的 Retry-After 才重试，每次继续受累计预算约束。5xx、ReadTimeout、一般连接中断均不能推断未执行，零自动重发并保留未知预留，沿用既有人工恢复入口。完整模型回复中的非法 JSON 仍由既有协议层最多修复一次，不作为传输重试。官方未绑定 Run 账本的路径行为不变；不假设供应商幂等或查询能力，本切片不新增熔断器或人工 UI。
+
+## 2026-11-07：版本化流式 timeout policy 迁移
+
+按 #135 的调用生命周期决议，以上三次总尝试限制和 180 秒请求超时仅作为未冻结新策略的旧 Run 语义保留。服务端显式启用的新 Run 冻结版本化 timeout policy，默认关闭；1200 秒只发一次软提示，首个有效增量后 30 秒有效 idle 收口。未确认 provider 公布上限时，client timeout 不作为整次请求、首响应或持续活跃流的应用层截止；原 Run/phase/batch deadline 仍优先。新策略移除应用层三次尝试上限，只允许可证明未发送的失败或仍在原 deadline 内且带有效 `Retry-After` 的 429 自动重试，继续共用原预算和调用身份账本。旧 Run 不迁移、不回写。

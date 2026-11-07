@@ -827,7 +827,10 @@ class WorkspaceService:
         waiting_input_marker: str = "",
         pipeline: Any | None = None,
         star_pipeline: Any | None = None,
+        stream_timeout_policy_version: str | None = None,
     ) -> None:
+        from .stream_timeout_policy import policy_for_version
+
         self.store = WorkspaceStore(database_path, connection=connection)
         self.execution_mode = execution_mode
         self.execution_delay = max(0.0, float(execution_delay))
@@ -835,6 +838,7 @@ class WorkspaceService:
         self.waiting_input_marker = waiting_input_marker
         self.pipeline = pipeline
         self.star_pipeline = star_pipeline
+        self.stream_timeout_policy = policy_for_version(stream_timeout_policy_version)
         self.budget_ledger = RunBudgetLedger(
             self.store._connection, connection_lock=self.store._lock
         )
@@ -917,15 +921,24 @@ class WorkspaceService:
             idempotency_key=idempotency_key,
             request_digest=digest,
             execution_mode=solver_mode if solver_mode in STAR_MODES else getattr(selected, "execution_mode", self.execution_mode),
-            solver_identity={**identity, "evidence_kind": getattr(selected, "evidence_kind", self.execution_mode)},
+            solver_identity={
+                **identity,
+                "evidence_kind": getattr(selected, "evidence_kind", self.execution_mode),
+                **({"stream_timeout_policy": self.stream_timeout_policy}
+                   if self.stream_timeout_policy is not None else {}),
+            },
             experiment_binding=experiment_binding,
             solver_hint=solver_hint,
             verification_mode=verification_mode,
             input_user_file_id=input_user_file_id,
         )
         if budget_limits is not None:
+            frozen_identity = self.store.job_identity(payload["job_id"])
             self.budget_ledger.ensure(
-                payload["job_id"], budget_limits, deadline_at=deadline_at
+                payload["job_id"],
+                budget_limits,
+                deadline_at=deadline_at,
+                stream_timeout_policy=frozen_identity.get("stream_timeout_policy"),
             )
             snapshot = self.budget_ledger.snapshot(payload["job_id"])
             expected_limits = {
@@ -998,7 +1011,11 @@ class WorkspaceService:
             # the HTTP contract never waits for execution.
             time.sleep(self.execution_delay)
             if self.execution_mode == "fake" and self.budget_ledger.snapshot(job_id) is not None:
-                budget = self.budget_ledger.ensure(job_id, RunBudgetLimits())
+                budget = self.budget_ledger.ensure(
+                    job_id,
+                    RunBudgetLimits(),
+                    stream_timeout_policy=identity.get("stream_timeout_policy"),
+                )
                 RunControl(self.store, job_id, budget).check()
             if self.execution_mode == "live" or execution_mode in STAR_MODES:
                 if pipeline is None:
@@ -1027,7 +1044,12 @@ class WorkspaceService:
                 limits = (pipeline.budget_for_mode(identity.get("solver_mode"))
                           if execution_mode in STAR_MODES else getattr(pipeline, "budget", RunBudgetLimits()))
                 deadline = getattr(getattr(pipeline, "experiment_policy", None), "deadline_at", None)
-                with bind_budget(self.budget_ledger.ensure(job_id, limits, deadline_at=deadline)) as budget, bind_control(RunControl(self.store, job_id, budget, self.checkpointer)) as control:
+                with bind_budget(self.budget_ledger.ensure(
+                    job_id,
+                    limits,
+                    deadline_at=deadline,
+                    stream_timeout_policy=identity.get("stream_timeout_policy"),
+                )) as budget, bind_control(RunControl(self.store, job_id, budget, self.checkpointer)) as control:
                     control.check()
                     state = pipeline.run(
                         job_id,
