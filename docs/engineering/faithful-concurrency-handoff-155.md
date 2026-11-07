@@ -13,13 +13,13 @@
 
 ## 决策来源与串行边界
 
-[Issue #155 最终 resolution](https://github.com/RUSS0718/MathAgent/issues/155#issuecomment-6704660319) 冻结了完整并发 Population/APRS 的行为和验收边界。#155 已关闭为决策完成，不代表产品已实现、服务容量已测量或数学能力已提升。已读取 #155 的全部五条评论；最终 resolution 是本交接的主要行为来源。
+[Issue #155 最终 resolution](https://github.com/RUSS0718/MathAgent/issues/155#issuecomment-6704660319) 冻结了完整并发 Population/APRS 的行为和验收边界。#155 已关闭为决策完成，不代表产品已实现、服务容量已测量或数学能力已提升。已读取 #155 决议阶段的五条评论；最终 resolution 是本交接的主要行为来源，后续实施回链见上节。
 
 [串行实施票 #148](https://github.com/RUSS0718/MathAgent/issues/148) 仍定义 F2/S08 串行首版：任一时刻只执行一条路线，主路线停滞后至多启动一条替代路线。它要求 F1 工程合同先通过。[总实施票 #146](https://github.com/RUSS0718/MathAgent/issues/146) 也将完整并发留作串行实测后的独立目标。不得把 #155 写成 #148 已覆盖，也不得把串行 F2 的验收结果当作并发完成证据。
 
 本地依据的远端规格为 [Faithful implement-spec](https://github.com/RUSS0718/MathAgent/blob/docs/wayfinder-chat-output-prototype-20261106/docs/specs/mathagent-faithful-implement-spec-20261107.md)，读取 ref 为 docs/wayfinder-chat-output-prototype-20261106，文件 SHA 为 c30deb2c51ccf60fa87f68b4a5ac0eaf4630511d。规格仍将 S08/F2 定义为串行路线，并把完整并发列在首版范围之外。#155 是之后批准的增量决策，不会改变串行 Run 的冻结语义。
 
-已读取 #146、#148、#150–154 的 issue 正文和评论集合。#146 与 F4–F8 的入口、依赖和分层验收作为集成背景；#150–154 的现有范围不会因 #155 决策自动扩张。#146、#148、#150–154 当前均无 issue 评论。实施票的创建、标签或关闭状态都不能替代代码和验收证据。
+已读取 #146、#148、#150–154 的 issue 正文和初次核对时的评论集合。#146 与 F4–F8 的入口、依赖和分层验收作为集成背景；#150–154 的现有范围不会因 #155 决策自动扩张。后续新增的 #146 实施回链见上节。实施票的创建、标签或关闭状态都不能替代代码和验收证据。
 
 新并发 policy 仅用于显式选择的新 Run。Run 冻结 policy 版本和配置；默认关闭；已运行的旧 Run 不热切换。并发核心是同题、同一 Run 内多条 CandidateRoute 搜索，不是多 Job 吞吐，也不包括单路线内多个 WorkUnit 并行。每条路线最多一个在途 WorkUnit。同源 control/variant 两臂继续遵守 #142 的隔离合同。
 
@@ -75,6 +75,12 @@ F8 框架可先行；A–G 能力按生产者就绪逐组开放
 SolverStateStore 已有 revision CAS 和状态/事件原子提交；RunBudgetLedger 已有请求预留与结算；恢复投影能识别未决请求。这些是可复用接缝，不证明已经支持多路线调度所有权、局部 unknown 暂停、依赖版本提交、或交付和结算分离。
 
 本地对 showcase/ 与 tests/ 搜索了 CandidateRoute、APRS、RaterInputSnapshot、RaterEvaluation、frontier_digest 等并发实现标识，未发现完整并发调度实现。现有 star_routing、candidate_registry、Best-Effort 和 Job 恢复只提供相邻能力，不能合并推断为完整并发。
+
+复核搜索入口（词项命中需继续追踪调用和公开验收，不能只凭无匹配判断行为不存在）：
+
+```powershell
+rg -n 'CandidateRoute|APRS|RaterInputSnapshot|RaterEvaluation|frontier_digest' showcase tests -g '*.py' -g '!tests/test.md' -g '!**/__pycache__/**' -g '!**/node_modules/**' -g '!**/dist/**'
+```
 
 ## 八项可执行验收责任
 
