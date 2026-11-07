@@ -60,6 +60,19 @@ S01 → S02 → S03 → S04；S05 等 S01、S03；S06 等 S03、S05。F1 等 S03
 
 完整仓库回归、发布门禁、浏览器、真实隔离工具、provider、自然题和独立数学评测尚未由本记录验证。不能从上述 PASS 推导数学能力、并发实现或 S01–S06 全部通过。
 
+### 起点回归与基线同步
+
+对原起点 `e6b6b89` 运行一次 `uv run python scripts/check.py --offline --report-dir artifacts/faithful-entry-146/repository-check`，后台 PID 为 1964，开始于 2026-11-07 16:54:55（Asia/Shanghai）。最终 1251 项测试、7 个 failure、12 个 error、42 个 skip，报告耗时 1373.6 秒，命令退出 1。该次全仓检查失败，后续 mutation probes 和入口检查未由该命令执行，不能算通过。
+
+原始结果保存在忽略目录 `artifacts/faithful-entry-146/`。12 个 error 均出自 Flask 测试清理时 SQLite 文件仍被占用；7 个 failure 涉及 Explore/Verifier schema、未校准概率字段、完整流协议失败与 RB-03 声明校验。报告保留了完整失败名和 traceback，未删除失败或将 skip 计为成功。
+
+起点检查结束后，集成分支合入总票指定的 `b7038798`（同步提交 `6f3c917`）。没有把运行中的测试源码改为新基线。同步后的聚焦复核覆盖旧失败场景：
+
+- ExploreReplySchemaTest、VerifierReplySchemaTest 和 Flask 测试：16 项通过，报告 `artifacts/faithful-baseline-146/focused.json`。
+- 未校准概率字段、完整流协议失败、流恢复及 RB-03 旧失败用例：5 项通过，报告 `artifacts/faithful-baseline-146/failures.json`。
+
+这 21 项只证明被复核的旧失败场景在指定基线通过，不替代同步后完整全仓回归或 S01 新合同验收。后续实现以该冻结基线为基础，原工作区保持不变。
+
 ## 并发交接边界
 
 #148 仍只负责串行 F2；#155 决策完成不关闭任何实施票。完整并发需要独立 policy、公共控制与持久化路径的重叠执行证据，以及所有权、资源原子准入、依赖版本核验、局部 unknown、答案冻结和终止栅栏验收。容量和性能参数必须实测，不在实现前填造数值。
