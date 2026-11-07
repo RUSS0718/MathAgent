@@ -42,6 +42,31 @@ def safe_identifier(value: Any) -> str | None:
     )
 
 
+def _public_call_policy_evidence(raw: Any) -> dict[str, Any] | None:
+    """Project only explicitly allowed, non-secret policy evidence fields."""
+
+    if not isinstance(raw, Mapping):
+        return None
+    policy_version = safe_identifier(raw.get("policy_version"))
+    if policy_version is None:
+        return None
+    endpoint_sha256 = raw.get("endpoint_sha256")
+    if not isinstance(endpoint_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", endpoint_sha256):
+        endpoint_sha256 = None
+    return {
+        "policy_version": policy_version,
+        "provider": "unknown",
+        "endpoint_sha256": endpoint_sha256,
+        "provider_timeout_limit": {
+            "status": "unknown",
+            "seconds": None,
+            "source": None,
+            "version": None,
+            "date": None,
+        },
+    }
+
+
 def public_attempt(
     event: Mapping[str, Any], *, run_id: str | None = None, role: str | None = None
 ) -> dict[str, Any]:
@@ -49,7 +74,7 @@ def public_attempt(
     usage = {key: _count(source.get(key)) for key in USAGE_FIELDS}
     status = event.get("status")
     dispatch_status = "not_submitted" if status == "not_submitted" else event.get("dispatch_status")
-    return {
+    public: dict[str, Any] = {
         "attempt_id": safe_identifier(event.get("attempt_id")),
         "logical_call_id": safe_identifier(event.get("logical_call_id")),
         "run_id": safe_identifier(run_id),
@@ -115,6 +140,10 @@ def public_attempt(
         else None,
         "cost": None,
     }
+    call_policy_evidence = _public_call_policy_evidence(event.get("call_policy_evidence"))
+    if call_policy_evidence is not None:
+        public["call_policy_evidence"] = call_policy_evidence
+    return public
 
 
 def _duration(value):

@@ -342,11 +342,19 @@ class InternStreamAdapter(InternModelAdapter):
             clock = guarded_utc_clock(time.time)
         started = clock()
         if stream_timeout_policy is not None:
-            from .stream_timeout_policy import StreamCallLifecycle, StreamTimeoutPolicy
+            from .stream_timeout_policy import (
+                StreamCallLifecycle,
+                StreamTimeoutPolicy,
+                call_policy_evidence,
+            )
 
             policy = StreamTimeoutPolicy.from_snapshot(stream_timeout_policy)
             logical_deadline = call_budget.absolute_deadline()
             stream_lifecycle = StreamCallLifecycle(policy.snapshot(), started, logical_deadline)
+            attempt["call_policy_evidence"] = call_policy_evidence(
+                policy.snapshot(),
+                endpoint=client.api_base,
+            )
             effective_timeout = call_budget.remaining_seconds()
         else:
             logical_deadline = started + effective_timeout

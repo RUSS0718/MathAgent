@@ -132,3 +132,22 @@ class StreamCallLifecycle:
 
         with self._lock:
             self._complete = True
+
+
+def call_policy_evidence(
+    policy: Mapping[str, object], *, endpoint: str
+) -> dict[str, object]:
+    """Build the opt-in attempt evidence without retaining a raw endpoint or SLA claim."""
+
+    return {
+        "policy_version": StreamTimeoutPolicy.from_snapshot(policy).policy_version,
+        "provider": "unknown",
+        "endpoint_sha256": hashlib.sha256(endpoint.encode("utf-8")).hexdigest(),
+        "provider_timeout_limit": {
+            "status": "unknown",
+            "seconds": None,
+            "source": None,
+            "version": None,
+            "date": None,
+        },
+    }

@@ -14,7 +14,7 @@
 
 本纵切只覆盖显式 Showcase/STAR 路径中的 `InternStreamAdapter`：服务端可选择一个版本化 stream call policy；创建 Job 时冻结版本，执行与恢复继续读取该 Job 的版本。默认关闭；未启用策略或历史 Job 缺少版本时沿用原语义。不得修改 `user_agent.py`、`implementations/`、官方预算或官方评分路径。
 
-本纵切不登记或推断任何 provider SLA。没有可核验的 provider 公布上限时，不能以 client 的 30/180 秒配置作为整次调用或首响应的应用层截止；请求仍受原 Run/phase/batch 硬截止约束。新策略的 Requests connect/read inactivity 参数以 client 连接值和 Run 剩余硬预算为边界，30 秒 effective-idle 由动态 watchdog 单独收口。实际 provider、endpoint、role 与可验证的公开限制来源应在调用证据中分别记录；未知值保持未知。
+本纵切不登记或推断任何 provider SLA。没有可核验的 provider 公布上限时，不能以 client 的 30/180 秒配置作为整次调用或首响应的应用层截止；请求仍受原 Run/phase/batch 硬截止约束。新策略的 Requests connect/read inactivity 参数以 client 连接值和 Run 剩余硬预算为边界，30 秒 effective-idle 由动态 watchdog 单独收口。新策略调用证据记录策略版本、provider、endpoint 身份和公开上限依据；未知 provider 明确记为 `unknown`，endpoint 只记录精确配置 URL 的 SHA-256，未核实上限记为 `unknown`，其来源、版本和日期为 `null`。旧策略不增加这些字段。
 
 ## 新策略行为
 
@@ -40,6 +40,7 @@
 | 完成后的慢处理 | 慢于旧 client timeout 的本地完成处理，只要仍在 Run deadline 内即可结束；超出 Run deadline 时由 Run deadline 结束。 |
 | EOF 排队与慢消费者 | 使用真实 `response_events` 和受控 Response；仅 reader 明确读到 EOF 后，排队的终态与慢速本地消费才豁免 idle；Run deadline 仍优先。未完成流即使心跳队列持续非空也按有效 idle 收口，并由测试事件解除 reader 后核对关闭。 |
 | 请求超时审计字段 | 新策略的 Requests timeout 是 connect/read 二元组；旧公开单值 `requests_timeout_seconds` 对新策略记为 `null`，有效期限由 Run deadline 与冻结 policy 解释；旧策略保持已有单值。 |
+| 新策略调用依据投影 | 通过公开 attempt seam 输出冻结 policy version、`provider: unknown`、仅 endpoint URL SHA-256，以及 `provider_timeout_limit: {status: unknown, seconds/source/version/date: null}`；嵌套未知字段丢弃，旧 attempt 无新增字段。 |
 | Run deadline 先到 | 不论有效流、heartbeat 或软提示状态如何，原 Run deadline 到期后均停止；不重置 deadline 或预算。 |
 | 同 key 丢 POST 回包恢复 | 用同一用户、请求和 Idempotency-Key 重放 POST 时返回原 Job；不会新建 Job、Run、调用或预算账本，原冻结 policy 不变。 |
 | 新策略重试边界 | 可证明未发送和有效 429 可在共享预算内重试超过三次；ReadTimeout/断流等 unknown 不自动重试；预算耗尽或原硬 deadline 到期时停止。 |
@@ -58,11 +59,12 @@
 
 显式启用入口为服务端 create_app 配置 SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION=faithful-stream-v1；缺省为 None，新 Job 才冻结选择，不改写已有 Job/Run。
 
-- `uv run --frozen python -m unittest discover -s tests -p 'test_faithful_s01_*.py' -v`：15 项通过。覆盖 1300 秒活跃流、首 delta 等待、heartbeat/usage/显式重复、无 ID 同值 delta、真实 transport EOF/idle 与心跳积压、Run deadline 优先、ConnectTimeout/429 重试 usage 初始化、超三次安全重试、脱敏软提示事件、timeout 审计字段及同 key 恢复。心跳积压反例在仅队列空时检查 idle 的实现下失败，改为消费每个事件前检查后通过。
+- `uv run --frozen python -m unittest discover -s tests -p 'test_faithful_s01_*.py' -v`：18 项通过。覆盖 1300 秒活跃流、首 delta 等待、heartbeat/usage/显式重复、无 ID 同值 delta、真实 transport EOF/idle 与心跳积压、Run deadline 优先、ConnectTimeout/429 重试 usage 初始化、超三次安全重试、脱敏软提示事件、调用依据白名单、timeout 审计字段、同 key 恢复及同 SSE id 新 payload。心跳积压反例在仅队列空时检查 idle 的实现下失败，改为消费每个事件前检查后通过。
 - `uv run --frozen python -m unittest tests.test_request_transport_late_callback -v`：7 项通过；迟到回执仍受原 deadline/Requests read timeout 窗口约束，无新增全局清理计时器。
 - `uv run --frozen python -m unittest tests.test_star_transport_policy -v`：21 项通过；包含旧策略迟到 usage 结算和既有单值 timeout 投影。
 - `uv run --frozen python -m unittest tests.test_star_stream_late_race_98 tests.test_star_buffered_deadline_98 tests.test_metered_absolute_deadline tests.test_star_dispatch_boundary_98 -v`：25 项通过。
 - `uv run --frozen python -m unittest tests.test_run_budget tests.test_job_control tests.test_workspace_jobs tests.test_flask_showcase tests.test_request_attempts tests.test_solver_harness_streaming_activity tests.test_solver_harness_streaming -v`：50 项通过。
+- `uv run --frozen python -m unittest tests.test_star_default_envelope_98.DefaultEnvelopeContractTest.test_unmetered_success_keeps_baseline_attempt_keys tests.test_request_attempts -v`：8 项通过；验证旧 attempt 字段稳定及既有 attempt 持久化。
 - provider-live、完整 S01 错误/取消/恢复矩阵、非流式等待、浏览器刷新与 SSE 重连、完整全仓发布门禁：`not_run` 或仍未覆盖。本记录仅支持“流式 timeout policy 首纵切离线验收”，不构成 S01 阶段退出声明。
 
 ## 纵切退出声明
