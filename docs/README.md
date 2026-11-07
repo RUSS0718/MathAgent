@@ -1,8 +1,10 @@
 # MathAgent 文档索引
 
-## Faithful 实施入口（2026-11-07）
+## Faithful 实施入口（2026-11-08）
 
-- [S02 上下文与容量治理退出合同](engineering/faithful-s02-exit-contract.md)：实施中，列出公共接缝与完整退出清单；尚未解除 S03 依赖。
+- [S02 上下文与容量治理退出合同](engineering/faithful-s02-exit-contract.md)：C01–C12 工程退出通过，状态为 `engineering-preview`；冻结源码 `d19aa56`，真实 provider、容量/SLA 与数学效果未验证。
+- [S02 工程退出验收记录](evals/faithful-s02-exit-20261108.md)：六阶段门禁、聚焦/浏览器回归、跳过项、审查修复及能力边界。S02 退出解除 S03 工程依赖。
+- [S03 规格与工作块交接合同](engineering/faithful-s03-handoff-contract.md)：S03 下一可开工阶段；启动前检查现有窗口并继承最新集成交接提交。S04/S05 仍等待 S03，F1 仍等待 S03 与 S04。
 
 - [S01 流式工程退出验收](evals/faithful-s01-exit-20261107.md)：按用户调整后的流式范围退出；六阶段冻结门禁与终审补丁分开留证，S02 的 S01 工程依赖解除。真实 provider 与数学效果未通过。
 - [S01 首纵切集成验收](evals/faithful-s01-first-slice-20261107.md)：流式策略、六阶段门禁与终审补丁证据；完整 S01 及后续阶段仍未验收。
