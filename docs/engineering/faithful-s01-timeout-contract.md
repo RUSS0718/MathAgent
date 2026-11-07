@@ -20,7 +20,7 @@
 
 1. Run policy 记录稳定的 `policy_version`，由服务端显式启用，缺省为关闭。相同幂等 POST 恢复原 Job 和其冻结版本；策略配置变化不改写已创建 Job 或历史 Run。
 2. 流式调用开始 1200 秒时最多发出一次软提示。提示不取消调用、不重发请求、不修改数学状态；有效增量持续到达时，调用可继续。
-3. 首个有效增量后启动 30 秒 effective-idle 时钟。非空 content 或非空 reasoning 增量可刷新该时钟；reasoning 只记录长度/时间，不公开其文本。heartbeat、空事件、role、usage 和可识别的重复事件均不刷新。只按重复的显式 SSE `id` 去重；无 ID 的相同 payload 仍是独立 delta，必须保留、刷新 idle 并与最终文本一致。
+3. 首个有效增量后启动 30 秒 effective-idle 时钟。非空 content 或非空 reasoning 增量可刷新该时钟；reasoning 只记录长度/时间，不公开其文本。heartbeat、空事件、role、usage 和可识别的重复事件均不刷新。只在显式 SSE `id` 与载荷都重复时去重；无 ID 的相同 payload 仍是独立 delta，必须保留、刷新 idle 并与最终文本一致。
 4. 首个有效增量到达前不施加臆造的首响应或 idle 上限；此阶段由原硬 deadline 收口。30 秒有效 idle 到期时结束该流并保留已收到的正文与可知计量。已派发但不能证明完成的调用保留 unknown 和未结算预留；未知 usage 仍为 `null`。
 5. 没有公开 provider 上限时，完成后的本地处理不另加 30 秒硬截止；它仍受原 Run/phase/batch deadline 限制。较早到期的原 Run deadline 始终优先。只有 reader 已明确读到 EOF 时，排队的终态和本地慢处理才可继续；未完成 reader 的 queued bytes 不豁免 effective idle。迟到回执继续由原 Run deadline 与 Requests read timeout 约束，不新增全局清理上限。
 6. 新策略不设应用层总尝试次数上限。共享 Run HTTP/token/时间预算及服务端实际限制仍然生效；只有明确未发送的失败或带有效 `Retry-After` 且仍在原硬 deadline 内的 429 可以自动重试。其他可能已发送的失败保持 unknown，不自动重发。显式用户重试使用新调用身份并保留旧 unknown 账目。
@@ -36,7 +36,7 @@
 | 有效流持续 1300 秒 | `client.timeout=180` 不会把活跃流当作 180 秒绝对截止；有效增量持续时 1300 秒后可完成。1200 秒恰发一次软提示，且不泄露 reasoning 文本。 |
 | 首个有效增量等待 | 180 秒无首个有效增量但仍未到 Run deadline 时不因 client timeout 结束；抵达 Run deadline 才终止，远端结果与 usage 按 unknown 规则保留。 |
 | 30 秒仅 heartbeat/非有效事件 | 首个有效增量之后，heartbeat、usage、role、空事件或重复事件不能刷新有效 idle；有效 idle 到期后结束并保留部分正文。 |
-| 相同 delta 和 SSE 事件身份 | 无 ID 的完全相同 data 连续到达时两份均输出、拼接且刷新 idle；显式重复 SSE ID 的重放只输出一次。 |
+| 相同 delta 和 SSE 事件身份 | 无 ID 的完全相同 data 连续到达时两份均输出、拼接且刷新 idle；相同显式 SSE ID 和载荷的重放只输出一次，同 ID 的新载荷仍完整输出。 |
 | 完成后的慢处理 | 慢于旧 client timeout 的本地完成处理，只要仍在 Run deadline 内即可结束；超出 Run deadline 时由 Run deadline 结束。 |
 | EOF 排队与慢消费者 | 使用真实 `response_events` 和受控 Response；仅 reader 明确读到 EOF 后，排队的终态与慢速本地消费才豁免 idle；Run deadline 仍优先。未完成流即使心跳队列持续非空也按有效 idle 收口，并由测试事件解除 reader 后核对关闭。 |
 | 请求超时审计字段 | 新策略的 Requests timeout 是 connect/read 二元组；旧公开单值 `requests_timeout_seconds` 对新策略记为 `null`，有效期限由 Run deadline 与冻结 policy 解释；旧策略保持已有单值。 |
@@ -54,7 +54,11 @@
 
 ## 本次验证记录
 
-- `uv run --frozen python -m unittest discover -s tests -p 'test_faithful_s01_*.py' -v`：14 项通过。覆盖 1300 秒活跃流、首 delta 等待、heartbeat/usage/显式重复、无 ID 同值 delta、真实 transport EOF/idle 与心跳积压、Run deadline 优先、ConnectTimeout/429 重试 usage 初始化、超三次安全重试、脱敏软提示事件、timeout 审计字段及同 key 恢复。心跳积压反例在仅队列空时检查 idle 的实现下失败，改为消费每个事件前检查后通过。
+集成终审补充：同一 SSE ID 携带不同内容的适配器验收先失败（第二段被丢弃），改为同时核对 ID 与载荷摘要后通过。原有同 ID/同载荷去重及无 ID 同值增量验收继续通过。
+
+显式启用入口为服务端 create_app 配置 SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION=faithful-stream-v1；缺省为 None，新 Job 才冻结选择，不改写已有 Job/Run。
+
+- `uv run --frozen python -m unittest discover -s tests -p 'test_faithful_s01_*.py' -v`：15 项通过。覆盖 1300 秒活跃流、首 delta 等待、heartbeat/usage/显式重复、无 ID 同值 delta、真实 transport EOF/idle 与心跳积压、Run deadline 优先、ConnectTimeout/429 重试 usage 初始化、超三次安全重试、脱敏软提示事件、timeout 审计字段及同 key 恢复。心跳积压反例在仅队列空时检查 idle 的实现下失败，改为消费每个事件前检查后通过。
 - `uv run --frozen python -m unittest tests.test_request_transport_late_callback -v`：7 项通过；迟到回执仍受原 deadline/Requests read timeout 窗口约束，无新增全局清理计时器。
 - `uv run --frozen python -m unittest tests.test_star_transport_policy -v`：21 项通过；包含旧策略迟到 usage 结算和既有单值 timeout 投影。
 - `uv run --frozen python -m unittest tests.test_star_stream_late_race_98 tests.test_star_buffered_deadline_98 tests.test_metered_absolute_deadline tests.test_star_dispatch_boundary_98 -v`：25 项通过。

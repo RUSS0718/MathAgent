@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -76,7 +77,7 @@ class StreamCallLifecycle:
         self.started_at = started_at
         self.run_deadline = run_deadline
         self._last_effective_at: float | None = None
-        self._seen_event_ids: set[str] = set()
+        self._seen_event_ids: set[tuple[str, str]] = set()
         self._soft_prompt_sent = False
         self._complete = False
         self._lock = threading.Lock()
@@ -90,15 +91,16 @@ class StreamCallLifecycle:
             idle_deadline = self._last_effective_at + self.policy.effective_idle_seconds
             return min(self.run_deadline, idle_deadline)
 
-    def record_event_id(self, event_id: str | None) -> bool:
-        """Deduplicate only repeated explicit SSE event identities."""
+    def record_event_id(self, event_id: str | None, event_data: str) -> bool:
+        """Deduplicate an explicit ID only when its payload also repeats."""
 
         if not event_id:
             return False
+        identity = (event_id, hashlib.sha256(event_data.encode("utf-8")).hexdigest())
         with self._lock:
-            if event_id in self._seen_event_ids:
+            if identity in self._seen_event_ids:
                 return True
-            self._seen_event_ids.add(event_id)
+            self._seen_event_ids.add(identity)
         return False
 
     def record_delta(

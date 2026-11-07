@@ -502,7 +502,7 @@ class InternStreamAdapter(InternModelAdapter):
                         notify(activity_observer, "event", event_count=attempt["event_count"])
                         if (
                             stream_lifecycle is not None
-                            and stream_lifecycle.record_event_id(current_event_id)
+                            and stream_lifecycle.record_event_id(current_event_id, content)
                         ):
                             current_event_id = None
                             return
