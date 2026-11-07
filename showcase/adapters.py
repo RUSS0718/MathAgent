@@ -758,7 +758,16 @@ class InternStreamAdapter(InternModelAdapter):
             exc.request_attempts = record_attempts(attempts, metadata)
             raise
         except Exception as exc:  # noqa: BLE001 - provider details stay out of events
-            category = _request_failure_category(exc)
+            local_processing_failure = (
+                local_processing_timeout
+                and stream_lifecycle is not None
+                and (attempt.get("status") == "success"
+                     or any(item.get("status") == "success" for item in attempts))
+            )
+            category = (
+                "local_processing_timeout"
+                if local_processing_failure else _request_failure_category(exc)
+            )
             activity_status = "deadline" if category == "timeout" else "disconnect" if category == "connectivity" else "unknown"
             notify(activity_observer, activity_status)
             from llm_client import _not_submitted

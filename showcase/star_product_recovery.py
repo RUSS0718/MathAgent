@@ -42,6 +42,14 @@ def recovery_projection(run):
              and other["request_revision"] > item["request_revision"])}
         for item in calls.values() if item["status"] == "protocol_failed"
     ]
+    processing_failures = [
+        {"call_id": public_solver_call_id(run["run_id"], item["call_id"]),
+         "role": item["role"], "status": item["status"],
+         "error_category": item.get("error_category"),
+         "finish_reason": item.get("finish_reason"),
+         "usage": item.get("usage")}
+        for item in calls.values() if item["status"] == "local_processing_failed"
+    ]
     events = run.get("events", [])
     receipts = {event["event_id"] for event in events if event["type"] == "tool_receipt"}
     unknown_tools = [
@@ -49,9 +57,14 @@ def recovery_projection(run):
         for event in events if event["type"] == "tool_dispatched"
         and event["event_id"].removesuffix(":dispatch") not in receipts
     ]
-    return {"status": "needs_review" if unknown or unknown_tools else "safe",
-            "unknown_calls": unknown, "unknown_tools": unknown_tools, "retries": retries,
-            "protocol_failures": protocol_failures}
+    projection = {
+        "status": "needs_review" if unknown or unknown_tools or processing_failures else "safe",
+        "unknown_calls": unknown, "unknown_tools": unknown_tools, "retries": retries,
+        "protocol_failures": protocol_failures,
+    }
+    if processing_failures:
+        projection["processing_failures"] = processing_failures
+    return projection
 
 
 def authorize_resume(connection, row, decision):
@@ -97,7 +110,10 @@ def authorize_resume(connection, row, decision):
     if orphan_tools:
         raise WorkspaceError("star_tool_recovery_needs_review", status=409)
     run = {"run_id": row["job_id"], "state": state}
-    unknown = recovery_projection(run)["unknown_calls"]
+    recovery = recovery_projection(run)
+    if recovery.get("processing_failures"):
+        raise WorkspaceError("star_processing_failure_requires_new_job", status=409)
+    unknown = recovery["unknown_calls"]
     if unknown:
         if not isinstance(decision, dict) or set(decision) != {"call_id", "new_call_id"}:
             raise WorkspaceError("star_retry_decision_required", status=409)

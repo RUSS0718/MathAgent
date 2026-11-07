@@ -382,13 +382,27 @@ def dispatch(harness, run, operation, request, session_dispatch):
             # provider finish reason, known usage and a safe response reference.
             known_protocol = category in KNOWN_PROTOCOL_FAILURES
             known_provider = category == "provider_generation_error"
+            completed_attempt = next((item for item in reversed(
+                getattr(exc, "request_attempts", ())
+            ) if item.get("status") == "success"), {})
+            local_processing = (
+                category == "local_processing_timeout" and bool(completed_attempt)
+            )
+            failure_usage = getattr(exc, "usage", None)
+            failure_finish_reason = getattr(exc, "finish_reason", None)
+            if local_processing:
+                failure_usage = failure_usage or completed_attempt.get("usage")
+                failure_finish_reason = failure_finish_reason or completed_attempt.get(
+                    "finish_reason"
+                )
             record.update(
                 status="tool_error" if getattr(exc, "tool_error", False)
                 else "provider_failed" if known_provider
+                else "local_processing_failed" if local_processing
                 else "protocol_failed" if known_protocol else "unknown_outcome",
                 partial_text="".join(partial),
-                usage=getattr(exc, "usage", None),
-                finish_reason=getattr(exc, "finish_reason", None),
+                usage=failure_usage,
+                finish_reason=failure_finish_reason,
                 response_excerpt=getattr(exc, "response_excerpt", None),
                 error_type=type(exc).__name__,
                 error_category=category,
