@@ -3,7 +3,13 @@
 **状态：** 实施交接文档，不是产品实现记录。
 **核对日期：** 2026-11-07。
 **工作树：** mathagent-faithful，核对时 HEAD=e6b6b8919ac266694c36eb0205e5f79fb3ef3953。
-**范围：** 交接同一 Run 内多 CandidateRoute 并发搜索，不实施产品、不运行付费实验、不写 GitHub、不提交。
+**范围：** 交接同一 Run 内多 CandidateRoute 并发搜索；本文档不代表产品实现或付费实验。
+
+## 已补齐的实施承接
+
+已创建 [完整并发实施票 #156](https://github.com/RUSS0718/MathAgent/issues/156)，并通过 GitHub REST 写入、读回核验原生关系：父票 #146，blocked_by 为 F1 #147 和串行 F2 #148。票内 C1–C5 分别承接 policy/所有权与原子预留、轮次并发、依赖核验与收益、恢复/终止、公开交付与结算，明确增量接入 F7/F8；本页八组公共路径验收均已列入该票。没有把它们追加为串行 F2 已完成范围。
+
+交接已回链到 [总票记录](https://github.com/RUSS0718/MathAgent/issues/146#issuecomment-6705014938) 和 [决策票记录](https://github.com/RUSS0718/MathAgent/issues/155#issuecomment-6705016228)。实施票仍开放；标签只表示合同可供实施，不解除工程前置门槛。下文的实现细节和证据缺口由 #156 继续承担，不再是没有承接票的待办。
 
 ## 决策来源与串行边界
 
