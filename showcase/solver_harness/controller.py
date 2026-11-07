@@ -143,25 +143,39 @@ def protocol_failure_exit(harness, run, exc):
     call = run["state"].get("calls", {}).get(getattr(exc, "call_id", None))
     if (call is not None and call.get("status") == "policy_rejected"
             and run["state"]["phase"] != "TERMINAL"):
+        category = call.get("error_category") or "policy_rejected"
+        is_context = category.startswith("context_")
         decision = call.get("transport_decision") or call.get("transport") or {}
         return harness.commit_event(
             run["run_id"],
             expected_revision=run["state_revision"],
             event={
-                "event_id": f"transport-policy-terminal-{run['state_revision']}",
-                "type": "transport_policy_rejected",
-                "error_category": call.get("error_category"),
+                "event_id": f"{category}-terminal-{run['state_revision']}",
+                "type": "context_capacity_rejected" if is_context else "transport_policy_rejected",
+                "error_category": category,
                 "transport": decision.get("transport"),
                 "transport_reason": decision.get("reason"),
                 "transport_evidence_kind": decision.get("evidence_kind"),
                 "new_run_required": decision.get("new_run_required") is True,
-                "summary": "Transport policy rejected this call before provider dispatch",
+                "summary": ("Context capacity policy rejected this call before provider dispatch"
+                            if is_context else
+                            "Transport policy rejected this call before provider dispatch"),
             },
             state_updates={
                 "phase": "TERMINAL",
                 "status": "partial_aborted",
-                "result_reason": call.get("error_category") or "transport_policy_rejected",
-                "final_response": "No verified answer is available: the Run transport policy requires a new Run.",
+                "result_reason": category,
+                "final_response": (
+                    "No provider request was sent. Previously committed results and evidence are "
+                    "preserved. context_capacity_exceeded: split the task into smaller parts while "
+                    "retaining the original problem and relevant evidence."
+                    if category == "context_capacity_exceeded" else
+                    f"No provider request was sent. Previously committed results and evidence are "
+                    f"preserved. Context policy rejected dispatch ({category}); verify the frozen "
+                    "provider profile or split the task while retaining the original requirements."
+                    if is_context else
+                    "No verified answer is available: the Run transport policy requires a new Run."
+                ),
             },
         )
     if call is None or call.get("status") != "protocol_failed" or run["state"]["phase"] == "TERMINAL":

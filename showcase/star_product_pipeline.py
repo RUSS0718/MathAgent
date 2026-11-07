@@ -26,7 +26,8 @@ class StarProductPipeline:
     def __init__(self, database_path, *, adapter=None, evidence_kind="live", budget=None,
                  features=None, registry=None, hint_mode="none", full_enabled=False,
                  full_features=None, full_budget=None, experiment_policy=None,
-                 transport_policy="legacy", stream_profiles=None, acceptance_mode="strict"):
+                 transport_policy="legacy", stream_profiles=None, acceptance_mode="strict",
+                 context_capacity=None):
         from .star_experiment_policy import ExperimentRunPolicy
 
         if experiment_policy is not None and not isinstance(experiment_policy, ExperimentRunPolicy):
@@ -49,7 +50,8 @@ class StarProductPipeline:
         if budget is not None and not isinstance(budget, RunBudgetLimits):
             raise ValueError("star_budget_invalid")
         self.budget = budget or RunBudgetLimits(max_model_calls=3, max_http_attempts=3, max_tool_calls=0)
-        self.config = limited_config(self.budget, features, registry)
+        self.config = limited_config(self.budget, features, registry,
+                                     context_capacity=context_capacity)
         if hint_mode not in {"none", "meta_auto"}:
             raise ValueError("star_hint_mode_invalid")
         self.config["hint_mode"] = hint_mode
@@ -60,7 +62,8 @@ class StarProductPipeline:
             max_model_calls=48, max_http_attempts=48, max_tool_calls=8)
         if not isinstance(self.full_budget, RunBudgetLimits):
             raise ValueError("star_budget_invalid")
-        self.full_config = full_config(self.full_budget, full_features)
+        self.full_config = full_config(self.full_budget, full_features,
+                                       context_capacity=context_capacity)
         if acceptance_mode == "handoff":
             self.config["acceptance_mode"] = self.full_config["acceptance_mode"] = acceptance_mode
         self.full_config["hint_mode"] = hint_mode
@@ -266,6 +269,8 @@ class StarProductPipeline:
                     "error": None if reviewed and verification_mode != "required" else {
                         "category": ("provider_generation_error"
                                      if math.get("result_reason") == "provider_generation_error"
+                                     else math.get("result_reason")
+                                     if str(math.get("result_reason", "")).startswith("context_")
                                      else "protocol_failure_unrepaired"
                                      if math.get("result_reason") == "protocol_failure_unrepaired"
                                      else "invalid_verifier_verdict"

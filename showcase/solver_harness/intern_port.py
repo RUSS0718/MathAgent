@@ -73,6 +73,7 @@ def _request_metadata(request, deadlines=None, activity_observer=None):
         "phase_deadline_at": request.get("phase_deadline_at"),
         "batch_deadline_at": request.get("batch_deadline_at"),
         "strict_completion": request.get("strict_completion") is True,
+        "context_admission": request.get("_context_admission"),
     }
     for name, limit in (deadlines or {}).items():
         if limit is not None:
@@ -312,6 +313,9 @@ class InternModelPort:
             )
             error = InternPortError(exc.category)
             error.request_attempts = record["request_attempts"]
+            error.no_dispatch = getattr(exc, "no_dispatch", False) is True
+            if hasattr(exc, "context_pack"):
+                error.context_pack = exc.context_pack
             raise error from exc
         except InternPortError as exc:
             record["error_category"] = exc.category
@@ -385,6 +389,9 @@ class InternModelPort:
             metrics["status"] = exc.category
             error = InternPortError(exc.category)
             error.request_attempts = record["request_attempts"]
+            error.no_dispatch = getattr(exc, "no_dispatch", False) is True
+            if hasattr(exc, "context_pack"):
+                error.context_pack = exc.context_pack
             raise error from exc
         except InternPortError as exc:
             record["error_category"] = exc.category
@@ -441,6 +448,7 @@ class InternModelPort:
         context.pop("schema_fingerprint", None)
         context.pop("activity_observer", None)
         context.pop("transport_decision_observer", None)
+        context.pop("_context_admission", None)
         context["original_problem"] = original
         context["tool_argument_schemas"] = {
             name: value for name, value in tools.items() if name in request.get("allowed_tools", [])

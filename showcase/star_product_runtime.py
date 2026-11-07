@@ -54,5 +54,6 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
         experiment_policy=config.get("SHOWCASE_STAR_EXPERIMENT_POLICY"),
         transport_policy=config.get("SHOWCASE_STAR_TRANSPORT_POLICY", "legacy"),
         stream_profiles=config.get("SHOWCASE_STAR_TRANSPORT_PROFILES"),
+        context_capacity=config.get("SHOWCASE_STAR_CONTEXT_CAPACITY"),
         hint_mode=config.get("SHOWCASE_STAR_HINT_MODE", "none"),
         evidence_kind=config.get("SHOWCASE_STAR_EVIDENCE_KIND", "live"))

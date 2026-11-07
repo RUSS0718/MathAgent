@@ -112,7 +112,8 @@ def prepare_session(run, request):
 def append_exchange(record, request, response):
     record = deepcopy(record)
     # Persist structured dialogue only: never the original problem or composed prompts.
-    excluded = {"problem", "prompt_layers", "session_history", "role_context"}
+    excluded = {"problem", "prompt_layers", "session_history", "role_context",
+                "session_history_summary", "_context_pack", "_context_policy"}
     task = {k: deepcopy(v) for k, v in request.items() if k not in excluded}
     record["history"].append({"request": task, "response": deepcopy(response)})
     record["last_injected_state_revision"] = request["state_revision"]

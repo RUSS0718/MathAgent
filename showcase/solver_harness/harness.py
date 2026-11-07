@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from copy import deepcopy
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from .harness_config import (
     _run_id,
 )
 from .initial_state import initial_state
+from .context_pack import frozen_policy, prepare_context_request
 from .meta import MetaPort
 from .plan import validate_plan
 from .review import VerifierPort
@@ -75,7 +77,17 @@ class SolverHarness:
         self._product_recovery = False
         self._event_observer = event_observer
         self._config = _normalize_config(config)
-        self._config_hash = _hash_json(self._config)
+        self._context_policy = frozen_policy(self._config)
+        identity_config = deepcopy(self._config)
+        if "context_capacity" in identity_config or "context_pack" in identity_config.get("features", {}):
+            identity_config.pop("context_capacity", None)
+            identity_features = dict(identity_config.get("features", {}))
+            identity_features.pop("context_pack", None)
+            if identity_features:
+                identity_config["features"] = identity_features
+            else:
+                identity_config.pop("features", None)
+        self._config_hash = _hash_json(identity_config)
         self._tool_port = tool_port
         self._meta_port = meta_port
         self._model_port = model_port
@@ -163,7 +175,8 @@ class SolverHarness:
                 problem,
             )
 
-        state = initial_state(run_id, problem_hash, self._config_hash)
+        state = initial_state(run_id, problem_hash, self._config_hash,
+                              context_policy=self._context_policy)
         event = {
             "event_id": "initialized",
             "run_id": run_id,
@@ -356,6 +369,17 @@ class SolverHarness:
             prepared["state_revision"] = latest["state_revision"]
         if self._config.get("features", {}).get("strict_completion") is True:
             prepared["strict_completion"] = True
+        context_policy = latest["state"].get(
+            "context_policy", {"enabled": False, "version": "context-pack-v1"}
+        )
+        if context_policy.get("enabled") is True:
+            prepared = prepare_context_request(
+                prepared, context_policy, run_id=latest["run_id"],
+                state_revision=latest["state_revision"],
+                problem_hash=latest["state"]["problem_hash"],
+                config_hash=latest["state"]["config_hash"],
+            )
+            prepared["_context_policy"] = context_policy
         tools = allowed_tool_ids(latest, request.get("role"), self._config, self._tool_port)
         prepared["allowed_tools"] = tools
         prepared["tool_policy"] = {"allow": tools}

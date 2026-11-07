@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from ..redaction import redact
 from ..run_budget import current_budget, public_solver_call_id
 from .intern_port import KNOWN_PROTOCOL_FAILURES
+from .context_pack import ContextCapacityExceeded, finalize_context_pack
 
 
 class CallInterrupted(BaseException):
@@ -28,6 +29,7 @@ def pending_call(run):
     audit = {
         "call_audit", "call_activity", "session_recorded", "call_retry_authorized",
         "session_started", "transport_selected", "transport_rejected",
+        "context_pack_measured", "context_capacity_rejected",
     }
     if any(event["state_revision"] > record["request_revision"]
            and event["type"] not in audit for event in run["events"]):
@@ -134,6 +136,10 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "prompt_layers",
             "role_context",
             "session_history",
+            "session_history_summary",
+            "_context_pack",
+            "_context_policy",
+            "_context_admission",
             "state_revision",
             "session_history_authority",
             "prompt_fingerprint",
@@ -216,6 +222,45 @@ def dispatch(harness, run, operation, request, session_dispatch):
             }
         _save(harness, run, record)
         prepared = harness.prepare_request(run, prepared)
+        context_policy = prepared.pop("_context_policy", None)
+        context_source = prepared.pop("_context_pack", None)
+        if isinstance(context_policy, Mapping) and context_policy.get("enabled") is True:
+            def admit_context(serialized_payload, endpoint, provider=None):
+                try:
+                    pack = finalize_context_pack(
+                        serialized_payload, context_policy, role=prepared["role"],
+                        run_id=run["run_id"],
+                        state_revision=(context_source or {}).get(
+                            "source_state_revision",
+                            (context_source or {}).get(
+                                "state_revision", prepared.get("state_revision", run["state_revision"])
+                            ),
+                        ),
+                        problem_hash=run["state"]["problem_hash"], endpoint=endpoint,
+                        provider=provider, source=context_source,
+                    )
+                except ContextCapacityExceeded as exc:
+                    record["context_pack"] = exc.pack
+                    record.update(status="policy_rejected", error_category=exc.category)
+                    latest = harness.get_run(run["run_id"])
+                    packs = [*latest["state"].get("context_packs", []), exc.pack]
+                    _save(
+                        harness, run, record, event_type="context_capacity_rejected",
+                        event_fields={"error_category": exc.category},
+                        state_updates={"context_packs": packs},
+                    )
+                    raise
+                record["context_pack"] = pack
+                latest = harness.get_run(run["run_id"])
+                _save(
+                    harness, run, record, event_type="context_pack_measured",
+                    state_updates={"context_packs": [
+                        *latest["state"].get("context_packs", []), pack,
+                    ]},
+                )
+                return pack
+
+            prepared["_context_admission"] = admit_context
 
         def observe_transport(decision, _request):
             latest = harness.get_run(run["run_id"])
@@ -334,6 +379,19 @@ def dispatch(harness, run, operation, request, session_dispatch):
         try:
             response = _consume(operation(deepcopy(prepared)), partial, checkpoint)
         except Exception as exc:
+            if (getattr(exc, "no_dispatch", False) is True
+                    and not getattr(exc, "transport_decision", None)):
+                category = getattr(exc, "category", "context_policy_rejected")
+                record.update(
+                    status="policy_rejected", error_category=category,
+                    context_pack=getattr(exc, "context_pack", record.get("context_pack")),
+                )
+                _save(
+                    harness, run, record,
+                    event_type="context_capacity_rejected",
+                    event_fields={"error_category": category},
+                )
+                raise CallInterrupted(run["run_id"], record["call_id"]) from None
             if getattr(exc, "no_dispatch", False) is True:
                 decision = getattr(exc, "transport_decision", None) or {}
                 record.update(

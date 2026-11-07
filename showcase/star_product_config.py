@@ -6,29 +6,34 @@ from .tools import ToolRegistry
 
 OPTIONAL_FEATURES = frozenset({
     "final_generation", "final_solution_review", "local_code_tool", "meta_guidance",
-    "reexplore_after_replan", "skills", "stream_activity",
+    "reexplore_after_replan", "skills", "stream_activity", "context_pack",
 })
 EXPERIMENTAL_FEATURES = frozenset({"planner_checkpoints", "reasoner_checkpoints"})
 CORE_FEATURES = frozenset({
     "star_routing", "persistent_sessions", "stream_recovery",
-    *(OPTIONAL_FEATURES - {"stream_activity"}),
+    *(OPTIONAL_FEATURES - {"stream_activity", "context_pack"}),
 })
 SUPPORTED_FEATURES = CORE_FEATURES | OPTIONAL_FEATURES | EXPERIMENTAL_FEATURES
 
 
-def full_config(budget, features=None):
+def full_config(budget, features=None, context_capacity=None):
     if features is not None and (not isinstance(features, Mapping) or any(
         key not in SUPPORTED_FEATURES | {"strict_completion"} or type(value) is not bool for key, value in features.items()
     )):
         raise ValueError("star_full_features_invalid")
     enabled = dict.fromkeys(CORE_FEATURES, True) if features is None else dict(features)
-    return {
+    config = {
         "features": enabled, "allowed_tools": ["polynomial_check", "python_math"],
         "max_model_calls": budget.max_model_calls, "max_tool_calls": budget.max_tool_calls,
         "max_total_duration_seconds": max(1, int(budget.max_runtime_seconds)),
         "max_explore_rounds": 2, "max_challenge_rounds": 5,
         "max_replans": 3, "max_final_solution_retries": 2,
     }
+    if enabled.get("context_pack") is True:
+        if context_capacity is None:
+            raise ValueError("context_capacity_required")
+        config["context_capacity"] = context_capacity
+    return config
 
 
 def core_gaps(config):
@@ -39,7 +44,7 @@ def core_gaps(config):
     return missing
 
 
-def limited_config(budget, features=None, registry=None):
+def limited_config(budget, features=None, registry=None, context_capacity=None):
     if features is not None and (not isinstance(features, Mapping) or any(
         key not in OPTIONAL_FEATURES | EXPERIMENTAL_FEATURES | {"strict_completion"} or type(value) is not bool for key, value in features.items()
     )):
@@ -53,9 +58,14 @@ def limited_config(budget, features=None, registry=None):
     tools = ["polynomial_check"] if registry else []
     if registry is not None and hasattr(registry, "container_python_executor"):
         tools.append("python_math")
-    return {
+    config = {
         "features": enabled, "allowed_tools": tools,
         "max_model_calls": budget.max_model_calls, "max_tool_calls": budget.max_tool_calls,
         "max_total_duration_seconds": max(1, int(budget.max_runtime_seconds)), "max_explore_rounds": 2,
         "max_challenge_rounds": 3,
     }
+    if enabled.get("context_pack") is True:
+        if context_capacity is None:
+            raise ValueError("context_capacity_required")
+        config["context_capacity"] = context_capacity
+    return config

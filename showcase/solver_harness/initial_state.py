@@ -5,13 +5,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 
-def initial_state(run_id: str, problem_hash: str, config_hash: str) -> dict[str, Any]:
+def initial_state(run_id: str, problem_hash: str, config_hash: str, *,
+                  context_policy: dict[str, Any] | None = None) -> dict[str, Any]:
     now = datetime.now(UTC).isoformat()
     return {
         "schema_version": "1.1",
         "run_id": run_id,
         "problem_hash": problem_hash,
         "config_hash": config_hash,
+        "context_policy": context_policy or {"enabled": False, "version": "context-pack-v1"},
+        "context_packs": [],
         "phase": "SETUP",
         "status": "running",
         "plan_version": 0,

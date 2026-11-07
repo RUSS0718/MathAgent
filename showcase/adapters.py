@@ -139,6 +139,13 @@ class InternModelAdapter:
         self.client_retry = client_retry
         self.thinking_mode = thinking_mode
 
+    @property
+    def supports_serialized_payload_observer(self):
+        """The repository Intern client reports exact request-body bytes before send."""
+        from llm_client import InternChatClient
+
+        return isinstance(self._get_client(), InternChatClient)
+
     def applied_config(self) -> dict[str, Any]:
         """Return resolved request settings without creating a lazy provider client."""
         client = self._client
@@ -181,6 +188,14 @@ class InternModelAdapter:
             kwargs["request_purpose"] = (metadata or {}).get("purpose") or (metadata or {}).get("role", "model_response")
         try:
             transport = getattr(client, "chat_response", client.chat)
+            context_admission = (metadata or {}).get("context_admission")
+            if context_admission is not None:
+                if (self.supports_serialized_payload_observer is not True
+                        and getattr(client, "supports_serialized_payload_observer", False) is not True):
+                    error = AdapterError("context_final_serialization_unavailable")
+                    error.no_dispatch = True
+                    raise error
+                kwargs["_serialized_payload_observer"] = context_admission
             requested_timeout = request_timeout(metadata)
             if requested_timeout is not None:
                 if not _accepts_keyword(transport, "timeout_seconds"):
@@ -208,6 +223,9 @@ class InternModelAdapter:
             )
             error = AdapterError(str(category), type(exc).__name__)
             error.request_attempts = attempts
+            error.no_dispatch = getattr(exc, "no_dispatch", False) is True
+            if hasattr(exc, "pack") or hasattr(exc, "context_pack"):
+                error.context_pack = getattr(exc, "pack", getattr(exc, "context_pack", None))
             raise error from exc
         def normalize_response():
             text, usage = _extract_response(raw)
@@ -297,6 +315,9 @@ class InternStreamAdapter(InternModelAdapter):
         if thinking_mode is not None:
             payload["thinking_mode"] = thinking_mode
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        context_admission = (metadata or {}).get("context_admission")
+        if callable(context_admission):
+            context_admission(body, client.api_base, "intern")
         headers = {"Content-Type": "application/json", "Authorization": client.authorization}
         role = (metadata or {}).get("role")
         attempt = {
