@@ -1,5 +1,10 @@
 # MathAgent 文档索引
 
+## Faithful 实施入口（2026-11-07）
+
+- [实施起点与 S01–S06 证据核验](engineering/faithful-implementation-entry-146.md)：实际 checkout、冻结基线同步、旧起点失败及聚焦复核；新阶段未因旧 SP 或 Intern 同名记录解除门槛。
+- [完整并发实施交接](engineering/faithful-concurrency-handoff-155.md)：承接 #155 的独立 [实施票 #156](https://github.com/RUSS0718/MathAgent/issues/156)，包含原生依赖、八组验收与交付/结算边界。串行 F2 不覆盖完整并发；文档和建票不代表产品已实现。
+
 ## 当前入口与归档状态（2026-11-06）
 
 - 本窗口所有Run的停因、根因边界和冻结身份统一见[逐Run错误索引](evals/provider-live-run-error-index-20261106.md)，不再另建重复错误流水账。原始实验数据按用户授权清理，证据恢复限制见索引末节。
