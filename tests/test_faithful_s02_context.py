@@ -304,6 +304,7 @@ class FaithfulS02ContextTest(unittest.TestCase):
         self.assertNotIn("context_pack", empty)
         self.assertNotIn("_context_policy", empty)
         self.assertEqual("not_needed", empty["_context_pack"]["summary_status"])
+        self.assertEqual("none", empty["_context_pack"]["summary_kind"])
         self.assertEqual({
             "problem_hash": "p", "specification_version": "problem-spec-v2", "config_hash": "c",
             "source_state_revision": 8, "run_id": "r", "role": "reasoner",
@@ -328,7 +329,8 @@ class FaithfulS02ContextTest(unittest.TestCase):
             ],
         }, no_summary_policy, run_id="r", state_revision=9, problem_hash="p")
         self.assertNotIn("session_history_summary", fallback)
-        self.assertEqual("input_limit_fallback", fallback["_context_pack"]["summary_status"])
+        self.assertEqual("reference_only", fallback["_context_pack"]["summary_status"])
+        self.assertEqual("index", fallback["_context_pack"]["summary_kind"])
         self.assertNotIn("recursive", json.dumps(fallback["session_history"], ensure_ascii=False))
 
     def test_archived_history_drops_nested_old_summaries_before_one_summary_attempt(self):
@@ -358,7 +360,9 @@ class FaithfulS02ContextTest(unittest.TestCase):
         self.assertNotIn("NESTED STALE SUMMARY", serialized)
         self.assertNotIn("DEEP STALE SUMMARY", serialized)
         self.assertNotIn("OLD PACK", serialized)
-        self.assertEqual("bounded archive reference", prepared["session_history_summary"])
+        self.assertIn("Non-authoritative provided summary: bounded archive reference",
+                      prepared["session_history_summary"])
+        self.assertEqual("provided_summarizer_output", prepared["_context_pack"]["summary_kind"])
 
     def test_failed_summary_matrix_never_revives_old_derived_text(self):
         history = [
@@ -369,14 +373,14 @@ class FaithfulS02ContextTest(unittest.TestCase):
         cases = (
             ("summarizer_exception", {"history_input_limit_bytes": 10_000,
                                        "history_summary_limit_bytes": 2_048},
-             lambda *_: (_ for _ in ()).throw(RuntimeError("summary failed")), "fallback"),
+            lambda *_: (_ for _ in ()).throw(RuntimeError("summary failed")), "reference_only"),
             ("summary_too_large", {"history_input_limit_bytes": 10_000,
                                     "history_summary_limit_bytes": 2},
-             lambda *_: "oversized", "fallback"),
+             lambda *_: "oversized", "reference_only"),
             ("input_too_large", {"history_input_limit_bytes": 1,
                                   "history_summary_limit_bytes": 0},
              lambda *_: self.fail("input-over-limit history must not be summarized"),
-             "input_limit_fallback"),
+             "reference_only"),
         )
         for label, limits, summarizer, expected_status in cases:
             with self.subTest(label=label):
@@ -389,13 +393,13 @@ class FaithfulS02ContextTest(unittest.TestCase):
                 }, policy, run_id="r", state_revision=12, problem_hash="p",
                    summarizer=summarizer)
                 self.assertEqual(expected_status, prepared["_context_pack"]["summary_status"])
+                self.assertEqual("index" if expected_status == "reference_only" else
+                                 "provided_summarizer_output",
+                                 prepared["_context_pack"]["summary_kind"])
                 projection = json.dumps(prepared, ensure_ascii=False)
                 self.assertNotIn("STALE", projection)
                 self.assertNotIn("NESTED OLD", projection)
-                if limits["history_summary_limit_bytes"] == 0 or label == "summary_too_large":
-                    self.assertNotIn("session_history_summary", prepared)
-                else:
-                    self.assertIn("non-authoritative", prepared["session_history_summary"])
+                self.assertNotIn("session_history_summary", prepared)
 
     def test_changed_history_source_rebuilds_hash_without_reusing_old_summary(self):
         policy = frozen_policy({"features": {"context_pack": True},

@@ -8,8 +8,8 @@ from datetime import UTC, datetime
 
 from ..redaction import redact
 from ..run_budget import current_budget, public_solver_call_id
-from .intern_port import KNOWN_PROTOCOL_FAILURES
 from .context_pack import ContextCapacityExceeded, finalize_context_pack
+from .intern_port import KNOWN_PROTOCOL_FAILURES
 
 
 class CallInterrupted(BaseException):
@@ -242,13 +242,6 @@ def dispatch(harness, run, operation, request, session_dispatch):
                 except ContextCapacityExceeded as exc:
                     record["context_pack"] = exc.pack
                     record.update(status="policy_rejected", error_category=exc.category)
-                    latest = harness.get_run(run["run_id"])
-                    packs = [*latest["state"].get("context_packs", []), exc.pack]
-                    _save(
-                        harness, run, record, event_type="context_capacity_rejected",
-                        event_fields={"error_category": exc.category},
-                        state_updates={"context_packs": packs},
-                    )
                     raise
                 record["context_pack"] = pack
                 latest = harness.get_run(run["run_id"])
@@ -386,10 +379,18 @@ def dispatch(harness, run, operation, request, session_dispatch):
                     status="policy_rejected", error_category=category,
                     context_pack=getattr(exc, "context_pack", record.get("context_pack")),
                 )
+                latest = harness.get_run(run["run_id"])
+                state_updates = {}
+                context_pack = record.get("context_pack")
+                if isinstance(context_pack, Mapping):
+                    state_updates["context_packs"] = [
+                        *latest["state"].get("context_packs", []), context_pack,
+                    ]
                 _save(
                     harness, run, record,
                     event_type="context_capacity_rejected",
                     event_fields={"error_category": category},
+                    state_updates=state_updates,
                 )
                 raise CallInterrupted(run["run_id"], record["call_id"]) from None
             if getattr(exc, "no_dispatch", False) is True:

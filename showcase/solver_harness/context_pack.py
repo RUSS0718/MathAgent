@@ -83,7 +83,7 @@ def prepare_context_request(request: dict[str, Any], policy: dict[str, Any], *, 
                             state_revision: int, problem_hash: str,
                             config_hash: str | None = None,
                             summarizer=None) -> dict[str, Any]:
-    """Deduplicate exact history and retain a bounded, non-authoritative archive summary."""
+    """Deduplicate history and add a bounded non-authoritative excerpt or source index."""
     prepared = deepcopy(request)
     if not policy.get("enabled"):
         return prepared
@@ -109,7 +109,12 @@ def prepare_context_request(request: dict[str, Any], policy: dict[str, Any], *, 
     if not isinstance(history, list) or not history:
         prepared["_context_pack"] = {
             "history_refs": [],
+            "retained_history_refs": [],
+            "archived_history_refs": [],
+            "included_refs": [],
             "summary_status": "not_needed",
+            "summary_kind": "none",
+            "summary_source_refs": [],
             **source_metadata,
         }
         return prepared
@@ -125,60 +130,147 @@ def prepare_context_request(request: dict[str, Any], policy: dict[str, Any], *, 
     report = prepared.get("report")
     current_receipts = report.get("tool_receipts", []) if isinstance(report, dict) else []
     recent_indexes = _add_tool_pair_closure(unique, recent_indexes, current_receipts)
-    archived = [item for index, item in enumerate(unique) if index not in recent_indexes]
-    recent = [item for index, item in enumerate(unique) if index in recent_indexes]
+    archived = [(index + 1, *item) for index, item in enumerate(unique)
+                if index not in recent_indexes]
+    recent = [(index + 1, *item) for index, item in enumerate(unique)
+              if index in recent_indexes]
     refs = [f"history:{digest}" for _, digest in unique]
-    prepared["session_history"] = [deepcopy(entry) for entry, _ in recent]
+    retained_refs = [f"history:{digest}" for _, _, digest in recent]
+    archived_refs = [f"history:{digest}" for _, _, digest in archived]
+    prepared["session_history"] = [deepcopy(entry) for _, entry, _ in recent]
     summary_status = "not_needed"
+    summary_kind = "none"
     summary_text = None
+    summary_source_refs = []
     if archived:
-        archive_digest = _digest([digest for _, digest in archived])
+        archive_items = [
+            {"index": index, "ref": f"history:{digest}", "sha256": digest}
+            for index, _, digest in archived
+        ]
+        archive_digest = _digest(archive_items)
         source_ref = {
             "source": f"session-history:{_digest(prepared.get('session_key', 'local'))}",
-            "from": 1,
-            "to": len(archived),
+            "index_base": 1,
+            "index_scope": "deduplicated_session_history",
+            "ranges": _index_ranges([item["index"] for item in archive_items]),
+            "items": archive_items,
             "count": len(archived),
             "sha256": archive_digest,
-            "version": "session-history-v1",
+            "version": "session-history-v2",
         }
-        bounded_input = _canonical_bytes([entry for entry, _ in archived])
+        summarizer_input = [(entry, digest) for _, entry, digest in archived]
+        bounded_input = _canonical_bytes({
+            "exchanges": summarizer_input,
+            "source": source_ref,
+        })
+        index_ref = f"archive-index:{archive_digest}"
+        index_details = (
+            f"archive index {index_ref}; "
+            f"1-based deduplicated session-history indexes "
+            f"{','.join(str(item['index']) for item in archive_items)}."
+        )
+        summary_prefix = f"Non-authoritative original archived exchanges; {index_details}"
         if len(bounded_input) <= policy["history_input_limit_bytes"]:
-            try:
-                text = (summarizer(archived, source_ref) if summarizer else
-                        f"Archived {len(archived)} historical exchanges; non-authoritative; "
-                        f"source sha256={archive_digest}.")
-                if not isinstance(text, str) or len(text.encode("utf-8")) > policy["history_summary_limit_bytes"]:
-                    raise ValueError("context_summary_invalid")
-                summary_text = text
-                summary_status = "created"
-            except Exception:  # deterministic reference fallback; never retry the summary
-                summary_text = (f"Historical exchanges archived; non-authoritative; "
-                                f"source sha256={archive_digest}.")
-                if len(summary_text.encode("utf-8")) > policy["history_summary_limit_bytes"]:
-                    summary_text = None
-                summary_status = "fallback"
+            if summarizer is not None:
+                try:
+                    text = summarizer(
+                        summarizer_input, source_ref
+                    )
+                    if not isinstance(text, str) or len(text.encode("utf-8")) > policy[
+                        "history_summary_limit_bytes"
+                    ]:
+                        raise ValueError("context_summary_invalid")
+                    candidate = f"Non-authoritative provided summary: {text}\n{index_details}"
+                    if len(candidate.encode("utf-8")) > policy["history_summary_limit_bytes"]:
+                        raise ValueError("context_summary_invalid")
+                    summary_text = candidate
+                    summary_source_refs = list(archived_refs)
+                    summary_status = "created"
+                    summary_kind = "provided_summarizer_output"
+                except Exception:  # one bounded attempt, then index-only fallback
+                    summary_status = "reference_only"
+                    summary_kind = "index"
+            else:
+                summary_text, excerpt_refs = _original_history_excerpt(
+                    archived, summary_prefix, policy["history_summary_limit_bytes"]
+                )
+                if summary_text:
+                    summary_source_refs = excerpt_refs
+                    summary_status = "created"
+                    summary_kind = "original_excerpt"
+                else:
+                    summary_status = "reference_only"
+                    summary_kind = "index"
         else:
-            summary_text = f"Historical exchanges archived; non-authoritative; source sha256={archive_digest}."
-            if len(summary_text.encode("utf-8")) > policy["history_summary_limit_bytes"]:
-                summary_text = None
-            summary_status = "input_limit_fallback"
+            summary_status = "reference_only"
+            summary_kind = "index"
         if summary_text:
             prepared["session_history_summary"] = summary_text
+        summary_sha256 = _digest(summary_text) if summary_text else None
+        included_history_refs = list(retained_refs)
+        if summary_text:
+            included_history_refs.append(f"history-summary:{summary_sha256}")
         prepared["_context_pack"] = {
             "history_refs": refs,
+            "retained_history_refs": retained_refs,
+            "archived_history_refs": archived_refs,
+            "included_refs": included_history_refs,
             "archived_history": source_ref,
             "summary_status": summary_status,
-            "summary_sha256": _digest(summary_text) if summary_text else None,
-            "summary_version": "context-history-summary-v1" if summary_text else None,
+            "summary_kind": summary_kind,
+            "summary_source_refs": summary_source_refs,
+            "summary_sha256": summary_sha256,
+            "summary_version": ({
+                "original_excerpt": "context-history-excerpt-v1",
+                "provided_summarizer_output": "context-history-summary-v2",
+                "index": "context-history-index-v1",
+            }.get(summary_kind) if summary_text else None),
             **source_metadata,
         }
     else:
         prepared["_context_pack"] = {
             "history_refs": refs,
+            "retained_history_refs": retained_refs,
+            "archived_history_refs": [],
+            "included_refs": retained_refs,
             "summary_status": summary_status,
+            "summary_kind": summary_kind,
+            "summary_source_refs": [],
             **source_metadata,
         }
     return prepared
+
+
+def _index_ranges(indexes: list[int]) -> list[dict[str, int]]:
+    """Compress sorted one-based history indexes without spanning retained rows."""
+    ranges = []
+    for index in indexes:
+        if ranges and index == ranges[-1]["to"] + 1:
+            ranges[-1]["to"] = index
+        else:
+            ranges.append({"from": index, "to": index})
+    return ranges
+
+
+def _original_history_excerpt(archived, prefix: str, output_limit: int):
+    """Include only complete original exchanges that fit as whole UTF-8 records."""
+    excerpt = prefix
+    included_refs = []
+    for index, entry, digest in archived:
+        if not isinstance(entry, dict) or not isinstance(entry.get("request"), dict) or not isinstance(
+            entry.get("response"), dict
+        ):
+            return None, []
+        ref = f"history:{digest}"
+        line = f"\n[{index}; {ref}] {_canonical_bytes(entry).decode('utf-8')}"
+        candidate = excerpt + line
+        if len(candidate.encode("utf-8")) > output_limit:
+            return None, []
+        excerpt = candidate
+        included_refs.append(ref)
+    if not included_refs:
+        return None, []
+    return excerpt, included_refs
 
 
 def _without_derived_history_fields(entry: Any) -> Any:
@@ -296,7 +388,7 @@ def finalize_context_pack(serialized_payload: bytes, policy: dict[str, Any], *, 
         "payload_sha256": hashlib.sha256(serialized_payload).hexdigest(),
         "included_refs": ["serialized_payload", *(
             f"payload.{key}" for key in payload if key in {"messages", "tools", "model", "max_tokens"}
-        ), *(source or {}).get("history_refs", [])],
+        ), *(source or {}).get("included_refs", [])],
         "profile_match": profile_matches,
     }
     pack["pack_sha256"] = _digest(pack)

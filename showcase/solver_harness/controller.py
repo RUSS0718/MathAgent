@@ -151,13 +151,13 @@ def protocol_failure_exit(harness, run, exc):
             expected_revision=run["state_revision"],
             event={
                 "event_id": f"{category}-terminal-{run['state_revision']}",
-                "type": "context_capacity_rejected" if is_context else "transport_policy_rejected",
+                "type": "context_capacity_terminal" if is_context else "transport_policy_rejected",
                 "error_category": category,
                 "transport": decision.get("transport"),
                 "transport_reason": decision.get("reason"),
                 "transport_evidence_kind": decision.get("evidence_kind"),
                 "new_run_required": decision.get("new_run_required") is True,
-                "summary": ("Context capacity policy rejected this call before provider dispatch"
+                "summary": ("Run terminated after context capacity rejected this call"
                             if is_context else
                             "Transport policy rejected this call before provider dispatch"),
             },
@@ -166,11 +166,12 @@ def protocol_failure_exit(harness, run, exc):
                 "status": "partial_aborted",
                 "result_reason": category,
                 "final_response": (
-                    "No provider request was sent. Previously committed results and evidence are "
-                    "preserved. context_capacity_exceeded: split the task into smaller parts while "
+                    "This call was rejected before provider dispatch. Previously committed results "
+                    "and evidence are preserved. context_capacity_exceeded: split the task into smaller parts while "
                     "retaining the original problem and relevant evidence."
                     if category == "context_capacity_exceeded" else
-                    f"No provider request was sent. Previously committed results and evidence are "
+                    f"This call was rejected before provider dispatch. Previously committed results "
+                    f"and evidence are "
                     f"preserved. Context policy rejected dispatch ({category}); verify the frozen "
                     "provider profile or split the task while retaining the original requirements."
                     if is_context else

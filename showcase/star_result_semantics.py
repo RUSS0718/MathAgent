@@ -50,8 +50,10 @@ def result_semantics(run, answer, *, verification_mode="auto", execution_status=
             "pack_count": len(context_packs),
             "packs": [{key: pack.get(key) for key in (
                 "version", "role", "problem_hash", "specification_version", "config_hash",
-                "source_state_revision", "included_refs", "archived_history", "summary_status",
-                "summary_sha256", "summary_version", "serialized_utf8_bytes", "token_estimate",
+                "source_state_revision", "history_refs", "retained_history_refs",
+                "archived_history_refs", "included_refs", "archived_history",
+                "summary_status", "summary_kind", "summary_source_refs", "summary_sha256",
+                "summary_version", "serialized_utf8_bytes", "token_estimate",
                 "token_estimator_version", "token_estimate_error", "capacity_is_hard_guarantee",
                 "input_cap_tokens", "output_reserve_tokens", "reserved_tokens",
                 "available_input_tokens", "capacity_status", "payload_sha256", "pack_sha256",

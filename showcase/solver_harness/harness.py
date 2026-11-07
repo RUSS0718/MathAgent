@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from copy import deepcopy
 from collections.abc import Mapping
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from ..redaction import redact
 from ..storage import SQLiteStore
+from .context_pack import frozen_policy, prepare_context_request
 from .controller import advance, protocol_failure_exit, run_supplied_plan_or_explore
 from .explore import ModelPort
 from .harness_config import (
@@ -22,7 +23,6 @@ from .harness_config import (
     _run_id,
 )
 from .initial_state import initial_state
-from .context_pack import frozen_policy, prepare_context_request
 from .meta import MetaPort
 from .plan import validate_plan
 from .review import VerifierPort
