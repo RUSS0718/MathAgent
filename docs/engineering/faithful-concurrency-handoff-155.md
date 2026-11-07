@@ -15,7 +15,7 @@
 
 [Issue #155 最终 resolution](https://github.com/RUSS0718/MathAgent/issues/155#issuecomment-6704660319) 冻结了完整并发 Population/APRS 的行为和验收边界。#155 已关闭为决策完成，不代表产品已实现、服务容量已测量或数学能力已提升。已读取 #155 决议阶段的五条评论；最终 resolution 是本交接的主要行为来源，后续实施回链见上节。
 
-[串行实施票 #148](https://github.com/RUSS0718/MathAgent/issues/148) 仍定义 F2/S08 串行首版：任一时刻只执行一条路线，主路线停滞后至多启动一条替代路线。它要求 F1 工程合同先通过。[总实施票 #146](https://github.com/RUSS0718/MathAgent/issues/146) 也将完整并发留作串行实测后的独立目标。不得把 #155 写成 #148 已覆盖，也不得把串行 F2 的验收结果当作并发完成证据。
+[串行实施票 #148](https://github.com/RUSS0718/MathAgent/issues/148) 仍定义 F2/S08 串行首版：任一时刻只执行一条路线，主路线停滞后至多启动一条替代路线。它要求 F1 工程合同先通过。[总实施票 #146](https://github.com/RUSS0718/MathAgent/issues/146) 正文已同步 #155 冻结决议和 #156 的独立增量入口，容量与性能仍待实测。不得把 #155 写成 #148 已覆盖，也不得把串行 F2 的验收结果当作并发完成证据。
 
 本地依据的远端规格为 [Faithful implement-spec](https://github.com/RUSS0718/MathAgent/blob/docs/wayfinder-chat-output-prototype-20261106/docs/specs/mathagent-faithful-implement-spec-20261107.md)，读取 ref 为 docs/wayfinder-chat-output-prototype-20261106，文件 SHA 为 c30deb2c51ccf60fa87f68b4a5ac0eaf4630511d。规格仍将 S08/F2 定义为串行路线，并把完整并发列在首版范围之外。#155 是之后批准的增量决策，不会改变串行 Run 的冻结语义。
 
