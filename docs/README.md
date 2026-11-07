@@ -2,6 +2,8 @@
 
 ## Faithful 实施入口（2026-11-07）
 
+- [S02 上下文与容量治理退出合同](engineering/faithful-s02-exit-contract.md)：实施中，列出公共接缝与完整退出清单；尚未解除 S03 依赖。
+
 - [S01 流式工程退出验收](evals/faithful-s01-exit-20261107.md)：按用户调整后的流式范围退出；六阶段冻结门禁与终审补丁分开留证，S02 的 S01 工程依赖解除。真实 provider 与数学效果未通过。
 - [S01 首纵切集成验收](evals/faithful-s01-first-slice-20261107.md)：流式策略、六阶段门禁与终审补丁证据；完整 S01 及后续阶段仍未验收。
 - [实施起点与 S01–S06 证据核验](engineering/faithful-implementation-entry-146.md)：实际 checkout、冻结基线同步、旧起点失败及聚焦复核；新阶段未因旧 SP 或 Intern 同名记录解除门槛。
