@@ -17,7 +17,9 @@
 - **Solver Run**：Solver Harness 的一次隔离执行，拥有独立的 `run_id`、状态版本和事件记录；与产品 Run 共用数据库，但状态存在独立表中。
 - **Plan Attempt**：同一 Solver Run 内一次可被回退或重规划替换的计划尝试；它也是 Reasoner 会话的隔离边界。
 - **ReplanDecision**：`Guidance.action_type=replan` 之后进入的独立审批裁决；只有当前转换的有效 `APPROVE_REPLAN` 才归档换计划并传入本次禁止方向与救援成果，Guidance 请求本身不取得执行权（ALIGN-03）。
-- **Candidate**：可被最终选择的完整答案版本；候选不是已证定理，必须保留来源、证据和失效状态。
+- **Candidate / AnswerCandidate（答案候选）**：可被最终选择的完整答案版本；候选不是已证定理，必须保留来源、证据和失效状态。
+- **CandidateRoute（搜索路线）**：带父子谱系、搜索前沿及停止原因的求解方向，区别于可交付的答案候选；路线被选中不代表其答案取得交付资格。
+- **PresentationArtifact（表达产物）**：绑定原答案及其来源版本的独立表达内容；表达整理成功不改变原答案的验证等级。
 - **Best-Effort Finalization**：预算耗尽后仅根据已持久化候选和证据选择答案的过程；它不新增模型或工具调用。
 - **State Revision**：Solver Run 状态快照的单调版本号，用于拒绝基于过期快照的写入。
 - **STAR AC**：STAR Core 实施规格中的验收编号；引用时写作 `STAR AC-06`，不得与 v0.2 或 Solver Harness 的同号用例混用。
