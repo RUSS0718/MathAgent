@@ -41,6 +41,7 @@ const pendingCreate = ref<{ fingerprint: string; key: string } | null>(null)
 const loading = ref(true)
 const loadFailed = ref(false)
 const report = ref<Awaited<ReturnType<typeof api.jobReport>> | null>(null)
+let reportDisposed = false
 const props = defineProps<{ path: string; sessionId: string | null }>()
 const current = computed(() => sessions.currentId ? jobs.activeForSession(sessions.currentId) : undefined)
 const selectedJob = computed(() => {
@@ -128,10 +129,16 @@ function openSettings(): void { globalThis.location.assign(settingsHref()) }
 async function chooseFile(event: Event): Promise<void> { const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (!file) return; try { await files.upload(file); selectedFile.value = files.items.at(-1)?.file_id; selectedFileName.value = file.name } catch (error) { notice.value = error instanceof Error ? error.message : '题图上传失败，请重试。' } finally { input.value = '' } }
 function clearFile(): void { selectedFile.value = undefined; selectedFileName.value = undefined }
 async function loadReport(jobId: string): Promise<void> {
+  if (sessions.messages.at(-1)?.analysis_job_id !== jobId) return
+  const sessionId = sessions.currentId
+  const isCurrent = () => !reportDisposed && sessions.currentId === sessionId
+    && sessions.messages.at(-1)?.analysis_job_id === jobId
   try {
     jobs.observe(await api.getJob(jobId))
-    report.value = await api.jobReport(jobId)
-  } catch { report.value = null }
+    const loaded = await api.jobReport(jobId)
+    if (isCurrent() && loaded.evidence_id === jobId
+        && (loaded.solver?.solver?.state_revision ?? 0) >= (report.value?.solver?.solver?.state_revision ?? 0)) report.value = loaded
+  } catch { if (isCurrent()) report.value = null }
 }
 function observeJob(jobId: string): void {
   void jobController.subscribe(jobId).then(async () => {
@@ -180,7 +187,7 @@ async function initialize(): Promise<void> {
   finally { loading.value = false }
 }
 onMounted(initialize)
-onUnmounted(() => jobController.stopAll())
+onUnmounted(() => { reportDisposed = true; jobController.stopAll() })
 </script>
 
 <template>
@@ -196,7 +203,7 @@ onUnmounted(() => jobController.stopAll())
       <div v-if="notice" class="notice workspace-notice" role="status">{{ notice }}<UiButton v-if="loadFailed" @click="initialize">重新加载</UiButton></div>
       <div v-if="current?.status === 'waiting_input'" class="notice notice--warning workspace-notice" role="status">运行需要补充条件，请在输入栏填写后继续。</div>
       <section class="conversation-area" aria-label="数学对话">
-        <div class="conversation-scroll"><div v-if="loading" class="loading-state" role="status" aria-busy="true">正在加载会话…<div v-for="n in 3" :key="n" class="skeleton"></div></div><MessageList v-else-if="!loadFailed" :messages="sessions.messages" @starter="useStarter" /><PresentationSection v-if="report && presentationMode && selectedJob" :job-id="selectedJob.jobId" :mode="presentationMode" :job-status="selectedJob.status" :problem="selectedProblem" :fallback-answer="report.report.answer" /><ReportSection v-else-if="report" :mode="report.mode" :status="report.status" :report="report.report" /></div>
+        <div class="conversation-scroll"><div v-if="loading" class="loading-state" role="status" aria-busy="true">正在加载会话…<div v-for="n in 3" :key="n" class="skeleton"></div></div><MessageList v-else-if="!loadFailed" :messages="sessions.messages" @starter="useStarter" /><PresentationSection :source-version="report" v-if="report && presentationMode && selectedJob" :job-id="selectedJob.jobId" :mode="presentationMode" :job-status="selectedJob.status" :problem="selectedProblem" :fallback-answer="report.report.answer" /><ReportSection v-else-if="report" :mode="report.mode" :status="report.status" :report="report.report" /></div>
         <ComposerBar v-model="draft" :disabled="loading || loadFailed || submitting || Boolean(current && current.status !== 'waiting_input')" :running="Boolean(current)" :waiting="current?.status === 'waiting_input'" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><StarModeSelector v-model="solverMode" :modes="solverModes" :disabled="Boolean(current) || submitting" /><PresentationCommandHint :enabled="presentationEnabled" /></template></ComposerBar>
       </section>
     </main>

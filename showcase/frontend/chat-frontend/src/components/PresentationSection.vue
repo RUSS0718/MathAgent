@@ -12,6 +12,7 @@ const props = defineProps<{
   jobStatus: string
   problem?: string
   fallbackAnswer?: string
+  sourceVersion?: unknown
 }>()
 
 const view = ref<'answer' | 'presentation'>('answer')
@@ -27,7 +28,7 @@ const renderedAnswer = computed(() => renderSafeMarkdown(response.value?.answer 
 const renderedExpression = computed(() => renderSafeMarkdown(expressionText.value))
 const completionLabel = computed(() => artifact.value?.completion === 'complete' ? '义务已完成' : artifact.value?.completion === 'partial' ? '部分完成' : '未完成')
 
-watch(() => [props.jobId, props.mode, props.jobStatus] as const, async ([jobId, mode, status]) => {
+watch(() => [props.jobId, props.mode, props.jobStatus, props.sourceVersion] as const, async ([jobId, mode, status]) => {
   const generation = ++requestGeneration
   response.value = null
   loadError.value = ''

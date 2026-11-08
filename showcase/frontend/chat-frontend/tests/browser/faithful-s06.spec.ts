@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 const modes = [
   { command: '/solve', label: '求解' },
@@ -96,19 +96,21 @@ test('S06 parses Composer output commands and restores each independent artifact
 
 test('late presentation responses cannot overwrite a newer Job', async ({ page }) => {
   let teachRequests = 0
+  let deliveredTeach = 0
   let releaseFirstTeach!: () => void
   const firstTeachReleased = new Promise<void>((resolve) => { releaseFirstTeach = resolve })
   await page.route('**/api/agent/jobs/*/teach', async (route) => {
     teachRequests += 1
     const response = await route.fetch()
-    if (teachRequests === 1) await firstTeachReleased
+    await firstTeachReleased
     await route.fulfill({ response })
+    deliveredTeach += 1
   })
 
   await page.goto('/dashboard-assets/')
   await page.getByLabel('数学问题').fill('/teach S06 browser delayed A')
   await page.getByRole('button', { name: '发送' }).click()
-  await expect.poll(() => teachRequests).toBe(1)
+  await expect.poll(() => teachRequests > 0).toBe(true)
 
   await page.getByLabel('数学问题').fill('/report S06 browser current B')
   await page.getByRole('button', { name: '发送' }).click()
@@ -118,9 +120,85 @@ test('late presentation responses cannot overwrite a newer Job', async ({ page }
   await expect(output).toHaveAttribute('data-source-job-id', /^run_/)
   const currentJobId = await output.getAttribute('data-source-job-id')
 
+  const heldRequests = teachRequests
   releaseFirstTeach()
+  await expect.poll(() => deliveredTeach >= heldRequests).toBe(true)
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
   await expect(output).toContainText('报告')
   await expect(output).toContainText('S06 browser current B')
   await expect(output).not.toContainText('S06 browser delayed A')
   await expect(output).toHaveAttribute('data-source-job-id', currentJobId!)
+})
+
+async function seedOutput(page: Page, problem: string, mode: string): Promise<{ session: string; job: string }> {
+  const origin = 'http://127.0.0.1:8091'
+  const auth = await (await page.request.get(`${origin}/api/check_auth`)).json()
+  const headers = { 'X-CSRF-Token': auth.csrf_token, 'Idempotency-Key': crypto.randomUUID() }
+  const session = (await (await page.request.post(`${origin}/api/new_chat`, { headers })).json()).new_session_id as string
+  const response = await page.request.post(`${origin}/api/agent/jobs`, { headers,
+    data: { session_id: session, message: problem, presentation_mode: mode } })
+  expect(response.status()).toBe(202)
+  const job = (await response.json()).job_id as string
+  await expect.poll(async () => (await (await page.request.get(`${origin}/api/agent/jobs/${job}`)).json()).status).toBe('succeeded')
+  return { session, job }
+}
+
+test('late report cannot become another Jobs original-answer fallback', async ({ page }) => {
+  const first = await seedOutput(page, 'S06 old report A', 'teach')
+  let held = false
+  let delivered = false
+  let aReads = 0
+  let bReads = 0
+  let release!: () => void
+  let releaseB!: () => void
+  const released = new Promise<void>(resolve => { release = resolve })
+  const bReleased = new Promise<void>(resolve => { releaseB = resolve })
+  await page.route('**/api/agent/jobs/*/report', async route => {
+    if (route.request().method() === 'POST') return route.fulfill({ status: 503, body: '{}' })
+    const response = await route.fetch()
+    const body = await response.json()
+    const isA = route.request().url().includes(first.job)
+    if (isA) {
+      body.report.answer = 'OLD_A_ANSWER'
+      if (++aReads > 1) { held = true; await released }
+    } else {
+      body.report.answer = 'CURRENT_B_ANSWER'
+      if (++bReads > 1) await bReleased
+    }
+    await route.fulfill({ response, json: body })
+    if (isA && aReads > 1) delivered = true
+  })
+  await page.goto(`/dashboard-assets/session/${first.session}`)
+  await expect.poll(() => held).toBe(true)
+  await page.getByLabel('数学问题').fill('/report S06 current report B')
+  await page.getByRole('button', { name: '发送' }).click()
+  const output = page.getByLabel('S06 输出模式')
+  await expect(output).toContainText('S06 current report B')
+  await expect(output).toContainText('CURRENT_B_ANSWER')
+  release()
+  try {
+    await expect.poll(() => delivered).toBe(true)
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+    await expect(output).not.toContainText('OLD_A_ANSWER')
+    await expect(output).toContainText('CURRENT_B_ANSWER')
+  } finally { releaseB() }
+})
+
+test('refreshing a terminal report rechecks a changed presentation source', async ({ page }) => {
+  const seeded = await seedOutput(page, 'S06 refreshed source', 'teach')
+  let reads = 0
+  await page.route(`**/api/agent/jobs/${seeded.job}/teach`, async route => {
+    const response = await route.fetch()
+    const body = await response.json()
+    if (++reads > 1) {
+      body.presentation.status = 'needs_review'
+      body.presentation.revalidation_reason = 'source_changed'
+    }
+    await route.fulfill({ response, json: body })
+  })
+  await page.goto(`/dashboard-assets/run/${seeded.job}`)
+  const output = page.getByLabel('S06 输出模式')
+  await expect(output).toHaveAttribute('data-artifact-id', /^presentation:/)
+  await page.getByRole('button', { name: '刷新持久报告' }).click()
+  await expect(output).toContainText('历史表达需要重新审阅')
 })

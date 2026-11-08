@@ -68,7 +68,7 @@ onUnmounted(() => { disposed = true; clearTimeout(reportTimer); controller.stopA
     <p class="notice notice--warning">fake / replay 只证明工程演示。planned 表示尚未实现；unavailable 表示当前不可用。</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p><p v-if="job?.error" class="notice notice--error" role="alert">运行类别：{{ job.error }}</p>
     <div class="action-row"><UiButton :busy="loading" @click="refresh"><UiIcon name="refresh" />刷新持久报告</UiButton><UiButton :disabled="connected || loading" @click="reconnect">重连事件（沿用游标）</UiButton><UiButton variant="danger" :disabled="busy || !job || ['succeeded', 'failed', 'canceled'].includes(job.status)" @click="cancel">取消 Run</UiButton></div>
-    <PresentationSection v-if="report && job?.presentationMode" :job-id="props.jobId" :mode="job.presentationMode" :job-status="job.status" :fallback-answer="report.report.answer" />
+    <PresentationSection :source-version="report" v-if="report && job?.presentationMode" :job-id="props.jobId" :mode="job.presentationMode" :job-status="job.status" :fallback-answer="report.report.answer" />
     <ReportSection v-else-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
     <section v-if="recovery && job?.status === 'failed' && report?.solver?.solver?.phase !== 'TERMINAL'" class="evidence-section" aria-label="安全续算">
       <h2>{{ recovery.status === 'needs_review' ? '未知请求需要人工决定' : '从安全边界继续' }}</h2>
