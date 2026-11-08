@@ -2,12 +2,15 @@
 
 ## Faithful 实施入口（2026-11-08）
 
-当前 S01–S03 已工程退出，下一步优先 S04 进展调度；S05 已满足工程前置，可与 S04 并行。S06 等 S05，F1/S07 等 S04。具体合同与依赖见 [#144 阶段决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)。执行与证据复用遵循根 [AGENTS.md](../AGENTS.md) 和[工程门禁](engineering/development-gates.md)。
+当前 S01–S04 已工程退出（`engineering-preview`）。S05 与 F1/S07 的工程前置已满足；S06 仍等 S05，S08/S09 等 F1/S07。真实 provider、容量/SLA、自然题与数学效果分别保留未验证状态。具体合同与依赖见 [#144 阶段决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)。执行与证据复用遵循根 [AGENTS.md](../AGENTS.md) 和[工程门禁](engineering/development-gates.md)。
+
+- [S04 进展与停滞调度合同](engineering/faithful-s04-contract.md)：受控方法标识、证据信用、三回合停滞、重复动作局部阻断及恢复语义。
+- [S04 工程退出验收记录](evals/faithful-s04-exit-20261108.md)：源码 `13641c6`、24 项专属合同、71 项聚焦回归、六阶段门禁和浏览器回归；保留 42 项 Docker skip 及中止记录，解除 F1/S07 的 S04 工程前置。
 
 - [S02 上下文与容量治理退出合同](engineering/faithful-s02-exit-contract.md)：C01–C12 工程退出通过，状态为 `engineering-preview`；冻结源码 `d19aa56`，真实 provider、容量/SLA 与数学效果未验证。
 - [S02 工程退出验收记录](evals/faithful-s02-exit-20261108.md)：六阶段门禁、聚焦/浏览器回归、跳过项、审查修复及能力边界。S02 退出解除 S03 工程依赖。
 - [S03 规格与工作块交接合同](engineering/faithful-s03-handoff-contract.md)：S03 实现与接口合同；工程退出已通过，状态为 `engineering-preview`。
-- [S03 工程退出验收记录](evals/faithful-s03-exit-20261108.md)：C01–C12 证据、六阶段门禁、聚焦/浏览器回归、跳过项、双轴审查及能力边界。S03 退出解除 S04/S05 的 S03 工程依赖；F1 仍等待 S04。
+- [S03 工程退出验收记录](evals/faithful-s03-exit-20261108.md)：C01–C12 证据、六阶段门禁、聚焦/浏览器回归、跳过项、双轴审查及能力边界。S03 退出解除 S04/S05 的 S03 工程依赖；F1/S07 当前前置状态见上述 S04 验收。
 
 - [S01 流式工程退出验收](evals/faithful-s01-exit-20261107.md)：按用户调整后的流式范围退出；六阶段冻结门禁与终审补丁分开留证，S02 的 S01 工程依赖解除。真实 provider 与数学效果未通过。
 - [S01 首纵切集成验收](evals/faithful-s01-first-slice-20261107.md)：流式策略、六阶段门禁与终审补丁证据；完整 S01 及后续阶段仍未验收。

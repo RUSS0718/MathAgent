@@ -1,6 +1,6 @@
 # S04 进展与停滞调度合同
 
-日期：2026-11-08（Asia/Shanghai）。状态：实施中，尚未工程退出。
+日期：2026-11-08（Asia/Shanghai）。状态：工程退出通过（`engineering-preview`），证据见 [S04 工程退出验收](../evals/faithful-s04-exit-20261108.md)。
 集成起点：`37a31bad37e5a795cbf631f2b2b07679b21b4286`，分支 `mathagent-faithful`。
 
 依据 [#144 阶段决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)、[#146](https://github.com/RUSS0718/MathAgent/issues/146)、[S03 合同](faithful-s03-exit-contract.md)。Faithful implement-spec 位于本地 `docs/wayfinder-chat-output-prototype-20261106` 分支的 `docs/specs/mathagent-faithful-implement-spec-20261107.md`，当前集成工作树没有该文件；只读核验，不复制历史规格。
@@ -42,4 +42,4 @@
 
 每组先失败验收，再最小实现、聚焦检查与相关回归。阶段退出集中双轴审查，修复阻塞项后冻结源码，按[工程门禁](development-gates.md)运行最终检查。已有同源码成功证据可复用；源码 SHA 与纯文档交接 SHA 分开记录。
 
-S04 未退出前不解除 F1/S07 前置。真实 provider、容量/SLA、自然题和数学效果保持未验证；不启动付费实验，不关闭 #146。
+S04 工程退出与已通过的 S03 共同解除 F1/S07 工程前置。真实 provider、容量/SLA、自然题和数学效果保持未验证；不启动付费实验，不关闭 #146。
