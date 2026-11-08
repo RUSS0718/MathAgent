@@ -98,6 +98,10 @@ def advance(harness, run, metadata, problem):
     run = run_replan(
         harness, run, problem=problem, model_port=harness._model_port, config=harness._config
     )
+    if harness._config.get("features", {}).get("serial_routes") is True:
+        from .routes import sync_plan_route
+
+        run = sync_plan_route(harness, run)
     if (
         harness._model_port is not None
         and run["state"]["phase"] == "STEP_EXECUTE"
@@ -112,6 +116,10 @@ def advance(harness, run, metadata, problem):
         config=harness._config,
         metadata=metadata or {},
     )
+    if harness._config.get("features", {}).get("serial_routes") is True:
+        from .routes import sync_plan_route
+
+        run = sync_plan_route(harness, run)
     if (
         harness._model_port is not None
         and run["state"]["phase"] == "STEP_EXECUTE"

@@ -220,7 +220,8 @@ class SolverHarness:
                               context_policy=self._context_policy,
                               problem_spec=supplied_spec,
                               work_units=work_units,
-                              proof_graph=self._config.get("features", {}).get("proof_graph") is True)
+                              proof_graph=self._config.get("features", {}).get("proof_graph") is True,
+                              serial_routes=self._config.get("features", {}).get("serial_routes") is True)
         if self._config.get("features", {}).get("progress_scheduling") is True:
             if supplied_spec is None:
                 raise SolverValidationError("progress_scheduling_requires_problem_spec")
@@ -377,6 +378,16 @@ class SolverHarness:
             raise SolverValidationError("state_updates cannot change identity or revision fields")
         if {"proof_graph", "proof_graph_policy"} & normalized_updates.keys():
             raise SolverValidationError("state_updates cannot change storage-managed proof graph fields")
+        route_fields = {
+            "route_policy", "route_registry", "route_lineage", "route_evaluations",
+            "aprs_decisions", "route_invalidations", "active_route_id", "route_budget",
+        }
+        if route_fields.intersection(normalized_updates) and normalized_event["type"] not in {
+            "route_created", "route_transition", "route_invalidated", "aprs_decided",
+        }:
+            raise SolverValidationError("route_state_requires_route_event")
+        if "route_policy" in normalized_updates:
+            raise SolverValidationError("route_policy_is_run_frozen")
 
         # Validate the persisted run identity before writing through this Harness.
         current = self._state_store.get_run(normalized_run_id) if current is None else current

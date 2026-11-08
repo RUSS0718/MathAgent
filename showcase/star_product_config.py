@@ -8,12 +8,12 @@ OPTIONAL_FEATURES = frozenset({
     "final_generation", "final_solution_review", "local_code_tool", "meta_guidance",
     "reexplore_after_replan", "skills", "stream_activity", "context_pack",
     "problem_spec", "progress_scheduling",
-    "proof_graph",
+    "proof_graph", "serial_routes",
 })
 EXPERIMENTAL_FEATURES = frozenset({"planner_checkpoints", "reasoner_checkpoints"})
 CORE_FEATURES = frozenset({
     "star_routing", "persistent_sessions", "stream_recovery",
-    *(OPTIONAL_FEATURES - {"stream_activity", "context_pack", "problem_spec", "progress_scheduling", "proof_graph"}),
+    *(OPTIONAL_FEATURES - {"stream_activity", "context_pack", "problem_spec", "progress_scheduling", "proof_graph", "serial_routes"}),
 })
 SUPPORTED_FEATURES = CORE_FEATURES | OPTIONAL_FEATURES | EXPERIMENTAL_FEATURES
 

@@ -126,6 +126,25 @@ def run_replan(harness, run, *, problem, model_port, config):
                 ],
             },
         )
+    if config.get("features", {}).get("serial_routes") is True:
+        from .routes import prepare_route_switch
+
+        state_routes = state.get("route_registry") or []
+        if state_routes:
+            progress = state.get("progress", {})
+            if progress.get("trigger") not in {"stagnation", "local_action_blocked"}:
+                return _stop(harness, run, "route_switch_requires_s04_stagnation")
+            if state.get("route_budget", {}).get("expansion_allowed") is False:
+                return _stop(harness, run, "route_expansion_budget_reserved")
+            if state.get("budget", {}).get("exhaustion_reason"):
+                return _stop(harness, run, "route_expansion_budget_exhausted")
+            if any(item.get("kind") == "alternate" for item in state_routes):
+                return _stop(harness, run, "alternate_route_limit_reached")
+            try:
+                run = prepare_route_switch(harness, run)
+            except ValueError as exc:
+                return _stop(harness, run, str(exc))
+            state = run["state"]
     rescued, excluded = _reusable(state, decision)
     # The same established result can be visible through both the accepted
     # ledger and the classified ledger; a ruling rescues the outcome once.
@@ -264,6 +283,12 @@ def run_replan(harness, run, *, problem, model_port, config):
             plan, work_units = bind_plan_work_units(plan, run["state"]["problem_spec"])
         except (TypeError, ValueError):
             return _stop(harness, run, "invalid_replacement_work_units")
+    if config.get("features", {}).get("serial_routes") is True:
+        from .routes import validate_route_frontier
+
+        route_reason = validate_route_frontier(run["state"], plan)
+        if route_reason is not None:
+            return _stop(harness, run, f"route_{route_reason}")
     return _commit(
         harness,
         run,

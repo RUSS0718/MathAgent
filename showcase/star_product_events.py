@@ -45,6 +45,9 @@ def decision_fields(event, state, invocations=()):
         "transport_evidence_kind", "transport_profile_fingerprint",
         "transport_profile_set_fingerprint",
         "transport_policy", "new_run_required",
+        "route_id", "parent_route_id", "route_kind", "frontier_digest",
+        "route_status", "route_reason", "policy_version", "pareto_route_ids",
+        "selected_route_id", "route_count", "route_replayable",
     ) if key in event}
     run_id = state.get("run_id")
     if isinstance(run_id, str) and run_id:
@@ -69,6 +72,11 @@ def decision_fields(event, state, invocations=()):
         "meta_invalid": "meta",
         "challenge_stalemate": "controller",
         "challenge_escalation_stopped": "controller",
+        "route_created": "controller",
+        "route_transition": "controller",
+        "route_rated": "controller",
+        "aprs_decided": "controller",
+        "route_rejected": "controller",
     }
     role = event.get("role") or roles.get(event["type"])
     if role in {"reasoner", "reason_noncoding", "explore", "planner", "researcher",

@@ -238,6 +238,13 @@ class SolverStateStore:
                 if not isinstance(state, dict):
                     raise SolverPersistenceError("commit_event")
                 state_updates = controlled_patch(connection, run_id, event, state_updates)
+                if event.get("type", "").startswith("route_") or event.get("type") == "aprs_decided":
+                    from .routes import validate_route_state_patch
+
+                    try:
+                        validate_route_state_patch(state, event, state_updates)
+                    except ValueError as exc:
+                        raise SolverPersistenceError(str(exc)) from exc
                 graph_candidate = dict(state)
                 graph_candidate.update(state_updates)
                 graph_candidate["proof_graph"] = state.get("proof_graph")
@@ -262,6 +269,15 @@ class SolverStateStore:
                     if graph_patch is not None:
                         state_updates = {**state_updates, "proof_graph": graph_patch}
                         event = {**event, "proof_graph": graph_summary}
+                        if graph_candidate.get("route_policy", {}).get("enabled") is True:
+                            from .routes import invalidate_routes
+
+                            route_patch = invalidate_routes(
+                                graph_candidate, graph_patch.get("current_version")
+                            )
+                            if route_patch:
+                                state_updates = {**state_updates, **route_patch}
+                                event = {**event, "route_invalidation": route_patch["route_invalidations"][-1]}
                     # The fixed deadline may pass while the derived graph is built.
                     guarded_updates = controlled_patch(connection, run_id, event, state_updates)
                     if guarded_updates != state_updates:

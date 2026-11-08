@@ -9,7 +9,8 @@ def initial_state(run_id: str, problem_hash: str, config_hash: str, *,
                   context_policy: dict[str, Any] | None = None,
                   problem_spec: dict[str, Any] | None = None,
                   work_units: list[dict[str, Any]] | None = None,
-                  proof_graph: bool = False) -> dict[str, Any]:
+                  proof_graph: bool = False,
+                  serial_routes: bool = False) -> dict[str, Any]:
     now = datetime.now(UTC).isoformat()
     state = {
         "schema_version": "1.1",
@@ -76,4 +77,17 @@ def initial_state(run_id: str, problem_hash: str, config_hash: str, *,
             "schema_version": "proof-graph-v1",
         }
         state["proof_graph"] = initial_proof_graph()
+    if serial_routes:
+        state["route_policy"] = {
+            "enabled": True,
+            "version": "route-v1",
+            "policy_version": "serial-aprs-v1",
+        }
+        state["route_registry"] = []
+        state["route_lineage"] = []
+        state["route_evaluations"] = []
+        state["aprs_decisions"] = []
+        state["route_invalidations"] = []
+        state["active_route_id"] = None
+        state["route_budget"] = {"closing_reserve": {}, "unknown": []}
     return state
