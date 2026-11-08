@@ -66,6 +66,12 @@ def read_job_snapshot(store, job_id, user_id):
             (job_id,),
         ).fetchone()
         payload["last_event_id"] = int(last_event["last_event_id"])
+        source_event = connection.execute(
+            "SELECT COALESCE(MAX(event_id), 0) AS source_event_id "
+            "FROM workspace_events WHERE job_id=? AND event_type!='presentation_artifact_saved'",
+            (job_id,),
+        ).fetchone()
+        payload["source_event_id"] = int(source_event["source_event_id"])
         star = (payload.get("result") or {}).get("solver_mode") in STAR_MODES
         solver_snapshot = persisted_solver(connection, job_id, projection_only=True) if star else None
         attempt_events = connection.execute(

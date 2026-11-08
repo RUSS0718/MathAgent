@@ -26,6 +26,7 @@ from .redaction import redact
 from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, freeze_budget
 from .run_checkpoints import RunCheckpointSaver
 from .run_control import RunControl, RunStopped, bind_control
+from .presentation import MODES, POLICY_VERSION, SCHEMA_VERSION, normalize_mode
 from .star_product_hints import migrate_hints, validate_hint
 from .star_product_modes import STAR_MODES
 
@@ -115,6 +116,17 @@ class WorkspaceStore:
                 response_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (user_id, idempotency_key),
+                FOREIGN KEY (job_id) REFERENCES workspace_jobs(job_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS presentation_artifacts (
+                job_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                source_fingerprint TEXT NOT NULL,
+                artifact_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(job_id, mode, source_fingerprint),
                 FOREIGN KEY (job_id) REFERENCES workspace_jobs(job_id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_updated
@@ -222,6 +234,7 @@ class WorkspaceStore:
         experiment_binding: Mapping[str, Any] | None = None,
         solver_hint: str | None = None,
         problem_spec: Mapping[str, Any] | None = None,
+        presentation_config: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Durably accept one Job and its user message before returning."""
 
@@ -251,7 +264,7 @@ class WorkspaceStore:
                 self._connection.execute(
                     "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,input_user_file_id,verification_mode,problem_spec_json,idempotency_key,request_digest,created_at,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (job_id, session_id, user_id, problem, "queued", _json({"execution_mode": execution_mode, **(solver_identity or {}), **({"experiment_pair": dict(experiment_binding)} if experiment_binding else {})}), None, input_user_file_id, verification_mode, _json(problem_spec) if problem_spec is not None else None, idempotency_key, request_digest, now, now),
+                    (job_id, session_id, user_id, problem, "queued", _json({"execution_mode": execution_mode, **(solver_identity or {}), **(dict(presentation_config or {})), **({"experiment_pair": dict(experiment_binding)} if experiment_binding else {})}), None, input_user_file_id, verification_mode, _json(problem_spec) if problem_spec is not None else None, idempotency_key, request_digest, now, now),
                 )
                 self._connection.execute(
                     "INSERT INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
@@ -362,7 +375,7 @@ class WorkspaceStore:
                     return
                 now = _utc_now()
                 prior = _loads(row["result_json"]) if row["result_json"] else {}
-                result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response), "execution_mode": prior.get("execution_mode", "unavailable")}
+                result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response), "execution_mode": prior.get("execution_mode", "unavailable"), **_presentation_identity(prior)}
                 if isinstance(prior.get("experiment_pair"), dict):
                     result["experiment_pair"] = prior["experiment_pair"]
                     _mark_pair_config_not_applied(result)
@@ -570,7 +583,7 @@ class WorkspaceStore:
             if isinstance(state.get("verification"), Mapping)
             else {"status": "unknown"},
         }
-        result.update({key: state[key] for key in ("solver_mode", "preset_version", "missing_capabilities", "evidence_kind", "solver", "acceptance_mode", "engineering_delivery") if key in state})
+        result.update({key: state[key] for key in ("solver_mode", "preset_version", "missing_capabilities", "evidence_kind", "solver", "acceptance_mode", "engineering_delivery", "presentation_mode", "presentation_schema_version", "presentation_policy_version") if key in state})
         result["verification"] = bind_verification(result["final_response"], result["verification"])
         error = state.get("error") if isinstance(state.get("error"), Mapping) else None
         error_code = str(error.get("category")) if error else None
@@ -584,6 +597,7 @@ class WorkspaceStore:
                     self._connection.rollback()
                     return
                 prior = _loads(row["result_json"]) if row["result_json"] else {}
+                result.update(_presentation_identity(prior))
                 if isinstance(prior.get("experiment_pair"), dict):
                     result["experiment_pair"] = prior["experiment_pair"]
                     _mark_pair_config_not_applied(result)
@@ -635,6 +649,79 @@ class WorkspaceStore:
                 lambda: self._insert_event(job_id, "verification_completed", {"type": "verification_completed", "job_id": job_id, "status": result.get("candidate_status", "unknown"), "data": payload}),
             )
 
+    def save_presentation(self, job_id: str, user_id: str, artifact: Mapping[str, Any]) -> dict[str, Any]:
+        source = artifact.get("source_fingerprint")
+        mode = artifact.get("mode")
+        if not isinstance(source, str) or mode not in MODES:
+            raise WorkspaceError("presentation_artifact_invalid", status=400)
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._connection.execute(
+                    "SELECT status,updated_at,result_json FROM workspace_jobs WHERE job_id=? AND user_id=?",
+                    (job_id, user_id),
+                ).fetchone()
+                if row is None:
+                    raise WorkspaceError("job_not_found", status=404)
+                expected = artifact.get("source_versions") or {}
+                event = self._connection.execute(
+                    "SELECT COALESCE(MAX(event_id),0) FROM workspace_events "
+                    "WHERE job_id=? AND event_type!='presentation_artifact_saved'", (job_id,),
+                ).fetchone()
+                solver_row = self._connection.execute(
+                    "SELECT state_revision,state_json FROM solver_states WHERE run_id=?", (job_id,)
+                ).fetchone()
+                state = _loads(solver_row["state_json"]) if solver_row is not None else {}
+                actual = {
+                    "job_status": row["status"], "job_updated_at": row["updated_at"],
+                    "source_event_id": int(event[0]),
+                    "state_revision": int(solver_row["state_revision"]) if solver_row is not None else None,
+                    "specification_version": state.get("specification_version"),
+                    "graph_version": (state.get("proof_graph") or {}).get("graph_version"),
+                }
+                if any(expected.get(key) != value for key, value in actual.items()):
+                    raise WorkspaceError("presentation_source_changed", status=409)
+                current_result = _loads(row["result_json"]) if row["result_json"] else {}
+                if (current_result.get("final_response") or "") != (artifact.get("answer") or ""):
+                    raise WorkspaceError("presentation_source_changed", status=409)
+                now = _utc_now()
+                inserted = self._connection.execute(
+                    "INSERT OR IGNORE INTO presentation_artifacts(job_id,user_id,mode,source_fingerprint,artifact_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                    (job_id, user_id, mode, source, _json(dict(artifact)), now, now),
+                ).rowcount
+                if inserted:
+                    self._insert_event(job_id, "presentation_artifact_saved", {
+                        "type": "presentation_artifact_saved", "job_id": job_id,
+                        "mode": mode, "status": artifact.get("status"),
+                        "schema_version": artifact.get("schema_version"),
+                        "artifact_sha256": (artifact.get("artifact") or {}).get("sha256"),
+                    })
+                stored = self._connection.execute(
+                    "SELECT artifact_json FROM presentation_artifacts WHERE job_id=? AND user_id=? AND mode=? AND source_fingerprint=?",
+                    (job_id, user_id, mode, source),
+                ).fetchone()
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
+        return _loads(stored["artifact_json"])
+
+    def get_presentation(self, job_id: str, user_id: str, mode: str, source_fingerprint: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT artifact_json FROM presentation_artifacts WHERE job_id=? AND user_id=? AND mode=? AND source_fingerprint=?",
+                (job_id, user_id, mode, source_fingerprint),
+            ).fetchone()
+        return _loads(row["artifact_json"]) if row is not None else None
+
+    def list_presentations(self, job_id: str, user_id: str, mode: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT artifact_json FROM presentation_artifacts WHERE job_id=? AND user_id=? AND mode=? ORDER BY created_at",
+                (job_id, user_id, mode),
+            ).fetchall()
+        return [_loads(row["artifact_json"]) for row in rows]
+
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
         with self._lock:
             row = self._connection.execute("SELECT * FROM workspace_jobs WHERE job_id=? AND user_id=?", (job_id, user_id)).fetchone()
@@ -642,6 +729,7 @@ class WorkspaceStore:
                 raise WorkspaceError("job_not_found", status=404)
         payload = self._job_payload(row, include_result=True)
         payload["last_event_id"] = self.last_event_id(job_id, user_id)
+        payload["source_event_id"] = self.source_event_id(job_id, user_id)
         return payload
 
     def get_job_by_idempotency_key(
@@ -763,6 +851,19 @@ class WorkspaceStore:
             ).fetchone()
         return int(event["last_event_id"])
 
+    def source_event_id(self, job_id: str, user_id: str) -> int:
+        with self._lock:
+            owned = self._connection.execute(
+                "SELECT 1 FROM workspace_jobs WHERE job_id=? AND user_id=?", (job_id, user_id)
+            ).fetchone()
+            if owned is None:
+                raise WorkspaceError("job_not_found", status=404)
+            event = self._connection.execute(
+                "SELECT COALESCE(MAX(event_id),0) FROM workspace_events "
+                "WHERE job_id=? AND event_type!='presentation_artifact_saved'", (job_id,),
+            ).fetchone()
+        return int(event[0])
+
     def close(self) -> None:
         with self._lock:
             if self._owns_connection:
@@ -813,6 +914,7 @@ class WorkspaceStore:
             "job_id": row["job_id"],
             "session_id": row["session_id"],
             "status": row["status"],
+            "updated_at": row["updated_at"],
             "verification_mode": row["verification_mode"],
             "input_user_file_id": row["input_user_file_id"],
             "last_event_id": None,
@@ -899,11 +1001,18 @@ class WorkspaceService:
         solver_hint: Any = None,
         experiment_binding: Mapping[str, Any] | None = None,
         problem_spec: Mapping[str, Any] | None = None,
+        presentation_mode: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         from .star_product_modes import validate_mode
+        requested_presentation_mode = normalize_mode(presentation_mode)
 
         identity = validate_mode(solver_mode, enabled=self.star_pipeline is not None, verification_mode=verification_mode, options=solver_options, pipeline=self.star_pipeline)
         validate_hint(solver_hint, solver_mode)
+        presentation_identity = ({
+            "presentation_mode": requested_presentation_mode,
+            "presentation_schema_version": SCHEMA_VERSION,
+            "presentation_policy_version": POLICY_VERSION,
+        } if presentation_mode is not None else {})
         selected = self.star_pipeline if solver_mode in STAR_MODES else self.pipeline
         if problem_spec is not None:
             if solver_mode not in STAR_MODES:
@@ -944,6 +1053,7 @@ class WorkspaceService:
             deadline_at=deadline_at,
             experiment_binding=experiment_binding,
             problem_spec=problem_spec,
+            presentation_mode=presentation_mode,
         )
         payload, existing = self.store.create_job(
             user_id=user_id,
@@ -957,6 +1067,7 @@ class WorkspaceService:
                 "evidence_kind": getattr(selected, "evidence_kind", self.execution_mode),
                 **({"stream_timeout_policy": self.stream_timeout_policy}
                    if self.stream_timeout_policy is not None else {}),
+                **presentation_identity,
             },
             experiment_binding=experiment_binding,
             problem_spec=problem_spec,
@@ -1170,6 +1281,17 @@ class WorkspaceService:
         self.store.get_job(job_id, user_id)
         self.store.record_verification(job_id, result)
 
+    def get_presentation(self, *, user_id: str, job_id: str, mode: str, source_fingerprint: str) -> dict[str, Any] | None:
+        self.store.get_job(job_id, user_id)
+        return self.store.get_presentation(job_id, user_id, mode, source_fingerprint)
+
+    def save_presentation(self, *, user_id: str, job_id: str, artifact: Mapping[str, Any]) -> dict[str, Any]:
+        return self.store.save_presentation(job_id, user_id, artifact)
+
+    def list_presentations(self, *, user_id: str, job_id: str, mode: str) -> list[dict[str, Any]]:
+        self.store.get_job(job_id, user_id)
+        return self.store.list_presentations(job_id, user_id, mode)
+
     def last_event_id(self, job_id: str, user_id: str) -> int:
         return self.store.last_event_id(job_id, user_id)
 
@@ -1232,6 +1354,14 @@ def _request_digest(*args: Any) -> str:
     return hashlib.sha256(_json(payload).encode("utf-8")).hexdigest()
 
 
+def _presentation_identity(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: value[key]
+        for key in ("presentation_mode", "presentation_schema_version", "presentation_policy_version")
+        if key in value
+    }
+
+
 def workspace_job_request_digest(
     *,
     session_id: str,
@@ -1245,6 +1375,7 @@ def workspace_job_request_digest(
     deadline_at: float | None = None,
     experiment_binding: Mapping[str, Any] | None = None,
     problem_spec: Mapping[str, Any] | None = None,
+    presentation_mode: str | None = None,
 ) -> str:
     """Fingerprint the exact public Job request, including any frozen budget."""
     request_parts = (session_id, message, web_search_enabled, input_user_file_id, verification_mode)
@@ -1273,6 +1404,8 @@ def workspace_job_request_digest(
         digest = _request_digest(digest, {"experiment_pair": dict(experiment_binding)})
     if problem_spec is not None:
         digest = _request_digest(digest, {"problem_spec": dict(problem_spec)})
+    if presentation_mode is not None:
+        digest = _request_digest(digest, {"presentation_mode": presentation_mode})
     return digest
 
 

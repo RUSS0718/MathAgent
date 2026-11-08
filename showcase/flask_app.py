@@ -43,6 +43,7 @@ from .server import create_live_pipeline, create_live_service
 from .star_product_modes import STAR_MODES
 from .verification import LightweightVerificationHook
 from .workspace import WorkspaceError, WorkspaceService
+from .presentation_api import register_presentation_api
 
 AUTH_COOKIE = "auth_session"
 MAX_BODY_BYTES = 1_000_000
@@ -75,6 +76,7 @@ def create_app(
         SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED=False,
         SHOWCASE_EXPERIMENT_PAIR_ENABLED=False,
         SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION=None,
+        SHOWCASE_PRESENTATION_ENABLED=False,
     )
     if config:
         app.config.from_mapping(dict(config))
@@ -236,6 +238,11 @@ def create_app(
                     "verification_mode": VERIFICATION_MODES,
                     "file_upload": upload,
                 },
+                "presentation": {
+                    "enabled": bool(app.config.get("SHOWCASE_PRESENTATION_ENABLED", False)),
+                    "modes": ["solve", "teach", "report"] if app.config.get("SHOWCASE_PRESENTATION_ENABLED", False) else [],
+                    "status": "available" if app.config.get("SHOWCASE_PRESENTATION_ENABLED", False) else "unavailable",
+                },
             }
         )
         response.headers["Cache-Control"] = "no-store"
@@ -359,6 +366,8 @@ def create_app(
         if len(message.strip()) > 100_000:
             return _json_error("message_too_large", 400)
         file_id = payload.get("input_user_file_id")
+        if payload.get("presentation_mode") is not None and not app.config.get("SHOWCASE_PRESENTATION_ENABLED", False):
+            return _json_error("capability_unavailable", 503)
         if file_id is not None:
             if not app.config.get("SHOWCASE_VISION_ENABLED"):
                 return _json_error("capability_unavailable", 503)
@@ -402,6 +411,7 @@ def create_app(
                 solver_options=payload.get("solver_options"),
                 solver_hint=payload.get("solver_hint"),
                 problem_spec=payload.get("problem_spec"),
+                presentation_mode=payload.get("presentation_mode"),
             )
         except WorkspaceError as exc:
             return _workspace_error(exc)
@@ -758,14 +768,12 @@ def create_app(
         run, _ = persisted
         return jsonify(replay_candidates(run))
 
-    @app.get("/api/agent/jobs/<job_id>/report")
-    def get_job_report(job_id: str) -> Response | tuple[Response, int]:
-        session = _require_auth(g.auth_session)
-        try:
-            job = workspace_service.get_job(job_id, session.user_id)
-            events = workspace_service.events(job_id, session.user_id)
-        except WorkspaceError as exc:
-            return _workspace_error(exc)
+    def job_report_payload(job_id: str, user_id: str) -> dict[str, Any]:
+        job = workspace_service.get_job(job_id, user_id)
+        events = [
+            event for event in workspace_service.events(job_id, user_id)
+            if event.get("event") != "presentation_artifact_saved"
+        ]
         result = job.get("result") if isinstance(job.get("result"), Mapping) else {}
         snapshot = {
             "run_id": job_id,
@@ -801,7 +809,15 @@ def create_app(
         if job.get("verification_mode") == "required" and not tool_results:
             verification["findings"] = ["needs_review", "tool_evidence_missing"]
         report = app.extensions["showcase_evidence_exporter"].report(snapshot, tool_results=tool_results, verification=verification)
-        return jsonify({"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": snapshot["execution_mode"], "solver": {key: (job.get("result") or {}).get(key) for key in ("solver_mode", "missing_capabilities", "evidence_kind", "solver")}, "report": report})
+        return {"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": snapshot["execution_mode"], "solver": {key: (job.get("result") or {}).get(key) for key in ("solver_mode", "missing_capabilities", "evidence_kind", "solver")}, "report": report}
+
+    @app.get("/api/agent/jobs/<job_id>/report")
+    def get_job_report(job_id: str) -> Response | tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        try:
+            return jsonify(job_report_payload(job_id, session.user_id))
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
 
     @app.post("/api/runs/<run_id>/resume")
     def resume_run(run_id: str) -> tuple[Response, int]:
@@ -816,6 +832,13 @@ def create_app(
         except RunResumeUnavailable as exc:
             return _json_error(exc.category, 409)
 
+    if app.config.get("SHOWCASE_PRESENTATION_ENABLED", True):
+        register_presentation_api(
+            app,
+            workspace_service=workspace_service,
+            job_loader=workspace_service.get_job,
+            report_loader=job_report_payload,
+        )
     return app
 
 
