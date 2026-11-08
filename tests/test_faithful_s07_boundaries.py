@@ -49,6 +49,7 @@ class FaithfulS07BoundaryTest(unittest.TestCase):
                     "verdict": "ACCEPT",
                     "classified_outcomes": [{
                         "category": "Lemma", "statement": statement, "scope": scope,
+                        "claim_indexes": [0],
                     }],
                 },
             }

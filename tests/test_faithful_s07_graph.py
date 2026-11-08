@@ -15,6 +15,35 @@ from showcase.solver_harness.storage import SolverPersistenceError, SolverRevisi
 
 
 class FaithfulS07GraphTest(unittest.TestCase):
+    def test_new_cyclic_and_dangling_dependencies_roll_back_whole_transaction(self):
+        for entries in ([('a', 'A', 'scope', ['missing'])],
+                        [('a', 'A', 'scope', ['b']), ('b', 'B', 'scope', ['a'])]):
+            with self.subTest(entries=entries), SolverHarness(config={"features": {"proof_graph": True}}) as harness:
+                run = harness.solve('problem')
+                run = self._commit(harness, run, 'finish-bootstrap', {})
+                before = harness.get_run(run['run_id'])
+                with self.assertRaises(SolverPersistenceError):
+                    self._commit(harness, run, 'invalid-graph', self._ledger_patch(run, entries))
+                self.assertEqual(before, harness.get_run(run['run_id']))
+
+    def test_bootstrap_rejects_grade_upgrade_and_unbound_claim_indexes(self):
+        from showcase.solver_harness.proof_graph_sources import importable_ledger_rows
+
+        with SolverHarness(config={"features": {"proof_graph": True}}) as harness:
+            run = harness.solve('problem')
+            patch = self._ledger_patch(run, [('a', 'A', 'scope', [])])
+            state = {**run['state'], **patch}
+            row = patch['verified_results_ledger'][0]
+            row['evidence_level'] = 'tool_verified'
+            imported, rejected = importable_ledger_rows(state, [row])
+            self.assertEqual([], imported)
+            self.assertEqual('unsupported_evidence_upgrade', rejected[0]['reason'])
+            row['evidence_level'] = 'llm_reviewed'
+            patch['calls']['review-1']['response']['classified_outcomes'][0]['claim_indexes'] = []
+            imported, rejected = importable_ledger_rows(state, [row])
+            self.assertEqual([], imported)
+            self.assertEqual('review_did_not_accept_record', rejected[0]['reason'])
+
     @staticmethod
     def _ledger_patch(run, entries):
         """Build reviewed source rows for an end-to-end persisted Harness event."""
@@ -23,7 +52,8 @@ class FaithfulS07GraphTest(unittest.TestCase):
             step_id = f"ledger-step-{index}"
             report_id, review_id = f"report-{index}", f"review-{index}"
             report = {"claims": [{"statement": statement}]}
-            classified = {"category": "Lemma", "statement": statement, "scope": scope}
+            classified = {"category": "Lemma", "statement": statement, "scope": scope,
+                          "claim_indexes": [0], "dependencies": dependencies}
             steps[step_id] = {
                 "report": report,
                 "verification": {"valid": True, "verdict": "ACCEPT"},
@@ -371,11 +401,16 @@ class FaithfulS07GraphTest(unittest.TestCase):
                 event={"event_id": "attach-independent-check", "type": "proof_graph_receipt_attached"},
                 state_updates={"tool_receipts": [receipt]},
             )
-            run = harness.commit_event(
-                run["run_id"], expected_revision=run["state_revision"],
-                event={"event_id": "verify-counterexample-receipt",
-                       "type": "proof_graph_counterexample_verified",
-                       "attempt_id": counterexample["id"], "receipt_id": receipt_id},
+            from showcase.solver_harness.proof_graph_commands import (
+                accept_counterexample,
+                resolve_conflict,
+            )
+
+            run = accept_counterexample(
+                harness, run["run_id"], expected_revision=run["state_revision"],
+                graph_version=run["state"]["proof_graph"]["current_version"],
+                event_id="verify-counterexample-receipt",
+                attempt_id=counterexample["id"], receipt_id=receipt_id,
             )
             snapshot = run["state"]["proof_graph"]["snapshots"][-1]
             self.assertEqual("accepted", snapshot["attempts"][counterexample["id"]]["status"])
@@ -408,10 +443,10 @@ class FaithfulS07GraphTest(unittest.TestCase):
             run = self._commit(harness, run, "persist-conflict-review", {
                 "calls": {**run["state"].get("calls", {}), resolution_id: review_call},
             })
-            run = harness.commit_event(
-                run["run_id"], expected_revision=run["state_revision"],
-                event={"event_id": "resolve-proof-graph-conflict",
-                       "type": "proof_graph_conflict_reviewed", "resolution": resolution},
+            run = resolve_conflict(
+                harness, run["run_id"], expected_revision=run["state_revision"],
+                graph_version=run["state"]["proof_graph"]["current_version"],
+                event_id="resolve-proof-graph-conflict", **resolution,
             )
             snapshot = run["state"]["proof_graph"]["snapshots"][-1]
             self.assertFalse(snapshot["propositions"][proposition_p]["conflict"])

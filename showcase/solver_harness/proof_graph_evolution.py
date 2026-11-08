@@ -72,6 +72,10 @@ def evolve_proof_graph(
     candidate_rows, dependency_rejections = dependency_closure(
         candidate_rows, rejected_ids=rejected_ids, known_ids=set(prior_result_props)
     )
+    if previous.get("bootstrap_complete") is True and dependency_rejections:
+        previous_ids = set(prior_result_props)
+        if any(item.get("source_id") not in previous_ids for item in dependency_rejections):
+            raise ProofGraphValidationError("illegal_new_graph_dependency")
     graph_data["not_imported_records"].extend(dependency_rejections)
     candidate_result_ids = {row["result_id"] for row, _source in candidate_rows}
     for derivation in graph_data["derivations"].values():

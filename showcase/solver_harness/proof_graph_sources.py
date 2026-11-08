@@ -77,6 +77,9 @@ def _verify_record(state: Mapping, record: Mapping) -> tuple[dict | None, str | 
         return None, "missing_scope"
     if record.get("evidence_level") not in {"llm_reviewed", "tool_verified"}:
         return None, "invalid_evidence_grade"
+    expected_grade = "tool_verified" if record.get("category") == "Computation" else "llm_reviewed"
+    if record.get("evidence_level") != expected_grade:
+        return None, "unsupported_evidence_upgrade"
     result_id, step_id = record.get("result_id"), record.get("source")
     steps = state.get("steps")
     step = steps.get(step_id) if isinstance(step_id, str) and isinstance(steps, Mapping) else None
@@ -102,6 +105,9 @@ def _verify_record(state: Mapping, record: Mapping) -> tuple[dict | None, str | 
         and item.get("category") == record.get("category")
         and item.get("statement") == statement
         and item.get("scope") == scope
+        and item.get("claim_indexes", []) == record.get("claim_indexes", [])
+        and item.get("receipt_ids", []) == record.get("receipt_ids", [])
+        and item.get("dependencies", []) == record.get("dependencies", [])
         for item in response.get("classified_outcomes", [])
     ):
         return None, "review_did_not_accept_record"
