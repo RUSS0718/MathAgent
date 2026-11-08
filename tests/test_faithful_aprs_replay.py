@@ -1,9 +1,12 @@
 """APRS consumes current evidence and replays persisted decision inputs."""
 import json
+import sqlite3
 import unittest
+from contextlib import closing
 from copy import deepcopy
 
 from showcase.solver_harness.aprs import rate_routes, replay_decision, verified_gain
+from tests.star_product_support import StarJobFixture
 
 
 class AprsReplayTest(unittest.TestCase):
@@ -81,3 +84,31 @@ class AprsReplayTest(unittest.TestCase):
         self.assertIn("h", verified_gain(state))
         state["obligation_evidence_ledger"][0]["claim_indexes"] = [0, 1]
         self.assertNotIn("root:a", verified_gain(state))
+
+
+class AprsJobReplayTest(StarJobFixture, unittest.TestCase):
+    def test_new_sqlite_reader_replays_actual_job_decision_without_dispatch(self):
+        from showcase.run_budget import RunBudgetLimits
+        from showcase.solver_harness.storage import SolverStateStore
+        from tests.test_faithful_s03_job import FEATURES, REPLIES, SPEC
+
+        self.open_star(REPLIES,
+                       SHOWCASE_STAR_FEATURES={**FEATURES, "context_pack": False, "serial_routes": True},
+                       SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8))
+        created = self.client.post("/api/agent/jobs", headers=self.headers(), json={
+            "message": SPEC["original_problem"], "session_id": self.session,
+            "solver_mode": "star_limited", "problem_spec": SPEC})
+        self.assertEqual(202, created.status_code)
+        job_id = created.get_json()["job_id"]
+        self.assertEqual("succeeded", self.terminal(job_id)["status"])
+        count = len(self.outbound)
+        service = self.app.extensions["showcase_workspace_service"]
+        with closing(sqlite3.connect(service.store.database_path)) as connection:
+            connection.row_factory = sqlite3.Row
+            state = SolverStateStore(connection).get_run(job_id)["state"]
+        evaluations = state["route_evaluations"][-1]["evaluations"]
+        decision = state["aprs_decisions"][-1]
+        self.assertTrue(replay_decision(evaluations, decision))
+        evaluations[0]["snapshot"]["frontier_digest"] = "tampered"
+        self.assertFalse(replay_decision(evaluations, decision))
+        self.assertEqual(count, len(self.outbound))
