@@ -257,7 +257,7 @@ def run_replan(harness, run, *, problem, model_port, config):
         except ValueError:
             return _stop(harness, run, "invalid_replacement_plan")
     work_units = None
-    if run["state"].get("progress_policy", {}).get("enabled") is True:
+    if isinstance(run["state"].get("problem_spec"), dict):
         from .specification import bind_plan_work_units
 
         try:

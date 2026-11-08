@@ -104,9 +104,7 @@ class FaithfulS05HistoryTest(StarJobFixture, unittest.TestCase):
             ACCEPT,
         ])
         terminal = self.terminal(job_id)
-        self.assertEqual("failed", terminal["status"])
-        self.assertIn("work_unit_prerequisites_incomplete",
-                      terminal["result"]["final_response"])
+        self.assertEqual("succeeded", terminal["status"], terminal)
         event_stream = self.client.get(
             f"/api/agent/jobs/{job_id}/events"
         ).get_data(as_text=True)
@@ -121,8 +119,8 @@ class FaithfulS05HistoryTest(StarJobFixture, unittest.TestCase):
 
         progress = self.report(job_id)["solver"]["solver"]["progress"]
 
-        self.assertEqual(0, progress["root_obligations"]["covered"])
-        self.assertEqual("open", progress["root_obligations"]["items"][0]["status"])
+        self.assertEqual(1, progress["root_obligations"]["covered"])
+        self.assertEqual("satisfied", progress["root_obligations"]["items"][0]["status"])
         self.assertEqual([
             {"plan_version": 1, "attempt_index": 0, "status": "archived",
              "step_count": 1, "outcome": "replan"},
