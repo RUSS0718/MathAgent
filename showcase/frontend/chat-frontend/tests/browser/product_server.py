@@ -24,6 +24,51 @@ from tests.test_star_product_traceback import PLAN, PROPOSE, TRACE, report
 counts = defaultdict(int)
 lock = threading.Lock()
 S03_PROBLEM = 'S03 browser root obligations'
+S05_LATENCY_PROBLEM = 'S05 browser event latency'
+S05_LONG_ARTIFACT_PROBLEM = 'S05 browser long public answer'
+S05_TRACEBACK_HISTORY_PROBLEM = 'S05 browser traceback history: prove 1+1=2'
+S05_REPLAN_HISTORY_PROBLEM = 'S05 browser replan history: prove 1+1=2'
+S05_LONG_ARTIFACT = '公开推导段落。' * 500
+S05_HISTORY_CLAIM = {'statement': '1+1=2', 'label': 'hard-verify'}
+S05_TRACEBACK_REPLIES = [
+    NEED_PLAN,
+    {'version': 1, 'steps': [{
+        'step_id': 'history-step', 'title': 'Prove equality', 'objective': 'Prove 1+1=2',
+        'obligation_ids': ['root:s03'], 'auxiliary_goal_ids': [],
+    }]},
+    report('first attempt', claims=[S05_HISTORY_CLAIM]),
+    {**TRACE, 'trace_back_to': 1},
+    report('retried attempt', claims=[S05_HISTORY_CLAIM]),
+    {'goal_gate': 'YES', 'logic_gate': 'PASS', 'verdict': 'ACCEPT', 'objection': '',
+     'obligation_evidence': [{
+         'obligation_id': 'root:s03', 'evidence_category': 'universal_proof',
+         'claim_indexes': [0],
+     }]},
+    {'final_response': '2'}, ACCEPT,
+]
+S05_REPLAN_REPLIES = [
+    NEED_PLAN,
+    {'version': 1, 'steps': [{
+        'step_id': 'history-step', 'title': 'Prove equality', 'objective': 'Prove 1+1=2',
+        'obligation_ids': ['root:s03'], 'auxiliary_goal_ids': [],
+    }]},
+    report('first attempt', claims=[S05_HISTORY_CLAIM]),
+    PROPOSE,
+    {**META_ABORT, 'decision': 'APPROVE_REPLAN',
+     'reason_summary': 'Use a fresh plan for this browser fixture',
+     'forbidden_directions': ['repeat prior plan'], 'reusable_results': []},
+    {'version': 2, 'steps': [{
+        'step_id': 'fresh-history-step', 'title': 'Fresh proof', 'objective': 'Prove 1+1=2',
+        'obligation_ids': ['root:s03'], 'auxiliary_goal_ids': [],
+    }]},
+    report('replanned attempt', claims=[S05_HISTORY_CLAIM]),
+    {'goal_gate': 'YES', 'logic_gate': 'PASS', 'verdict': 'ACCEPT', 'objection': '',
+     'obligation_evidence': [{
+         'obligation_id': 'root:s03', 'evidence_category': 'universal_proof',
+         'claim_indexes': [0],
+     }]},
+    {'final_response': '2'}, ACCEPT,
+]
 trace_replies = [
     NEED_PLAN, PLAN, report("safe reviewed fact"), VERDICT,
     report("old wrong fact"), VERDICT, report("old dependent fact"), VERDICT,
@@ -51,10 +96,13 @@ class Provider(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         context = json.loads(body['messages'][-1]['content'])
         problem = context['original_problem']
+        spec_enabled = context.get('problem_spec_version') == 1
         run_id = context['run_id']
         with lock:
             counts[run_id] += 1
             number = counts[run_id]
+        if problem == S05_LATENCY_PROBLEM:
+            time.sleep(.25)
         if problem == 'unknown' and number == 1:
             self.close_connection = True
             return
@@ -62,34 +110,33 @@ class Provider(BaseHTTPRequestHandler):
             time.sleep(2)
         role = context['role']
         if role == 'explore':
-            reply = {'assessment': 'NEED_PLAN', 'worked': [], 'failed': [], 'candidates': []} if problem in {'plan', 'tool', S03_PROBLEM} else {'assessment': 'SOLVED', 'worked': [], 'failed': [], 'candidates': [], 'solution_candidate': '2'}
+            reply = {'assessment': 'NEED_PLAN', 'worked': [], 'failed': [], 'candidates': []} if problem in {'plan', 'tool', S03_PROBLEM, S05_LATENCY_PROBLEM, S05_LONG_ARTIFACT_PROBLEM, S05_TRACEBACK_HISTORY_PROBLEM, S05_REPLAN_HISTORY_PROBLEM} else {'assessment': 'SOLVED', 'worked': [], 'failed': [], 'candidates': [], 'solution_candidate': '2'}
         elif role == 'planner':
             reply = ({'version': 1, 'steps': [{
                 'step_id': 's03-work', 'title': 'Prove the value', 'objective': 'Prove the statement',
-                'obligation_ids': ['root:s03'],
-                'auxiliary_goal_ids': [],
-            }]} if problem == S03_PROBLEM else
+                **({'obligation_ids': ['root:s03'], 'auxiliary_goal_ids': []} if spec_enabled else {}),
+            }]} if problem in {S03_PROBLEM, S05_LATENCY_PROBLEM, S05_LONG_ARTIFACT_PROBLEM, S05_TRACEBACK_HISTORY_PROBLEM, S05_REPLAN_HISTORY_PROBLEM} else
                 {'version': 1, 'steps': [{'step_id': 'PRIVATE HINT TEXT', 'title': 'Add', 'objective': 'Add'}]})
         elif role == 'reasoner':
             reply = ({'argument': 'The identity follows by integer addition.',
                       'claims': [{'statement': '1+1 equals 2 by the definition of addition.',
                                   'label': 'hard-verify'}],
-                      'blocked': False} if problem == S03_PROBLEM else
+                      'blocked': False} if problem in {S03_PROBLEM, S05_LATENCY_PROBLEM, S05_LONG_ARTIFACT_PROBLEM, S05_TRACEBACK_HISTORY_PROBLEM, S05_REPLAN_HISTORY_PROBLEM} else
                 {'argument': 'PRIVATE PROOF TEXT', 'claims': [], 'blocked': False})
         elif role == 'step_verifier':
             reply = ({'goal_gate': 'YES', 'logic_gate': 'PASS', 'verdict': 'ACCEPT', 'objection': '',
                       'obligation_evidence': [{'obligation_id': 'root:s03',
                                                'evidence_category': 'universal_proof',
                                                'claim_indexes': [0]}]}
-                     if problem == S03_PROBLEM else
+                     if problem in {S03_PROBLEM, S05_LATENCY_PROBLEM, S05_LONG_ARTIFACT_PROBLEM, S05_TRACEBACK_HISTORY_PROBLEM, S05_REPLAN_HISTORY_PROBLEM} else
                      {'goal_gate': 'YES', 'logic_gate': 'PASS', 'verdict': 'ACCEPT', 'objection': ''})
         elif role == 'final_generator':
-            reply = {'final_response': '2'}
+            reply = {'final_response': S05_LONG_ARTIFACT if problem == S05_LONG_ARTIFACT_PROBLEM else '2'}
         elif role == 'explore_polish':
             reply = {'solution_candidate': '1+1=2'}
         elif role == 'whole_solution_verifier':
             reply = {'verdict': 'ACCEPT', 'reason': 'Addition'}
-        elif role == 'meta' and problem == 'replan':
+        elif role == 'meta' and problem in {'replan', S05_REPLAN_HISTORY_PROBLEM}:
             reply = {}
         else:
             self.send_error(400)
@@ -98,6 +145,10 @@ class Provider(BaseHTTPRequestHandler):
             reply = trace_replies[number - 1]
         if problem == 'replan':
             reply = replan_replies[number - 1]
+        if problem == S05_TRACEBACK_HISTORY_PROBLEM:
+            reply = S05_TRACEBACK_REPLIES[number - 1]
+        if problem == S05_REPLAN_HISTORY_PROBLEM:
+            reply = S05_REPLAN_REPLIES[number - 1]
         if problem == 'tool' and role == 'reasoner':
             reply = TOOL_STEP
         if number > 28:
@@ -143,11 +194,23 @@ if __name__ == '__main__':
                 'problem_spec': True, 'final_generation': True, 'final_solution_review': True,
             },
             'SHOWCASE_STAR_BUDGET': RunBudgetLimits(
-                max_model_calls=8, max_http_attempts=8, max_tool_calls=0,
+                max_model_calls=28, max_http_attempts=28, max_tool_calls=0,
             ),
             'SHOWCASE_STAR_ADAPTER': InternModelAdapter(
                 InternChatClient(retry=1), max_tokens=256,
             )})
+        @spec_app.get('/__test__/jobs/<job_id>/persisted-event-times')
+        def persisted_event_times(job_id):
+            service = spec_app.extensions['showcase_workspace_service']
+            with service.store._lock:
+                rows = service.store._connection.execute(
+                    'SELECT event_id,event_type,created_at FROM workspace_events WHERE job_id=? ORDER BY event_id',
+                    (job_id,),
+                ).fetchall()
+            return spec_app.response_class(json.dumps([{
+                'id': int(row['event_id']), 'event': row['event_type'],
+                'created_at': row['created_at'],
+            } for row in rows]), mimetype='application/json')
         threading.Thread(target=spec_app.run, kwargs={'host': '127.0.0.1', 'port': 8095,
             'threaded': True, 'use_reloader': False}, daemon=True).start()
         app.run(host='127.0.0.1', port=8091, threaded=True, use_reloader=False)

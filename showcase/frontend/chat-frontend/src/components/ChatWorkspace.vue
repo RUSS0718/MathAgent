@@ -32,6 +32,7 @@ const selectedFileName = ref<string | undefined>()
 const sidebarOpen = ref(false)
 const inspectorOpen = ref(!globalThis.matchMedia('(max-width: 1180px)').matches)
 const submitting = ref(false)
+const pendingCreate = ref<{ fingerprint: string; key: string } | null>(null)
 const loading = ref(true)
 const loadFailed = ref(false)
 const report = ref<Awaited<ReturnType<typeof api.jobReport>> | null>(null)
@@ -49,8 +50,18 @@ async function send(): Promise<void> {
   submitting.value = true
   notice.value = ''
   try {
-    const result = await api.createJob(message, sessions.currentId, createIdempotencyKey(), selectedFile.value, solverMode.value)
+    const sessionId = sessions.currentId
+    const fileId = selectedFile.value
+    const mode = solverMode.value
+    const fingerprint = JSON.stringify({
+      sessionId, message, fileId: fileId ?? null, mode,
+    })
+    if (pendingCreate.value?.fingerprint !== fingerprint) {
+      pendingCreate.value = { fingerprint, key: createIdempotencyKey() }
+    }
+    const result = await api.createJob(message, sessionId, pendingCreate.value.key, fileId, mode)
     if (!result.success || !result.job_id || !result.status) throw new Error(result.error ?? '任务未被接受')
+    pendingCreate.value = null
     jobs.start(result.job_id, sessions.currentId, result.status)
     observeJob(result.job_id)
     sessions.addUser(message, result.job_id)

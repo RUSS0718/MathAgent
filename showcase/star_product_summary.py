@@ -43,6 +43,7 @@ def progress_summary(state):
                 for index, item in enumerate(ledger, 1)
             ],
         }
+        summary["plan_history"] = _plan_history(state)
     if "reasoner_checkpoints" in state:
         summary["reasoner_checkpoints"] = [
             {"round": item.get("round"), "status": item.get("status")}
@@ -50,3 +51,83 @@ def progress_summary(state):
             if isinstance(item, dict)
         ]
     return summary
+
+
+def _plan_history(state):
+    """Return version-only history for archived and current plans."""
+    history = []
+    seen_attempts = set()
+    step_counts = {}
+    failures = state.get("failure_records", [])
+    failures = failures if isinstance(failures, list) else []
+    current_plan = state.get("plan")
+    current_version = state.get("plan_version")
+
+    for failure in failures:
+        if not isinstance(failure, dict):
+            continue
+        archived = failure.get("archived_plan")
+        if not isinstance(archived, dict):
+            continue
+        version = archived.get("version", failure.get("plan_version"))
+        steps = archived.get("steps")
+        if type(version) is int and version >= 1 and isinstance(steps, list):
+            step_counts[version] = len(steps)
+    if isinstance(current_plan, dict):
+        steps = current_plan.get("steps")
+        if type(current_version) is int and current_version >= 1 and isinstance(steps, list):
+            step_counts[current_version] = len(steps)
+
+    for failure in failures:
+        if not isinstance(failure, dict):
+            continue
+        plan = failure.get("archived_plan")
+        kind = failure.get("kind")
+        version = (
+            plan.get("version", failure.get("plan_version"))
+            if isinstance(plan, dict)
+            else failure.get("plan_version")
+        )
+        attempt = failure.get("attempt_index")
+        if (type(version) is not int or version < 1
+                or type(attempt) is not int or attempt < 0):
+            continue
+        if kind == "trace_back":
+            status = "retried"
+        elif isinstance(plan, dict):
+            status = "archived"
+        else:
+            continue
+        identity = (version, attempt)
+        if identity in seen_attempts:
+            continue
+        steps = plan.get("steps") if isinstance(plan, dict) else None
+        step_count = len(steps) if isinstance(steps, list) else step_counts.get(version)
+        history.append({
+            "plan_version": version,
+            "attempt_index": attempt,
+            "status": status,
+            "step_count": step_count,
+            "outcome": kind if kind in {
+                "replan", "problem_spec_change", "trace_back",
+            } else None,
+        })
+        seen_attempts.add(identity)
+
+    plan = current_plan
+    if isinstance(plan, dict):
+        version = current_version if type(current_version) is int else plan.get("version")
+        attempt = state.get("attempt_index")
+        identity = (version, attempt)
+        if (type(version) is int and version >= 1
+                and type(attempt) is int and attempt >= 0
+                and identity not in seen_attempts):
+            steps = plan.get("steps")
+            history.append({
+                "plan_version": version,
+                "attempt_index": attempt,
+                "status": "current",
+                "step_count": len(steps) if isinstance(steps, list) else 0,
+                "outcome": None,
+            })
+    return history

@@ -8,6 +8,13 @@ const props = defineProps<{ report: JobReport; jobId: string }>()
 const solver = computed(() => props.report.solver?.solver)
 const steps = computed(() => (solver.value?.progress?.steps ?? []) as Record<string, unknown>[])
 const failures = computed(() => (solver.value?.progress?.failures ?? []) as Record<string, unknown>[])
+const obligations = computed(() => solver.value?.progress?.root_obligations)
+const plans = computed(() => solver.value?.progress?.plan_history ?? [])
+const retries = computed(() => solver.value?.recovery?.retries ?? [])
+const candidateFields = [
+  'candidate_id', 'answer_hash', 'source_phase', 'plan_version', 'attempt_index',
+  'review_state', 'selection_eligible', 'invalidated_by', 'evidence_grade', 'dependency_refs',
+]
 const replay = ref<Awaited<ReturnType<typeof api.candidateReplay>> | null>(null)
 const notice = ref('')
 const busy = ref(false)
@@ -35,13 +42,35 @@ async function loadReplay(): Promise<void> {
         <p v-if="!failures.length">未触发回退或重规划。</p>
         <ul v-else><li v-for="(failure, index) in failures" :key="index">{{ failure.kind }} · 原计划 {{ failure.plan_version }} · 尝试 {{ failure.attempt_index }} · 失效 {{ failure.invalidated_count }} 项 · 救援 {{ failure.rescued_count }} 项</li></ul>
       </details>
+      <section v-if="obligations" class="evidence-section" aria-label="根义务台账">
+        <h3>根义务台账 · {{ obligations.covered }} / {{ obligations.total }}</h3>
+        <ol>
+          <li v-for="item in obligations.items" :key="item.ordinal">
+            义务 {{ item.ordinal }} · {{ item.type ?? '未分类' }} · {{ item.status }}
+          </li>
+        </ol>
+      </section>
+      <section v-if="plans.length" class="evidence-section" aria-label="计划与尝试历史">
+        <h3>计划与尝试历史</h3>
+        <ol>
+          <li v-for="attempt in plans" :key="attempt.plan_version + ':' + attempt.attempt_index">
+            计划 {{ attempt.plan_version }} · 尝试 {{ attempt.attempt_index }} ·
+            {{ attempt.status === 'current' ? '当前' : attempt.status === 'retried' ? '已回退并重试' : '已归档' }} ·
+            {{ attempt.step_count == null ? '完整步骤数未知' : attempt.step_count + ' 步' }}
+            <span v-if="attempt.outcome"> · {{ attempt.outcome }}</span>
+          </li>
+        </ol>
+      </section>
+      <details v-if="retries.length"><summary>请求重试（{{ retries.length }} 次）</summary>
+        <ul><li v-for="retry in retries" :key="retry.call_id">{{ retry.status }} · 原调用 {{ retry.retry_of }} · 新调用 {{ retry.call_id }}</li></ul>
+      </details>
       <details><summary>累计预算与未知消耗</summary><dl class="data-list"><template v-for="(value, field) in report.report.budget" :key="field"><dt>{{ field }}</dt><dd>{{ display(value) }}</dd></template></dl><p v-if="!report.report.budget">预算记录不可用；不按零消耗解释。</p></details>
     </section>
     <section class="evidence-section" aria-label="候选版本与选择">
       <h2>候选版本与选择</h2>
       <p>候选接受、有限计算与完整数学证明不同；失效版本保留供审阅。</p>
       <p v-if="!solver?.candidate_history?.length">尚无完整候选记录；不能据此判断求解成功。</p>
-      <details v-for="(candidate, index) in solver?.candidate_history" :key="index"><summary>候选 {{ index + 1 }} · 版本 {{ candidate.version }} · {{ candidate.review_state }}</summary><dl class="data-list"><template v-for="field in ['candidate_id', 'answer_text', 'answer_hash', 'source_phase', 'plan_version', 'attempt_index', 'review_state', 'selection_eligible', 'invalidated_by', 'evidence_grade', 'dependency_refs']" :key="field"><dt>{{ field }}</dt><dd>{{ display(candidate[field]) }}</dd></template></dl></details>
+      <details v-for="(candidate, index) in solver?.candidate_history" :key="index"><summary>候选 {{ index + 1 }} · 版本 {{ candidate.version }} · {{ candidate.review_state }}</summary><dl class="data-list"><template v-for="field in candidateFields" :key="field"><dt>{{ field }}</dt><dd>{{ display(candidate[field]) }}</dd></template></dl></details>
       <details v-if="solver?.best_effort" open><summary>Best-Effort 确定性选择</summary><dl class="data-list"><template v-for="(value, field) in solver.best_effort" :key="field"><dt>{{ field }}</dt><dd>{{ display(value) }}</dd></template></dl></details>
       <UiButton :busy="busy" @click="loadReplay">零调用重放候选选择</UiButton>
       <p v-if="notice" role="status">{{ notice }}</p>
