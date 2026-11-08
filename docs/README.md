@@ -2,7 +2,10 @@
 
 ## Faithful 实施入口（2026-11-08）
 
-当前 S01–S05 与 F1/S07 已工程退出（`engineering-preview`）。S06、S08、S09 的工程前置已解除，但这三个后续阶段尚未实现。真实 provider、容量/SLA、自然题与数学效果分别保留未验证状态。具体合同与依赖见 [#144 阶段决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)。执行与证据复用遵循根 [AGENTS.md](../AGENTS.md) 和[工程门禁](engineering/development-gates.md)。
+当前 S01–S08（含 S06 与串行 F2/S08）已工程退出（`engineering-preview`）。S09 仅完成隔离环境核验：Lean 缺失，状态 unavailable，未实现后端；S10 前置未解除。完整 F6 与完整并发仍为后续增量。真实 provider、容量/SLA、自然题与数学效果分别保留未验证状态。具体合同与依赖见 [#144 阶段决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)。执行与证据复用遵循根 [AGENTS.md](../AGENTS.md) 和[工程门禁](engineering/development-gates.md)。
+
+- [S06 与 S08/F2 工程退出验收](evals/faithful-s06-s08-exit-20261108.md)：门禁源码 `2f11c65`，6/6通过，1543项含42skip；分别记录基础模板输出、串行路线/APRS、双轴修复及首轮门禁失败。
+- [S06基础输出合同](engineering/faithful-s06-contract.md)、[S08串行路线合同](engineering/faithful-s08-contract.md)、[重规划诊断与S09环境](evals/faithful-replan-s09-environment-20261108.md)：S09编译exit127、无L2/L3；#156可按实际前置推进，S10不可提前实施。
 
 - [S05 与 F1/S07 工程退出验收](evals/faithful-s05-s07-exit-20261108.md)：门禁源码 `932a234`，六阶段通过，1496 项回归含 42 skip；真实图浏览器 5 项通过、50/50 样本 P95 818 ms。分别记录两阶段结论、双轴修复、首轮门禁失败和未验证边界。
 - [S05 公开产物与 UI 合同](engineering/faithful-s05-contract.md)、[F1/S07 图与 GraphBootstrap 合同](engineering/faithful-s07-contract-exit-20261108.md)：真实进度、可恢复历史、脱敏图投影及 AND/OR、版本、来源与原子失效边界。
