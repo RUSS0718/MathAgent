@@ -20,5 +20,8 @@ class RouteProjectionTest(unittest.TestCase):
         self.assertIsNone(routes["evaluations"][0]["vector"]["cost"])
         self.assertEqual(2, routes["budget"]["closing_reserve"]["model_calls"])
         self.assertNotIn("PRIVATE", repr(routes))
+        state["route_registry"][0]["needs_reevaluation"] = True
+        self.assertFalse(progress_summary(state)["routes"]["evaluations"][0]["hard_gate"])
+        self.assertFalse(progress_summary(state)["routes"]["evaluations"][0]["current"])
         state["aprs_decisions"][0]["selected_route_id"] = "forged"
         self.assertFalse(progress_summary(state)["routes"]["decisions"][0]["replayable"])

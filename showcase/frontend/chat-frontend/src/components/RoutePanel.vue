@@ -27,7 +27,7 @@ const ratingFields = [['verified_gain', '新增有效信用'], ['evidence_qualit
       </li>
     </ol>
     <details v-for="rating in routes.evaluations ?? []" :key="rating.route_id">
-      <summary>路线评分 · {{ rating.route_id }} · {{ rating.hard_gate ? '符合硬门槛' : '不符合当前门槛' }}</summary>
+      <summary>路线评分 · {{ rating.route_id }} · {{ rating.current ? '当前输入' : '历史输入，需重评' }} · {{ rating.hard_gate ? '符合硬门槛' : '不符合当前门槛' }}</summary>
       <dl class="data-list">
         <template v-for="[key, label] in ratingFields" :key="key">
           <dt>{{ label }}</dt><dd>{{ rating.vector[key] ?? '未知' }}</dd>

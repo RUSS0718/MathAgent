@@ -18,6 +18,7 @@ def route_summary(state):
     """Project finite numeric vectors and independently verify persisted decisions."""
     groups = state.get("route_evaluations", [])
     latest = {}
+    routes = {item["route_id"]: item for item in state.get("route_registry", [])}
     by_hash = {}
     for group in groups:
         evaluations = group.get("evaluations", [])
@@ -35,6 +36,13 @@ def route_summary(state):
         decisions.append(public)
     budget = state.get("route_budget", {})
     snapshot = budget.get("current_snapshot") or {}
+    def current(item):
+        route = routes.get(item["route_id"], {})
+        return (not route.get("needs_reevaluation")
+                and route.get("status") in {"created", "eligible", "active"}
+                and item.get("snapshot", {}).get("graph_version")
+                == (state.get("proof_graph") or {}).get("current_version", route.get("graph_version")))
+
     return {
         "policy_version": state["route_policy"].get("policy_version"),
         "active_route_id": state.get("active_route_id"),
@@ -44,7 +52,8 @@ def route_summary(state):
             for item in state.get("route_registry", [])],
         "decisions": decisions,
         "evaluations": [{
-            "route_id": key, "input_hash": item.get("input_hash"), "hard_gate": item.get("hard_gate") is True,
+            "route_id": key, "input_hash": item.get("input_hash"), "current": current(item),
+            "hard_gate": current(item) and item.get("hard_gate") is True,
             "vector": {**_numbers(item.get("vector", {}), (
                 "verified_gain", "evidence_quality", "novelty", "cost", "http_attempts", "tool_calls", "wall_time_seconds")),
                        "cost_known": item.get("vector", {}).get("cost_known") is True},

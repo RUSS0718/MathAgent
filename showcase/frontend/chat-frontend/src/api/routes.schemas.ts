@@ -18,7 +18,7 @@ export const routesSchema = z.object({
     policy_version: z.string().optional(), replayable: z.boolean().optional(),
   })),
   evaluations: z.array(z.object({
-    route_id: z.string(), input_hash: z.string().nullable(), hard_gate: z.boolean(),
+    route_id: z.string(), input_hash: z.string().nullable(), hard_gate: z.boolean(), current: z.boolean().optional(),
     vector: z.object({
       verified_gain: z.number().nonnegative().nullable().optional(),
       evidence_quality: z.number().nonnegative().nullable().optional(),
