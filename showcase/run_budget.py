@@ -188,6 +188,31 @@ class RunBudgetLedger:
             limits = state["limits"]
             if time.time() >= state["deadline_at"]:
                 raise BudgetExhausted("run_deadline_exhausted")
+            if kind == "http":
+                reserved = next((action for action in state["actions"]
+                                 if action.get("kind") == "http"
+                                 and action.get("status") == "pre_reserved"
+                                 and action.get("logical_call_id") == logical_call_id), None)
+                if reserved is not None:
+                    if input_estimate > reserved["input_estimate"] or output_cap > reserved["output_cap"]:
+                        raise BudgetExhausted("finalization_reservation_too_small")
+                    action_id = attempt_id or uuid4().hex
+                    if any(action.get("id") == action_id for action in state["actions"]):
+                        raise BudgetExhausted("run_attempt_identity_conflict")
+                    reserved.update(
+                        id=action_id,
+                        status="reserved",
+                        reservation_attempt_id=reserved["id"],
+                        attempt_event=attempt_event,
+                        public_attempt=(
+                            {**public_attempt(attempt_event, run_id=run_id, role=role),
+                             "started_at_utc": attempt_event.get("started_at_utc"),
+                             "dispatch_status": "reserved_dispatch_unconfirmed",
+                             "solver_call_id": public_solver_call_id(run_id, solver_call_id)}
+                            if attempt_event is not None else None
+                        ),
+                    )
+                    return action_id, max(0.001, state["deadline_at"] - time.time())
             if kind == "logical":
                 if summary["logical_calls"] >= limits["max_model_calls"]:
                     raise BudgetExhausted("run_model_budget_exhausted")
@@ -217,6 +242,115 @@ class RunBudgetLedger:
                 }
             )
             return action_id, max(0.001, state["deadline_at"] - time.time())
+
+    def reserve_finalization_pair(
+        self,
+        run_id,
+        *,
+        reservation_id,
+        final_input_estimate,
+        final_output_cap,
+        review_input_estimate,
+        review_output_cap,
+    ):
+        """Atomically hold one generator and one whole-review call in this Run."""
+        if not isinstance(reservation_id, str) or not reservation_id.strip():
+            raise ValueError("finalization_reservation_id_invalid")
+        estimates = (final_input_estimate, final_output_cap,
+                     review_input_estimate, review_output_cap)
+        if any(type(value) is not int or value < 0 for value in estimates):
+            raise ValueError("run_budget_reservation_invalid")
+        reservation_id = reservation_id.strip()
+        roles = ("final_generator", "whole_solution_verifier")
+        with self._transaction(run_id) as state:
+            if state is None:
+                raise BudgetExhausted("budget_uninitialized")
+            assert_dispatch_allowed(self.connection, run_id)
+            if time.time() >= state["deadline_at"]:
+                raise BudgetExhausted("run_deadline_exhausted")
+            existing = [action for action in state["actions"]
+                        if action.get("reservation_id") == reservation_id]
+            if existing:
+                if len(existing) != 4:
+                    raise BudgetExhausted("finalization_reservation_incomplete")
+                expected = {
+                    "final_generator": (final_input_estimate, final_output_cap),
+                    "whole_solution_verifier": (review_input_estimate, review_output_cap),
+                }
+                if any(
+                    (action["input_estimate"], action["output_cap"])
+                    != expected[action["role"]]
+                    for action in existing if action["kind"] == "http"
+                ):
+                    raise BudgetExhausted("finalization_reservation_conflict")
+                return {role: next(action["logical_call_id"] for action in existing
+                                   if action["kind"] == "logical" and action["role"] == role)
+                        for role in roles}
+            summary = _summary(state)
+            limits = state["limits"]
+            if summary["logical_calls"] + 2 > limits["max_model_calls"]:
+                raise BudgetExhausted("run_model_budget_exhausted")
+            if summary["http_attempts"] + 2 > limits["max_http_attempts"]:
+                raise BudgetExhausted("run_model_budget_exhausted")
+            token_reserve = final_input_estimate + final_output_cap + review_input_estimate + review_output_cap
+            if summary["charged_tokens"] + token_reserve > limits["max_tokens"]:
+                raise BudgetExhausted("run_model_budget_exhausted")
+            logical_ids = {}
+            for role, input_estimate, output_cap in (
+                (roles[0], final_input_estimate, final_output_cap),
+                (roles[1], review_input_estimate, review_output_cap),
+            ):
+                logical_id = f"{reservation_id}:logical:{role}"
+                http_id = f"{reservation_id}:http:{role}"
+                logical_ids[role] = logical_id
+                state["actions"].extend((
+                    {
+                        "id": logical_id,
+                        "kind": "logical",
+                        "logical_call_id": logical_id,
+                        "solver_call_id": None,
+                        "role": role,
+                        "tool_call_id": None,
+                        "input_estimate": 0,
+                        "output_cap": 0,
+                        "reservation_id": reservation_id,
+                        "status": "pre_reserved",
+                        "usage": provider_usage(None),
+                    },
+                    {
+                        "id": http_id,
+                        "kind": "http",
+                        "logical_call_id": logical_id,
+                        "solver_call_id": None,
+                        "role": role,
+                        "tool_call_id": None,
+                        "input_estimate": input_estimate,
+                        "output_cap": output_cap,
+                        "reservation_id": reservation_id,
+                        "status": "pre_reserved",
+                        "usage": provider_usage(None),
+                    },
+                ))
+            return logical_ids
+
+    def claim_finalization_call(self, run_id, role, solver_call_id=None):
+        """Claim the oldest held logical slot for a closeout role, if one exists."""
+        with self._transaction(run_id) as state:
+            if state is None:
+                raise BudgetExhausted("budget_uninitialized")
+            for action in state["actions"]:
+                if (action.get("kind") == "logical"
+                        and action.get("role") == role
+                        and action.get("status") == "pre_reserved"):
+                    action["status"] = "reserved"
+                    action["solver_call_id"] = solver_call_id
+                    for reserved in state["actions"]:
+                        if (reserved.get("kind") == "http"
+                                and reserved.get("status") == "pre_reserved"
+                                and reserved.get("logical_call_id") == action["logical_call_id"]):
+                            reserved["solver_call_id"] = solver_call_id
+                    return action["logical_call_id"]
+        return None
 
     def settle(self, run_id, action_id, event):
         with self.lock:
@@ -328,7 +462,13 @@ class RunBudget:
     def model_call(self, role=None, *, solver_call_id=None, deadline_at=None, strict_completion=False):
         if deadline_at is not None and deadline_at <= time.time():
             raise BudgetExhausted("scoped_deadline_exhausted")
-        action_id, _remaining = self.ledger.reserve(self.run_id, "logical", role=role, solver_call_id=solver_call_id)
+        action_id = self.ledger.claim_finalization_call(
+            self.run_id, role, solver_call_id=solver_call_id
+        )
+        if action_id is None:
+            action_id, _remaining = self.ledger.reserve(
+                self.run_id, "logical", role=role, solver_call_id=solver_call_id
+            )
         return ModelCallBudget(self.ledger, self.run_id, action_id, role, solver_call_id, deadline_at, strict_completion)
 
     def before_attempt(self, event, input_estimate):
@@ -390,12 +530,13 @@ class ModelCallBudget(RunBudget):
 def _summary(state):
     # Known counters sum only fields actually returned by the provider. Missing
     # fields retain their reservation even when a total-only usage is available.
-    attempts = [a for a in state["actions"] if a["kind"] == "http"]
+    http_actions = [a for a in state["actions"] if a["kind"] == "http"]
+    attempts = [a for a in http_actions if a.get("status") != "pre_reserved"]
     fields = ("prompt_tokens", "completion_tokens", "total_tokens")
     known = {field: sum(a["usage"][field] or 0 for a in attempts) for field in fields}
     missing = {field: sum(a["usage"][field] is None for a in attempts) for field in fields}
     charged = reserved = 0
-    for action in attempts:
+    for action in http_actions:
         usage = action["usage"]
         held = (action["input_estimate"] if usage["prompt_tokens"] is None else 0) + (
             action["output_cap"] if usage["completion_tokens"] is None else 0
@@ -418,7 +559,7 @@ def _summary(state):
         **({"stream_timeout_policy": state["stream_timeout_policy"]}
            if "stream_timeout_policy" in state else {}),
         "logical_calls": sum(a["kind"] == "logical" for a in state["actions"]),
-        "http_attempts": len(attempts),
+        "http_attempts": len(http_actions),
         "tool_calls": sum(a["kind"] == "tool" for a in state["actions"]),
         "provider_known": {
             field: None if attempts and missing[field] == len(attempts) else value
@@ -427,7 +568,7 @@ def _summary(state):
         "provider_unknown_fields": missing,
         "reserved_tokens": reserved,
         "charged_tokens": charged,
-        "local_input_estimate": sum(a["input_estimate"] for a in attempts),
+        "local_input_estimate": sum(a["input_estimate"] for a in http_actions),
         "estimate_source": "local_utf8_bytes",
         "unknown_attempts": sum(
             any(a["usage"][field] is None for field in fields) for a in attempts

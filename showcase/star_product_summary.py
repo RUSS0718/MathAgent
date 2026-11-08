@@ -32,6 +32,17 @@ def progress_summary(state):
             for item in state.get("verified_results_ledger", [])
             if isinstance(item, dict) and isinstance(item.get("category"), str)],
         "meta_decision": (state.get("meta_decision") or {}).get("decision")}
+    if state.get("problem_spec_policy", {}).get("enabled") is True:
+        ledger = state.get("obligation_ledger", [])
+        summary["root_obligations"] = {
+            "covered": sum(item.get("status") == "satisfied" for item in ledger),
+            "total": len(ledger),
+            "items": [
+                {"ordinal": index, "type": item.get("obligation_type"),
+                 "status": item.get("status", "open")}
+                for index, item in enumerate(ledger, 1)
+            ],
+        }
     if "reasoner_checkpoints" in state:
         summary["reasoner_checkpoints"] = [
             {"round": item.get("round"), "status": item.get("status")}

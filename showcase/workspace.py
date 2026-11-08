@@ -82,6 +82,7 @@ class WorkspaceStore:
                 error_code TEXT,
                 input_user_file_id TEXT,
                 verification_mode TEXT NOT NULL DEFAULT 'auto',
+                problem_spec_json TEXT,
                 idempotency_key TEXT NOT NULL,
                 request_digest TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -131,6 +132,8 @@ class WorkspaceStore:
             self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN verification_mode TEXT NOT NULL DEFAULT 'auto'")
         if "input_user_file_id" not in columns:
             self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN input_user_file_id TEXT")
+        if "problem_spec_json" not in columns:
+            self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN problem_spec_json TEXT")
         migrate_hints(self._connection, columns)
         self._connection.commit()
 
@@ -218,6 +221,7 @@ class WorkspaceStore:
         solver_identity: Mapping[str, Any] | None = None,
         experiment_binding: Mapping[str, Any] | None = None,
         solver_hint: str | None = None,
+        problem_spec: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Durably accept one Job and its user message before returning."""
 
@@ -245,9 +249,9 @@ class WorkspaceStore:
                 job_id = f"run_{secrets.token_hex(16)}"
                 now = _utc_now()
                 self._connection.execute(
-                    "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,input_user_file_id,verification_mode,idempotency_key,request_digest,created_at,updated_at) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (job_id, session_id, user_id, problem, "queued", _json({"execution_mode": execution_mode, **(solver_identity or {}), **({"experiment_pair": dict(experiment_binding)} if experiment_binding else {})}), None, input_user_file_id, verification_mode, idempotency_key, request_digest, now, now),
+                    "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,input_user_file_id,verification_mode,problem_spec_json,idempotency_key,request_digest,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (job_id, session_id, user_id, problem, "queued", _json({"execution_mode": execution_mode, **(solver_identity or {}), **({"experiment_pair": dict(experiment_binding)} if experiment_binding else {})}), None, input_user_file_id, verification_mode, _json(problem_spec) if problem_spec is not None else None, idempotency_key, request_digest, now, now),
                 )
                 self._connection.execute(
                     "INSERT INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
@@ -682,6 +686,14 @@ class WorkspaceStore:
             row = self._connection.execute("SELECT solver_hint FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
         return str(row["solver_hint"]) if row is not None and row["solver_hint"] is not None else None
 
+    def problem_spec(self, job_id: str) -> dict[str, Any] | None:
+        """Read the private frozen ProblemSpec supplied at Job creation."""
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT problem_spec_json FROM workspace_jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+        return _loads(row["problem_spec_json"]) if row is not None and row["problem_spec_json"] else None
+
     def active_jobs(self, user_id: str, session_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
             query = "SELECT * FROM workspace_jobs WHERE user_id=? AND status IN ('queued','running','waiting_input')"
@@ -886,12 +898,30 @@ class WorkspaceService:
         solver_options: Any = None,
         solver_hint: Any = None,
         experiment_binding: Mapping[str, Any] | None = None,
+        problem_spec: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         from .star_product_modes import validate_mode
 
         identity = validate_mode(solver_mode, enabled=self.star_pipeline is not None, verification_mode=verification_mode, options=solver_options, pipeline=self.star_pipeline)
         validate_hint(solver_hint, solver_mode)
         selected = self.star_pipeline if solver_mode in STAR_MODES else self.pipeline
+        if problem_spec is not None:
+            if solver_mode not in STAR_MODES:
+                raise WorkspaceError("problem_spec_requires_star_mode", status=400)
+            preset = selected.preset_config(solver_mode)
+            if preset.get("features", {}).get("problem_spec") is not True:
+                raise WorkspaceError("problem_spec_feature_disabled", status=400)
+            from .solver_harness.specification import normalize_problem_spec
+
+            try:
+                problem_spec = normalize_problem_spec(problem_spec)
+            except (TypeError, ValueError) as exc:
+                raise WorkspaceError("problem_spec_invalid", status=400) from exc
+            if problem_spec["original_problem"] != problem:
+                raise WorkspaceError("problem_spec_original_problem_mismatch", status=400)
+        elif (solver_mode in STAR_MODES
+              and selected.preset_config(solver_mode).get("features", {}).get("problem_spec") is True):
+            raise WorkspaceError("problem_spec_required", status=400)
         if web_search_enabled:
             raise WorkspaceError("capability_unavailable", status=503)
         if input_user_file_id is not None and (not isinstance(input_user_file_id, str) or not input_user_file_id):
@@ -913,6 +943,7 @@ class WorkspaceService:
             budget_limits=budget_limits,
             deadline_at=deadline_at,
             experiment_binding=experiment_binding,
+            problem_spec=problem_spec,
         )
         payload, existing = self.store.create_job(
             user_id=user_id,
@@ -928,6 +959,7 @@ class WorkspaceService:
                    if self.stream_timeout_policy is not None else {}),
             },
             experiment_binding=experiment_binding,
+            problem_spec=problem_spec,
             solver_hint=solver_hint,
             verification_mode=verification_mode,
             input_user_file_id=input_user_file_id,
@@ -1058,7 +1090,9 @@ class WorkspaceService:
                         emit=lambda event: self.store.append_event(job_id, event),
                         **({"solver_hint": self.store.solver_hint(job_id),
                             "retry_call": identity.get("retry_call"),
-                            "solver_mode": identity.get("solver_mode")} if execution_mode in STAR_MODES else {}),
+                            "solver_mode": identity.get("solver_mode"),
+                            "problem_spec": self.store.problem_spec(job_id)}
+                           if execution_mode in STAR_MODES else {}),
                         **({"component_features": component_features,
                             "on_component_config_applied": lambda config: self.store.record_pair_applied_config(
                                 job_id, pair_binding, config
@@ -1210,6 +1244,7 @@ def workspace_job_request_digest(
     budget_limits: RunBudgetLimits | None = None,
     deadline_at: float | None = None,
     experiment_binding: Mapping[str, Any] | None = None,
+    problem_spec: Mapping[str, Any] | None = None,
 ) -> str:
     """Fingerprint the exact public Job request, including any frozen budget."""
     request_parts = (session_id, message, web_search_enabled, input_user_file_id, verification_mode)
@@ -1236,6 +1271,8 @@ def workspace_job_request_digest(
         )
     if experiment_binding is not None:
         digest = _request_digest(digest, {"experiment_pair": dict(experiment_binding)})
+    if problem_spec is not None:
+        digest = _request_digest(digest, {"problem_spec": dict(problem_spec)})
     return digest
 
 

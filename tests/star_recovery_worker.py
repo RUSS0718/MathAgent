@@ -24,6 +24,21 @@ PLAN = {"version": 1, "steps": [
 
 TRACE_WINDOWS = {"trace_before", "trace_after"}
 STREAM_WINDOWS = {"stream_exit"}
+S03_RECOVERY_WINDOWS = {"spec_unknown", "spec_resume"}
+S03_PROBLEM = "1+1"
+S03_SPEC = {
+    "specification_version": 1,
+    "original_problem": S03_PROBLEM,
+    "domain": "integers",
+    "quantifiers": ["the equality holds"],
+    "assumptions": ["integer arithmetic"],
+    "directions": ["prove the statement"],
+    "output_requirements": ["give the exact value"],
+    "root_obligations": [{"obligation_id": "root:value",
+                          "obligation_type": "universal",
+                          "statement": "1+1 equals 2."}],
+    "auxiliary_goals": [],
+}
 META_CONTINUE_DECISION = {"decision": "CONTINUE",
                           "reason_summary": "Re-solve the same step against the objection.",
                           "plan_summary": "", "forbidden_directions": [],
@@ -232,6 +247,8 @@ def config(folder, *, crash_tools=False):
             "SHOWCASE_STAR_BUDGET": RunBudgetLimits(max_model_calls=calls, max_http_attempts=calls),
             "SHOWCASE_STAR_REGISTRY": registry,
             "SHOWCASE_STAR_FEATURES": {"final_generation": True, "final_solution_review": True,
+                                        **({"problem_spec": True}
+                                           if window in S03_RECOVERY_WINDOWS else {}),
                                         "stream_activity": window in STREAM_WINDOWS,
                                        **({"planner_checkpoints": True}
                                           if window == "planner_checkpoint_yield" else {}),
@@ -252,6 +269,26 @@ def config(folder, *, crash_tools=False):
 
 def reply_value(window, context, folder):
     role = context["role"]
+    if window in S03_RECOVERY_WINDOWS:
+        if role == "explore":
+            return {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
+        if role == "planner":
+            return {"version": 1, "steps": [{
+                "step_id": "prove-value", "title": "prove", "objective": "prove the value",
+                "obligation_ids": ["root:value"], "auxiliary_goal_ids": [],
+            }]}
+        if role == "reasoner":
+            return {"argument": "1+1=2 by integer addition.", "claims": [
+                {"statement": "1+1 equals 2 by the definition of addition.",
+                 "label": "hard-verify"}], "blocked": False}
+        if role == "step_verifier":
+            return {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
+                    "objection": "", "obligation_evidence": [{
+                        "obligation_id": "root:value", "evidence_category": "universal_proof",
+                        "claim_indexes": [0]}]}
+        if role == "final_generator":
+            return {"final_response": "2"}
+        return {"verdict": "ACCEPT", "reason": "The identity follows from integer addition."}
     if window in CHAIN_WINDOWS:
         return chain_reply(role, context, folder)
     if window in GUIDANCE_WINDOWS or window == REPLAN_GUIDANCE_WINDOW:
@@ -412,6 +449,13 @@ def main():
         original(store, job_id, event)
         log = folder / "requests.jsonl"
         last = json.loads(log.read_text(encoding="utf-8").splitlines()[-1]) if log.exists() else {}
+        if window in S03_RECOVERY_WINDOWS:
+            if (window == "spec_unknown" and event.get("solver_event_type") == "call_audit"
+                    and last.get("role") == "reasoner"):
+                while not (folder / "job_id").exists():
+                    time.sleep(.01)
+                os._exit(71)
+            return
         if window == "repair_response":
             if (event.get("solver_event_type") == "session_recorded"
                     and last.get("role") == "step_verifier"
@@ -507,6 +551,10 @@ def main():
     def transport(*args, **kwargs):
         response = provider(folder, kwargs)
         context = json.loads((folder / "requests.jsonl").read_text().splitlines()[-1])
+        if window == "spec_unknown" and context.get("role") == "reasoner":
+            while not (folder / "job_id").exists():
+                time.sleep(.01)
+            os._exit(71)
         if (window == "unknown" and context.get("role") == "step_verifier"
                 and context.get("step", {}).get("step_id") == "s2"):
             os._exit(71)
@@ -527,6 +575,33 @@ def main():
         client = app.test_client()
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
         headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
+        if window == "spec_resume":
+            job_id = (folder / "job_id").read_text()
+            interrupted = client.get(f"/api/agent/jobs/{job_id}").get_json()
+            (folder / "interrupted_deadline.txt").write_text(
+                str(interrupted["result"]["budget"]["deadline_at"])
+            )
+            (folder / "problem_spec.json").write_text(json.dumps(
+                app.extensions["showcase_workspace_service"].store.problem_spec(job_id)
+            ))
+            recovery = interrupted["result"]["solver"]["recovery"]
+            old_call_id = recovery["unknown_calls"][0]["call_id"]
+            response = client.post(
+                f"/api/agent/jobs/{job_id}/resume",
+                json={"retry_call": {"call_id": old_call_id, "new_call_id": str(uuid.uuid4())}},
+                headers=headers,
+            )
+            (folder / "resume_status").write_text(str(response.status_code))
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                current = client.get(f"/api/agent/jobs/{job_id}").get_json()
+                if current["status"] in {"succeeded", "failed", "canceled"}:
+                    (folder / "final_job.json").write_text(json.dumps(current))
+                    break
+                time.sleep(.01)
+            for name in ("showcase_workspace_service", "showcase_run_service", "loopback_store"):
+                app.extensions[name].close()
+            return
         if window in CHAIN_RESUME_WINDOWS:
             # Resume the Job crashed by the previous chain window and die at the
             # next persistent boundary of the same public Run.
@@ -538,8 +613,11 @@ def main():
             raise RuntimeError("chain resume window was not reached")
         session = client.post("/api/new_chat", headers=headers).get_json()["new_session_id"]
         headers["Idempotency-Key"] = str(uuid.uuid4())
-        response = client.post("/api/agent/jobs", json={"message": "1+1", "session_id": session,
-                               "solver_mode": "star_limited"}, headers=headers)
+        job_request = {"message": S03_PROBLEM if window == "spec_unknown" else "1+1",
+                       "session_id": session, "solver_mode": "star_limited"}
+        if window == "spec_unknown":
+            job_request["problem_spec"] = S03_SPEC
+        response = client.post("/api/agent/jobs", json=job_request, headers=headers)
         (folder / "job_id").write_text(response.get_json()["job_id"])
         time.sleep(20)
     raise RuntimeError("crash window was not reached")

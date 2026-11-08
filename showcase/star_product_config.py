@@ -7,11 +7,12 @@ from .tools import ToolRegistry
 OPTIONAL_FEATURES = frozenset({
     "final_generation", "final_solution_review", "local_code_tool", "meta_guidance",
     "reexplore_after_replan", "skills", "stream_activity", "context_pack",
+    "problem_spec",
 })
 EXPERIMENTAL_FEATURES = frozenset({"planner_checkpoints", "reasoner_checkpoints"})
 CORE_FEATURES = frozenset({
     "star_routing", "persistent_sessions", "stream_recovery",
-    *(OPTIONAL_FEATURES - {"stream_activity", "context_pack"}),
+    *(OPTIONAL_FEATURES - {"stream_activity", "context_pack", "problem_spec"}),
 })
 SUPPORTED_FEATURES = CORE_FEATURES | OPTIONAL_FEATURES | EXPERIMENTAL_FEATURES
 
@@ -53,6 +54,11 @@ def limited_config(budget, features=None, registry=None, context_capacity=None):
         raise ValueError("star_registry_invalid")
     enabled = {"star_routing": True, "persistent_sessions": True, "stream_recovery": True,
                **(features or {})}
+    if enabled.get("problem_spec") is True and (
+        enabled.get("final_generation") is not True
+        or enabled.get("final_solution_review") is not True
+    ):
+        raise ValueError("problem_spec_requires_final_generation_and_review")
     if enabled.get("local_code_tool") and registry is None:
         raise ValueError("star_registry_required")
     tools = ["polynomial_check"] if registry else []

@@ -52,6 +52,8 @@ class StarProductPipeline:
         self.budget = budget or RunBudgetLimits(max_model_calls=3, max_http_attempts=3, max_tool_calls=0)
         self.config = limited_config(self.budget, features, registry,
                                      context_capacity=context_capacity)
+        if acceptance_mode == "handoff" and self.config["features"].get("problem_spec") is True:
+            raise ValueError("problem_spec_requires_strict_acceptance")
         if hint_mode not in {"none", "meta_auto"}:
             raise ValueError("star_hint_mode_invalid")
         self.config["hint_mode"] = hint_mode
@@ -64,6 +66,8 @@ class StarProductPipeline:
             raise ValueError("star_budget_invalid")
         self.full_config = full_config(self.full_budget, full_features,
                                        context_capacity=context_capacity)
+        if acceptance_mode == "handoff" and self.full_config["features"].get("problem_spec") is True:
+            raise ValueError("problem_spec_requires_strict_acceptance")
         if acceptance_mode == "handoff":
             self.config["acceptance_mode"] = self.full_config["acceptance_mode"] = acceptance_mode
         self.full_config["hint_mode"] = hint_mode
@@ -124,7 +128,7 @@ class StarProductPipeline:
 
     def run(self, run_id, problem, *, verification_mode="auto", emit=None, solver_hint=None,
             retry_call=None, solver_mode="star_limited", component_features=None,
-            on_component_config_applied=None):
+            on_component_config_applied=None, problem_spec=None):
         """Execute STAR, applying and recording pair-only feature overrides when present."""
         if solver_mode not in STAR_MODES:
             raise ValueError("star_mode_invalid")
@@ -139,6 +143,11 @@ class StarProductPipeline:
                      if self.experiment_policy is not None else None)
         base = self.full_config if solver_mode in FULL_MODES else self.config
         features = dict(base["features"])
+        if features.get("problem_spec") is True:
+            if problem_spec is None:
+                raise ValueError("problem_spec_required")
+        elif problem_spec is not None:
+            raise ValueError("problem_spec_feature_disabled")
         # SP-13 合同：reference 核心恰为 9 项；candidate_registry/best_effort 仅由
         # Best-Effort 附加；受限模式保留 SP-11 已验收的候选历史行为。
         if solver_mode != "star_reference":
@@ -213,8 +222,13 @@ class StarProductPipeline:
                 from .solver_harness.calls import CallInterrupted
 
                 try:
-                    run = (resume_solver(harness, problem, run_id, retry_call) if existing else
-                           harness.solve(problem, {"run_id": run_id, "user_hint": solver_hint}))
+                    if existing:
+                        run = resume_solver(harness, problem, run_id, retry_call)
+                    else:
+                        metadata = {"run_id": run_id, "user_hint": solver_hint}
+                        if problem_spec is not None:
+                            metadata["problem_spec"] = problem_spec
+                        run = harness.solve(problem, metadata)
                 except (CallInterrupted, HardBudgetStop) as exc:
                     run = harness.get_run(run_id)
                     from .solver_harness.controller import protocol_failure_exit

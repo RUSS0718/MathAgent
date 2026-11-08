@@ -1,5 +1,7 @@
 """Strict structured replies for the explicit Intern Solver ports."""
 
+from copy import deepcopy
+
 
 def obj(properties, required=None, *, additional_properties=False):
     return {
@@ -252,4 +254,30 @@ def response_schema(request):
         return SCHEMAS["meta_guidance" if request.get("guidance_request") else "meta"]
     if role not in SCHEMAS:
         raise ValueError("unsupported_intern_role")
-    return SCHEMAS[role]
+    schema = SCHEMAS[role]
+    if not isinstance(request.get("problem_spec"), dict):
+        return schema
+    schema = deepcopy(schema)
+    if role == "step_verifier":
+        schema["properties"]["obligation_evidence"] = {
+            "type": "array",
+            "items": obj({
+                "obligation_id": TEXT,
+                "evidence_category": TEXT,
+                "claim_indexes": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+            }),
+        }
+    if role in {"planner", "planner_checkpoint"}:
+        planner = deepcopy(SCHEMAS["planner"])
+        step = planner["properties"]["steps"]["items"]
+        step["properties"].update({"obligation_ids": TEXTS, "auxiliary_goal_ids": TEXTS})
+        step["required"].extend(["obligation_ids", "auxiliary_goal_ids"])
+        if role == "planner":
+            schema = planner
+        else:
+            schema["properties"]["plan"]["oneOf"][0] = planner
+            for branch in schema["properties"]["checkpoint"]["oneOf"]:
+                nested_plan = branch["properties"].get("plan")
+                if nested_plan:
+                    nested_plan["oneOf"][0] = planner
+    return schema

@@ -23,6 +23,7 @@ from tests.test_star_product_traceback import PLAN, PROPOSE, TRACE, report
 
 counts = defaultdict(int)
 lock = threading.Lock()
+S03_PROBLEM = 'S03 browser root obligations'
 trace_replies = [
     NEED_PLAN, PLAN, report("safe reviewed fact"), VERDICT,
     report("old wrong fact"), VERDICT, report("old dependent fact"), VERDICT,
@@ -61,13 +62,27 @@ class Provider(BaseHTTPRequestHandler):
             time.sleep(2)
         role = context['role']
         if role == 'explore':
-            reply = {'assessment': 'NEED_PLAN', 'worked': [], 'failed': [], 'candidates': []} if problem in {'plan', 'tool'} else {'assessment': 'SOLVED', 'worked': [], 'failed': [], 'candidates': [], 'solution_candidate': '2'}
+            reply = {'assessment': 'NEED_PLAN', 'worked': [], 'failed': [], 'candidates': []} if problem in {'plan', 'tool', S03_PROBLEM} else {'assessment': 'SOLVED', 'worked': [], 'failed': [], 'candidates': [], 'solution_candidate': '2'}
         elif role == 'planner':
-            reply = {'version': 1, 'steps': [{'step_id': 'PRIVATE HINT TEXT', 'title': 'Add', 'objective': 'Add'}]}
+            reply = ({'version': 1, 'steps': [{
+                'step_id': 's03-work', 'title': 'Prove the value', 'objective': 'Prove the statement',
+                'obligation_ids': ['root:s03'],
+                'auxiliary_goal_ids': [],
+            }]} if problem == S03_PROBLEM else
+                {'version': 1, 'steps': [{'step_id': 'PRIVATE HINT TEXT', 'title': 'Add', 'objective': 'Add'}]})
         elif role == 'reasoner':
-            reply = {'argument': 'PRIVATE PROOF TEXT', 'claims': [], 'blocked': False}
+            reply = ({'argument': 'The identity follows by integer addition.',
+                      'claims': [{'statement': '1+1 equals 2 by the definition of addition.',
+                                  'label': 'hard-verify'}],
+                      'blocked': False} if problem == S03_PROBLEM else
+                {'argument': 'PRIVATE PROOF TEXT', 'claims': [], 'blocked': False})
         elif role == 'step_verifier':
-            reply = {'goal_gate': 'YES', 'logic_gate': 'PASS', 'verdict': 'ACCEPT', 'objection': ''}
+            reply = ({'goal_gate': 'YES', 'logic_gate': 'PASS', 'verdict': 'ACCEPT', 'objection': '',
+                      'obligation_evidence': [{'obligation_id': 'root:s03',
+                                               'evidence_category': 'universal_proof',
+                                               'claim_indexes': [0]}]}
+                     if problem == S03_PROBLEM else
+                     {'goal_gate': 'YES', 'logic_gate': 'PASS', 'verdict': 'ACCEPT', 'objection': ''})
         elif role == 'final_generator':
             reply = {'final_response': '2'}
         elif role == 'explore_polish':
@@ -120,4 +135,19 @@ if __name__ == '__main__':
                 'SHOWCASE_STAR_ADAPTER': InternModelAdapter(InternChatClient(retry=1), max_tokens=256)})
             threading.Thread(target=other.run, kwargs={'host': '127.0.0.1', 'port': port,
                 'threaded': True, 'use_reloader': False}, daemon=True).start()
+        spec_app = create_app({'TESTING': True,
+            'SHOWCASE_DATA_DIR': str(Path(directory) / '8095'),
+            'SHOWCASE_JOB_DELAY_SECONDS': 0, 'SHOWCASE_STAR_ENABLED': True,
+            'SHOWCASE_STAR_EVIDENCE_KIND': 'fault_injection',
+            'SHOWCASE_STAR_FEATURES': {
+                'problem_spec': True, 'final_generation': True, 'final_solution_review': True,
+            },
+            'SHOWCASE_STAR_BUDGET': RunBudgetLimits(
+                max_model_calls=8, max_http_attempts=8, max_tool_calls=0,
+            ),
+            'SHOWCASE_STAR_ADAPTER': InternModelAdapter(
+                InternChatClient(retry=1), max_tokens=256,
+            )})
+        threading.Thread(target=spec_app.run, kwargs={'host': '127.0.0.1', 'port': 8095,
+            'threaded': True, 'use_reloader': False}, daemon=True).start()
         app.run(host='127.0.0.1', port=8091, threaded=True, use_reloader=False)

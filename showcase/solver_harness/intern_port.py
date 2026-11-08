@@ -405,7 +405,13 @@ class InternModelPort:
         original = _actual_problem(request, self.original_problem)
         if not isinstance(original, str) or not original.strip():
             raise InternPortError("missing_original_problem")
-        if self.original_problem is not None and original != self.original_problem:
+        specification = request.get("problem_spec")
+        revised_original = (
+            isinstance(specification, Mapping)
+            and specification.get("original_problem") == original
+            and request.get("problem_spec_version") == specification.get("specification_version")
+        )
+        if self.original_problem is not None and original != self.original_problem and not revised_original:
             raise InternPortError("problem_identity_mismatch")
         role = request["role"]
         layers = request.get("prompt_layers", [])
@@ -429,6 +435,14 @@ class InternModelPort:
             "polynomial_check accepts only numeric rational strings in coefficients and candidates, never symbolic parameters; use python_math for a permitted symbolic computation or review the symbolic argument without a tool. "
             "A reviewer may propose at most one tool_request per reply while its verdict is still pending; judge only from recorded receipts, never from assumed outputs."
         )
+        if role == "step_verifier" and isinstance(specification, Mapping):
+            instructions += (
+                " For ProblemSpec obligation_evidence, declare only root obligations mapped to this current WorkUnit. "
+                "The evidence_category is a category label, not proof. The cited claim itself must contain reasoning "
+                "that establishes the declared obligation; a candidate list or finite examples cannot establish "
+                "completeness_proof or a universal claim. Review enumeration, completeness, filtering, and format "
+                "as separate obligations, and leave any unsupported obligation open."
+            )
         if request.get("checkpoint_protocol"):
             role_label = role.replace("_", " ").title()
             instructions += (
@@ -454,6 +468,34 @@ class InternModelPort:
             name: value for name, value in tools.items() if name in request.get("allowed_tools", [])
         }
         return system + [{"role": "user", "content": json.dumps(context, ensure_ascii=False)}]
+
+    def serialized_payload_size(self, request):
+        """Estimate the exact non-stream provider body without dispatching it."""
+        if self.adapter is None:
+            raise InternPortError("finalization_payload_estimate_unavailable", no_dispatch=True)
+        from ..adapters import _normalize_message
+
+        schema = response_schema(request)
+        messages = [_normalize_message(item) for item in self._messages(request, schema)]
+        client = self.adapter._get_client()
+        payload = {
+            "model": getattr(client, "model", None) or self.adapter.model_id,
+            "messages": messages,
+            "temperature": self.adapter.temperature,
+            "max_tokens": self.adapter.max_tokens,
+        }
+        tools = request.get("provider_tools", request.get("tools", ()))
+        if tools and hasattr(client, "chat"):
+            import inspect
+
+            if "tools" in inspect.signature(client.chat).parameters:
+                payload["tools"] = [dict(tool) for tool in tools]
+        mode = self.adapter.thinking_mode
+        if mode is None and hasattr(client, "_resolve_reasoning_mode"):
+            mode = client._resolve_reasoning_mode("inherit")
+        if mode is not None:
+            payload["thinking_mode"] = mode
+        return len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
 
     def _authorize_transport(self, request, decision, fingerprints):
         """Persist and freeze this Run's transport choice before any HTTP call."""

@@ -401,6 +401,7 @@ def create_app(
                 solver_mode=payload.get("solver_mode", "legacy"),
                 solver_options=payload.get("solver_options"),
                 solver_hint=payload.get("solver_hint"),
+                problem_spec=payload.get("problem_spec"),
             )
         except WorkspaceError as exc:
             return _workspace_error(exc)

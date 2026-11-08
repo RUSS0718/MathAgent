@@ -140,9 +140,87 @@ test('real registry receipt remains finite scope and non-resolvable refs are hon
   await page.goto(`/dashboard-assets/run/${id}`)
   await expect(page.getByText('无可解析的内容寻址产物；普通引用不代表已保存执行内容。')).toBeVisible()
   const report = await (await page.request.get(`/api/agent/jobs/${id}/report`)).json()
-  expect(report.report.tool_summaries[0].receipt.executed).toBe(true)
-  expect(report.report.tool_summaries[0].receipt.source).toBe('local_precheck')
+  expect(report.report.tool_summaries[0].receipt.receipt_executed).toBe(true)
+  expect(report.report.tool_summaries[0].receipt.receipt_status).toBe('success')
+  expect(report.report.tool_summaries[0].receipt).not.toHaveProperty('source')
   expect(report.report.checks.status).toBe('unknown')
   expect(report.report.budget.tool_calls).toBe(1)
   expect(await page.locator('body').innerText()).not.toContain('PRIVATE HINT TEXT')
+})
+
+test('ProblemSpec progress survives browser refresh and SSE reconnect without new calls', async ({ page }) => {
+  const origin = 'http://127.0.0.1:8095'
+  const eventRequests: { url: string; lastEventId: string | undefined }[] = []
+  page.on('request', request => {
+    if (new URL(request.url()).pathname.endsWith('/events')) {
+      eventRequests.push({ url: request.url(), lastEventId: request.headers()['last-event-id'] })
+    }
+  })
+  const problem = 'S03 browser root obligations'
+  const privateStatement = 'PRIVATE_S03_ROOT_STATEMENT_8a1f'
+  const spec = {
+    specification_version: 1,
+    original_problem: problem,
+    domain: 'integers',
+    quantifiers: ['the equality holds'],
+    assumptions: ['integer arithmetic'],
+    directions: ['prove the statement'],
+    output_requirements: ['give the exact value'],
+    root_obligations: [{
+      obligation_id: 'root:s03',
+      obligation_type: 'universal',
+      statement: privateStatement,
+    }],
+    auxiliary_goals: [],
+  }
+  await expect.poll(async () => {
+    try { return (await page.request.get(`${origin}/health`)).status() } catch { return 0 }
+  }, { timeout: 10000 }).toBe(200)
+  const auth = await (await page.request.get(`${origin}/api/check_auth`)).json()
+  const headers = { 'X-CSRF-Token': auth.csrf_token, 'Idempotency-Key': crypto.randomUUID() }
+  const session = await (await page.request.post(`${origin}/api/new_chat`, { headers })).json()
+  const created = await page.request.post(`${origin}/api/agent/jobs`, {
+    headers,
+    data: { message: problem, session_id: session.new_session_id,
+      solver_mode: 'star_limited', problem_spec: spec },
+  })
+  expect(created.status()).toBe(202)
+  const id = (await created.json()).job_id as string
+  await terminal(page, id, origin)
+  const job = await (await page.request.get(`${origin}/api/agent/jobs/${id}`)).json()
+  expect(job.status, JSON.stringify(job)).toBe('succeeded')
+
+  const before = await count(page, id)
+  expect(before).toBe(6)
+  const expectedProgress = {
+    covered: 1,
+    total: 1,
+    items: [{ ordinal: 1, type: 'universal', status: 'satisfied' }],
+  }
+  const report = await (await page.request.get(`${origin}/api/agent/jobs/${id}/report`)).json()
+  expect(report.solver.solver.progress.root_obligations).toEqual(expectedProgress)
+  expect(JSON.stringify(report)).not.toContain(privateStatement)
+
+  await page.goto(`${origin}/dashboard/run/${id}`)
+  await expect(page.getByRole('heading', { name: 'STAR 持久进展' })).toBeVisible()
+  await expect(page.getByLabel('结果语义').first()).toContainText('LLM 整题审查通过')
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'STAR 持久进展' })).toBeVisible()
+  const requestCountBeforeReconnect = eventRequests.length
+  const persistedCursor = (await (await page.request.get(`${origin}/api/agent/jobs/${id}`)).json()).last_event_id
+  expect(persistedCursor).toBeGreaterThan(0)
+  await page.getByRole('button', { name: '重连事件（沿用游标）' }).click()
+  await expect(page.getByLabel('结果语义').first()).toContainText('绑定一致')
+  await expect.poll(() => eventRequests.length).toBeGreaterThan(requestCountBeforeReconnect)
+  const reconnectReads = eventRequests.slice(requestCountBeforeReconnect)
+  const cursors = reconnectReads.map(item => {
+    const queryCursor = new URL(item.url).searchParams.get('last_event_id')
+    return queryCursor === null ? item.lastEventId : queryCursor
+  })
+  expect(cursors).toContain(String(persistedCursor))
+  const reloadedReport = await (await page.request.get(`${origin}/api/agent/jobs/${id}/report`)).json()
+  expect(reloadedReport.solver.solver.progress.root_obligations).toEqual(expectedProgress)
+  expect(JSON.stringify(reloadedReport)).not.toContain(privateStatement)
+  expect(await count(page, id)).toBe(before)
+  expect(await page.locator('body').innerText()).not.toContain(privateStatement)
 })

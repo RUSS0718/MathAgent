@@ -77,6 +77,13 @@ class SolverHarness:
         self._product_recovery = False
         self._event_observer = event_observer
         self._config = _normalize_config(config)
+        if self._config.get("features", {}).get("problem_spec") is True:
+            if (self._config.get("acceptance_mode", "strict") != "strict"
+                    or self._config.get("features", {}).get("final_generation") is not True
+                    or self._config.get("features", {}).get("final_solution_review") is not True):
+                raise SolverValidationError(
+                    "problem_spec_requires_strict_final_generation_and_review"
+                )
         self._context_policy = frozen_policy(self._config)
         identity_config = deepcopy(self._config)
         if "context_capacity" in identity_config or "context_pack" in identity_config.get("features", {}):
@@ -137,11 +144,45 @@ class SolverHarness:
                 _normalize_json_mapping(metadata["plan"], "plan")
             except ValueError as exc:
                 raise SolverValidationError(str(exc)) from exc
-        run_id = _run_id(metadata)
+        spec_enabled = self._config.get("features", {}).get("problem_spec") is True
+        supplied_spec = None if metadata is None else metadata.get("problem_spec")
+        if supplied_spec is not None and not spec_enabled:
+            raise SolverValidationError("problem_spec_feature_disabled")
+        if spec_enabled and supplied_spec is None:
+            if self._state_store.get_run(_run_id(metadata)) is None:
+                raise SolverValidationError("problem_spec_required")
+        if supplied_spec is not None:
+            from .specification import normalize_problem_spec
+
+            try:
+                supplied_spec = normalize_problem_spec(supplied_spec)
+            except (TypeError, ValueError) as exc:
+                raise SolverValidationError(str(exc)) from exc
+            if supplied_spec["original_problem"] != problem:
+                raise SolverValidationError("problem_spec_original_problem_mismatch")
+        effective_metadata = None if metadata is None else dict(metadata)
+        work_units = []
+        if spec_enabled and supplied_spec is not None and effective_metadata is not None:
+            supplied_plan = effective_metadata.get("plan")
+            if supplied_plan is not None:
+                from .specification import bind_plan_work_units
+
+                try:
+                    normalized_plan, work_units = bind_plan_work_units(
+                        supplied_plan, supplied_spec
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise SolverValidationError(str(exc)) from exc
+                effective_metadata["plan"] = normalized_plan
+        run_id = _run_id(effective_metadata)
         problem_hash = hashlib.sha256(problem.encode("utf-8")).hexdigest()
         existing = self._state_store.get_run(run_id)
         if existing is not None:
             self._validate_identity(existing, run_id, problem_hash)
+            if supplied_spec is not None and supplied_spec != existing["state"].get("problem_spec"):
+                raise SolverIdentityError(
+                    "problem specification is frozen; use update_problem_spec"
+                )
             if (
                 self._config.get("features", {}).get("best_effort") is True
                 and existing["state"]["status"] == "partial_budget_exhausted"
@@ -153,8 +194,8 @@ class SolverHarness:
                 existing = recover_inflight(self, existing)
                 if existing["state"]["phase"] == "TERMINAL":
                     return existing
-                if metadata is not None and "retry_call" in metadata:
-                    return retry_call(self, existing, problem, metadata["retry_call"])
+                if effective_metadata is not None and "retry_call" in effective_metadata:
+                    return retry_call(self, existing, problem, effective_metadata["retry_call"])
                 if existing["state"].get("status") in {
                     "interrupted",
                     "recovered_pending_validation",
@@ -163,20 +204,22 @@ class SolverHarness:
             resumable = existing["state"].get("phase") == "SETUP" or (
                 self._config.get("features", {}).get("persistent_sessions") is True
                 and existing["state"].get("phase") == "PLAN"
-                and metadata is not None
-                and "plan" in metadata
+                and effective_metadata is not None
+                and "plan" in effective_metadata
             )
             if self._model_port is None or not resumable:
-                return advance(self, existing, metadata, problem)
+                return advance(self, existing, effective_metadata, problem)
             return advance(
                 self,
-                run_supplied_plan_or_explore(self, existing, problem, metadata),
-                metadata,
+                run_supplied_plan_or_explore(self, existing, problem, effective_metadata),
+                effective_metadata,
                 problem,
             )
 
         state = initial_state(run_id, problem_hash, self._config_hash,
-                              context_policy=self._context_policy)
+                              context_policy=self._context_policy,
+                              problem_spec=supplied_spec,
+                              work_units=work_units)
         event = {
             "event_id": "initialized",
             "run_id": run_id,
@@ -197,9 +240,12 @@ class SolverHarness:
         if self._event_observer is not None:
             self._event_observer(created, event)
         if self._model_port is None:
-            return advance(self, created, metadata, problem)
+            return advance(self, created, effective_metadata, problem)
         return advance(
-            self, run_supplied_plan_or_explore(self, created, problem, metadata), metadata, problem
+            self,
+            run_supplied_plan_or_explore(self, created, problem, effective_metadata),
+            effective_metadata,
+            problem,
         )
 
     def get_run(self, run_id: str, *, problem: str | None = None) -> dict[str, Any]:
@@ -224,6 +270,42 @@ class SolverHarness:
         from .best_effort import run_best_effort
 
         return run_best_effort(self, result, require_termination=True)
+
+    def update_problem_spec(
+        self,
+        run_id: str,
+        *,
+        expected_revision: int,
+        problem_spec: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Create a new frozen specification version and invalidate its affected branch."""
+        if self._config.get("features", {}).get("problem_spec") is not True:
+            raise SolverValidationError("problem_spec_feature_disabled")
+        current = self._state_store.get_run(run_id)
+        if current is None:
+            raise SolverRunNotFoundError(run_id)
+        self._validate_identity(current, run_id, None)
+        from .specification import normalize_problem_spec
+
+        try:
+            revised = normalize_problem_spec(problem_spec)
+        except (TypeError, ValueError) as exc:
+            raise SolverValidationError(str(exc)) from exc
+        old = current["state"].get("problem_spec")
+        if not isinstance(old, Mapping):
+            raise SolverValidationError("problem_spec_missing_from_run")
+        if revised["specification_version"] != old["specification_version"] + 1:
+            raise SolverValidationError("specification_version_must_increment_by_one")
+        from .specification_change import build_specification_change
+
+        change = build_specification_change(current["state"], revised)
+        return self._commit_event(
+            run_id,
+            expected_revision=expected_revision,
+            event=change["event"],
+            state_updates=change["updates"],
+            current=current,
+        )
 
     def commit_event(
         self,
@@ -356,6 +438,14 @@ class SolverHarness:
 
         if handoff.enabled(self._config):
             request = handoff.prepare_request(latest, request)
+        specification = latest["state"].get("problem_spec")
+        if isinstance(specification, Mapping):
+            request = {
+                **request,
+                "problem": deepcopy(specification["original_problem"]),
+                "problem_spec": deepcopy(specification),
+                "problem_spec_version": specification["specification_version"],
+            }
         prepared = (
             compose_request(latest, request)
             if self._config.get("features", {}).get("skills") is True

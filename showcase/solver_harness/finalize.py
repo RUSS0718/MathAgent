@@ -1,5 +1,6 @@
 """Opt-in final synthesis and bounded independent whole-solution review."""
 
+import json
 from collections.abc import Mapping
 from copy import deepcopy
 
@@ -9,6 +10,85 @@ from .budget import budget_reason
 from .calls import CallInterrupted
 from .final_binding import review_record
 from .results import stable_unique_results
+
+
+def _serialized_request_size(harness, model_port, run, request):
+    prepared = harness.prepare_request(run, request)
+    estimator = getattr(model_port, "serialized_payload_size", None)
+    if callable(estimator):
+        return estimator(prepared)
+    return len(json.dumps(prepared, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+
+
+def _reserve_finalization_pair(
+    harness, budget, run, model_port, generator_request, review_request, reservation_id
+):
+    from ..run_budget import BudgetExhausted
+
+    adapter = getattr(model_port, "adapter", None)
+    output_cap = getattr(adapter, "max_tokens", 0)
+    if type(output_cap) is not int or output_cap < 0:
+        output_cap = 0
+    candidate_byte_cap = output_cap * 4 if output_cap else None
+    review_request = {
+        **review_request,
+        "solution_candidate": "x" * candidate_byte_cap if candidate_byte_cap else "",
+    }
+    try:
+        generator_input = _serialized_request_size(harness, model_port, run, generator_request)
+        review_input = _serialized_request_size(harness, model_port, run, review_request)
+        # Dispatch and report commits add small fixed-size identifiers and revisions.
+        generator_input += 1_024
+        review_input += 1_024
+        budget.ledger.reserve_finalization_pair(
+            run["run_id"],
+            reservation_id=reservation_id,
+            final_input_estimate=generator_input,
+            final_output_cap=output_cap,
+            review_input_estimate=review_input,
+            review_output_cap=output_cap,
+        )
+    except BudgetExhausted as exc:
+        return str(exc), candidate_byte_cap
+    except Exception:
+        return "finalization_reservation_estimate_unavailable", candidate_byte_cap
+    return None, candidate_byte_cap
+
+
+def _skip_unneeded_work_units(harness, run):
+    state = run["state"]
+    plan = state.get("plan") or {}
+    steps = deepcopy(state.get("steps", {}))
+    skipped = list(state.get("skipped_work_units", []))
+    added = []
+    for step in plan.get("steps", []):
+        step_id = step["step_id"]
+        verification = steps.get(step_id, {}).get("verification", {})
+        if verification.get("valid") is True and verification.get("verdict") == "ACCEPT":
+            continue
+        if steps.get(step_id, {}).get("status") == "SKIPPED":
+            continue
+        steps[step_id] = {
+            **steps.get(step_id, {}),
+            "status": "SKIPPED",
+            "skip_reason": "root_obligations_satisfied",
+        }
+        skipped.append({
+            "work_unit_id": step_id,
+            "specification_version": state["specification_version"],
+            "reason": "root_obligations_satisfied",
+        })
+        added.append(step_id)
+    if not added:
+        return run
+    return commit(
+        harness,
+        run,
+        "auxiliary_work_skipped",
+        {"steps": steps, "skipped_work_units": skipped},
+        skipped_count=len(added),
+        specification_version=state["specification_version"],
+    )
 
 
 def commit(harness, run, kind, updates, **details):
@@ -220,25 +300,42 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
     from .handoff import enabled, reviewed_drafts
 
     features = config.get("features", {})
-    if not features.get("final_generation") or run["state"]["phase"] != "FINAL_GENERATE":
-        return run
     state = run["state"]
+    spec_enabled = isinstance(state.get("problem_spec"), Mapping)
+    if run["state"]["phase"] != "FINAL_GENERATE":
+        return run
+    if not features.get("final_generation"):
+        return finish(harness, run, "partial_aborted", "final_generation_required") if spec_enabled else run
     plan_steps = state.get("plan", {}).get("steps", [])
     handoff_mode = enabled(config)
-    unfinished = len(reviewed_drafts(state)) != len(plan_steps) if handoff_mode else any(
-        state["steps"].get(step["step_id"], {}).get("verification", {}).get("verdict") != "ACCEPT"
-        or state["steps"].get(step["step_id"], {}).get("verification", {}).get("valid") is not True
-        for step in plan_steps
-    )
+    if spec_enabled:
+        from .obligation_evidence import all_root_obligations_satisfied
+
+        unfinished = not all_root_obligations_satisfied(state.get("obligation_ledger", []))
+    else:
+        unfinished = len(reviewed_drafts(state)) != len(plan_steps) if handoff_mode else any(
+            state["steps"].get(step["step_id"], {}).get("verification", {}).get("verdict") != "ACCEPT"
+            or state["steps"].get(step["step_id"], {}).get("verification", {}).get("valid") is not True
+            for step in plan_steps
+        )
     if not plan_steps or unfinished:
-        return finish(harness, run, "partial_aborted", "unaccepted_plan_steps")
+        return finish(
+            harness, run, "partial_aborted",
+            "root_obligations_incomplete" if spec_enabled else "unaccepted_plan_steps",
+        )
+    if spec_enabled and (not features.get("final_solution_review") or verifier_port is None):
+        return finish(harness, run, "partial_aborted", "independent_final_review_required")
     retries = config.get("max_final_solution_retries", 2)
     if isinstance(retries, bool) or not isinstance(retries, int) or not 0 <= retries <= 20:
         raise ValueError("config.max_final_solution_retries must be 0..20")
     attempts = deepcopy(state.get("final_solution_attempts", []))
     current_attempts = [attempt for attempt in attempts
                         if attempt["plan_version"] == state["plan_version"]
-                        and attempt["attempt_index"] == state["attempt_index"]]
+                        and attempt["attempt_index"] == state["attempt_index"]
+                        and not attempt.get("invalidated")
+                        and not attempt.get("invalidated_by_specification_version")
+                        and (not spec_enabled or attempt.get("specification_version")
+                             == state["specification_version"])]
     previous_review = current_attempts[-1].get("review") if current_attempts else None
     pending_review = (getattr(harness, "_product_recovery", False)
                       and current_attempts and current_attempts[-1].get("review") is None)
@@ -258,37 +355,89 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
             attempt = current_attempts[-1]
             candidate = attempt["candidate"]
             session = attempt["session_key"]
+            reservation_id = attempt.get("reservation_id")
         else:
             session = f"final:{run['run_id']}:plan{state['plan_version']}:attempt{state['attempt_index']}:candidate{len(attempts)}"
+            reservation_id = (
+                f"{run['run_id']}:spec{state.get('specification_version', 'legacy')}:"
+                f"plan{state['plan_version']}:candidate{len(attempts)}"
+            )
+        generator_request = {
+            "role": "final_generator",
+            "call_id": f"final-generator:{session}",
+            "session_key": session,
+            "problem": problem,
+            "accepted_results": facts,
+            "step_proofs": deepcopy(proofs),
+            "previous_review": previous_review,
+            "finalization_scope": True,
+            "instruction": "Synthesize a complete answer to the original problem from "
+            + ("the accepted facts and reviewed_drafts. Drafts are unproven: address their "
+               "recorded objections explicitly; do not describe them as accepted proofs. "
+               if handoff_mode else "only the accepted facts and the delivered step proofs. ")
+            + "Return final_response.",
+        }
+        review_reservation_request = {
+            "role": "whole_solution_verifier",
+            "call_id": f"whole-review:{session}",
+            "session_key": f"whole_verify:{session}",
+            "problem": problem,
+            "solution_candidate": "",
+            "accepted_results": facts,
+            "step_proofs": deepcopy(proofs),
+            "finalization_scope": True,
+            "review_criteria": [
+                "original_problem_consistency",
+                "completeness",
+                "cross_step_logic",
+                "output_format",
+            ],
+        }
+        candidate_byte_cap = None
+        if spec_enabled:
+            from ..run_budget import current_budget
+
+            shared_budget = current_budget()
+            if shared_budget is None:
+                return finish(harness, run, "partial_aborted", "finalization_reservation_unavailable")
+            reservation_error, candidate_byte_cap = _reserve_finalization_pair(
+                harness,
+                shared_budget,
+                run,
+                model_port,
+                generator_request,
+                review_reservation_request,
+                reservation_id,
+            )
+            if reservation_error is not None:
+                return finish(harness, run, "partial_aborted", reservation_error)
+            run = _skip_unneeded_work_units(harness, run)
+        if pending_review:
+            pass
+        else:
             run, reply = dispatch(
                 harness,
                 run,
                 model_port.complete,
-                {
-                    "role": "final_generator",
-                    "session_key": session,
-                    "problem": problem,
-                    "accepted_results": facts,
-                    "step_proofs": deepcopy(proofs),
-                    "previous_review": previous_review,
-                    "instruction": "Synthesize a complete answer to the original problem from "
-                    + ("the accepted facts and reviewed_drafts. Drafts are unproven: address their "
-                       "recorded objections explicitly; do not describe them as accepted proofs. "
-                       if handoff_mode else "only the accepted facts and the delivered step proofs. ")
-                    + "Return final_response.",
-                },
+                generator_request,
             )
             candidate = reply.get("final_response") if isinstance(reply, Mapping) else None
             if not isinstance(candidate, str) or not candidate.strip():
                 return finish(harness, run, "partial_aborted", "invalid_final_candidate")
+            if candidate_byte_cap is not None and len(candidate.encode("utf-8")) > candidate_byte_cap:
+                return finish(harness, run, "partial_aborted", "final_candidate_exceeds_reserved_review_input", candidate)
             attempt = {
                 "attempt": len(attempts),
                 "plan_version": state["plan_version"],
                 "attempt_index": state["attempt_index"],
+                **({"specification_version": state["specification_version"]}
+                   if spec_enabled else {}),
                 "candidate": candidate,
                 "accepted_results": facts,
                 "review": None,
                 "session_key": session,
+                "reservation_id": reservation_id if spec_enabled else None,
+                "candidate_byte_cap": candidate_byte_cap,
             }
             attempts.append(attempt)
             current_attempts.append(attempt)
@@ -304,25 +453,15 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
                 if not features.get("final_solution_review")
                 else "final_verifier_unavailable"
             )
-            return finish(harness, run, "completed_unverified", reason, candidate)
+            return finish(
+                harness, run,
+                "partial_aborted" if spec_enabled else "completed_unverified",
+                reason, candidate,
+            )
         reason = budget_reason(run["state"], config)
         if reason:
             return finish(harness, run, "partial_budget_exhausted", reason, candidate)
-        base_request = {
-            "role": "whole_solution_verifier",
-            "call_id": f"whole-review:{session}",
-            "session_key": f"whole_verify:{session}",
-            "problem": problem,
-            "solution_candidate": candidate,
-            "accepted_results": facts,
-            "step_proofs": deepcopy(proofs),
-            "review_criteria": [
-                "original_problem_consistency",
-                "completeness",
-                "cross_step_logic",
-                "output_format",
-            ],
-        }
+        base_request = {**review_reservation_request, "solution_candidate": candidate}
         run, review = dispatch(harness, run, verifier_port.verify, base_request)
         from .verifier_compute import continue_review, declared_request
 
@@ -370,9 +509,17 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
             review=attempt["review"],
         )
         if not valid:
-            return finish(harness, run, "completed_unverified", "final_verifier_failed", candidate)
+            return finish(
+                harness, run,
+                "partial_aborted" if spec_enabled else "completed_unverified",
+                "final_verifier_failed", candidate,
+            )
         if handoff_mode:
-            return finish(harness, run, "completed_unverified", "handoff_final_reviewed", candidate)
+            return finish(
+                harness, run,
+                "partial_aborted" if spec_enabled else "completed_unverified",
+                "handoff_final_reviewed", candidate,
+            )
         if review["verdict"] == "ACCEPT":
             return finish(
                 harness, run, "completed_llm_reviewed", "final_verifier_accepted", candidate

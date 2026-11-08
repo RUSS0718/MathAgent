@@ -49,6 +49,12 @@ def generate_initial_plan(harness, run, *, problem, model_port, config, metadata
             preplan_hint=state.get("preplan_hint"),
             instruction="Return a Plan with version and 1..20 steps with step_id, title, objective and earlier-step depends_on references.",
         )
+        if isinstance(state.get("problem_spec"), dict):
+            request["instruction"] += (
+                " Map every root obligation to one or more step obligation_ids. Use auxiliary_goal_ids "
+                "only for non-root work. Every root obligation must be mapped; WorkUnit count does not "
+                "change the root-obligation progress denominator."
+            )
     if config.get("features", {}).get("planner_checkpoints") is True:
         from .planner_checkpoint import generate_checkpoint_plan
 
@@ -93,12 +99,22 @@ def generate_initial_plan(harness, run, *, problem, model_port, config, metadata
         from ..redaction import redact
 
         plan = redact(plan)
+    work_units = None
+    if isinstance(state.get("problem_spec"), dict):
+        from .specification import bind_plan_work_units
+
+        try:
+            plan, work_units = bind_plan_work_units(plan, state["problem_spec"])
+        except (TypeError, ValueError):
+            return finish(harness, run, "partial_aborted", "invalid_problem_spec_work_units")
     updates = {
         "phase": "STEP_EXECUTE",
         "plan": plan,
         "plan_version": version,
         "current_step": plan["steps"][0]["step_id"],
     }
+    if work_units is not None:
+        updates["work_units"] = work_units
     if recovering_replan:
         updates["pending_guidance_task"] = None
     decision_revision = decision.get("decided_at_revision") if isinstance(decision, dict) else None
