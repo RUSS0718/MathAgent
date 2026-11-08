@@ -30,3 +30,13 @@ class RouteBudgetTest(unittest.TestCase):
         for _ in range(3):
             state.update(review_progress(state, event, {'obligation_ledger': [{'obligation_id': 'root:a', 'status': 'satisfied'}]}))
         self.assertEqual(3, state['progress']['route_progress']['no_evidence_rounds'])
+
+    def test_alternate_challenge_does_not_inherit_primary_stagnation(self):
+        state = {'progress_policy': {'enabled': True, 'version': 'progress-v1'},
+                 'route_policy': {'enabled': True}, 'active_route_id': 'alternate',
+                 'problem_spec': {}, 'progress': {'no_evidence_rounds': 3, 'trigger': 'stagnation'},
+                 'plan': {'steps': [{'step_id': 's', 'obligation_ids': ['root:a'], 'method_id': 'direct'}]}}
+        patch = review_progress(state, {'type': 'step_reviewed', 'step_id': 's', 'valid': True},
+                                {'phase': 'CHALLENGE'})
+        self.assertIsNone(patch['progress']['trigger'])
+        self.assertNotIn('phase', patch)

@@ -7,6 +7,15 @@ from showcase.solver_harness.progress import guard_action
 
 
 class RouteDispatchGuardTest(unittest.TestCase):
+    def test_alternate_action_cannot_consume_closeout_reserve(self):
+        state = {"phase": "STEP_EXECUTE", "progress_policy": {"enabled": True},
+                 "route_policy": {"enabled": True}, "active_route_id": "r",
+                 "route_registry": [{"route_id": "r", "kind": "alternate", "status": "active"}],
+                 "route_budget": {"route_execution_allowed": False}}
+        with patch('showcase.solver_harness.finalize.finish', return_value='stopped') as finish:
+            self.assertEqual('stopped', guard_action(Mock(), {"state": state}))
+        self.assertEqual('route_closing_reserve_required', finish.call_args.args[-1])
+
     def test_challenge_does_not_dispatch_after_guard_redirects_to_meta(self):
         run = {"state": {"phase": "CHALLENGE", "current_step": "s", "steps": {}}}
         redirected = {"state": {**run["state"], "phase": "META_DECIDE"}}

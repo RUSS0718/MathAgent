@@ -80,6 +80,10 @@ def review_progress(state, event, updates):
             "no_evidence_rounds": 0 if fresh or new_goals else local.get("no_evidence_rounds", 0) + 1,
             "action_failures": failures,
         }
+        local_rounds = progress["route_progress"]["no_evidence_rounds"]
+        local_blocked = any(failures.get(key, 0) >= 2 for key in keys)
+        trigger = "stagnation" if local_rounds >= 3 else "local_action_blocked" if local_blocked else None
+        progress["trigger"] = trigger
     patch = {"progress": progress}
     route_guard_owns_stagnation = (
         state.get("route_policy", {}).get("enabled") is True
@@ -108,6 +112,11 @@ def guard_action(harness, run):
                        if item.get("route_id") == state.get("active_route_id")), None)
         if active is None or active.get("status") != "active":
             return run
+        if (active.get("kind") == "alternate"
+                and state.get("route_budget", {}).get("route_execution_allowed") is not True):
+            from .finalize import finish
+
+            return finish(harness, run, "partial_budget_exhausted", "route_closing_reserve_required")
         if active.get("needs_reevaluation") is True:
             from .finalize import finish
 
