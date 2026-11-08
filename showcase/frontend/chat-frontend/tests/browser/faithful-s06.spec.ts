@@ -9,7 +9,6 @@ const modes = [
 test('S06 parses Composer output commands and restores each independent artifact', async ({ page }) => {
   const submissions: Array<{ body: Record<string, unknown>; key: string; jobId: string }> = []
   let loseFirstTeachReply = true
-  let teachReplyWasLost = false
   await page.route('**/api/agent/jobs', async (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     const body = route.request().postDataJSON() as Record<string, unknown>
@@ -21,7 +20,6 @@ test('S06 parses Composer output commands and restores each independent artifact
     submission.jobId = accepted.job_id ?? ''
     if (body.presentation_mode === 'teach' && loseFirstTeachReply) {
       loseFirstTeachReply = false
-      teachReplyWasLost = true
       await route.abort('failed')
       return
     }
@@ -33,16 +31,25 @@ test('S06 parses Composer output commands and restores each independent artifact
   for (const { command, label } of modes) {
     const problem = `S06 browser ${label}`
     await page.getByLabel('数学问题').fill(`${command} ${problem}`)
+    const firstTeachRequestFailed = command === '/teach'
+      ? page.waitForEvent('requestfailed', (request) => {
+        if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/api/agent/jobs') return false
+        return (request.postDataJSON() as Record<string, unknown>).presentation_mode === 'teach'
+      })
+      : undefined
     await page.getByRole('button', { name: '发送' }).click()
     if (command === '/teach') {
+      const failedRequest = await firstTeachRequestFailed!
+      expect(failedRequest.failure()).not.toBeNull()
+      await expect.poll(() => submissions.filter((item) => item.body.presentation_mode === 'teach' && item.body.message === problem).length).toBe(1)
+      const lostTeachSubmission = submissions.find((item) => item.body.presentation_mode === 'teach' && item.body.message === problem)
+      expect(lostTeachSubmission?.jobId).toMatch(/^run_/)
       await expect(page.locator('.workspace-notice')).toContainText('无法连接服务器')
-      expect(teachReplyWasLost).toBe(true)
       await page.getByRole('button', { name: '发送' }).click()
       await expect.poll(() => submissions.filter((item) => item.body.presentation_mode === 'teach' && item.body.message === problem && item.jobId).length).toBe(2)
       const teachSubmissions = submissions.filter((item) => item.body.presentation_mode === 'teach' && item.body.message === problem)
       expect(teachSubmissions[1]?.key).toBe(teachSubmissions[0]?.key)
       expect(teachSubmissions[1]?.jobId).toBe(teachSubmissions[0]?.jobId)
-      teachReplyWasLost = false
     }
 
     await expect.poll(() => submissions.filter((item) => item.body.presentation_mode === command.slice(1) && item.body.message === problem && item.jobId).length).toBeGreaterThan(0)
