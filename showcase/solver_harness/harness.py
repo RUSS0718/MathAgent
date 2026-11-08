@@ -220,6 +220,10 @@ class SolverHarness:
                               context_policy=self._context_policy,
                               problem_spec=supplied_spec,
                               work_units=work_units)
+        if self._config.get("features", {}).get("progress_scheduling") is True:
+            if supplied_spec is None:
+                raise SolverValidationError("progress_scheduling_requires_problem_spec")
+            state["progress_policy"] = {"enabled": True, "version": "progress-v1"}
         event = {
             "event_id": "initialized",
             "run_id": run_id,
@@ -409,11 +413,19 @@ class SolverHarness:
             candidate_patch, candidate_events = prepare_candidates(
                 current, normalized_event, normalized_updates
             )
+        from .progress import review_progress
+
+        progress_patch = review_progress(current["state"], normalized_event, normalized_updates)
+        if progress_patch:
+            normalized_event["progress"] = {
+                key: progress_patch["progress"][key]
+                for key in ("rounds", "no_evidence_rounds", "trigger")
+            }
         result = self._state_store.commit_event(
             normalized_run_id,
             expected_revision=expected_revision,
             event=normalized_event,
-            state_updates={**normalized_updates, **candidate_patch},
+            state_updates={**normalized_updates, **candidate_patch, **progress_patch},
             request_hash=request_hash,
             validated_run=current,
         )
@@ -438,6 +450,10 @@ class SolverHarness:
 
         if handoff.enabled(self._config):
             request = handoff.prepare_request(latest, request)
+        if latest["state"].get("progress_policy", {}).get("enabled") is True:
+            request = {**request,
+                       "progress_policy": deepcopy(latest["state"]["progress_policy"]),
+                       "progress": deepcopy(latest["state"].get("progress", {}))}
         specification = latest["state"].get("problem_spec")
         if isinstance(specification, Mapping):
             request = {

@@ -21,6 +21,11 @@ def run_step(
     max_runtime_seconds: int,
 ) -> dict[str, Any]:
     """Execute the first supplied step once, leaving the report pending review."""
+    from .progress import guard_action
+
+    run = guard_action(harness, run)
+    if run["state"]["phase"] == "TERMINAL":
+        return run
     state = run["state"]
     step = next(
         (item for item in plan["steps"] if item["step_id"] == state["current_step"]),

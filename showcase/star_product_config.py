@@ -7,12 +7,12 @@ from .tools import ToolRegistry
 OPTIONAL_FEATURES = frozenset({
     "final_generation", "final_solution_review", "local_code_tool", "meta_guidance",
     "reexplore_after_replan", "skills", "stream_activity", "context_pack",
-    "problem_spec",
+    "problem_spec", "progress_scheduling",
 })
 EXPERIMENTAL_FEATURES = frozenset({"planner_checkpoints", "reasoner_checkpoints"})
 CORE_FEATURES = frozenset({
     "star_routing", "persistent_sessions", "stream_recovery",
-    *(OPTIONAL_FEATURES - {"stream_activity", "context_pack", "problem_spec"}),
+    *(OPTIONAL_FEATURES - {"stream_activity", "context_pack", "problem_spec", "progress_scheduling"}),
 })
 SUPPORTED_FEATURES = CORE_FEATURES | OPTIONAL_FEATURES | EXPERIMENTAL_FEATURES
 
@@ -23,6 +23,8 @@ def full_config(budget, features=None, context_capacity=None):
     )):
         raise ValueError("star_full_features_invalid")
     enabled = dict.fromkeys(CORE_FEATURES, True) if features is None else dict(features)
+    if enabled.get("progress_scheduling") is True and enabled.get("problem_spec") is not True:
+        raise ValueError("progress_scheduling_requires_problem_spec")
     config = {
         "features": enabled, "allowed_tools": ["polynomial_check", "python_math"],
         "max_model_calls": budget.max_model_calls, "max_tool_calls": budget.max_tool_calls,
@@ -64,6 +66,8 @@ def limited_config(budget, features=None, registry=None, context_capacity=None):
     tools = ["polynomial_check"] if registry else []
     if registry is not None and hasattr(registry, "container_python_executor"):
         tools.append("python_math")
+    if enabled.get("progress_scheduling") is True and enabled.get("problem_spec") is not True:
+        raise ValueError("progress_scheduling_requires_problem_spec")
     config = {
         "features": enabled, "allowed_tools": tools,
         "max_model_calls": budget.max_model_calls, "max_tool_calls": budget.max_tool_calls,

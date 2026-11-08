@@ -23,6 +23,11 @@ def run_challenges(
     max_runtime_seconds,
 ):
     """Reply and recheck in verify:{run_id}:plan{version}:step{step_id}."""
+    from .progress import guard_action
+
+    run = guard_action(harness, run)
+    if run["state"]["phase"] == "TERMINAL":
+        return run
     initial_state = run["state"]
     step_id = initial_state["current_step"]
     initial_history = initial_state["steps"].get(step_id, {}).get("challenge_history", [])
@@ -39,6 +44,9 @@ def run_challenges(
     for number in range(completed_rounds + 1, max_rounds + 1):
         state = run["state"]
         if state["phase"] != "CHALLENGE":
+            return run
+        run = guard_action(harness, run)
+        if run["state"]["phase"] == "TERMINAL":
             return run
         attempt = state["attempt_index"]
         suffix = f"-attempt-{attempt}" if attempt else ""

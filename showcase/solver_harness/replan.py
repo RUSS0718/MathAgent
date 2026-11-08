@@ -256,6 +256,14 @@ def run_replan(harness, run, *, problem, model_port, config):
                 raise ValueError("wrong_plan_version")
         except ValueError:
             return _stop(harness, run, "invalid_replacement_plan")
+    work_units = None
+    if run["state"].get("progress_policy", {}).get("enabled") is True:
+        from .specification import bind_plan_work_units
+
+        try:
+            plan, work_units = bind_plan_work_units(plan, run["state"]["problem_spec"])
+        except (TypeError, ValueError):
+            return _stop(harness, run, "invalid_replacement_work_units")
     return _commit(
         harness,
         run,
@@ -263,6 +271,7 @@ def run_replan(harness, run, *, problem, model_port, config):
         {
             "phase": "STEP_EXECUTE",
             "plan": redact(plan),
+            **({"work_units": work_units} if work_units is not None else {}),
             "current_step": plan["steps"][0]["step_id"],
             "pending_guidance_task": None,
         },

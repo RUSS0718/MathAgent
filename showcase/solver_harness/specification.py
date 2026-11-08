@@ -293,6 +293,10 @@ def normalize_work_units(
                 "required_obligation_ids": required_obligation_ids,
             }
         )
+        if "method_id" in item:
+            from .progress import normalize_method
+
+            units[-1]["method_id"] = normalize_method(item["method_id"])
         seen.add(unit_id)
         covered.update(obligation_ids)
 
@@ -314,6 +318,7 @@ def normalize_plan_work_units(plan: Mapping[str, Any], specification: Any) -> li
         if not isinstance(step, Mapping):
             raise ValueError("plan step must be a mapping")
         units.append({
+            **({"method_id": step["method_id"]} if "method_id" in step else {}),
             "work_unit_id": step.get("step_id"),
             "obligation_ids": step.get("obligation_ids", []),
             "auxiliary_goal_ids": step.get("auxiliary_goal_ids", []),
@@ -360,6 +365,7 @@ def bind_plan_work_units(
     bound["steps"] = [
         {
             **step,
+            **({"method_id": unit["method_id"]} if "method_id" in unit else {}),
             "obligation_ids": unit["obligation_ids"],
             "auxiliary_goal_ids": unit["auxiliary_goal_ids"],
         }

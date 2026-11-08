@@ -272,6 +272,15 @@ def response_schema(request):
         step = planner["properties"]["steps"]["items"]
         step["properties"].update({"obligation_ids": TEXTS, "auxiliary_goal_ids": TEXTS})
         step["required"].extend(["obligation_ids", "auxiliary_goal_ids"])
+        if request.get("progress_policy", {}).get("enabled") is True:
+            from .progress import METHOD_IDS
+
+            step["properties"]["method_id"] = {
+                "type": "string",
+                "description": "Choose " + ", ".join(sorted(METHOD_IDS))
+                + "; unrecognized names are mapped to unknown by the controller.",
+            }
+            step["required"].append("method_id")
         if role == "planner":
             schema = planner
         else:
