@@ -45,23 +45,9 @@ def progress_summary(state):
         }
         summary["plan_history"] = _plan_history(state)
     if state.get("route_policy", {}).get("enabled") is True:
-        summary["routes"] = {
-            "policy_version": state["route_policy"].get("policy_version"),
-            "active_route_id": state.get("active_route_id"),
-            "items": [
-                {key: item.get(key) for key in (
-                    "route_id", "parent_route_id", "kind", "status", "frontier_digest",
-                    "graph_version", "policy_version", "stop_reason", "elimination_reason",
-                    "needs_reevaluation") if key in item}
-                for item in state.get("route_registry", []) if isinstance(item, dict)
-            ],
-            "decisions": [
-                {key: item.get(key) for key in (
-                    "state_revision", "selected_route_id", "pareto_route_ids", "reason",
-                    "policy_version", "replayable") if key in item}
-                for item in state.get("aprs_decisions", []) if isinstance(item, dict)
-            ],
-        }
+        from .solver_harness.route_projection import route_summary
+
+        summary["routes"] = route_summary(state)
     if "reasoner_checkpoints" in state:
         summary["reasoner_checkpoints"] = [
             {"round": item.get("round"), "status": item.get("status")}
