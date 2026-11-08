@@ -2,6 +2,8 @@
 
 ## Faithful 实施入口（2026-11-08）
 
+当前 S01–S03 已工程退出，下一步优先 S04 进展调度；S05 已满足工程前置，可与 S04 并行。S06 等 S05，F1/S07 等 S04。具体合同与依赖见 [#144 阶段决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)。执行与证据复用遵循根 [AGENTS.md](../AGENTS.md) 和[工程门禁](engineering/development-gates.md)。
+
 - [S02 上下文与容量治理退出合同](engineering/faithful-s02-exit-contract.md)：C01–C12 工程退出通过，状态为 `engineering-preview`；冻结源码 `d19aa56`，真实 provider、容量/SLA 与数学效果未验证。
 - [S02 工程退出验收记录](evals/faithful-s02-exit-20261108.md)：六阶段门禁、聚焦/浏览器回归、跳过项、审查修复及能力边界。S02 退出解除 S03 工程依赖。
 - [S03 规格与工作块交接合同](engineering/faithful-s03-handoff-contract.md)：S03 实现与接口合同；工程退出已通过，状态为 `engineering-preview`。
@@ -223,6 +225,4 @@ v0.2 文档已归档为历史合同；v1.1 规格不覆盖这些 accepted ADR，
 
 最新 [readiness-05 执行观察器异常记录](evals/provider-live-natural-20261105-readiness-05.md) 区分 runner 写状态失败与服务端仍在运行的自然多步 Job；未获得 readiness PASS，#128 两臂仍 NOT_RUN。
 
-当前真实API批次为 [readiness-06](evals/provider-live-natural-20261105-readiness-06.md)，隔离服务与冻结源码已核对；简单题成功，多步运行中，尚未readiness PASS。
-
-readiness-06 已终态FAIL：有界Meta继续处理后仍未完成整题交付，详见 [06最终记录](evals/provider-live-natural-20261105-readiness-06.md)。后续零索引核验与重复历史读取修复不追溯升级旧Run。
+历史批次 [readiness-06](evals/provider-live-natural-20261105-readiness-06.md) 已终态 FAIL：有界 Meta 继续处理后仍未完成整题交付。后续零索引核验与重复历史读取修复不追溯升级旧 Run；当前实验状态见顶部归档入口。
