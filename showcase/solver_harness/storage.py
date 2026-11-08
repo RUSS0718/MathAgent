@@ -89,6 +89,10 @@ class SolverStateStore:
             state = dict(state)
             event = dict(event)
             with _SOLVER_STORAGE_LOCK, self._connection:
+                if state.get("route_policy", {}).get("enabled") is True:
+                    from .route_budget import derive_route_budget
+
+                    state["route_budget"] = derive_route_budget(self._connection, run_id)
                 if state.get("proof_graph_policy", {}).get("enabled") is True:
                     from .proof_graph import evolve_proof_graph
 
@@ -191,6 +195,7 @@ class SolverStateStore:
         event: Mapping[str, Any],
         request_hash: str,
         validated_run: Mapping[str, Any] | None = None,
+        route_authorized: bool = False,
     ) -> dict[str, Any]:
         """Compare-and-swap one event, reusing a matching validated history when supplied."""
 
@@ -238,11 +243,20 @@ class SolverStateStore:
                 if not isinstance(state, dict):
                     raise SolverPersistenceError("commit_event")
                 state_updates = controlled_patch(connection, run_id, event, state_updates)
-                if event.get("type", "").startswith("route_") or event.get("type") == "aprs_decided":
+                if route_authorized or any(
+                    key in state_updates
+                    for key in {
+                        "route_registry", "route_lineage", "route_evaluations",
+                        "aprs_decisions", "route_invalidations", "active_route_id",
+                        "route_budget",
+                    }
+                ):
                     from .routes import validate_route_state_patch
 
                     try:
-                        validate_route_state_patch(state, event, state_updates)
+                        validate_route_state_patch(
+                            state, event, state_updates, authorized=route_authorized
+                        )
                     except ValueError as exc:
                         raise SolverPersistenceError(str(exc)) from exc
                 graph_candidate = dict(state)
@@ -283,6 +297,26 @@ class SolverStateStore:
                     if guarded_updates != state_updates:
                         state_updates = guarded_updates
                         event = {key: value for key, value in event.items() if key != "proof_graph"}
+                if state.get("route_policy", {}).get("enabled") is True:
+                    from .route_budget import derive_route_budget
+                    from .route_commits import rating_patch, rating_required, terminal_route_patch
+
+                    candidate = {**state, **state_updates}
+                    candidate["route_budget"] = derive_route_budget(
+                        connection, run_id, candidate.get("route_budget")
+                    )
+                    if candidate.get("phase") == "TERMINAL":
+                        terminal_patch = terminal_route_patch(run_id, candidate)
+                        candidate.update(terminal_patch)
+                        state_updates = {**state_updates, **terminal_patch}
+                        if terminal_patch:
+                            event = {**event, "route_terminal": True}
+                    if rating_required(state, candidate):
+                        derived = rating_patch(candidate, current_revision + 1)
+                        candidate.update(derived)
+                        state_updates = {**state_updates, **derived}
+                        event = {**event, "route_rated": True}
+                    state_updates = {**state_updates, "route_budget": candidate["route_budget"]}
                 next_revision = current_revision + 1
                 now = datetime.now(UTC).isoformat()
                 state.update(state_updates)

@@ -26,7 +26,7 @@ def run_challenges(
     from .progress import guard_action
 
     run = guard_action(harness, run)
-    if run["state"]["phase"] == "TERMINAL":
+    if run["state"]["phase"] != "CHALLENGE":
         return run
     initial_state = run["state"]
     step_id = initial_state["current_step"]
@@ -46,8 +46,9 @@ def run_challenges(
         if state["phase"] != "CHALLENGE":
             return run
         run = guard_action(harness, run)
-        if run["state"]["phase"] == "TERMINAL":
+        if run["state"]["phase"] != "CHALLENGE":
             return run
+        state = run["state"]
         attempt = state["attempt_index"]
         suffix = f"-attempt-{attempt}" if attempt else ""
         step_id = state["current_step"]
@@ -423,7 +424,7 @@ def _explore_after_guidance(harness, run, problem, model_port, max_model_calls, 
         max_explore_rounds=round_number,
         max_runtime_seconds=max_runtime_seconds,
     )
-    if run["state"]["phase"] == "TERMINAL":
+    if run["state"]["phase"] != "CHALLENGE":
         return run
     state = run["state"]
     guidance = state["meta_guidance_decision"]

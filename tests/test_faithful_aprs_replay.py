@@ -92,8 +92,12 @@ class AprsJobReplayTest(StarJobFixture, unittest.TestCase):
         from showcase.solver_harness.storage import SolverStateStore
         from tests.test_faithful_s03_job import FEATURES, REPLIES, SPEC
 
-        self.open_star(REPLIES,
-                       SHOWCASE_STAR_FEATURES={**FEATURES, "context_pack": False, "serial_routes": True},
+        replies = deepcopy(REPLIES)
+        replies[1]["steps"][0]["method_id"] = "computation"
+        self.open_star(replies,
+                       SHOWCASE_STAR_FEATURES={**FEATURES, "context_pack": False,
+                                               "progress_scheduling": True,
+                                               "serial_routes": True},
                        SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8))
         created = self.client.post("/api/agent/jobs", headers=self.headers(), json={
             "message": SPEC["original_problem"], "session_id": self.session,

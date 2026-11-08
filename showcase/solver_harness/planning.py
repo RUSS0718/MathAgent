@@ -107,6 +107,12 @@ def generate_initial_plan(harness, run, *, problem, model_port, config, metadata
             plan, work_units = bind_plan_work_units(plan, state["problem_spec"])
         except (TypeError, ValueError):
             return finish(harness, run, "partial_aborted", "invalid_problem_spec_work_units")
+    if config.get("features", {}).get("serial_routes") is True:
+        from .routes import route_plan_error
+
+        route_error = route_plan_error(plan)
+        if route_error is not None:
+            return finish(harness, run, "partial_aborted", route_error)
     updates = {
         "phase": "STEP_EXECUTE",
         "plan": plan,

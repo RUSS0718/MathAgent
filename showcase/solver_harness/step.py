@@ -24,7 +24,7 @@ def run_step(
     from .progress import guard_action
 
     run = guard_action(harness, run)
-    if run["state"]["phase"] == "TERMINAL":
+    if run["state"]["phase"] not in {"SETUP", "STEP_EXECUTE"}:
         return run
     state = run["state"]
     step = next(

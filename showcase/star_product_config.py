@@ -24,6 +24,7 @@ def full_config(budget, features=None, context_capacity=None):
     )):
         raise ValueError("star_full_features_invalid")
     enabled = dict.fromkeys(CORE_FEATURES, True) if features is None else dict(features)
+    _freeze_serial_route_dependencies(enabled)
     if enabled.get("progress_scheduling") is True and enabled.get("problem_spec") is not True:
         raise ValueError("progress_scheduling_requires_problem_spec")
     config = {
@@ -57,6 +58,7 @@ def limited_config(budget, features=None, registry=None, context_capacity=None):
         raise ValueError("star_registry_invalid")
     enabled = {"star_routing": True, "persistent_sessions": True, "stream_recovery": True,
                **(features or {})}
+    _freeze_serial_route_dependencies(enabled)
     if enabled.get("problem_spec") is True and (
         enabled.get("final_generation") is not True
         or enabled.get("final_solution_review") is not True
@@ -80,3 +82,13 @@ def limited_config(budget, features=None, registry=None, context_capacity=None):
             raise ValueError("context_capacity_required")
         config["context_capacity"] = context_capacity
     return config
+
+
+def _freeze_serial_route_dependencies(features):
+    if features.get("serial_routes") is not True:
+        return
+    if features.get("problem_spec") is not True:
+        raise ValueError("serial_routes_requires_problem_spec")
+    if features.get("progress_scheduling") is False:
+        raise ValueError("serial_routes_requires_progress_scheduling")
+    features["progress_scheduling"] = True

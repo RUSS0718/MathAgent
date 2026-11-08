@@ -145,6 +145,10 @@ class SolverHarness:
             except ValueError as exc:
                 raise SolverValidationError(str(exc)) from exc
         spec_enabled = self._config.get("features", {}).get("problem_spec") is True
+        serial_routes = self._config.get("features", {}).get("serial_routes") is True
+        if (serial_routes
+                and self._config.get("features", {}).get("progress_scheduling") is not True):
+            raise SolverValidationError("serial_routes_requires_progress_scheduling")
         supplied_spec = None if metadata is None else metadata.get("problem_spec")
         if supplied_spec is not None and not spec_enabled:
             raise SolverValidationError("problem_spec_feature_disabled")
@@ -174,11 +178,22 @@ class SolverHarness:
                 except (TypeError, ValueError) as exc:
                     raise SolverValidationError(str(exc)) from exc
                 effective_metadata["plan"] = normalized_plan
+                if serial_routes:
+                    from .routes import route_plan_error
+
+                    error = route_plan_error(normalized_plan)
+                    if error is not None:
+                        raise SolverValidationError(error)
         run_id = _run_id(effective_metadata)
         problem_hash = hashlib.sha256(problem.encode("utf-8")).hexdigest()
         existing = self._state_store.get_run(run_id)
         if existing is not None:
             self._validate_identity(existing, run_id, problem_hash)
+            if (serial_routes
+                    and existing["state"].get("progress_policy") != {
+                        "enabled": True, "version": "progress-v1"
+                    }):
+                raise SolverIdentityError("serial_routes_requires_frozen_progress_policy")
             if supplied_spec is not None and supplied_spec != existing["state"].get("problem_spec"):
                 raise SolverIdentityError(
                     "problem specification is frozen; use update_problem_spec"
@@ -222,6 +237,8 @@ class SolverHarness:
                               work_units=work_units,
                               proof_graph=self._config.get("features", {}).get("proof_graph") is True,
                               serial_routes=self._config.get("features", {}).get("serial_routes") is True)
+        if self._config.get("features", {}).get("serial_routes") is True and supplied_spec is None:
+            raise SolverValidationError("serial_routes_requires_problem_spec")
         if self._config.get("features", {}).get("progress_scheduling") is True:
             if supplied_spec is None:
                 raise SolverValidationError("progress_scheduling_requires_problem_spec")
@@ -342,6 +359,7 @@ class SolverHarness:
         event: Mapping[str, Any],
         state_updates: Mapping[str, Any] | None = None,
         current: Mapping[str, Any] | None = None,
+        route_authorized: bool = False,
     ) -> dict[str, Any]:
         """Reuse an internal caller's fresh snapshot; keep identity checks and storage CAS."""
 
@@ -382,10 +400,8 @@ class SolverHarness:
             "route_policy", "route_registry", "route_lineage", "route_evaluations",
             "aprs_decisions", "route_invalidations", "active_route_id", "route_budget",
         }
-        if route_fields.intersection(normalized_updates) and normalized_event["type"] not in {
-            "route_created", "route_transition", "route_invalidated", "aprs_decided",
-        }:
-            raise SolverValidationError("route_state_requires_route_event")
+        if route_fields.intersection(normalized_updates) and not route_authorized:
+            raise SolverValidationError("route_state_requires_internal_commit")
         if "route_policy" in normalized_updates:
             raise SolverValidationError("route_policy_is_run_frozen")
 
@@ -442,6 +458,7 @@ class SolverHarness:
             state_updates={**normalized_updates, **candidate_patch, **progress_patch},
             request_hash=request_hash,
             validated_run=current,
+            route_authorized=route_authorized,
         )
         if self._event_observer is not None:
             self._event_observer(result, next(item for item in result["events"] if item["event_id"] == normalized_event["event_id"]))
@@ -451,7 +468,31 @@ class SolverHarness:
             )
         return result
 
-    def prepare_request(self, run: Mapping[str, Any], request: Mapping[str, Any]) -> dict[str, Any]:
+    def _commit_route_event(
+        self,
+        run_id: str,
+        *,
+        expected_revision: int,
+        event: Mapping[str, Any],
+        state_updates: Mapping[str, Any] | None = None,
+        authorization: object,
+    ) -> dict[str, Any]:
+        """Commit a route-derived patch through the private controller seam."""
+        from .routes import ROUTE_COMMIT_TOKEN
+
+        if authorization is not ROUTE_COMMIT_TOKEN:
+            raise SolverValidationError("route_commit_authorization_invalid")
+        return self._commit_event(
+            run_id,
+            expected_revision=expected_revision,
+            event=event,
+            state_updates=state_updates,
+            route_authorized=True,
+        )
+
+    def prepare_request(
+        self, run: Mapping[str, Any], request: Mapping[str, Any], *, use_snapshot=False
+    ) -> dict[str, Any]:
         """Compose opt-in protocols from the current persisted run projection."""
         from copy import deepcopy
 
@@ -459,7 +500,7 @@ class SolverHarness:
         from .prompts import compose_request
         from .tool_precheck import allowed_tool_ids
 
-        latest = self.get_run(run["run_id"])
+        latest = run if use_snapshot else self.get_run(run["run_id"])
         from . import handoff
 
         if handoff.enabled(self._config):

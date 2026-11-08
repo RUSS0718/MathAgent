@@ -64,8 +64,29 @@ def review_progress(state, event, updates):
         "blocked_actions": sorted(blocked),
         "trigger": trigger,
     }
+    if state.get("route_policy", {}).get("enabled") is True:
+        route_id = state.get("active_route_id")
+        local = previous.get("route_progress", {})
+        if local.get("route_id") != route_id:
+            local = {}
+        failures = dict(local.get("action_failures", {}))
+        if fresh or new_goals:
+            failures = {}
+        else:
+            for key in keys:
+                failures[key] = failures.get(key, 0) + 1
+        progress["route_progress"] = {
+            "route_id": route_id,
+            "no_evidence_rounds": 0 if fresh or new_goals else local.get("no_evidence_rounds", 0) + 1,
+            "action_failures": failures,
+        }
     patch = {"progress": progress}
-    if trigger and updates.get("phase") not in {"TERMINAL", "FINAL_GENERATE", "FINAL_REVIEW"}:
+    route_guard_owns_stagnation = (
+        state.get("route_policy", {}).get("enabled") is True
+        and updates.get("phase") == "STEP_EXECUTE"
+    )
+    if (trigger and not route_guard_owns_stagnation
+            and updates.get("phase") not in {"TERMINAL", "FINAL_GENERATE", "FINAL_REVIEW"}):
         patch["phase"] = "META_DECIDE"
         # The reviewed step owns the intervention even if the normal ACCEPT
         # transition would otherwise have advanced to an unrelated next step.
@@ -80,6 +101,50 @@ def guard_action(harness, run):
             or state.get("progress_policy", {}).get("enabled") is not True):
         return run
     progress = state.get("progress", {})
+    if state.get("route_policy", {}).get("enabled") is True:
+        from .routes import ROUTE_COMMIT_TOKEN, transition_route
+
+        active = next((item for item in state.get("route_registry", [])
+                       if item.get("route_id") == state.get("active_route_id")), None)
+        if active is None or active.get("status") != "active":
+            return run
+        if active.get("needs_reevaluation") is True:
+            from .finalize import finish
+
+            return finish(harness, run, "partial_aborted", "route_requires_reevaluation")
+        local = progress.get("route_progress", {})
+        rounds = local.get("no_evidence_rounds", 0) if local.get("route_id") == active["route_id"] else 0
+        failures = local.get("action_failures", {}) if local.get("route_id") == active["route_id"] else {}
+        blocked = any(failures.get(key, 0) >= 2 for key in action_keys(state, state.get("current_step")))
+        reason = (
+            "progress_stagnation_stop" if rounds >= 3 else
+            "progress_action_blocked" if blocked else None
+        )
+        if reason is None:
+            return run
+        if active.get("kind") == "primary":
+            return harness.commit_event(
+                run["run_id"], expected_revision=run["state_revision"],
+                event={"event_id": f"route-stagnation-guard-{run['state_revision']}",
+                       "type": "route_stagnation_guard", "reason": reason,
+                       "route_id": active["route_id"],
+                       "plan_version": state.get("plan_version"),
+                       "attempt_index": state.get("attempt_index")},
+                state_updates={"phase": "META_DECIDE"},
+            )
+        route_patch = transition_route(
+            state, active["route_id"], "terminated", reason=reason
+        )
+        return harness._commit_route_event(
+            run["run_id"], expected_revision=run["state_revision"],
+            event={"event_id": f"alternate-stagnation-{run['state_revision']}",
+                   "type": "route_transition", "route_id": active["route_id"],
+                   "route_status": "terminated", "route_reason": reason},
+            state_updates={**route_patch, "phase": "TERMINAL",
+                           "status": "partial_aborted", "result_reason": reason,
+                           "final_response": f"No verified final answer is available: {reason}."},
+            authorization=ROUTE_COMMIT_TOKEN,
+        )
     reason = None
     if progress.get("no_evidence_rounds", 0) >= 3:
         reason = "progress_stagnation_stop"

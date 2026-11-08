@@ -12,12 +12,82 @@ from .final_binding import review_record
 from .results import stable_unique_results
 
 
-def _serialized_request_size(harness, model_port, run, request):
-    prepared = harness.prepare_request(run, request)
+def _serialized_request_size(harness, model_port, run, request, *, use_snapshot=False):
+    prepared = harness.prepare_request(run, request, use_snapshot=use_snapshot)
     estimator = getattr(model_port, "serialized_payload_size", None)
     if callable(estimator):
         return estimator(prepared)
     return len(json.dumps(prepared, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+
+
+def finalization_requests(problem, facts, proofs, session, previous_review, handoff_mode):
+    generator_request = {
+        "role": "final_generator",
+        "call_id": f"final-generator:{session}",
+        "session_key": session,
+        "problem": problem,
+        "accepted_results": facts,
+        "step_proofs": deepcopy(proofs),
+        "previous_review": previous_review,
+        "finalization_scope": True,
+        "instruction": "Synthesize a complete answer to the original problem from "
+        + ("the accepted facts and reviewed_drafts. Drafts are unproven: address their "
+           "recorded objections explicitly; do not describe them as accepted proofs. "
+           if handoff_mode else "only the accepted facts and the delivered step proofs. ")
+        + "Return final_response.",
+    }
+    review_request = {
+        "role": "whole_solution_verifier",
+        "call_id": f"whole-review:{session}",
+        "session_key": f"whole_verify:{session}",
+        "problem": problem,
+        "solution_candidate": "",
+        "accepted_results": facts,
+        "step_proofs": deepcopy(proofs),
+        "finalization_scope": True,
+        "review_criteria": [
+            "original_problem_consistency",
+            "completeness",
+            "cross_step_logic",
+            "output_format",
+        ],
+    }
+    return generator_request, review_request
+
+
+def finalization_reserve_estimate(
+    harness, model_port, run, generator_request, review_request, *, require_cap=False,
+    use_snapshot=False,
+):
+    """Read-only token estimate using the exact shared finalization payload contract."""
+    adapter = getattr(model_port, "adapter", None)
+    output_cap = getattr(adapter, "max_tokens", None)
+    if type(output_cap) is not int or output_cap < 0:
+        if require_cap:
+            raise ValueError("finalization_output_cap_unavailable")
+        output_cap = 0
+    if require_cap and output_cap == 0:
+        raise ValueError("finalization_output_cap_unavailable")
+    candidate_byte_cap = output_cap * 4 if output_cap else None
+    review = {
+        **review_request,
+        "solution_candidate": "x" * candidate_byte_cap if candidate_byte_cap else "",
+    }
+    generator_input = _serialized_request_size(
+        harness, model_port, run, generator_request, use_snapshot=use_snapshot
+    ) + 1_024
+    review_input = _serialized_request_size(
+        harness, model_port, run, review, use_snapshot=use_snapshot
+    ) + 1_024
+    return {
+        "model_calls": 2,
+        "http_attempts": 2,
+        "tokens": generator_input + output_cap + review_input + output_cap,
+        "generator_input": generator_input,
+        "review_input": review_input,
+        "output_cap": output_cap,
+        "candidate_byte_cap": candidate_byte_cap,
+    }
 
 
 def _reserve_finalization_pair(
@@ -25,27 +95,19 @@ def _reserve_finalization_pair(
 ):
     from ..run_budget import BudgetExhausted
 
-    adapter = getattr(model_port, "adapter", None)
-    output_cap = getattr(adapter, "max_tokens", 0)
-    if type(output_cap) is not int or output_cap < 0:
-        output_cap = 0
-    candidate_byte_cap = output_cap * 4 if output_cap else None
-    review_request = {
-        **review_request,
-        "solution_candidate": "x" * candidate_byte_cap if candidate_byte_cap else "",
-    }
+    candidate_byte_cap = None
     try:
-        generator_input = _serialized_request_size(harness, model_port, run, generator_request)
-        review_input = _serialized_request_size(harness, model_port, run, review_request)
-        # Dispatch and report commits add small fixed-size identifiers and revisions.
-        generator_input += 1_024
-        review_input += 1_024
+        estimate = finalization_reserve_estimate(
+            harness, model_port, run, generator_request, review_request
+        )
+        output_cap = estimate["output_cap"]
+        candidate_byte_cap = estimate["candidate_byte_cap"]
         budget.ledger.reserve_finalization_pair(
             run["run_id"],
             reservation_id=reservation_id,
-            final_input_estimate=generator_input,
+            final_input_estimate=estimate["generator_input"],
             final_output_cap=output_cap,
-            review_input_estimate=review_input,
+            review_input_estimate=estimate["review_input"],
             review_output_cap=output_cap,
         )
     except BudgetExhausted as exc:
@@ -362,37 +424,9 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
                 f"{run['run_id']}:spec{state.get('specification_version', 'legacy')}:"
                 f"plan{state['plan_version']}:candidate{len(attempts)}"
             )
-        generator_request = {
-            "role": "final_generator",
-            "call_id": f"final-generator:{session}",
-            "session_key": session,
-            "problem": problem,
-            "accepted_results": facts,
-            "step_proofs": deepcopy(proofs),
-            "previous_review": previous_review,
-            "finalization_scope": True,
-            "instruction": "Synthesize a complete answer to the original problem from "
-            + ("the accepted facts and reviewed_drafts. Drafts are unproven: address their "
-               "recorded objections explicitly; do not describe them as accepted proofs. "
-               if handoff_mode else "only the accepted facts and the delivered step proofs. ")
-            + "Return final_response.",
-        }
-        review_reservation_request = {
-            "role": "whole_solution_verifier",
-            "call_id": f"whole-review:{session}",
-            "session_key": f"whole_verify:{session}",
-            "problem": problem,
-            "solution_candidate": "",
-            "accepted_results": facts,
-            "step_proofs": deepcopy(proofs),
-            "finalization_scope": True,
-            "review_criteria": [
-                "original_problem_consistency",
-                "completeness",
-                "cross_step_logic",
-                "output_format",
-            ],
-        }
+        generator_request, review_reservation_request = finalization_requests(
+            problem, facts, proofs, session, previous_review, handoff_mode
+        )
         candidate_byte_cap = None
         if spec_enabled:
             from ..run_budget import current_budget
