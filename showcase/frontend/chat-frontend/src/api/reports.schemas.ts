@@ -30,12 +30,12 @@ export const proofGraphSchema = z.object({
   graph_version: z.number().int().nonnegative(),
   propositions: z.array(z.object({
     id: z.string(), status: z.enum(['unresolved', 'supported', 'invalidated', 'refuted']),
-    grade: z.string().nullable(), conflict: z.boolean(),
+    grade: z.enum(['llm_reviewed', 'tool_verified', 'mixed']).nullable(), conflict: z.boolean(),
     dependencies: z.array(z.string()), sources: z.array(z.string()),
   })),
   attempts: z.array(z.object({
     id: z.string(), status: z.enum(['proposed', 'accepted', 'rejected', 'invalidated', 'unknown']),
-    direction: z.enum(['support', 'counterexample']), grade: z.string().nullable(),
+    direction: z.enum(['support', 'counterexample']), grade: z.enum(['llm_reviewed', 'tool_verified', 'mixed']).nullable(),
     conclusion: z.string(), dependencies: z.array(z.string()), sources: z.array(z.string()),
   })),
 })
