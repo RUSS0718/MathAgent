@@ -39,7 +39,7 @@ def route_summary(state):
     def current(item):
         route = routes.get(item["route_id"], {})
         return (not route.get("needs_reevaluation")
-                and route.get("status") in {"created", "eligible", "active"}
+                and item.get("snapshot", {}).get("route_status") == route.get("status")
                 and item.get("snapshot", {}).get("graph_version")
                 == (state.get("proof_graph") or {}).get("current_version", route.get("graph_version")))
 
