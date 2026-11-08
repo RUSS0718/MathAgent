@@ -21,9 +21,11 @@ def replay_decision(evaluations, decision):
     policy = decision.get("policy_version")
     if policy != POLICY_VERSION:
         return False
-    reason = decision.get("reason")
+    frozen = decision.get("decision_input")
+    if not isinstance(frozen, dict) or decision.get("decision_input_hash") != _hash(frozen):
+        return False
     expected = _choose({"route_policy": {"policy_version": policy}}, evaluations,
-                       stop_reason=reason if reason not in {"route_selected", "no_eligible_route"} else None)
+                       stop_reason=frozen.get("stop_reason"))
     return all(decision.get(key) == value for key, value in expected.items())
 
 
@@ -36,18 +38,23 @@ def _graph_source_current(state, evidence):
                      if item.get("graph_version") == graph.get("current_version")), None)
     if snapshot is None:
         return False
-    ids = {item.get("result_id") for item in state.get("verified_results_ledger", [])
+    records = [item for item in state.get("verified_results_ledger", [])
            if item.get("source") == evidence.get("source")
+           and ("result_id" not in evidence or item.get("result_id") == evidence["result_id"])
            and all(key not in evidence or item.get(key) == evidence[key]
                    for key in ("plan_version", "attempt_index", "review_call_id"))
-           and set(item.get("claim_indexes", [])).intersection(evidence.get("claim_indexes", []))}
-    linked = [item for item in snapshot.get("attempts", {}).values() if item.get("result_id") in ids]
-    # S03 obligation evidence need not have a classified F1 graph node.
-    if not linked:
-        return True
-    return any(item.get("status") == "accepted" and item.get("direction", "support") == "support"
-               and snapshot.get("propositions", {}).get(item.get("conclusion"), {}).get("status") == "supported"
-               and not snapshot["propositions"][item["conclusion"]].get("conflict") for item in linked)
+           and set(item.get("claim_indexes", [])).intersection(evidence.get("claim_indexes", []))]
+    for index in evidence.get("claim_indexes", []):
+        ids = {item.get("result_id") for item in records if index in item.get("claim_indexes", [])}
+        linked = [item for item in snapshot.get("attempts", {}).values() if item.get("result_id") in ids]
+        # S03 obligation evidence need not have a classified F1 graph node.
+        if linked and not any(
+            item.get("status") == "accepted" and item.get("direction", "support") == "support"
+            and snapshot.get("propositions", {}).get(item.get("conclusion"), {}).get("status") == "supported"
+            and not snapshot["propositions"][item["conclusion"]].get("conflict") for item in linked
+        ):
+            return False
+    return True
 
 
 def verified_gain(state: dict[str, Any]) -> list[str]:
@@ -81,13 +88,25 @@ def verified_gain(state: dict[str, Any]) -> list[str]:
     for step in (state.get("plan") or {}).get("steps", []):
         record = state.get("steps", {}).get(step.get("step_id"), {})
         review = record.get("verification") or {}
-        report = record.get("report") or {}
-        source = {"source": step.get("step_id"), "plan_version": state.get("plan_version"),
-                  "attempt_index": state.get("attempt_index"),
-                  "claim_indexes": list(range(len(report.get("claims", []))))}
-        if (review.get("valid") is True and review.get("verdict") == "ACCEPT"
-                and source["claim_indexes"] and _graph_source_current(state, source)):
-            credit.update(relevant.intersection(step.get("auxiliary_goal_ids", [])))
+        if review.get("valid") is not True or review.get("verdict") != "ACCEPT":
+            continue
+        goals = {item["goal_id"]: item for item in state.get("problem_spec", {}).get("auxiliary_goals", [])}
+        for goal_id in relevant.intersection(step.get("auxiliary_goal_ids", [])):
+            statement = goals.get(goal_id, {}).get("statement")
+            if not statement:
+                continue
+            for record in state.get("verified_results_ledger", []):
+                if (record.get("source") == step.get("step_id")
+                        and record.get("statement") == statement
+                        and record.get("valid") is True and record.get("proven") is True
+                        and record.get("invalidated") is not True
+                        and record.get("category") != "Conjecture"
+                        and record.get("claim_indexes")
+                        and all(key not in state or record.get(key) == state[key]
+                                for key in ("plan_version", "attempt_index"))
+                        and _graph_source_current(state, record)):
+                    credit.add(goal_id)
+                    break
     return sorted(credit)
 
 
@@ -215,10 +234,12 @@ def _choose(state: dict[str, Any], evaluations: list[dict[str, Any]], *, stop_re
             eligible[rid]["vector"]["cost"] if eligible[rid]["vector"]["cost"] is not None else float("inf"), rid,
         ))[0]
     reason = stop_reason or ("no_eligible_route" if selected is None else "route_selected")
+    frozen = {"stop_reason": stop_reason}
     return {"selected_route_id": selected, "candidate_route_ids": sorted(eligible),
             "pareto_route_ids": pareto, "reason": reason,
             "policy_version": state.get("route_policy", {}).get("policy_version", POLICY_VERSION),
-            "evaluation_hash": _hash(sorted(evaluations, key=lambda item: item["route_id"]))}
+            "evaluation_hash": _hash(sorted(evaluations, key=lambda item: item["route_id"])),
+            "decision_input": frozen, "decision_input_hash": _hash(frozen)}
 
 
 def decide(state: dict[str, Any], evaluations: list[dict[str, Any]], *, stop_reason: str | None = None) -> dict[str, Any]:

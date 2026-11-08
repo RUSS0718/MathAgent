@@ -45,15 +45,39 @@ class AprsReplayTest(unittest.TestCase):
         changed = deepcopy(decision)
         changed["selected_route_id"] = "another"
         self.assertFalse(replay_decision(evaluations, changed))
+        changed = deepcopy(decision)
+        changed["reason"] = "arbitrary_stop"
+        self.assertFalse(replay_decision(evaluations, changed))
 
     def test_only_frozen_prerequisite_goals_gain_credit_and_baseline_cannot_repeat_it(self):
         state = self.state()
         state["problem_spec"] = {"root_obligations": [{"obligation_id": "root:a", "prerequisite_ids": ["g"]}],
-                                 "auxiliary_goals": [{"goal_id": "g"}, {"goal_id": "unrelated"}]}
+                                 "auxiliary_goals": [{"goal_id": "g", "statement": "proof"}, {"goal_id": "unrelated"}]}
         state["plan"] = {"steps": [{"step_id": "s", "auxiliary_goal_ids": ["g", "unrelated"]}]}
         state["steps"] = {"s": {"verification": {"valid": True, "verdict": "ACCEPT"},
                                   "report": {"claims": [{"statement": "proof"}]}}}
+        state["verified_results_ledger"] = [{"result_id": "goal-proof", "source": "s", "statement": "proof",
+                                             "valid": True, "proven": True, "category": "Lemma", "claim_indexes": [0]}]
         self.assertEqual(["g", "root:a"], verified_gain(state))
         state["route_registry"][0]["credit_at_start"] = ["g", "root:a"]
         evaluations, _ = rate_routes(state)
         self.assertEqual(0, evaluations[0]["vector"]["verified_gain"])
+
+    def test_two_frozen_prerequisites_do_not_share_one_surviving_support(self):
+        state = self.state()
+        state["problem_spec"] = {"root_obligations": [{"obligation_id": "root:a", "prerequisite_ids": ["g", "h"]}],
+            "auxiliary_goals": [{"goal_id": "g", "statement": "g proof"}, {"goal_id": "h", "statement": "h proof"}]}
+        state["plan"] = {"steps": [{"step_id": "s", "auxiliary_goal_ids": ["g", "h"]}]}
+        state["steps"] = {"s": {"verification": {"valid": True, "verdict": "ACCEPT"},
+                                  "report": {"claims": [{"statement": "g proof"}, {"statement": "h proof"}]}}}
+        state["verified_results_ledger"] = [
+            {"result_id": name, "source": "s", "statement": name + " proof", "claim_indexes": [index],
+             "valid": True, "proven": True, "category": "Lemma"} for index, name in enumerate(["g", "h"])]
+        state["proof_graph"] = {"current_version": 2, "snapshots": [{"graph_version": 2,
+            "attempts": {"g": {"result_id": "g", "status": "invalidated", "conclusion": "g"},
+                         "h": {"result_id": "h", "status": "accepted", "conclusion": "h"}},
+            "propositions": {"g": {"status": "invalidated"}, "h": {"status": "supported"}}}]}
+        self.assertNotIn("g", verified_gain(state))
+        self.assertIn("h", verified_gain(state))
+        state["obligation_evidence_ledger"][0]["claim_indexes"] = [0, 1]
+        self.assertNotIn("root:a", verified_gain(state))
