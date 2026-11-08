@@ -238,8 +238,9 @@ test('real traceback and replan history remain visible after refresh', async ({ 
   const replanJob = await create(page, replanHistoryProblem, true)
   const replanStatus = await expectTerminal(page, replanJob, specOrigin)
   const replanReport = await (await page.request.get(`${specOrigin}/api/agent/jobs/${replanJob}/report`)).json()
-  expect(replanStatus).toBe('failed')
-  expect(replanReport.report.answer).toContain('work_unit_prerequisites_incomplete')
+  expect(replanStatus).toBe('succeeded')
+  expect(replanReport.report.answer).toBe('2')
+  expect(replanReport.solver?.solver?.progress?.root_obligations?.covered).toBe(1)
   expect(replanReport.solver?.solver?.progress?.plan_history, JSON.stringify(replanReport)).toEqual(expect.arrayContaining([
     expect.objectContaining({ plan_version: 1, attempt_index: 0, status: 'archived', outcome: 'replan' }),
     expect.objectContaining({ plan_version: 2, attempt_index: 1, status: 'current' }),
