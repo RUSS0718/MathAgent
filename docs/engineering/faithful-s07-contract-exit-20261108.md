@@ -1,6 +1,6 @@
 # F1/S07 证明依赖图与 GraphBootstrap 合同及退出记录
 
-日期：2026-11-08（Asia/Shanghai）。初始源码基线：`47428eb7263cf2cb3a452df3967f81ffd88a8510`。当前状态：实施中。
+日期：2026-11-08（Asia/Shanghai）。初始源码基线：`47428eb7263cf2cb3a452df3967f81ffd88a8510`。当前状态：工程退出通过（`engineering-preview`），最终证据见 [S05/S07 工程验收](../evals/faithful-s05-s07-exit-20261108.md)。下方集成前记录是历史快照，不替代最终结论。
 
 依据 GitHub #147、#139 最终决议 `6689524325`、Faithful implement-spec（只读 `git show docs/wayfinder-chat-output-prototype-20261106:docs/specs/mathagent-faithful-implement-spec-20261107.md`）及 S03/S04 退出合同。实现仅限 F1/S07；不实现路线/APRS、Lean、Composer 或前端。
 
@@ -53,6 +53,8 @@ ID 是按指定快照内稳定排序重生成的 `pN`/`aN`，只在 `(run_id, gr
 ## 退出证据
 
 ### 集成前纵切记录
+
+本节保留当时状态；最终图生产者、公开 Job、页面与门禁已在上述验收记录独立验证。
 
 状态：实现纵切待提交，阶段仍待 Standards/Spec 审查结果及集成后的真实 Job 验收；本记录不声明 S07 工程退出。
 

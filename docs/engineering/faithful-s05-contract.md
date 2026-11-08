@@ -1,6 +1,6 @@
 # S05 公开产物与 UI 合同及退出记录
 
-日期：2026-11-08（Asia/Shanghai）。工作分支：feat/faithful-s05。起点：47428eb7263cf2cb3a452df3967f81ffd88a8510。状态：非图纵切已提交；图消费增量及集成门禁待完成。
+日期：2026-11-08（Asia/Shanghai）。工作分支：feat/faithful-s05。起点：47428eb7263cf2cb3a452df3967f81ffd88a8510。状态：工程退出通过（`engineering-preview`），图增量与最终门禁见 [S05/S07 工程验收](../evals/faithful-s05-s07-exit-20261108.md)。下方非图纵切与待完成列表保留当时快照。
 
 依据 #144 阶段决议、#146、既有 S01/S03/S04 合同及本地 accepted Faithful implement-spec。S05 复用持久 Job/Run 事件、现有 STAR projection、ChatWorkspace、AgentTimeline 与 StarRunReview；不添加求解循环，不修改 solver_harness/**、配置入口或官方路径。
 
@@ -32,6 +32,8 @@
 - 未运行全仓长门禁；工程测试结果不表示数学能力提升。
 
 ## 尚待完成
+
+本节为集成前历史列表，已由上述最终验收记录逐项更新；不作为当前阶段阻塞判断。
 
 - 非图纵切 Standards/Spec 双轴只读审查由协调者独立执行；结果与修复情况待其返回后追加。
 - `proof_graph_summary(state)` 惰性公开投影接线留作独立增量提交；需在 A 生产模块集成后验证真实 Job/report 输出。图消费接线完成前不宣称图 UI 验收。
