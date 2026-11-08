@@ -60,7 +60,8 @@ def route_summary(state):
         } for key, item in sorted(latest.items())],
         "budget": {"closing_reserve": _numbers(budget.get("closing_reserve", {}), RESOURCE_KEYS),
                    "remaining": _numbers(budget.get("remaining", {}), RESOURCE_KEYS),
-                   "consumed": _numbers(snapshot, RESOURCE_KEYS),
+                   "accounting": _numbers(snapshot, RESOURCE_KEYS),
                    "unknown": bool(snapshot.get("unknown_attempts") or snapshot.get("unresolved_attempts")
-                                   or snapshot.get("unknown_tool_calls") or snapshot.get("reserved_tokens"))},
+                                   or snapshot.get("unknown_tool_calls")),
+                   "has_reservations": bool(snapshot.get("reserved_tokens"))},
     }

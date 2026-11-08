@@ -31,7 +31,8 @@ export const routesSchema = z.object({
   })).optional(),
   budget: z.object({ closing_reserve: z.record(z.string(), z.number().nonnegative().nullable()),
     remaining: z.record(z.string(), z.number().nonnegative().nullable()),
-    consumed: z.record(z.string(), z.number().nonnegative().nullable()), unknown: z.boolean(),
+    accounting: z.record(z.string(), z.number().nonnegative().nullable()), unknown: z.boolean(),
+    has_reservations: z.boolean(),
   }).optional(),
 })
 export type RouteSummary = z.infer<typeof routesSchema>

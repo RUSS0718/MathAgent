@@ -38,6 +38,7 @@ const ratingFields = [['verified_gain', '新增有效信用'], ['evidence_qualit
     <details v-if="routes.budget">
       <summary>共享预算与收尾预留</summary>
       <p v-if="routes.budget.unknown">存在未决消费，保留未知预留，不按零成本处理。</p>
+      <p v-else-if="routes.budget.has_reservations">存在尚未结算的资源预留，不能作为已知实际消费。</p>
       <dl class="data-list">
         <template v-for="(value, key) in routes.budget.closing_reserve" :key="key">
           <dt>收尾预留 · {{ key }}</dt><dd>{{ value ?? '未知' }}</dd>
