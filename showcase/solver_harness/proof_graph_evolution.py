@@ -56,6 +56,11 @@ def evolve_proof_graph(
         raise ProofGraphValidationError("invalid_verified_ledger")
 
     candidate_rows, rejected = importable_ledger_rows(state, ledger)
+    prior_bindings = {item.get("result_id"): item.get("ledger_dependencies")
+                      for item in previous.get("derivations", {}).values()}
+    for row, _source in candidate_rows:
+        if row["result_id"] in prior_bindings and prior_bindings[row["result_id"]] != row.get("dependencies", []):
+            raise ProofGraphValidationError("historical_dependencies_changed")
     graph_data = deepcopy(dict(previous))
     graph_data["graph_version"] = graph["current_version"]
     graph_data["bootstrap_complete"] = True
@@ -170,6 +175,7 @@ def evolve_proof_graph(
         }
         derivation_id = "derivation_" + _digest(state["run_id"], result_id)[:32]
         graph_data["derivations"][derivation_id] = {
+            "ledger_dependencies": list(dependencies),
             "id": derivation_id,
             "status": attempt_status,
             "grade": row["evidence_level"],
@@ -335,6 +341,8 @@ def evolve_proof_graph(
         prop["conflict"] = False if prop_id == resolved_prop_id else previously_conflicted or (
             prop_id in support_candidates and bool(counterexamples)
         )
+        if prop["conflict"] and not previously_conflicted:
+            prop["conflict_since_revision"] = state["state_revision"] + 1
 
     # Compute the whole AND/OR fixed point before changing any attempt state.
     active_props = active_supports(

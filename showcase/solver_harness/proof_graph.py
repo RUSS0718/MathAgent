@@ -77,6 +77,12 @@ def _resolution_valid(state: Mapping, prop_id: str, resolution: Mapping) -> bool
         return False
     response = call.get("response")
     request = call.get("request")
+    snapshot = state["proof_graph"]["snapshots"][-1]
+    since = snapshot.get("propositions", {}).get(prop_id, {}).get("conflict_since_revision")
+    revision = call.get("request_revision")
+    if (type(since) is not int or type(revision) is not int
+            or not since < revision <= state["state_revision"]):
+        return False
     return (
         isinstance(response, Mapping)
         and response.get("proof_graph_resolution") == resolution.get("ruling")

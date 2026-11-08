@@ -15,6 +15,16 @@ from showcase.solver_harness.storage import SolverPersistenceError, SolverRevisi
 
 
 class FaithfulS07GraphTest(unittest.TestCase):
+    def test_existing_result_cannot_rewrite_its_dependencies(self):
+        with SolverHarness(config={"features": {"proof_graph": True}}) as harness:
+            run = harness.solve('problem')
+            run = self._commit(harness, run, 'seed-existing', self._ledger_patch(run, [('a', 'A', 'scope', [])]))
+            before = harness.get_run(run['run_id'])
+            for dependencies in (['missing'], ['a']):
+                with self.subTest(dependencies=dependencies), self.assertRaises(SolverPersistenceError):
+                    self._commit(harness, run, 'rewrite-existing', self._ledger_patch(run, [('a', 'A', 'scope', dependencies)]))
+                self.assertEqual(before, harness.get_run(run['run_id']))
+
     def test_new_cyclic_and_dangling_dependencies_roll_back_whole_transaction(self):
         for entries in ([('a', 'A', 'scope', ['missing'])],
                         [('a', 'A', 'scope', ['b']), ('b', 'B', 'scope', ['a'])]):
@@ -436,6 +446,7 @@ class FaithfulS07GraphTest(unittest.TestCase):
                 "problem_hash": run["state"]["problem_hash"],
                 "config_hash": run["state"]["config_hash"],
                 "role": "step_verifier", "status": "completed",
+                "request_revision": run["state_revision"],
                 "request": {"proof_graph_conflict_ids": [proposition_p]},
                 "response": {"proof_graph_proposition_id": proposition_p,
                              "proof_graph_resolution": "support"},
@@ -443,6 +454,12 @@ class FaithfulS07GraphTest(unittest.TestCase):
             run = self._commit(harness, run, "persist-conflict-review", {
                 "calls": {**run["state"].get("calls", {}), resolution_id: review_call},
             })
+            from showcase.solver_harness.proof_graph import _resolution_valid
+
+            stale_state = {**run['state'], 'calls': {
+                **run['state']['calls'], resolution_id: {**review_call, 'request_revision': 0},
+            }}
+            self.assertFalse(_resolution_valid(stale_state, proposition_p, resolution))
             run = resolve_conflict(
                 harness, run["run_id"], expected_revision=run["state_revision"],
                 graph_version=run["state"]["proof_graph"]["current_version"],
