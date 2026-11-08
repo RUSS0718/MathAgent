@@ -22,11 +22,11 @@ from typing import Any
 
 from .evidence_store import append_check
 from .final_evidence import bind_verification
+from .presentation import MODES, POLICY_VERSION, SCHEMA_VERSION, normalize_mode
 from .redaction import redact
 from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, freeze_budget
 from .run_checkpoints import RunCheckpointSaver
 from .run_control import RunControl, RunStopped, bind_control
-from .presentation import MODES, POLICY_VERSION, SCHEMA_VERSION, normalize_mode
 from .star_product_hints import migrate_hints, validate_hint
 from .star_product_modes import STAR_MODES
 

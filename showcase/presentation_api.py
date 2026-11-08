@@ -6,7 +6,13 @@ from collections.abc import Callable, Mapping
 
 from flask import Blueprint, g, jsonify, request
 
-from .presentation import MODES, build_presentation, failed_presentation, presentation_snapshot, revalidate
+from .presentation import (
+    MODES,
+    build_presentation,
+    failed_presentation,
+    presentation_snapshot,
+    revalidate,
+)
 from .workspace import WorkspaceError
 
 

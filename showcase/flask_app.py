@@ -31,6 +31,7 @@ from .final_evidence import checked_verification
 from .job_events import register_job_event_route
 from .loopback import AuthSession, LoopbackStore
 from .polynomial import PolynomialChecker
+from .presentation_api import register_presentation_api
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
 from .run_budget import RunBudgetLimits
 from .run_service import (
@@ -43,7 +44,6 @@ from .server import create_live_pipeline, create_live_service
 from .star_product_modes import STAR_MODES
 from .verification import LightweightVerificationHook
 from .workspace import WorkspaceError, WorkspaceService
-from .presentation_api import register_presentation_api
 
 AUTH_COOKIE = "auth_session"
 MAX_BODY_BYTES = 1_000_000
