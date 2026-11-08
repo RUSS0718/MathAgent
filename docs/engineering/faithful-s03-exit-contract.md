@@ -1,6 +1,6 @@
 # S03 技术设计与完整工程退出合同
 
-日期：2026-11-08。状态：实现已完成，退出验收进行中；所有退出项仍待最终证据核实。起点 `97519602d56829fa719f5939c683365860f99f0f`，集成分支 `mathagent-faithful`。依据 #137、#136、#144、#146 和 S03 交接合同。
+日期：2026-11-08。状态：工程退出通过（`engineering-preview`）。实现提交 `3a6943f26564db250b96e21044bb4b28511f599f`，集成分支 `mathagent-faithful`。依据 #137、#136、#144、#146 和 S03 交接合同。完整门禁及逐项证据见 [S03 工程退出验收](../evals/faithful-s03-exit-20261108.md)。
 
 ## 现状与设计边界
 
@@ -35,12 +35,29 @@
 | C09 | 独立完整 Whole Verifier 检查组合、假设及实际交付；文本变更降级 | pass |
 | C10 | 真实规格版本进入 S02 packs；容量拒绝不截断题意或答案 | pass |
 | C11 | 公开产品端身份、规格持久化/恢复、重连、deadline、unknown 预留保持 | pass |
-| C12 | baseline 字节、聚焦/相关回归、双轴审查、唯一六阶段门禁及 ProblemSpec 浏览器接缝证据 | incomplete |
+| C12 | baseline 字节、聚焦/相关回归、双轴审查、唯一六阶段门禁及 ProblemSpec 浏览器接缝证据 | pass |
+
+## 退出证据映射
+
+| 项 | 验收结果 | 主要证据 |
+| --- | --- | --- |
+| C01 | pass | `test_faithful_s03_specification.py`：显式启用、冻结版本、旧 Run 不迁移及完整字段 |
+| C02 | pass | `test_faithful_s03_harness.py`：必要与充分方向分别覆盖，单方向不能完成 |
+| C03 | pass | `test_faithful_s03_specification.py`：最值界不覆盖可达性 |
+| C04 | pass | `test_faithful_s03_pell.py`：候选列表不覆盖完备性；列表、完备性、筛选、格式各自审查后才收尾 |
+| C05 | pass | `test_faithful_s03_specification.py`、`test_faithful_s03_harness.py`：WorkUnit 映射、多对多进度与 AND 前提 |
+| C06 | pass | `test_faithful_s03_job.py`、`test_faithful_s03_pell.py`：Verifier 只可为当前 WorkUnit 声明类别匹配、报告引用的义务证据；候选值不关闭完备性 |
+| C07 | pass | `test_faithful_s03_revision.py`、`test_faithful_s03_harness.py`：定向失效结果、证据、候选、最终候选与 Whole Verifier 记录，保留无关分支 |
+| C08 | pass | `test_faithful_s03_budget.py`、`test_faithful_s03_harness.py`：共享账本未能原子预留收尾时不派发最终生成或审查 |
+| C09 | pass | `test_faithful_s03_harness.py`、`test_star_product_final_binding.py`：独立 Whole Verifier、实际审查来源和 exact-text 绑定 |
+| C10 | pass | `test_faithful_s03_harness.py`、`test_faithful_s03_job.py`：规格版本进入 S02 pack；超限 Job 保留完整规格且不派发新 HTTP |
+| C11 | pass | `test_faithful_s03_recovery.py`、`test_faithful_s03_job.py`：进程退出后恢复冻结规格、原 deadline 与 unknown 预留，显式新身份重试 |
+| C12 | pass | commit `3a6943f` 的唯一六阶段门禁 `faithful-s03-exit-3a6943f-20261108-1355`、13 项隔离 Chromium、基线哈希及双轴审查 |
 
 ### 公开进度合同
 
 仅在 ProblemSpec 明确启用时，公开进度增加 `root_obligations`：`covered` 与 `total` 是满足根义务数和原题根义务总数；`items` 按规格顺序提供从 1 开始的 `ordinal`、公开类型 `type` 和 `open` / `satisfied` 状态。投影不包含义务 ID、原题/义务文本、假设或证明内容。关闭开关及 legacy Run 不增加此字段，保持既有 shape。
 
-所有项取得当前源码证据后才声明 engineering-preview 退出。真实隔离工具、provider-live、容量/SLA、自然题和数学效果分别留证；本任务不启动付费实验。S03 未退出前 S04/S05/F1 均不开工，S07 不提前引入。
+S03 工程退出通过，状态限定为 `engineering-preview`。真实隔离工具、provider-live、容量/SLA、自然题和数学效果分别留证；本任务未启动付费实验。S03 退出解除 S04 与 S05 的 S03 工程前置；F1 仍等待 S04，不提前引入 S07。
 
 后续窗口继承当前模型选择；不能确认具体型号时不得猜测，详见 S03 交接合同的用户模型约束。
