@@ -23,3 +23,7 @@
 - 隔离中写最小 `example : 1 + 1 = 2 := by decide` 后执行 `lean /tmp/Minimal.lean`，实际返回 `lean: not found`，退出127。证据 `artifacts/faithful-s06-s08-coordination/s09-environment.log`。
 
 Lean/Mathlib/toolchain 精确版本无法核验；没有可报告的内核证明项或 L2/L3。上述有限环境探针不宣称穷尽机器中任意未登记目录。S09阶段未工程退出，F3保持未完成，S10依赖不解除。
+
+## 独立双轴审查
+
+针对 `git diff 9cf8ef4..6f55402`，两个继承模型默认值的独立只读审查分别检查仓库标准与用户重规划合同。Standards：无可行动项；Spec：无可行动项。未使用审查代替18项回归与真实 Chromium 验收。无法从工具结果核实具体模型型号，不声称锁定或已核验实际型号。
