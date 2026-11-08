@@ -1,5 +1,6 @@
 """Serial route expansion retains shared closeout and unknown reservations."""
 import unittest
+from contextlib import closing
 
 from showcase.run_budget import RunBudgetLedger, RunBudgetLimits
 from showcase.solver_harness.progress import review_progress
@@ -8,7 +9,7 @@ from showcase.solver_harness.route_budget import derive_route_budget
 
 class RouteBudgetTest(unittest.TestCase):
     def test_expansion_stops_for_tokens_deadline_and_shared_unknown_charge(self):
-        with RunBudgetLedger() as ledger:
+        with closing(RunBudgetLedger()) as ledger:
             ledger.ensure('r', RunBudgetLimits(max_model_calls=10, max_http_attempts=10, max_tokens=1000))
             base = {'preflight_valid': True, 'effective_deadline_at': 100,
                     'closing_reserve': {'model_calls': 2, 'http_attempts': 2, 'tokens': 500, 'time_seconds': 20},
