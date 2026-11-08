@@ -50,6 +50,12 @@ def progress_summary(state):
             for item in state.get("reasoner_checkpoints", [])
             if isinstance(item, dict)
         ]
+    if state.get("proof_graph_policy", {}).get("enabled") is True:
+        from .solver_harness.proof_graph_projection import proof_graph_summary
+
+        graph = proof_graph_summary(state)
+        if graph is not None:
+            summary["proof_graph"] = graph
     return summary
 
 

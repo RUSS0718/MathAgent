@@ -242,7 +242,7 @@ class SolverStateStore:
                 graph_candidate.update(state_updates)
                 graph_candidate["proof_graph"] = state.get("proof_graph")
                 graph_candidate["proof_graph_policy"] = state.get("proof_graph_policy")
-                if graph_candidate.get("proof_graph_policy", {}).get("enabled") is True:
+                if (graph_candidate.get("proof_graph_policy") or {}).get("enabled") is True:
                     from .proof_graph import evolve_proof_graph
 
                     receipt_rows = connection.execute(
