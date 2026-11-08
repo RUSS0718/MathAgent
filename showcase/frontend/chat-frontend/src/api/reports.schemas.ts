@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { resultSemanticsSchema } from './result-semantics.schemas.ts'
+import { routesSchema } from './routes.schemas.ts'
 
 export const recoverySchema = z.object({
   status: z.enum(['safe', 'needs_review']),
@@ -42,6 +43,7 @@ export const proofGraphSchema = z.object({
 export type ProofGraph = z.infer<typeof proofGraphSchema>
 
 export const progressSchema = z.object({
+  routes: routesSchema.optional(),
   proof_graph: proofGraphSchema.optional(),
   root_obligations: rootObligationsSchema.optional(),
   plan_history: planHistorySchema.optional(),
