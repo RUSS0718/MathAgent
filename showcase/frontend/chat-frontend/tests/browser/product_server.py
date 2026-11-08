@@ -178,6 +178,7 @@ if __name__ == '__main__':
     with tempfile.TemporaryDirectory() as directory:
         app = create_app({'TESTING': True, 'SHOWCASE_DATA_DIR': directory,
             'SHOWCASE_JOB_DELAY_SECONDS': 0, 'SHOWCASE_STAR_ENABLED': True,
+            'SHOWCASE_PRESENTATION_ENABLED': True,
             'SHOWCASE_STAR_EVIDENCE_KIND': 'fault_injection',
             'SHOWCASE_STAR_FEATURES': {'final_generation': True, 'final_solution_review': True, 'local_code_tool': True},
             'SHOWCASE_STAR_REGISTRY': registry,

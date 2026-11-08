@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import type { DecodedSseEvent } from '../api/events.schemas'
 import type { ActiveJobResponse } from '../api/jobs.schemas'
+import type { PresentationMode } from '../api/presentation.schemas'
 
 type Status = 'queued' | 'running' | 'waiting_input' | 'succeeded' | 'failed' | 'canceled'
 export interface JobRecord {
@@ -11,6 +12,7 @@ export interface JobRecord {
   renderedEventId: number
   summary: string
   error: string | null
+  presentationMode: PresentationMode | null
   events: DecodedSseEvent[]
 }
 
@@ -29,7 +31,7 @@ export const useJobsStore = defineStore('jobs', {
       const record = this.records[jobId]
       if (record) { record.status = 'queued'; record.error = null }
     },
-    start(jobId: string, sessionId: string, status: Status, lastEventId = 0): JobRecord {
+    start(jobId: string, sessionId: string, status: Status, lastEventId = 0, presentationMode?: PresentationMode | null): JobRecord {
       const record = this.records[jobId] ?? {
         jobId,
         sessionId,
@@ -38,9 +40,11 @@ export const useJobsStore = defineStore('jobs', {
         renderedEventId: 0,
         summary: '',
         error: null,
+        presentationMode: null,
         events: [],
       }
       record.sessionId = sessionId
+      if (presentationMode !== undefined) record.presentationMode = presentationMode
       if (!terminalStatuses.has(record.status)) record.status = status
       record.lastEventId = Math.max(record.lastEventId, lastEventId)
       this.records[jobId] = record
@@ -51,6 +55,8 @@ export const useJobsStore = defineStore('jobs', {
       const cursor = existing?.lastEventId ?? 0
       const record = this.start(job.job_id, job.session_id, job.status, cursor)
       record.error = typeof job.error === 'string' ? job.error : null
+      const mode = (job as ActiveJobResponse & { result?: { presentation_mode?: unknown } }).result?.presentation_mode
+      if (mode === 'solve' || mode === 'teach' || mode === 'report') record.presentationMode = mode
       return record
     },
     applyEvent(jobId: string, event: DecodedSseEvent): void {

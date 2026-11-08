@@ -7,11 +7,15 @@ import { useJobsStore } from '../stores/jobs.store'
 import { useSessionsStore } from '../stores/sessions.store'
 import { useFilesStore } from '../stores/files.store'
 import ReportSection from './ReportSection.vue'
+import PresentationSection from './PresentationSection.vue'
 import { JobController } from '../runtime/jobs/job-controller'
+import { parsePresentationInput } from '../runtime/presentation/mode'
+import type { PresentationMode } from '../runtime/presentation/mode'
 import SessionSidebar from './SessionSidebar.vue'
 import MessageList from './MessageList.vue'
 import ComposerBar from './ComposerBar.vue'
 import StarModeSelector from './StarModeSelector.vue'
+import PresentationCommandHint from './PresentationCommandHint.vue'
 import WorkspaceInspector from './WorkspaceInspector.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
@@ -24,6 +28,7 @@ const files = useFilesStore()
 const draft = ref('')
 const notice = ref('')
 const visionEnabled = ref(false)
+const presentationEnabled = ref(false)
 const executionMode = ref('unavailable')
 const solverMode = ref('legacy')
 const solverModes = ref<Array<{ solver_mode: string; enabled: boolean }>>([])
@@ -42,11 +47,24 @@ const selectedJob = computed(() => {
   const jobId = sessions.messages.at(-1)?.analysis_job_id
   return jobId ? jobs.byId(jobId) : undefined
 })
+const presentationMode = computed(() => selectedJob.value?.presentationMode ?? null)
+const selectedProblem = computed(() => {
+  const jobId = selectedJob.value?.jobId
+  return [...sessions.messages].reverse().find((message) => message.analysis_job_id === jobId && message.sender === 'user')?.text ?? ''
+})
 
 async function send(): Promise<void> {
   if (current.value?.status === 'waiting_input') { await resumeCurrent(); return }
-  const message = draft.value.trim()
-  if (!message || current.value || !sessions.currentId || submitting.value) return
+  const parsed = parsePresentationInput(draft.value)
+  const message = parsed.problem
+  if (parsed.presentationMode && !presentationEnabled.value) {
+    notice.value = 'S06 输出模式当前不可用；原题未提交。'
+    return
+  }
+  if (!message || current.value || !sessions.currentId || submitting.value) {
+    if (!message && parsed.presentationMode) notice.value = '请在输出命令后输入数学题目，例如：/teach 证明 1+1=2。'
+    return
+  }
   submitting.value = true
   notice.value = ''
   try {
@@ -55,14 +73,15 @@ async function send(): Promise<void> {
     const mode = solverMode.value
     const fingerprint = JSON.stringify({
       sessionId, message, fileId: fileId ?? null, mode,
+      presentationMode: parsed.presentationMode ?? null,
     })
     if (pendingCreate.value?.fingerprint !== fingerprint) {
       pendingCreate.value = { fingerprint, key: createIdempotencyKey() }
     }
-    const result = await api.createJob(message, sessionId, pendingCreate.value.key, fileId, mode)
+    const result = await api.createJob(message, sessionId, pendingCreate.value.key, fileId, mode, parsed.presentationMode)
     if (!result.success || !result.job_id || !result.status) throw new Error(result.error ?? '任务未被接受')
     pendingCreate.value = null
-    jobs.start(result.job_id, sessions.currentId, result.status)
+    jobs.start(result.job_id, sessions.currentId, result.status, 0, parsed.presentationMode ?? null)
     observeJob(result.job_id)
     sessions.addUser(message, result.job_id)
     report.value = null
@@ -108,7 +127,12 @@ function useStarter(value: string): void { draft.value = value; document.getElem
 function openSettings(): void { globalThis.location.assign(settingsHref()) }
 async function chooseFile(event: Event): Promise<void> { const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (!file) return; try { await files.upload(file); selectedFile.value = files.items.at(-1)?.file_id; selectedFileName.value = file.name } catch (error) { notice.value = error instanceof Error ? error.message : '题图上传失败，请重试。' } finally { input.value = '' } }
 function clearFile(): void { selectedFile.value = undefined; selectedFileName.value = undefined }
-async function loadReport(jobId: string): Promise<void> { try { report.value = await api.jobReport(jobId) } catch { report.value = null } }
+async function loadReport(jobId: string): Promise<void> {
+  try {
+    jobs.observe(await api.getJob(jobId))
+    report.value = await api.jobReport(jobId)
+  } catch { report.value = null }
+}
 function observeJob(jobId: string): void {
   void jobController.subscribe(jobId).then(async () => {
     await loadReport(jobId)
@@ -128,6 +152,7 @@ async function initialize(): Promise<void> {
       notice.value = 'live 模式未检测到 Intern API 凭证。'
     }
     solverModes.value = capabilities.solver_modes ?? []
+    presentationEnabled.value = capabilities.presentation?.enabled ?? false
     visionEnabled.value = capabilities.files.upload.enabled
     if (visionEnabled.value) await files.load()
   } catch (error) {
@@ -171,8 +196,8 @@ onUnmounted(() => jobController.stopAll())
       <div v-if="notice" class="notice workspace-notice" role="status">{{ notice }}<UiButton v-if="loadFailed" @click="initialize">重新加载</UiButton></div>
       <div v-if="current?.status === 'waiting_input'" class="notice notice--warning workspace-notice" role="status">运行需要补充条件，请在输入栏填写后继续。</div>
       <section class="conversation-area" aria-label="数学对话">
-        <div class="conversation-scroll"><div v-if="loading" class="loading-state" role="status" aria-busy="true">正在加载会话…<div v-for="n in 3" :key="n" class="skeleton"></div></div><MessageList v-else-if="!loadFailed" :messages="sessions.messages" @starter="useStarter" /><ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" /></div>
-        <ComposerBar v-model="draft" :disabled="loading || loadFailed || submitting || Boolean(current && current.status !== 'waiting_input')" :running="Boolean(current)" :waiting="current?.status === 'waiting_input'" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><StarModeSelector v-model="solverMode" :modes="solverModes" :disabled="Boolean(current) || submitting" /></template></ComposerBar>
+        <div class="conversation-scroll"><div v-if="loading" class="loading-state" role="status" aria-busy="true">正在加载会话…<div v-for="n in 3" :key="n" class="skeleton"></div></div><MessageList v-else-if="!loadFailed" :messages="sessions.messages" @starter="useStarter" /><PresentationSection v-if="report && presentationMode && selectedJob" :job-id="selectedJob.jobId" :mode="presentationMode" :job-status="selectedJob.status" :problem="selectedProblem" :fallback-answer="report.report.answer" /><ReportSection v-else-if="report" :mode="report.mode" :status="report.status" :report="report.report" /></div>
+        <ComposerBar v-model="draft" :disabled="loading || loadFailed || submitting || Boolean(current && current.status !== 'waiting_input')" :running="Boolean(current)" :waiting="current?.status === 'waiting_input'" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><StarModeSelector v-model="solverMode" :modes="solverModes" :disabled="Boolean(current) || submitting" /><PresentationCommandHint :enabled="presentationEnabled" /></template></ComposerBar>
       </section>
     </main>
     <WorkspaceInspector :open="inspectorOpen" :job="selectedJob" :report="report" @close="inspectorOpen = false" />

@@ -16,6 +16,7 @@ export const capabilitiesResponseSchema = z.object({
   sse: z.object({ enabled: z.boolean(), status: z.string() }),
   verification_mode: z.array(z.string()),
   files: z.object({ upload: capabilitySchema }),
+  presentation: z.object({ enabled: z.boolean(), modes: z.array(z.enum(['solve', 'teach', 'report'])), status: z.enum(['available', 'unavailable']) }).optional(),
   capabilities: z.object({ jobs: z.boolean(), sse: z.boolean(), verification_mode: z.array(z.string()), file_upload: capabilitySchema }),
 })
 export type CapabilitiesResponse = z.infer<typeof capabilitiesResponseSchema>
