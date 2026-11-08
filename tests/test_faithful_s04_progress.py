@@ -256,3 +256,21 @@ class LegacyProgressBoundaryTest(unittest.TestCase):
         self.assertNotIn("method_id", old)
         new = response_schema({**request, "progress_policy": {"enabled": True}})
         self.assertIn("method_id", new["properties"]["steps"]["items"]["properties"])
+
+
+class CompletedRootProgressTest(unittest.TestCase):
+    def test_prerequisite_of_completed_root_cannot_refresh_stagnation(self):
+        state = ProgressTest().state()
+        state["obligation_ledger"] = [{"obligation_id": "root", "status": "satisfied"},
+                                      {"obligation_id": "open", "status": "open"}]
+        state["progress"] = {"seen_roots": ["root"], "no_evidence_rounds": 2}
+        state["problem_spec"] = {
+            "root_obligations": [{"obligation_id": "root", "prerequisite_ids": ["factor"]},
+                                 {"obligation_id": "open"}],
+            "auxiliary_goals": [{"goal_id": "factor"}],
+        }
+        state["plan"]["steps"][0].update(obligation_ids=[], auxiliary_goal_ids=["factor"])
+        patch = review_progress(state, {"type": "step_reviewed", "step_id": "a"}, {
+            "phase": "STEP_EXECUTE", "steps": {"a": {"verification": {"valid": True, "verdict": "ACCEPT"}}}})
+        self.assertEqual(3, patch["progress"]["no_evidence_rounds"])
+        self.assertEqual("stagnation", patch["progress"]["trigger"])

@@ -104,7 +104,10 @@ def accepted_prerequisite_goals(state, event, updates):
     verdict = record.get("verification", {})
     if not (verdict.get("valid") is True and verdict.get("verdict") == "ACCEPT"):
         return set()
-    relevant = set().union(*prerequisite_goals(state).values())
+    covered = {item["obligation_id"] for item in state.get("obligation_ledger", [])
+               if item.get("status") == "satisfied"}
+    relevant = set().union(*(goals for root, goals in prerequisite_goals(state).items()
+                             if root not in covered))
     step = next((item for item in state.get("plan", {}).get("steps", [])
                  if item.get("step_id") == step_id), {})
     return relevant.intersection(step.get("auxiliary_goal_ids", []))
