@@ -4,6 +4,7 @@ import type { JobReport } from '../api/reports.schemas'
 import { api } from '../api/client'
 import UiButton from './ui/UiButton.vue'
 import StatusBadge from './ui/StatusBadge.vue'
+import ProofGraphView from './ProofGraphView.vue'
 const props = defineProps<{ report: JobReport; jobId: string }>()
 const solver = computed(() => props.report.solver?.solver)
 const steps = computed(() => (solver.value?.progress?.steps ?? []) as Record<string, unknown>[])
@@ -29,6 +30,7 @@ async function loadReplay(): Promise<void> {
 </script>
 <template>
   <template v-if="report.solver?.solver_mode?.startsWith('star_')">
+    <ProofGraphView v-if="solver?.progress?.proof_graph" :graph="solver.progress.proof_graph" :run-id="jobId" />
     <section class="evidence-section" aria-label="STAR 持久进展">
       <h2>STAR 持久进展</h2>
       <div class="review-meta"><StatusBadge :value="report.solver.solver_mode" /><StatusBadge :value="report.solver.evidence_kind ?? 'unknown'" /></div>

@@ -26,7 +26,23 @@ export const planHistorySchema = z.array(z.object({
   outcome: z.enum(['replan', 'problem_spec_change', 'trace_back']).nullable(),
 }))
 
+export const proofGraphSchema = z.object({
+  graph_version: z.number().int().nonnegative(),
+  propositions: z.array(z.object({
+    id: z.string(), status: z.enum(['unresolved', 'supported', 'invalidated', 'refuted']),
+    grade: z.string().nullable(), conflict: z.boolean(),
+    dependencies: z.array(z.string()), sources: z.array(z.string()),
+  })),
+  attempts: z.array(z.object({
+    id: z.string(), status: z.enum(['proposed', 'accepted', 'rejected', 'invalidated', 'unknown']),
+    direction: z.enum(['support', 'counterexample']), grade: z.string().nullable(),
+    conclusion: z.string(), dependencies: z.array(z.string()), sources: z.array(z.string()),
+  })),
+})
+export type ProofGraph = z.infer<typeof proofGraphSchema>
+
 export const progressSchema = z.object({
+  proof_graph: proofGraphSchema.optional(),
   root_obligations: rootObligationsSchema.optional(),
   plan_history: planHistorySchema.optional(),
   steps: z.array(z.record(z.string(), z.unknown())).optional(),

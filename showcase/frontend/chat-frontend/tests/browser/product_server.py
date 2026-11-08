@@ -151,6 +151,11 @@ class Provider(BaseHTTPRequestHandler):
             reply = S05_REPLAN_REPLIES[number - 1]
         if problem == 'tool' and role == 'reasoner':
             reply = TOOL_STEP
+        if problem == S05_LATENCY_PROBLEM and role == 'step_verifier':
+            reply['classified_outcomes'] = [{
+                'category': 'Lemma', 'statement': '1+1 equals 2 by the definition of addition.',
+                'scope': 'integer addition', 'claim_indexes': [0],
+            }]
         if number > 28:
             self.send_error(429)
             return
@@ -191,7 +196,8 @@ if __name__ == '__main__':
             'SHOWCASE_JOB_DELAY_SECONDS': 0, 'SHOWCASE_STAR_ENABLED': True,
             'SHOWCASE_STAR_EVIDENCE_KIND': 'fault_injection',
             'SHOWCASE_STAR_FEATURES': {
-                'problem_spec': True, 'final_generation': True, 'final_solution_review': True,
+                'problem_spec': True, 'proof_graph': True,
+                'final_generation': True, 'final_solution_review': True,
             },
             'SHOWCASE_STAR_BUDGET': RunBudgetLimits(
                 max_model_calls=28, max_http_attempts=28, max_tool_calls=0,

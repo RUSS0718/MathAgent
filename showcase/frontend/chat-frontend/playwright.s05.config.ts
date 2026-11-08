@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test'
 
-const browserRunId = process.env.S05_BROWSER_RUN_ID ?? `run-${new Date().toISOString().replace(/[:.]/g, '-')}`
+const browserRunId = `run-${new Date().toISOString().replace(/[:.]/g, '-')}`
 
 export default defineConfig({
   testDir: './tests/browser', testMatch: 'faithful-s05.spec.ts', workers: 1,
