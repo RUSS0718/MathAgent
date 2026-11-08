@@ -86,7 +86,16 @@ class SolverStateStore:
 
         run_id = state["run_id"]
         try:
+            state = dict(state)
+            event = dict(event)
             with _SOLVER_STORAGE_LOCK, self._connection:
+                if state.get("proof_graph_policy", {}).get("enabled") is True:
+                    from .proof_graph import evolve_proof_graph
+
+                    graph_patch, graph_summary = evolve_proof_graph(state, event)
+                    if graph_patch is not None:
+                        state["proof_graph"] = graph_patch
+                        event["proof_graph"] = graph_summary
                 cursor = self._connection.execute(
                     """
                     INSERT INTO solver_states(
@@ -121,6 +130,33 @@ class SolverStateStore:
                         event["created_at"],
                     ),
                 )
+                if state.get("proof_graph_policy", {}).get("enabled") is True:
+                    graph_event = {
+                        "run_id": run_id,
+                        "sequence": 2,
+                        "event_id": "proof-graph-bootstrap-v1",
+                        "state_revision": state["state_revision"],
+                        "event_json": _json({
+                            "run_id": run_id,
+                            "sequence": 2,
+                            "event_id": "proof-graph-bootstrap-v1",
+                            "state_revision": state["state_revision"],
+                            "type": "proof_graph_bootstrapped",
+                            "graph_version": state["proof_graph"]["current_version"],
+                            "imported_count": len(state["proof_graph"]["snapshots"][-1]["derivations"]),
+                            "not_imported_count": len(state["proof_graph"]["snapshots"][-1]["not_imported_records"]),
+                            "created_at": event["created_at"],
+                        }),
+                        "created_at": event["created_at"],
+                    }
+                    self._connection.execute(
+                        """
+                        INSERT INTO solver_events(
+                            run_id, sequence, event_id, state_revision, event_json, created_at
+                        ) VALUES (:run_id, :sequence, :event_id, :state_revision, :event_json, :created_at)
+                        """,
+                        graph_event,
+                    )
         except (sqlite3.Error, KeyError, TypeError, ValueError) as exc:
             raise SolverPersistenceError("create_run") from exc
         return True
@@ -160,6 +196,8 @@ class SolverStateStore:
 
         connection = self._connection
         with _SOLVER_STORAGE_LOCK:
+            if {"proof_graph", "proof_graph_policy"} & state_updates.keys():
+                raise SolverPersistenceError("graph_fields_are_storage_managed")
             if connection.in_transaction:
                 raise SolverPersistenceError("commit_event")
             try:
@@ -200,6 +238,35 @@ class SolverStateStore:
                 if not isinstance(state, dict):
                     raise SolverPersistenceError("commit_event")
                 state_updates = controlled_patch(connection, run_id, event, state_updates)
+                graph_candidate = dict(state)
+                graph_candidate.update(state_updates)
+                graph_candidate["proof_graph"] = state.get("proof_graph")
+                graph_candidate["proof_graph_policy"] = state.get("proof_graph_policy")
+                if graph_candidate.get("proof_graph_policy", {}).get("enabled") is True:
+                    from .proof_graph import evolve_proof_graph
+
+                    receipt_rows = connection.execute(
+                        "SELECT event_json FROM solver_events WHERE run_id = ? ORDER BY sequence",
+                        (run_id,),
+                    ).fetchall()
+                    persisted_receipts = {}
+                    for receipt_row in receipt_rows:
+                        saved = json.loads(receipt_row["event_json"])
+                        receipt = saved.get("receipt")
+                        if (saved.get("type") == "tool_receipt" and isinstance(receipt, Mapping)
+                                and isinstance(receipt.get("receipt_id"), str)):
+                            persisted_receipts[receipt["receipt_id"]] = receipt
+                    graph_patch, graph_summary = evolve_proof_graph(
+                        graph_candidate, event, persisted_receipts
+                    )
+                    if graph_patch is not None:
+                        state_updates = {**state_updates, "proof_graph": graph_patch}
+                        event = {**event, "proof_graph": graph_summary}
+                    # The fixed deadline may pass while the derived graph is built.
+                    guarded_updates = controlled_patch(connection, run_id, event, state_updates)
+                    if guarded_updates != state_updates:
+                        state_updates = guarded_updates
+                        event = {key: value for key, value in event.items() if key != "proof_graph"}
                 next_revision = current_revision + 1
                 now = datetime.now(UTC).isoformat()
                 state.update(state_updates)

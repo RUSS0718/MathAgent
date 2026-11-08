@@ -219,7 +219,8 @@ class SolverHarness:
         state = initial_state(run_id, problem_hash, self._config_hash,
                               context_policy=self._context_policy,
                               problem_spec=supplied_spec,
-                              work_units=work_units)
+                              work_units=work_units,
+                              proof_graph=self._config.get("features", {}).get("proof_graph") is True)
         if self._config.get("features", {}).get("progress_scheduling") is True:
             if supplied_spec is None:
                 raise SolverValidationError("progress_scheduling_requires_problem_spec")
@@ -374,6 +375,8 @@ class SolverHarness:
             "updated_at",
         } & normalized_updates.keys():
             raise SolverValidationError("state_updates cannot change identity or revision fields")
+        if {"proof_graph", "proof_graph_policy"} & normalized_updates.keys():
+            raise SolverValidationError("state_updates cannot change storage-managed proof graph fields")
 
         # Validate the persisted run identity before writing through this Harness.
         current = self._state_store.get_run(normalized_run_id) if current is None else current

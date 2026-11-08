@@ -8,7 +8,8 @@ from typing import Any
 def initial_state(run_id: str, problem_hash: str, config_hash: str, *,
                   context_policy: dict[str, Any] | None = None,
                   problem_spec: dict[str, Any] | None = None,
-                  work_units: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                  work_units: list[dict[str, Any]] | None = None,
+                  proof_graph: bool = False) -> dict[str, Any]:
     now = datetime.now(UTC).isoformat()
     state = {
         "schema_version": "1.1",
@@ -67,4 +68,12 @@ def initial_state(run_id: str, problem_hash: str, config_hash: str, *,
             "obligation_evidence_ledger": [],
             "skipped_work_units": [],
         })
+    if proof_graph:
+        from .proof_graph import initial_proof_graph
+
+        state["proof_graph_policy"] = {
+            "enabled": True, "version": "proof-graph-v1",
+            "schema_version": "proof-graph-v1",
+        }
+        state["proof_graph"] = initial_proof_graph()
     return state
