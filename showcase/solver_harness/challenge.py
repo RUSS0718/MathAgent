@@ -424,7 +424,7 @@ def _explore_after_guidance(harness, run, problem, model_port, max_model_calls, 
         max_explore_rounds=round_number,
         max_runtime_seconds=max_runtime_seconds,
     )
-    if run["state"]["phase"] != "CHALLENGE":
+    if run["state"]["phase"] == "TERMINAL":
         return run
     state = run["state"]
     guidance = state["meta_guidance_decision"]
