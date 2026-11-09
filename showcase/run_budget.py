@@ -418,6 +418,10 @@ class RunBudgetLedger:
         return dict(population.get("closing_reserve") or {}) if population is not None else {}
 
     def _population_state(self, run_id):
+        if self.connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='solver_states'"
+        ).fetchone() is None:
+            return None
         row = self.connection.execute(
             "SELECT state_json FROM solver_states WHERE run_id=?", (run_id,)
         ).fetchone()

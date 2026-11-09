@@ -67,6 +67,14 @@ store同事务保存rating_history，公共candidate-replay对并发Run重算全
 
 门禁02源码 `d77267bddccf546910738b572a37f3849443ed58`：定向Spec复查发现连续相同评分跨轮被去重，协调者中断门禁，`interruption.json` 记录source_changed=true，不计通过。已用失败测试复现历史只有轮1，改为按(round,rating)保留后store/schedule共16项通过（`replay-round-red.log`、`replay-round-green.log`）。01/02均未形成完整回归结论，不复用为最终退出证据。
 
+## 门禁03失败与预算兼容修复
+
+源码 `7925b093c30ad26e18d1eb117c739548a5c89a52`，门禁03失败于offline：1585项，42failure、69error、42skip；测试1168.677秒，门禁1180.453秒，source_changed=false。发布与前端未执行，日志和原始摘要保留。
+
+64个error直接指向独立RunBudget账本不存在solver_states；新接缝无条件查询导致旧模型/工具准入失败，进一步引发零请求与超时断言失败。修复仅先查表是否存在，缺表沿旧预算行为；12项旧预算与迟到结算先通过，30个失败模块回归153项全部通过，85.752秒，`gate03-failed-regression01.log`；没有放宽旧断言。定向Standards/Spec复查覆盖该四行修复与默认预算隔离，无新增阻塞。
+
+另有test_star_experiment的Docker daemon不可用环境错误；用户于本次接续手动打开Docker，实测server29.6.1，已有固定镜像SHA `fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d` 一致，未构建/下载镜像。42skip不计通过，后续完整门禁按实际环境重新记录。
+
 ## 退出与未验证项
 
 源码 SHA、门禁 SHA、source_changed、完整失败/skip、最终交接 SHA 待冻结后记录。55 项回归结束后临时检查已删除；最终门禁启动时重新建立唯一检查所有权。
