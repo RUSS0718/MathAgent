@@ -65,6 +65,8 @@ timeout/error 曾被 Population 当作已结清，父账本却保留未知预留
 
 store同事务保存rating_history，公共candidate-replay对并发Run重算全部历史，只返回policy/count/matches，不输出私有路线输入。`replay-public-red.log` 先复现缺字段；`replay-tamper-green.log` 5项通过，含持久历史篡改后replay不匹配、零模型新调用。
 
+门禁02源码 `d77267bddccf546910738b572a37f3849443ed58`：定向Spec复查发现连续相同评分跨轮被去重，协调者中断门禁，`interruption.json` 记录source_changed=true，不计通过。已用失败测试复现历史只有轮1，改为按(round,rating)保留后store/schedule共16项通过（`replay-round-red.log`、`replay-round-green.log`）。01/02均未形成完整回归结论，不复用为最终退出证据。
+
 ## 退出与未验证项
 
 源码 SHA、门禁 SHA、source_changed、完整失败/skip、最终交接 SHA 待冻结后记录。55 项回归结束后临时检查已删除；最终门禁启动时重新建立唯一检查所有权。

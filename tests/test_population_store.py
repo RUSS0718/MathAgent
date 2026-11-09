@@ -93,6 +93,19 @@ class PopulationStoreTests(unittest.TestCase):
             dependencies=[],
         )
 
+    def test_identical_rating_in_consecutive_rounds_retains_both_rounds(self):
+        from showcase.solver_harness.population_schedule import round_schedule
+
+        first = round_schedule(self.run["state"]["population"])
+        run = command(self.harness, RUN_ID, "patch", updates=first)
+        next_population = dict(run["state"]["population"])
+        next_population["opportunities"] = list(first["round_members"])
+        second = round_schedule(next_population)
+        self.assertEqual(first["rating"], second["rating"])
+        run = command(self.harness, RUN_ID, "patch", updates=second)
+        history = run["state"]["population"]["rating_history"]
+        self.assertEqual([1, 2], [entry["round"] for entry in history])
+
     def test_independent_process_takeover_fences_previous_dispatch_owner(self):
         script = """
 import sys

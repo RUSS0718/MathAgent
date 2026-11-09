@@ -221,9 +221,10 @@ def _transition(connection, state, population, operation, args, *, owner_token):
         if "rating" in updates:
             rating = updates["rating"]
             history = population.setdefault("rating_history", [])
-            if not history or history[-1]["rating"] != rating:
-                history.append({"round": updates.get("round", population.get("round", 0)),
-                                "rating": deepcopy(rating)})
+            entry = {"round": updates.get("round", population.get("round", 0)),
+                     "rating": deepcopy(rating)}
+            if not history or history[-1] != entry:
+                history.append(entry)
         population.update(updates)
         return _event("population_updated", changed=sorted(updates)), {"population": population}
 
