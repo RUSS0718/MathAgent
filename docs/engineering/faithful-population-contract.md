@@ -1,6 +1,6 @@
 # #156 完整并发 Population 工程合同
 
-日期：2026-11-08（Asia/Shanghai）。状态：本轮离线engineering-preview门禁通过；分层结果与未验证项见[验收记录](../evals/faithful-population-20261109.md)，不代表真实容量或数学效果退出。依据 [#156](https://github.com/RUSS0718/MathAgent/issues/156) 与 [#155 决议](https://github.com/RUSS0718/MathAgent/issues/155#issuecomment-6704660319)。本合同不扩张串行 F2，也不解除 F3/S10 门槛。
+日期：2026-11-08（Asia/Shanghai）。状态：历史门禁05支持离线engineering-preview；2026-11-09接续正在补公共验收映射与回归，当前源码须重新冻结门禁。分层结果与未验证项见[验收记录](../evals/faithful-population-20261109.md)，不代表真实容量或数学效果退出。依据 [#156](https://github.com/RUSS0718/MathAgent/issues/156) 与 [#155 决议](https://github.com/RUSS0718/MathAgent/issues/155#issuecomment-6704660319)。本合同不扩张串行 F2，也不解除 F3/S10 门槛。
 
 起点：集成树 `faithful-integration/Challenge-Cup-2026`，分支 `mathagent-faithful`，HEAD `0aec0ff2bd422237782c4ae82af62fe770f4387f`，工作树干净。相对总票审计基线 `b7038798cccdf5bfdc80175ebfe68dcbf12dc2d6` 的变化为 S01–S08 及交接增量，具体证据由[索引](../README.md)定位。已核对 #144、#146、#148、#149、#155、#156；F1/F2 的工程前置已满足。Lean 缺失仍为 unavailable，不接入 L2/L3，不实施干预或记忆。
 
@@ -24,4 +24,4 @@
 | C4 | 协调者：新 recovery/final 生命周期接缝 | 局部 unknown、全 Run 暂停、显式新身份、复用完成动作、冻结/拒绝恢复及终止竞态 |
 | C5 | 产品工作面：新 product/projection/Panel 与 API/report/Evidence 小接缝 | 公共创建/恢复/取消/读取、交付与结算分离、隐私、刷新零调用、旧 Run 与幂等兼容 |
 
-八组公共验收逐项沿用[完整并发交接](faithful-concurrency-handoff-155.md)，通过 Job、事件、report、Evidence/replay 和真实独立进程观察。局部测试先红后绿；阶段冻结后按[工程门禁](development-gates.md)唯一运行，集中 Standards/Spec 审查。运行产物仅在忽略的 artifacts。未通过项保留 incomplete；真实 provider、容量/SLA、自然题及数学收益分层记录，工程通过不表示能力提升。
+当前逐项公共入口、断言、精确测试和未完成矩阵见[接续验收映射](../evals/faithful-population-20261109.md#接续验收映射2026-11-09门禁06前)。八组公共验收逐项沿用[完整并发交接](faithful-concurrency-handoff-155.md)，通过 Job、事件、report、Evidence/replay 和真实独立进程观察。局部测试先红后绿；阶段冻结后按[工程门禁](development-gates.md)唯一运行，集中 Standards/Spec 审查。运行产物仅在忽略的 artifacts。未通过项保留 incomplete；真实 provider、容量/SLA、自然题及数学收益分层记录，工程通过不表示能力提升。

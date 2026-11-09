@@ -1,6 +1,6 @@
 # #156 Population/APRS 接管与验收
 
-日期：2026-11-09（Asia/Shanghai）。状态：离线工程门禁通过（engineering-preview）；真实容量与数学效果未验证，不声明能力提升。
+日期：2026-11-09（Asia/Shanghai）。状态：历史门禁05支持engineering-preview；本次接续已补聚焦证据，当前源码最终门禁待运行。真实容量与数学效果未验证，不声明能力提升。
 
 ## 身份
 
@@ -101,3 +101,52 @@ store同事务保存rating_history，公共candidate-replay对并发Run重算全
 门禁01/02中断、03失败、04成功及05成功全部保留。05开始和结束的dirty tracked/untracked均为空，`source_changed=false`。门禁源码/门禁SHA为`088a307d0ba8d332cc2f0e6c767c405a8de4180e`；文档索引及本验收记录随后由独立docs提交更新。临时30分钟检查、runner脚本及测试后台进程均已清理；无未完成运行。未push。接续仍使用当前选择模型，具体型号与实际继承未独立核实，不猜测。
 
 官方baseline和默认评分预算未变；`tests/test.md` 未读、未改、未提交、未删除。完整记录只支持所列工程覆盖，不声明数学能力提升。
+
+
+## 接续验收映射（2026-11-09，门禁06前）
+
+接续基线 `9442d87b8d8fea18a3f7a53d4fcf89cfa48e2991`。开工保留5个未提交文件；旧门禁05不覆盖这些变化。本表细化八组合同，测试名均位于 `tests/`；公共 Job 指 `POST /api/agent/jobs` 与 GET Job/events/report、resume/cancel。结果仅说明已列断言，不能将一行的局部证据推广到整组完成。
+
+| 合同 | 公共入口或持久化边界 | 状态/断言 | 测试定位 | 当前证据/缺口 |
+| --- | --- | --- | --- | --- |
+| 1 重叠、单路线、等待 | 公共 Job + loopback | 两路线HTTP重叠；快路线第二工作块不等待慢HTTP | `test_star_population_runtime`: `test_two_distinct_routes_overlap_and_deliver_from_persisted_root_evidence`、`test_fast_route_advances_second_work_unit_while_other_http_is_pending` | 历史公共证据；本轮待冻结回归 |
+| 1 公平、新成员 | 调度持久状态；公共Job中可信控制器注入 | 低分仍获机会；新成员不进入当前轮 | `test_population_schedule`；runtime的 `test_controller_registers_new_route_during_round_for_next_round_only` | 不代表自主Planner生产；大规模公平性未测 |
+| 2 准入、重复、收尾 | store事务/共享预算；公共Job限流 | 发送前预留；未知占用保留；429停止新探索 | `test_population_store`、`test_population_pressure`；runtime的 `test_http_rate_limit_pauses_new_exploration_and_retains_other_inflight_request` | 新增 `test_population_admission` 三项持久化验收通过（独立连接竞争、等价frontier、动作重放）；新增 `test_population_public_admission` 单槽跨进程竞争通过（race03）；完整竞争故障组合矩阵未穷尽；自然机器压力not_measured |
+| 3 依赖、共享、去重 | store接受；公共Job出站上下文 | 仅采用已接受证据；绑定实际依赖；重复合并不新增结果 | `test_population_evidence`、`test_population_adoption`；runtime的 `test_next_work_unit_adopts_other_route_verified_evidence_with_persisted_dependencies` | 本轮 `test_population_public_evidence` 四项公共Job/受控持久故障注入通过：双来源去重/成本保留、实际依赖撤销、冲突拒绝、无关版本变化允许；完整故障组合矩阵仍未穷尽 |
+| 4 所有权与退出恢复 | 跨进程store；新服务实例/public resume | 旧owner拒写；completed回执不重发；退出窗口inflight精确unknown并保留预留 | `test_population_store.test_independent_process_takeover_fences_previous_dispatch_owner`；runtime的 `test_public_resume_after_worker_process_exit_reuses_persisted_receipt` | 已有独立证据；两个存活公共owner竞争未测 |
+| 5 unknown与暂停 | 公共resume/GET；共享账本 | 普通resume零重发；显式新身份；丢失callback后读取结算 | runtime的 `test_population_resume_retries_unknown_call_with_new_identity`、`test_public_read_repairs_lost_settlement_callback_without_new_math_or_calls`；`test_population_public_unknown` 的反事实依赖拒交分支；`test_population_schedule.test_shared_closing_failure_yields_without_new_dispatch` | 局部/全局暂停分层，真实provider故障未测 |
+| 6 冻结与终止 | 公共Job/cancel；原deadline | REJECT后恢复；取消/截止迟到只结算；答案不被覆盖 | runtime的 `test_rejected_final_candidate_resumes_legal_route_then_reviews_new_candidate`、`test_original_deadline_fences_late_results`、`test_cancel_fences_late_route_math_and_preserves_physical_settlement` | exact-text沿用既有finalization；无形式内核证据 |
+| 7 交付/结算 | 公共Job/report；独立浏览器fixture | 独立答案先交付；账本缺失拒交；页面分开显示 | runtime的 `test_delivery_can_settle_before_late_request_without_resending_or_changing_math`、`test_bound_review_cannot_deliver_after_shared_budget_ledger_is_lost`；`test_population_delivery` | 浏览器r4仅复用未变前端；本轮 `test_population_public_unknown` 两项公共Job/持久故障注入通过；完整故障组合矩阵未穷尽 |
+| 8 policy/旧路径 | preset/幂等摘要；旧预算；baseline门禁 | 默认关闭；policy冻结；旧预算无solver_states仍准入 | `test_star_population_product`、`test_population_identity`、`test_population_transport_identity`、`test_run_budget.test_legacy_budget_without_solver_state_table_reserves_model_call` | 本轮73项聚焦通过；当前源码最终门禁未运行 |
+
+本轮聚焦命令：`uv run python scripts/run_unittest_report.py --summary-json artifacts/faithful-population-followup/review-regression.json tests.test_release_reporting tests.test_run_budget tests.test_population_schedule tests.test_population_store tests.test_population_evidence tests.test_population_adoption tests.test_population_delivery tests.test_population_pressure tests.test_population_identity tests.test_population_transport_identity tests.test_star_population_product`。73项通过，13.425秒；它验证现有改进与相关回归，不是#156全组完成证据。
+
+#156/#146保持open。provider-live、服务/账户/机器容量、自然压力/SLA、自然题、独立数学效果、faithful-D仍未验证；S09 unavailable，F3/S10与完整F6状态不变。
+
+新增持久化验收：`uv run python scripts/run_unittest_report.py --expect-count 3 --summary-json artifacts/faithful-population-followup/admission-green.json tests.test_population_admission`，3项通过，0.317秒。先运行再决定实现，现有生产行为满足断言，未修改生产逻辑。初次 `admission.json` 中2项失败源于测试比较了持续增长的wall_time_seconds，修正为逐字段核对其余预算项；不将该失败写成产品缺陷或修复证据。
+
+公共回归：`uv run python scripts/run_unittest_report.py --expect-count 16 --summary-json artifacts/faithful-population-followup/runtime.json --diagnostics artifacts/faithful-population-followup/runtime.log tests.test_star_population_runtime`，16项通过，68.080秒，0skip。本轮未更改生产或前端源码；无需为已有正确行为添加实现。
+
+Standards初审发现报告脚本在diagnostics模式父/子进程重复导入显式选择器；真实子进程回归先失败（导入计数2，预期1）。修复预检仅在实际worker执行。复查又发现计数检查覆盖加载错误；unresolved选择器加expect-count的红测退出1而非预期2，修复合并保留加载/计数错误。代理定向4项通过（0.429秒），报告/预算28项通过（7.990秒）；源码冻结前仍须集中复查与最终门禁。这些属于检查入口修复，不是Population能力提升。
+
+公共新增用例首轮失败记录 `public-admission01/02/03`、`public-evidence-current`、`public-evidence02`、`public-unknown-01` 保留。当前已确认多处测试装配/前置错误：借用含super的fixture未继承、异步Run尚未创建、已终止Run再accept触发终止栅栏、同一会话重复创建Job、真实reasoner+verifier成本被错误预期为单次调用、并发工作时比较动态快照。它们均不能直接写成产品bug修复证据；后续有效验收另列。
+
+公共准入 `public-admission04` 两项通过，6.187秒；随后复查强化DB重读和成功终态，须最终合并回归。`public-evidence04` 的重复收益断言通过，两依赖场景精确拒绝及ledger断言已通过，但末尾错误期待root covered=1（撤销后应0）；修订后合并05有一项撤销时序失败，尚不算稳定证据。`public-unknown03` 的独立交付已达成功终态，最后resume应为409而非测试误期望202；依赖场景测试错误地禁止了两次正常收尾调用。所有日志保留，不将这些测试修订写成产品行为修复。
+
+`public-evidence06`：4项通过，16.974秒。命令 `uv run python scripts/run_unittest_report.py --expect-count 4 --summary-json artifacts/faithful-population-followup/public-evidence06.json --diagnostics artifacts/faithful-population-followup/public-evidence06.log tests.test_population_public_evidence`。在已捕获真实dependency的接受前窗口，等待当前futures完成再重读持久状态；实际依赖撤销/冲突导致 `adopted_evidence_changed`（精确原因是持久层补充），公共Evidence timeline出现拒绝类型、root covered=0，数学ledger无部分增写。无关图版本变化仍由正常accept接纳；两份独立root证据保留来源与每action两次HTTP/60 fixture tokens，root与总收益计一次。未修改生产实现；这些受控loopback/故障注入不代表自然题或真实provider。
+
+`public-unknown04`：依赖拒交一项已通过；独立交付场景只因测试清理要求unknown settlement不再pending而失败。该等待条件违背未知预留合同，修订为等待实际worker退出；不以这项失败改变生产unknown语义。`public-unknown02/03/04`日志保留，当前源码最终门禁仍未启动。
+
+`public-unknown06`：2项通过，9.943秒。命令 `uv run python scripts/run_unittest_report.py --expect-count 2 --summary-json artifacts/faithful-population-followup/public-unknown06.json --diagnostics artifacts/faithful-population-followup/public-unknown06.log tests.test_population_public_unknown`。依赖案在最终生成前将已有义务证据的真实review call/action状态反事实注入为unknown，保留既有受控loopback logical/http账本，拒交原因精确为 `population_unknown_proof_dependency`；这是持久故障注入，不是真实provider产生未知审查。独立案快路线交付，慢路线真实loopback超时后unknown仍保留原HTTP预算占用，公共report/Evidence保持delivered；终态resume返回409且零新增HTTP。清理等待实际work返回，不要求unknown结清。保留旧调用身份断言不被描述为禁止合法final generator/whole review调用。
+
+集中复查回归 `review-fixes`：报告15项、公共evidence4项、公共unknown2项，共21项通过，29.430秒，0skip；命令 `uv run python scripts/run_unittest_report.py --expect-count 21 --summary-json artifacts/faithful-population-followup/review-fixes.json --diagnostics artifacts/faithful-population-followup/review-fixes.log tests.test_release_reporting tests.test_population_public_evidence tests.test_population_public_unknown`。Standards初审的callback断言吞没风险已增加主线程显式错误回传，报告重复回归已去重；Spec定向复查确认unknown两项的分层含义，不升级为整组故障矩阵完成。当前最终门禁未启动。
+
+`public-admission-race03`：3项通过，13.928秒。命令 `uv run python scripts/run_unittest_report.py --expect-count 3 --summary-json artifacts/faithful-population-followup/public-admission-race03.json --diagnostics artifacts/faithful-population-followup/public-admission-race03.log tests.test_population_public_admission`。新Run先冻结受控capacity=1；两个独立进程ready后同屏障释放，以同owner、不同route/action竞争。恰一准入、另一 `population_capacity_exhausted`；持久层只有winner动作/一次准入事件，logical/HTTP/token增量精确为winner一份预留，loser在预算账本零条目。父调度器正常处理冲突，原winner身份继续执行，公共Job/report/Evidence交付且失败方零发送。仅证明受控容量下原子准入公共最小纵切，不代表provider实际容量、机器压力或两个有效owner。
+
+竞争01/02失败来自测试接缝：未在Run创建前冻结容量、吞容量冲突后伪造准入返回。主线程修订后竞争03通过；生产Population代码未改。所有本测试子进程在finally中终止仍活跃者并wait，不遗留后台运行。
+
+最终聚焦 `focused-final01`：16个相关模块102项通过，118.413秒，0failure/0error/0skip。入口 `uv run python scripts/run_unittest_report.py --expect-count 102 --summary-json artifacts/faithful-population-followup/focused-final01.json --diagnostics artifacts/faithful-population-followup/focused-final01.log`，后接本轮报告、旧预算、全部Population组件/公共验收及 `tests.test_star_population_runtime` 16模块（完整可执行命令见 `artifacts/faithful-population-followup/focused-final01-command.txt`）。新四模块3+3+4+2=12项，单独发现不重复父fixture；报告15项及旧预算回归一并覆盖。当前生产Population与前端源码未改。
+
+`uv run python scripts/check_fast.py` 本轮通过（5项、4.160秒，baseline/Demo/CLI/接缝均通过），但它仍是冻结前聚焦证据；最终门禁将重新执行。Ruff检查/格式检查7文件通过，diff --check无空白错误；官方baseline相对接续9442d87无差异。当前源码最终门禁尚未运行，历史05与Docker42专项继续独立记载。
+
+冻结前双轴复查：Standards确认callback异常已主线程显式回传、报告重复场景已去重，准入预算delta/loser零ledger/子进程finally/容量冲突透传/最终DB重读无阻塞；Spec确认不同route/action单槽竞争及unknown分层含义符合本轮公共最小纵切。两轴分别报告，均无新增阻塞；完整故障组合和真实环境仍不在已验证结论。源代码冻结后只运行一个最终门禁06，运行中不改源。
