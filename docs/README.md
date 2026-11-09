@@ -1,6 +1,6 @@
 # MathAgent 文档索引
 
-- [#156 完整并发接管与验收](evals/faithful-population-20261109.md)：离线engineering-preview门禁04通过（1605项、42skip），并补充独立进程退出窗口恢复聚焦证据；含并发HTTP、回放与独立结算证据；真实容量/机器压力/数学效果未验证，#156保持开放。
+- [#156 完整并发接管与验收](evals/faithful-population-20261109.md)：离线engineering-preview门禁05通过（1606项、42skip），另有42项固定Docker隔离专项通过；含独立进程退出恢复、并发HTTP、回放与独立结算证据；真实容量/机器压力/数学效果未验证，#156保持开放。
 
 ## Faithful 实施入口（截至2026-11-08的阶段快照）
 

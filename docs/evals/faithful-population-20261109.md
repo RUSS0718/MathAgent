@@ -29,7 +29,7 @@ timeout/error 曾被 Population 当作已结清，父账本却保留未知预留
 | 5 unknown | 普通 resume 零重发；显式新 ID lineage；timeout 保留旧预留；公共 GET/report 修复丢失结算 callback | 本地 timeout 不代表远端停止 |
 | 6 冻结/终止 | 公共首次 REJECT 后恢复合法路线并再次整题审查；cancel/deadline 迟到不改根义务或交付 | 无形式内核验收 |
 | 7 交付/结算 | 公共答案先交付、迟到后结算；报告/Evidence 分开投影；桌面/手机 Chromium 刷新重连零 POST、隐私检查 | 浏览器受控 API fixture；后端公共测试独立覆盖真实 HTTP |
-| 8 policy/兼容 | 独立 preset、五项预算身份；同 key 返回同 Job；旧路径回归与 baseline 快速检查 | 最终新源码门禁待完成 |
+| 8 policy/兼容 | 独立 preset、五项预算身份；同 key 返回同 Job；旧路径回归与 baseline 快速检查 | 最终覆盖以门禁05及其42项Docker专项补跑分层记录 |
 
 ## 聚焦证据
 
@@ -77,18 +77,18 @@ store同事务保存rating_history，公共candidate-replay对并发Run重算全
 
 ## 门禁04与交接结论
 
-成功门禁源码 SHA：`eaaadc0b9df401b77a10b30e26546374e3e6600d`。命令：`uv run python scripts/run_final_gate.py --root . --output-dir artifacts/final-gates --run-id faithful-population-04`。当前源码最终门禁通过，后续仅更新文档，不重复产品门禁。
+门禁04源码 SHA：`eaaadc0b9df401b77a10b30e26546374e3e6600d`，其结果仅覆盖该提交。新增真实进程退出测试、预算预留关联断言与最终文档冻结后，门禁05在源码 SHA `088a307d0ba8d332cc2f0e6c767c405a8de4180e` 上运行：`uv run python scripts/run_final_gate.py --root . --output-dir artifacts/final-gates --run-id faithful-population-05`。
 
 | 检查 | 实际结果 |
 | --- | --- |
-| 完整门禁04 | 6/6，1596.203秒，source_changed=false，`artifacts/final-gates/faithful-population-04/status.json` |
-| 完整回归 | 1605项，0failure、0error、42skip，1466.470秒；同目录repository-check/tests.json与diagnostics.log |
-| 发布检查 | 27项通过，40.253秒，release.log |
+| 完整门禁05 | 6/6，1555.765秒，source_changed=false，`artifacts/final-gates/faithful-population-05/status.json` |
+| 完整回归 | 1606项，0failure、0error、42skip，1427.257秒；同目录repository-check/tests.json与diagnostics.log |
+| 发布检查 | 27项通过，39.921秒，release.log |
 | 前端 | npm ci/audit/check全部通过，0漏洞；chunk大于500kB提示不计性能验收 |
 | 浏览器 | 先前桌面/手机Chromium两项通过，前端源码其后未变化，r4证据复用 |
 | 官方隔离 | 快速边界检查通过；相对接管HEAD的user_agent.py、implementations/、BASELINE.json无差异 |
 
-门禁04的42项skip主要是需要显式验证镜像配置的隔离工具/Reference专项；该次门禁的skip仍如实保留。Docker开启后，使用仓库固定镜像ID `sha256:fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d` 和Docker readiness标志，对解析出的全部42个原skip用例单独重跑：`Ran 42 tests in 263.685s — OK`，日志 `artifacts/faithful-population-takeover/faithful-population-docker-skip-20261109-r2/tests.log`。该专门回放不改写门禁04摘要，也不以设置环境变量替代测试通过。S09 Lean仍unavailable，没有L2/L3，不解除F3/S10前置，不实现干预或记忆。
+门禁05的42项skip主要是需要显式验证镜像配置的隔离工具/Reference专项；该次完整门禁摘要如实保留skip。Docker开启后，使用仓库固定镜像ID `sha256:fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d` 和Docker readiness标志，对解析出的全部42个原skip用例单独重跑：`Ran 42 tests in 263.685s — OK`，日志 `artifacts/faithful-population-takeover/faithful-population-docker-skip-20261109-r2/tests.log`。该专门回放不改写门禁05摘要，也不以设置环境变量替代测试通过。S09 Lean仍unavailable，没有L2/L3，不解除F3/S10前置，不实现干预或记忆。
 
 **#156的本轮离线并发工程实现与工程门禁达到engineering-preview。** 公开恢复、受控真实HTTP、取消/截止、证据共享、持久回放、交付与结算以及报告浏览器证据分别保留；不以浏览器fixture代替后端公共HTTP，不以单元测试代替真实服务容量。运行中路线注册由可信控制器注入验收，未新增自主Planner生产者；实际跨进程接管有store与公共恢复证据。
 
@@ -98,6 +98,6 @@ store同事务保存rating_history，公共candidate-replay对并发Run重算全
 
 真实provider、服务/账户/机器容量、自然机器压力、SLA、自然题和独立数学效果未验证；faithful-D研究批次not_run。保留#156开放以追踪剩余真实环境/完整覆盖验收，不关闭完整F6、F3或总票#146。原挂起runtime06根因未知，后续带超时栈15项通过和完整门禁04通过不被写成已定位修复该挂起。
 
-门禁01/02中断、03失败和04成功全部保留。04覆盖旧源码`eaaadc0`，不能作为新增进程退出验收及文档的最终源码门禁；接续后运行的05门禁将单独记录最终源码SHA与结果。临时检查及门禁结束状态在下方补记。未push。接续仍使用当前选择模型，具体型号与实际继承未独立核实，不猜测。
+门禁01/02中断、03失败、04成功及05成功全部保留。05开始和结束的dirty tracked/untracked均为空，`source_changed=false`。门禁源码/门禁SHA为`088a307d0ba8d332cc2f0e6c767c405a8de4180e`；最终文档交接提交另列于本文末。临时30分钟检查、runner脚本及测试后台进程均已清理；无未完成运行。未push。接续仍使用当前选择模型，具体型号与实际继承未独立核实，不猜测。
 
 官方baseline和默认评分预算未变；`tests/test.md` 未读、未改、未提交、未删除。完整记录只支持所列工程覆盖，不声明数学能力提升。
