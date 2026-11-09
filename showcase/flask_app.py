@@ -412,6 +412,7 @@ def create_app(
                 solver_hint=payload.get("solver_hint"),
                 problem_spec=payload.get("problem_spec"),
                 presentation_mode=payload.get("presentation_mode"),
+                formal_policy=payload.get("formal_policy"),
             )
         except WorkspaceError as exc:
             return _workspace_error(exc)
@@ -634,6 +635,29 @@ def create_app(
                 idempotency_key=request.headers.get("Idempotency-Key", ""),
                 answer=str(payload.get("answer", "")),
                 retry_call=payload.get("retry_call"),
+            )
+            return jsonify({**result, "existing": existing}), 200 if existing else 202
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
+    @app.post("/api/agent/jobs/<job_id>/formal-attempts")
+    def create_formal_attempt(job_id: str) -> tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        payload = _request_object()
+        if isinstance(payload, tuple):
+            return payload
+        if set(payload) - {"expected_attempt_id", "operation", "requested_backend"}:
+            return _json_error("formal_attempt_request_invalid", 400)
+        requested_backend = payload.get("requested_backend")
+        if requested_backend is not None and not isinstance(requested_backend, str):
+            return _json_error("formal_attempt_request_invalid", 400)
+        try:
+            result, existing = workspace_service.formal_attempt(
+                user_id=session.user_id, job_id=job_id,
+                idempotency_key=request.headers.get("Idempotency-Key", ""),
+                expected_attempt_id=str(payload.get("expected_attempt_id", "")),
+                operation=str(payload.get("operation", "")),
+                requested_backend=requested_backend,
             )
             return jsonify({**result, "existing": existing}), 200 if existing else 202
         except WorkspaceError as exc:

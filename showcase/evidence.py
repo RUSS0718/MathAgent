@@ -61,6 +61,8 @@ class EvidencePackExporter:
             "solver": {key: (snapshot.get("result") or {}).get(key) for key in ("solver_mode", "preset_version", "population_policy_hash", "missing_capabilities", "evidence_kind", "solver")},
             "verification": verification_data,
             "semantics": ((snapshot.get("result") or {}).get("solver") or {}).get("semantics"),
+            **({'formal_verification': _formal_verification(snapshot)}
+               if _formal_verification(snapshot) is not None else {}),
             "artifacts": [redact(artifact) for artifact in artifacts],
             "feature_status": {
                 "execution": "implemented",
@@ -100,6 +102,8 @@ class EvidencePackExporter:
             "tool_summaries": [_tool_summary(item) for item in tool_results],
             "checks": check,
             "semantics": (result.get("solver") or {}).get("semantics"),
+            **({'formal_verification': _formal_verification(snapshot)}
+               if _formal_verification(snapshot) is not None else {}),
             "limitations": ["公开报告省略完整提示、隐藏推理、凭证和原始图片。"],
         })
 
@@ -108,6 +112,15 @@ class EvidencePackExporter:
 
         return json.dumps(pack, ensure_ascii=False, sort_keys=True, indent=2)
 
+
+def _formal_verification(snapshot: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
+    formal = result.get("formal_verification")
+    if isinstance(formal, Mapping):
+        return formal
+    solver = result.get("solver")
+    formal = solver.get("formal_verification") if isinstance(solver, Mapping) else None
+    return formal if isinstance(formal, Mapping) else None
 
 def _verification_dict(value: VerificationResult | Mapping[str, Any] | None) -> dict[str, Any]:
     if isinstance(value, VerificationResult):

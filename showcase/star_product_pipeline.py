@@ -1,5 +1,8 @@
 """Limited STAR bridge inside the existing Job/S3 execution boundary."""
 
+import json
+from collections.abc import Mapping
+
 from langgraph.graph import END, START, StateGraph
 
 from .adapters import InternModelAdapter
@@ -30,7 +33,8 @@ class StarProductPipeline:
                  transport_policy="legacy", stream_profiles=None, acceptance_mode="strict",
                  context_capacity=None, population_capacity=None, population_budget=None,
                  limited_enabled=True,
-                 population_enabled=None):
+                 population_enabled=None, formal_backend=None,
+                 formal_registry=None, formal_server_policy=None):
         from .star_experiment_policy import ExperimentRunPolicy
 
         if experiment_policy is not None and not isinstance(experiment_policy, ExperimentRunPolicy):
@@ -82,6 +86,14 @@ class StarProductPipeline:
             raise ValueError("star_hint_mode_invalid")
         self.config["hint_mode"] = hint_mode
         self.registry = registry
+        self.formal_backend = formal_backend
+        self.formal_registry = formal_registry
+        if self.formal_backend is not None and self.formal_registry is None:
+            from .formal import BackendRegistry, register_formal_backend
+
+            self.formal_registry = BackendRegistry()
+            register_formal_backend(self.formal_registry, self.formal_backend)
+        self.formal_server_policy = dict(formal_server_policy) if isinstance(formal_server_policy, Mapping) else None
         self.checkpointer = None
         self.full_enabled = full_enabled is True
         self.full_budget = full_budget or RunBudgetLimits(
@@ -315,6 +327,71 @@ class StarProductPipeline:
 
                 verification = selection_verification(run, answer, verification)
                 reviewed = math["status"] == "completed_llm_reviewed" and bound
+                identity_row = harness._state_store._connection.execute(
+                    "SELECT result_json FROM workspace_jobs WHERE job_id=?", (run_id,)
+                ).fetchone()
+                formal_identity = json.loads(identity_row[0]) if identity_row and identity_row[0] else {}
+                formal_policy = formal_identity.get("formal_policy")
+                formal_verification = None
+                if formal_policy is not None:
+                    from .solver_harness.formal_integration import (
+                        FormalIntegrationState,
+                        execute_reserved_attempt,
+                        mark_inflight_unknown,
+                        reserve_formal_attempt,
+                    )
+
+                    target = dict(formal_policy["target"])
+                    current_state = harness.get_run(run_id)
+                    formal_state = FormalIntegrationState(
+                        job_id=run_id, run_id=run_id, problem=problem,
+                        problem_spec=current_state["state"].get("problem_spec", {}),
+                        policy=formal_policy, target=target,
+                    )
+                    existing_formal = current_state["state"].get("formal_verification")
+                    if (isinstance(existing_formal, Mapping)
+                            and existing_formal.get("status") == "dispatched"):
+                        reserved = mark_inflight_unknown(existing_formal)
+                        event_type = "formal_verification_recovered_unknown"
+                    elif isinstance(existing_formal, Mapping):
+                        reserved = existing_formal
+                        event_type = None
+                    else:
+                        reserved = reserve_formal_attempt(formal_state)
+                        event_type = "formal_verification_dispatched"
+                    if event_type is not None:
+                        run = harness.commit_event(
+                            run_id,
+                            expected_revision=current_state["state_revision"],
+                            event={
+                                "event_id": f"formal-{reserved['current_attempt_id']}-{reserved['status']}",
+                                "type": event_type,
+                                "status": reserved["status"],
+                                "grade": None,
+                            },
+                            state_updates={"formal_verification": reserved},
+                        )
+                        current_state = run
+                    if reserved.get("status") == "dispatched":
+                        formal_verification = execute_reserved_attempt(
+                            formal_state, backend=self.formal_backend,
+                            record=reserved, budget=current_budget(),
+                            registry=self.registry, backend_registry=self.formal_registry,
+                        )
+                        run = harness.commit_event(
+                            run_id,
+                            expected_revision=current_state["state_revision"],
+                            event={
+                                "event_id": f"formal-{formal_verification['current_attempt_id']}-{formal_verification['status']}",
+                                "type": "formal_verification_completed",
+                                "status": formal_verification["status"],
+                                "grade": formal_verification["grade"],
+                            },
+                            state_updates={"formal_verification": formal_verification},
+                        )
+                        math = run["state"]
+                    else:
+                        formal_verification = reserved
                 attempts = []
                 for call in port.invocations:
                     for attempt in call["request_attempts"]:
@@ -392,7 +469,9 @@ def projection(run, *, answer=None, verification_mode="auto"):
             "recovery": recovery_projection(run),
             "progress": progress_summary(state),
             "semantics": result_semantics(run, answer if answer is not None else state.get("final_response", ""), verification_mode=verification_mode, execution_status=run.get("execution_status")),
-            **candidate_projection(run)}
+            **candidate_projection(run),
+            **({'formal_verification': state['formal_verification']}
+               if isinstance(state.get('formal_verification'), Mapping) else {})}
     if state.get("population_policy", {}).get("enabled") is True:
         from .solver_harness.population_projection import population_projection
 

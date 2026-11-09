@@ -11,6 +11,7 @@ import RoutePanel from './RoutePanel.vue'
 import ToolArtifactLinks from './ToolArtifactLinks.vue'
 import AgentTimeline from './AgentTimeline.vue'
 import ReportSection from './ReportSection.vue'
+import FormalVerificationSection from './FormalVerificationSection.vue'
 import PresentationSection from './PresentationSection.vue'
 import PageFrame from './ui/PageFrame.vue'
 import UiButton from './ui/UiButton.vue'
@@ -70,6 +71,7 @@ onUnmounted(() => { disposed = true; clearTimeout(reportTimer); controller.stopA
     <div class="action-row"><UiButton :busy="loading" @click="refresh"><UiIcon name="refresh" />刷新持久报告</UiButton><UiButton :disabled="connected || loading" @click="reconnect">重连事件（沿用游标）</UiButton><UiButton variant="danger" :disabled="busy || !job || ['succeeded', 'failed', 'canceled'].includes(job.status)" @click="cancel">取消 Run</UiButton></div>
     <PresentationSection :source-version="report" v-if="report && job?.presentationMode" :job-id="props.jobId" :mode="job.presentationMode" :job-status="job.status" :fallback-answer="report.report.answer" />
     <ReportSection v-else-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
+    <FormalVerificationSection v-if="report?.solver?.solver?.formal_verification" :verification="report.solver.solver.formal_verification" />
     <section v-if="recovery && job?.status === 'failed' && report?.solver?.solver?.phase !== 'TERMINAL'" class="evidence-section" aria-label="安全续算">
       <h2>{{ recovery.status === 'needs_review' ? '未知请求需要人工决定' : '从安全边界继续' }}</h2>
       <dl v-if="report?.report.budget" class="data-list"><template v-for="field in Object.keys(budgetLabels)" :key="field"><dt>{{ budgetLabels[field] }}</dt><dd>{{ field === 'deadline_at' && typeof report.report.budget[field] === 'number' ? new Date(Number(report.report.budget[field]) * 1000).toLocaleString() : display(report.report.budget[field]) }}</dd></template></dl>

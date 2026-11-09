@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from contextlib import closing
 from pathlib import Path
 
@@ -9,6 +10,15 @@ from .job_observation import observe_deadline
 from .run_budget import _summary
 from .star_product_modes import STAR_MODES
 from .star_product_projection import current_solver, persisted_solver
+
+
+def _attach_formal(payload):
+    result = payload.get("result")
+    solver = result.get("solver") if isinstance(result, Mapping) else None
+    formal = solver.get("formal_verification") if isinstance(solver, Mapping) else None
+    if isinstance(formal, Mapping):
+        payload["result"] = {**result, "formal_verification": formal}
+    return payload
 
 
 def read_job(service, job_id, user_id):
@@ -21,6 +31,7 @@ def read_job(service, job_id, user_id):
     if star:
         with store._lock:
             payload["result"]["solver"] = current_solver(store._connection, job_id)
+        payload = _attach_formal(payload)
     attempts = [event["data"]["attempt"] for event in store.events(job_id, user_id)
                 if event["event"] == "request_attempt"]
     budget, ledger_attempts = service.budget_ledger.view(job_id) if service.budget_ledger is not None else (None, [])
@@ -99,6 +110,7 @@ def read_job_snapshot(store, job_id, user_id):
                 projection(run, answer=answer, verification_mode=row["verification_mode"])
                 if run is not None else None
             )
+            payload = _attach_formal(payload)
         budget, ledger_attempts = None, []
         if ledger is not None:
             state = json.loads(ledger[0])

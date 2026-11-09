@@ -145,6 +145,22 @@ def resume_solver(harness, problem, run_id, retry):
     from .solver_harness.controller import run_supplied_plan_or_explore
 
     run = harness.get_run(run_id, problem=problem)
+    formal = run["state"].get("formal_verification")
+    if isinstance(formal, dict) and formal.get("status") == "dispatched":
+        from .solver_harness.formal_integration import mark_inflight_unknown
+
+        recovered_formal = mark_inflight_unknown(formal)
+        run = harness.commit_event(
+            run_id,
+            expected_revision=run["state_revision"],
+            event={
+                "event_id": f"formal-{recovered_formal['current_attempt_id']}-recovered-unknown",
+                "type": "formal_verification_recovered_unknown",
+                "status": "unknown",
+                "grade": None,
+            },
+            state_updates={"formal_verification": recovered_formal},
+        )
     if run["state"].get("population_policy", {}).get("enabled") is True:
         from .solver_harness.population_lifecycle import resume_population
 

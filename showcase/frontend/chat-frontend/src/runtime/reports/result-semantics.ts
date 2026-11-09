@@ -6,7 +6,9 @@ export function describeResultSemantics(value: ResultSemantics): string {
   const transport = { known: '传输结果已知', unknown: '远端请求结果未知，需要人工决定', pending: '请求进行中，结果尚未返回', unavailable: '传输记录不可用' }
   const review = { accepted: 'LLM 整题审查通过', rejected: 'LLM 整题审查拒绝', not_reviewed: '尚无整题审查', invalid_source: '整题审查来源无效' }
   const binding = { same_artifact: '绑定一致', artifact_changed: '文本已改写，旧审查不适用于当前答案', unbound: '未绑定有效整题审查' }
-  const parts = [execution[value.execution], transport[value.transport], review[value.whole_review], binding[value.binding], '未作形式化验证']
+  const formal = { not_verified: '未作形式化验证', disabled: '形式验证未启用', dispatched: '形式验证进行中，尚未确认', unsupported: '形式目标不受支持', unavailable: '形式验证环境不可用', partial: '形式验证未完成', timeout: '形式验证超时', error: '形式验证出错', failed: '形式验证未通过', unknown: '形式验证结果未知', solved: '形式验证后端已返回结果' }
+  const parts = [execution[value.execution], transport[value.transport], review[value.whole_review], binding[value.binding], formal[value.formal_verification]]
   if (value.verification_requirement === 'required_unmet') parts.push('required 模式的额外验证要求尚未满足')
+  if (value.formal_requirement === 'unmet') parts.push('形式化要求未满足，原答案仍保留')
   return parts.join('；')
 }

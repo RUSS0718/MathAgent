@@ -57,3 +57,21 @@
   .campaign-row { align-items: flex-start; }
   .page-footer { padding: var(--space-4); }
 }
+
+.formal-section { margin-top: var(--space-6); padding: var(--space-6); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--surface); }
+.formal-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); }
+.formal-heading h2 { margin: 0; font-size: var(--text-lg); }
+.formal-eyebrow { margin: 0 0 var(--space-1); color: var(--muted); font-size: var(--text-xs); font-weight: 600; }
+.formal-badges { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.formal-headline { margin: var(--space-4) 0 var(--space-2); font-weight: 600; }
+.formal-boundary { margin: 0 0 var(--space-4); color: var(--muted); }
+.formal-section > .data-list { margin-top: var(--space-4); }
+.formal-section details { border-top: 1px solid var(--border); }
+.formal-section summary { cursor: pointer; padding: var(--space-4) 0; }
+.formal-section details .data-list { padding-bottom: var(--space-5); }
+.formal-attempts { display: grid; gap: var(--space-3); padding: 0 0 var(--space-5) var(--space-5); }
+.formal-attempts li { overflow-wrap: anywhere; }
+.formal-attempts span { display: block; }
+@media (max-width: 760px) {
+  .formal-section { padding: var(--space-4); }
+}

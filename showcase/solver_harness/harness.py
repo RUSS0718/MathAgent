@@ -454,8 +454,13 @@ class SolverHarness:
             )
             and normalized_updates
             and not (
-                normalized_event["type"] in {"call_audit", "call_activity"}
-                and set(normalized_updates) <= {"calls"}
+                (
+                    normalized_event["type"] in {"call_audit", "call_activity"}
+                    and set(normalized_updates) <= {"calls"}
+                ) or (
+                    normalized_event["type"].startswith("formal_")
+                    and set(normalized_updates) == {"formal_verification"}
+                )
             )
         ):
             raise SolverValidationError(
@@ -601,8 +606,9 @@ class SolverHarness:
         if reason:
             stop(self, latest, reason)
             raise HardBudgetStop(run["run_id"])
-        from .sessions import dispatch
         from contextlib import nullcontext
+
+        from .sessions import dispatch
 
         scope = nullcontext()
         if (latest["state"].get("population_policy", {}).get("enabled") is True

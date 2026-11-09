@@ -4,7 +4,9 @@ import { renderSafeMarkdown } from '../renderers/markdown-adapter'
 import StatusBadge from './ui/StatusBadge.vue'
 import type { ResultSemantics } from '../api/result-semantics.schemas'
 import { describeResultSemantics } from '../runtime/reports/result-semantics'
-const props = defineProps<{ title?: string; content?: string; mode?: string; status?: string; report?: { answer: string; public_summary: string; stage: string; limitations: string[]; checks?: { status?: string; findings?: string[]; history?: Record<string, unknown>[] }; semantics?: ResultSemantics | null } }>()
+import type { FormalVerification } from '../api/reports.schemas'
+import FormalVerificationSection from './FormalVerificationSection.vue'
+const props = defineProps<{ title?: string; content?: string; mode?: string; status?: string; report?: { answer: string; public_summary: string; stage: string; limitations: string[]; checks?: { status?: string; findings?: string[]; history?: Record<string, unknown>[] }; semantics?: ResultSemantics | null; formal_verification?: FormalVerification | null } }>()
 const html = computed(() => renderSafeMarkdown(props.content ?? props.report?.answer ?? ''))
 const answerText = computed(() => props.content ?? props.report?.answer ?? '')
 const isLongArtifact = computed(() => answerText.value.length > 2400)
@@ -17,7 +19,7 @@ function translate(group: keyof typeof labels, value?: string): string {
 }
 </script>
 <template>
-  <section class="report-section">
+  <section class="report-section" aria-label="数学报告">
     <h2>{{ title ?? '数学报告' }}</h2>
     <div class="report-meta"><StatusBadge v-if="mode" :value="mode" /><StatusBadge v-if="status" :value="status" /><span v-if="report">阶段：{{ translate('stage', report.stage) }}</span><StatusBadge v-if="!report?.semantics && report?.checks?.status" :value="report.checks.status" /></div>
     <p v-if="report?.semantics" class="report-summary" aria-label="结果语义">{{ describeResultSemantics(report.semantics) }}</p>
@@ -27,6 +29,7 @@ function translate(group: keyof typeof labels, value?: string): string {
       <div class="report-content" data-public-long-artifact v-html="html"></div>
     </details>
     <p v-if="report?.public_summary" class="report-summary">{{ report.public_summary }}</p>
+    <FormalVerificationSection v-if="report?.formal_verification" :verification="report.formal_verification" />
     <details v-if="report?.checks?.history?.length">
       <summary>验证历史（{{ report.checks.history.length }} 项）</summary>
       <p>整题 LLM 审查和局部检查分别保留；均不等于形式化证明。</p>

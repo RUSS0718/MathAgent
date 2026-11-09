@@ -316,6 +316,9 @@ class RunService:
 
             result.pop("retry_call", None)
             result["solver"] = current_solver(self._store._connection, run_id)
+            formal = (result.get("solver") or {}).get("formal_verification")
+            if isinstance(formal, Mapping):
+                result["formal_verification"] = formal
         attempts = [event["attempt"] for event in self._store.get_events(run_id) if event.get("type") == "request_attempt"]
         budget, ledger_attempts = self._budget_ledger.view(run_id)
         if budget is not None and (result.get("solver_mode") in STAR_MODES

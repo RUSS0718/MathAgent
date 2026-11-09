@@ -38,6 +38,18 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
             features = {"final_generation": True, "final_solution_review": True,
                 "local_code_tool": True}
 
+    formal_backend = config.get("SHOWCASE_FORMAL_BACKEND")
+    formal_server_policy = config.get("SHOWCASE_FORMAL_VERIFICATION_CONFIG")
+    formal_registry = None
+    if formal_backend is not None:
+        if registry is None:
+            registry = ToolRegistry()
+        from .formal import BackendRegistry, register_formal, register_formal_backend
+
+        register_formal(registry, formal_backend)
+        formal_registry = BackendRegistry()
+        register_formal_backend(formal_registry, formal_backend)
+
     budget = config.get("SHOWCASE_STAR_BUDGET")
     if budget is None:
         budget = RunBudgetLimits(max_model_calls=8 if image_enabled else 3,
@@ -68,4 +80,7 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
         limited_enabled=limited_enabled,
         population_enabled=population_enabled,
         hint_mode=config.get("SHOWCASE_STAR_HINT_MODE", "none"),
-        evidence_kind=config.get("SHOWCASE_STAR_EVIDENCE_KIND", "live"))
+        evidence_kind=config.get("SHOWCASE_STAR_EVIDENCE_KIND", "live"),
+        formal_backend=formal_backend,
+        formal_registry=formal_registry,
+        formal_server_policy=formal_server_policy)

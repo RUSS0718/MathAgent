@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import secrets
 import sqlite3
 import threading
@@ -32,6 +33,28 @@ from .star_product_modes import STAR_MODES
 
 ACTIVE_JOB_STATUSES = ("queued", "running", "waiting_input")
 TERMINAL_JOB_STATUSES = ("succeeded", "failed", "canceled")
+
+
+def _apply_formal_requirement(result: dict[str, Any]) -> None:
+    policy = result.get("formal_policy")
+    solver = result.get("solver")
+    if not isinstance(policy, Mapping) or not isinstance(solver, Mapping):
+        return
+    semantics = solver.get("semantics")
+    if not isinstance(semantics, Mapping):
+        return
+    formal = result.get("formal_verification")
+    if not isinstance(formal, Mapping):
+        formal = solver.get("formal_verification")
+    met = (isinstance(formal, Mapping) and formal.get("status") == "solved"
+           and formal.get("grade") in {"L2", "L3"})
+    updated_solver = dict(solver)
+    updated_solver["semantics"] = {
+        **dict(semantics),
+        "formal_requirement": ("met" if met else "unmet")
+        if policy.get("require_formal") is True else "default",
+    }
+    result["solver"] = updated_solver
 
 
 class WorkspaceError(RuntimeError):
@@ -583,7 +606,7 @@ class WorkspaceStore:
             if isinstance(state.get("verification"), Mapping)
             else {"status": "unknown"},
         }
-        result.update({key: state[key] for key in ("solver_mode", "preset_version", "population_policy_hash", "missing_capabilities", "evidence_kind", "solver", "acceptance_mode", "engineering_delivery", "presentation_mode", "presentation_schema_version", "presentation_policy_version") if key in state})
+        result.update({key: state[key] for key in ("solver_mode", "preset_version", "population_policy_hash", "missing_capabilities", "evidence_kind", "solver", "acceptance_mode", "engineering_delivery", "presentation_mode", "presentation_schema_version", "presentation_policy_version", "formal_policy", "formal_policy_hash", "formal_verification") if key in state})
         result["verification"] = bind_verification(result["final_response"], result["verification"])
         error = state.get("error") if isinstance(state.get("error"), Mapping) else None
         error_code = str(error.get("category")) if error else None
@@ -598,6 +621,10 @@ class WorkspaceStore:
                     return
                 prior = _loads(row["result_json"]) if row["result_json"] else {}
                 result.update(_presentation_identity(prior))
+                for frozen_key in ("formal_policy", "formal_policy_hash"):
+                    if frozen_key in prior:
+                        result[frozen_key] = prior[frozen_key]
+                _apply_formal_requirement(result)
                 if isinstance(prior.get("experiment_pair"), dict):
                     result["experiment_pair"] = prior["experiment_pair"]
                     _mark_pair_config_not_applied(result)
@@ -1002,6 +1029,7 @@ class WorkspaceService:
         experiment_binding: Mapping[str, Any] | None = None,
         problem_spec: Mapping[str, Any] | None = None,
         presentation_mode: str | None = None,
+        formal_policy: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         from .star_product_modes import validate_mode
         requested_presentation_mode = normalize_mode(presentation_mode)
@@ -1014,6 +1042,31 @@ class WorkspaceService:
             "presentation_policy_version": POLICY_VERSION,
         } if presentation_mode is not None else {})
         selected = self.star_pipeline if solver_mode in STAR_MODES else self.pipeline
+        from .solver_harness.formal_policy import FormalPolicyError, normalize_formal_policy
+
+        formal_identity = {}
+        if formal_policy is not None:
+            if solver_mode not in STAR_MODES:
+                raise WorkspaceError("formal_policy_requires_star_mode", status=400)
+            try:
+                if not isinstance(formal_policy, Mapping):
+                    raise FormalPolicyError("formal_policy_invalid")
+                if "timeout_seconds" in formal_policy:
+                    timeout = formal_policy["timeout_seconds"]
+                    if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+                            or not math.isfinite(timeout) or timeout <= 0):
+                        raise FormalPolicyError("formal_timeout_invalid")
+                formal_policy = normalize_formal_policy(
+                    formal_policy,
+                    configured=(getattr(selected, "formal_backend", None) is not None),
+                    server_template=getattr(selected, "formal_server_policy", None),
+                )
+            except FormalPolicyError as exc:
+                raise WorkspaceError(exc.category, status=400) from exc
+            formal_identity = {
+                "formal_policy": formal_policy,
+                "formal_policy_hash": _request_digest(formal_policy),
+            }
         if problem_spec is not None:
             if solver_mode not in STAR_MODES:
                 raise WorkspaceError("problem_spec_requires_star_mode", status=400)
@@ -1055,6 +1108,7 @@ class WorkspaceService:
             problem_spec=problem_spec,
             presentation_mode=presentation_mode,
             population_policy_hash=identity.get("population_policy_hash"),
+            formal_policy=formal_policy,
         )
         payload, existing = self.store.create_job(
             user_id=user_id,
@@ -1069,6 +1123,7 @@ class WorkspaceService:
                 **({"stream_timeout_policy": self.stream_timeout_policy}
                    if self.stream_timeout_policy is not None else {}),
                 **presentation_identity,
+                **formal_identity,
             },
             experiment_binding=experiment_binding,
             problem_spec=problem_spec,
@@ -1114,6 +1169,207 @@ class WorkspaceService:
                 self._submitted.discard(job_id)
             self._submit(job_id)
         return result, existing
+
+    def formal_attempt(
+        self, *, user_id: str, job_id: str, idempotency_key: str,
+        expected_attempt_id: str, operation: str,
+        requested_backend: str | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Append one explicit formal child attempt without re-solving the Run."""
+        if not _is_uuid_v4(idempotency_key):
+            raise WorkspaceError("idempotency_key_invalid", status=400)
+        payload = {"expected_attempt_id": expected_attempt_id, "operation": operation}
+        if requested_backend is not None:
+            payload["requested_backend"] = requested_backend
+        digest = _request_digest("formal_attempt", job_id, payload)
+        from .solver_harness.formal_integration import (
+            FormalIntegrationError,
+            FormalIntegrationState,
+            commit_formal_retry_reservation,
+        )
+        from .solver_harness.storage import (
+            SolverEventConflictError,
+            SolverPersistenceError,
+            SolverStateStore,
+        )
+
+        state_store = SolverStateStore(self.store._connection)
+        with self.store._lock:
+            existing = self.store._connection.execute(
+                "SELECT operation,job_id,request_digest,response_json FROM workspace_actions "
+                "WHERE user_id=? AND idempotency_key=?",
+                (user_id, idempotency_key),
+            ).fetchone()
+            if existing is not None:
+                if (existing["operation"] != "formal_attempt"
+                        or existing["job_id"] != job_id
+                        or existing["request_digest"] != digest):
+                    raise WorkspaceError("idempotency_conflict", status=409)
+                return _loads(existing["response_json"]), True
+            row = self.store._connection.execute(
+                "SELECT status,result_json FROM workspace_jobs WHERE job_id=? AND user_id=?",
+                (job_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise WorkspaceError("job_not_found", status=404)
+            if row["status"] != "succeeded":
+                raise WorkspaceError("formal_retry_job_not_terminal", status=409)
+            identity = _loads(row["result_json"]) if row["result_json"] else {}
+            policy = identity.get("formal_policy")
+            if identity.get("solver_mode") not in STAR_MODES or not isinstance(policy, dict):
+                raise WorkspaceError("formal_retry_unavailable", status=409)
+            registry = getattr(self.star_pipeline, "formal_registry", None)
+            if registry is None:
+                raise WorkspaceError("formal_retry_unavailable", status=409)
+            if operation == "switch":
+                if not isinstance(requested_backend, str) or not requested_backend.strip():
+                    raise WorkspaceError("formal_backend_required", status=400)
+                selected_policy = {
+                    **policy, "backend": requested_backend.strip(),
+                    "requested_backend": requested_backend.strip(),
+                }
+            else:
+                if requested_backend is not None:
+                    raise WorkspaceError("formal_retry_request_invalid", status=400)
+                selected_policy = policy
+            try:
+                backend = registry.select(policy["target"], selected_policy)
+            except ValueError as exc:
+                raise WorkspaceError("formal_backend_unsupported", status=409) from exc
+            current = state_store.get_run(job_id)
+            if current is None:
+                raise WorkspaceError("formal_retry_unavailable", status=409)
+            formal = current["state"].get("formal_verification")
+            if not isinstance(formal, Mapping):
+                raise WorkspaceError("formal_retry_unavailable", status=409)
+            formal_state = FormalIntegrationState(
+                job_id=job_id, run_id=job_id, problem=self.store.problem(job_id),
+                problem_spec=current["state"].get("problem_spec", {}),
+                policy=policy, target=policy["target"],
+            )
+            event = {
+                "event_id": f"formal-retry-{uuid.uuid4().hex}",
+                "type": "formal_verification_dispatched", "status": "dispatched",
+                "grade": None,
+            }
+
+            def transaction_hook_factory(record):
+                result = {"success": True, "job_id": job_id, "status": "queued",
+                          "attempt_id": record["current_attempt_id"]}
+
+                def persist(connection):
+                    prior = connection.execute(
+                        "SELECT operation,job_id,request_digest FROM workspace_actions "
+                        "WHERE user_id=? AND idempotency_key=?",
+                        (user_id, idempotency_key),
+                    ).fetchone()
+                    if prior is not None:
+                        raise SolverEventConflictError(job_id, event["event_id"])
+                    connection.execute(
+                        "INSERT INTO workspace_actions(user_id,idempotency_key,operation,job_id,request_digest,response_json,created_at) "
+                        "VALUES(?,?,?,?,?,?,?)",
+                        (user_id, idempotency_key, "formal_attempt", job_id, digest,
+                         _json(result), _utc_now()),
+                    )
+                    updated = connection.execute(
+                        "UPDATE workspace_jobs SET status='running',updated_at=? "
+                        "WHERE job_id=? AND user_id=? AND status='succeeded'",
+                        (_utc_now(), job_id, user_id),
+                    )
+                    if updated.rowcount != 1:
+                        raise SolverPersistenceError("formal_retry_job_not_terminal")
+
+                return persist
+
+            try:
+                preview = commit_formal_retry_reservation(
+                    self.store, job_id, snapshot=current, state=formal_state,
+                    existing=formal, expected_attempt_id=expected_attempt_id,
+                    operation=operation,
+                    backend=backend, requested_backend=requested_backend,
+                    event=event,
+                    transaction_hook_factory=transaction_hook_factory,
+                )
+            except FormalIntegrationError as exc:
+                raise WorkspaceError(exc.category, status=409) from exc
+            except SolverEventConflictError as exc:
+                with self.store._lock:
+                    prior = self.store._connection.execute(
+                        "SELECT operation,job_id,request_digest,response_json FROM workspace_actions "
+                        "WHERE user_id=? AND idempotency_key=?",
+                        (user_id, idempotency_key),
+                    ).fetchone()
+                if (prior is not None and prior["operation"] == "formal_attempt"
+                        and prior["job_id"] == job_id and prior["request_digest"] == digest):
+                    return _loads(prior["response_json"]), True
+                raise WorkspaceError("idempotency_conflict", status=409) from exc
+            except SolverPersistenceError as exc:
+                raise WorkspaceError("formal_retry_persistence_failed", status=409) from exc
+            result = {"success": True, "job_id": job_id, "status": "queued",
+                      "attempt_id": preview["current_attempt_id"]}
+            with self._submit_lock:
+                self._submitted.add(job_id)
+            self._executor.submit(self._execute_formal_attempt, job_id)
+            return result, False
+
+    def _execute_formal_attempt(self, job_id: str) -> None:
+        """Run one child formal attempt through the bounded formal helper."""
+        from .solver_harness.formal_integration import run_explicit_formal_retry
+        from .solver_harness.storage import SolverStateStore
+
+        identity = self.store.job_identity(job_id)
+        state_store = SolverStateStore(self.store._connection)
+        with self.store._lock:
+            current = state_store.get_run(job_id)
+        if current is None:
+            return
+        record = current["state"].get("formal_verification")
+        if not isinstance(record, Mapping):
+            return
+        try:
+            result = run_explicit_formal_retry(
+                self, job_id, run_id=job_id,
+                problem=self.store.problem(job_id), policy=identity["formal_policy"],
+                expected_attempt_id=record["current"].get("parent_attempt_id"),
+                operation=record["current"].get("requested_operation", "retry"),
+                reserved_attempt_id=record["current_attempt_id"],
+            )
+            formal = result["record"]
+            budget = result["budget"]
+        except Exception:  # noqa: BLE001 - do not leave an accepted retry inflight
+            from .solver_harness.formal_integration import mark_inflight_unknown
+
+            with self.store._lock:
+                current = state_store.get_run(job_id)
+            saved = current["state"].get("formal_verification") if current else None
+            if (isinstance(saved, Mapping) and saved.get("current_attempt_id") == record["current_attempt_id"]
+                    and saved.get("status") == "dispatched"):
+                formal = mark_inflight_unknown(saved)
+                from .solver_harness.formal_integration import commit_formal_state_with_one_retry
+
+                commit_formal_state_with_one_retry(
+                    self.store, job_id, expected_revision=current["state_revision"],
+                    formal_verification=formal,
+                    event={"event_id": f"formal-{record['current_attempt_id']}-recovered-unknown",
+                           "type": "formal_verification_recovered_unknown",
+                           "status": "unknown", "grade": None},
+                    expected_attempt_id=record["current_attempt_id"],
+                    expected_status="dispatched",
+                )
+            else:
+                formal = saved if isinstance(saved, Mapping) else record
+            budget = self.budget_ledger.snapshot(job_id)
+        persisted = self.store.job_identity(job_id)
+        persisted["formal_verification"] = formal
+        if budget is not None:
+            persisted["budget"] = budget
+        _apply_formal_requirement(persisted)
+        with self.store._lock:
+            self.store._connection.execute(
+                "UPDATE workspace_jobs SET status='succeeded',error_code=NULL,result_json=?,updated_at=? WHERE job_id=?",
+                (_json(persisted), _utc_now(), job_id),
+            )
+            self.store._connection.commit()
 
     def cancel_job(self, *, user_id: str, job_id: str, idempotency_key: str) -> tuple[dict[str, Any], bool]:
         if not _is_uuid_v4(idempotency_key):
@@ -1378,6 +1634,7 @@ def workspace_job_request_digest(
     problem_spec: Mapping[str, Any] | None = None,
     presentation_mode: str | None = None,
     population_policy_hash: str | None = None,
+    formal_policy: Mapping[str, Any] | None = None,
 ) -> str:
     """Fingerprint the exact public Job request, including any frozen budget."""
     request_parts = (session_id, message, web_search_enabled, input_user_file_id, verification_mode)
@@ -1410,6 +1667,8 @@ def workspace_job_request_digest(
         digest = _request_digest(digest, {"presentation_mode": presentation_mode})
     if population_policy_hash is not None:
         digest = _request_digest(digest, {"population_policy_hash": population_policy_hash})
+    if formal_policy is not None:
+        digest = _request_digest(digest, {"formal_policy": dict(formal_policy)})
     return digest
 
 

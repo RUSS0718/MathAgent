@@ -812,6 +812,13 @@ def _tool_settlement(result, duration_seconds):
             for key in ("unknown_outcome", "cleanup_verified", "executed", "timeout")
             if type(value.get(key)) is bool
         }
+        # Formal receipts retain uncertainty inside the receipt cost object; this is
+        # execution evidence, never a second mathematical acceptance decision.
+        formal_cost = value.get("cost")
+        if isinstance(formal_cost, Mapping) and type(formal_cost.get("unknown")) is bool:
+            evidence["unknown_outcome"] = formal_cost["unknown"]
+        elif value.get("status") in {"unknown", "unknown_outcome"}:
+            evidence["unknown_outcome"] = True
         if evidence:
             settlement["execution_evidence"] = evidence
     return settlement

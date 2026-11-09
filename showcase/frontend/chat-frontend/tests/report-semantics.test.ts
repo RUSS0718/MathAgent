@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'vite'
 import { createSSRApp } from 'vue'
 import { renderToString } from 'vue/server-renderer'
-import { reportSchema } from '../src/api/reports.schemas.ts'
+import { formalVerificationSchema, reportSchema } from '../src/api/reports.schemas.ts'
 import { decodeSseBlock, SseProtocolError } from '../src/api/events.schemas.ts'
 import { createPinia, setActivePinia } from 'pinia'
 import { useJobsStore } from '../src/stores/jobs.store.ts'
@@ -105,6 +105,118 @@ test('report distinguishes unknown, rejection, invalid binding, required and lif
       assert.match(html, /whole_solution_llm_review/)
       assert.match(html, /polynomial_candidates/)
     })
+  } finally {
+    await server.close()
+  }
+})
+
+test('formal verification stays separate from the original answer and legacy review', async () => {
+  const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' })
+  const record = {
+    schema_version: 'formal-verification-v1',
+    policy: {
+      enabled: true, backend: 'lean_tactic_prover', timeout_seconds: 30,
+      environment: {
+        lean_version: '4.19.0', mathlib_version: 'v4.19.0',
+        toolchain: 'leanprover/lean4:v4.19.0', image_digest: 'sha256:' + 'b'.repeat(64),
+        manifest_digest: 'c'.repeat(64), template_version: 'rational-polynomial-v1',
+      },
+      target: { lhs: 'x + x', rhs: '2 * x', private_prompt: 'HIDDEN_FORMAL_PROMPT' },
+      api_token: 'HIDDEN_FORMAL_TOKEN',
+    },
+    policy_hash: 'a'.repeat(64),
+    status: 'unavailable', grade: null,
+    current_attempt_id: 'formal_attempt_1',
+    current: {
+      schema_version: 1, status: 'unavailable', grade: null,
+      attempt_id: 'formal_attempt_1', parent_attempt_id: null,
+      reason: 'lean_runtime_unavailable',
+      proof_artifact: null,
+      specifications: {
+        original_to_spec: {
+          original_problem_hash: 'd'.repeat(64), problem_spec_hash: 'e'.repeat(64),
+          root_obligations: [{ obligation_id: 'root:identity', statement: 'x + x = 2 * x' }],
+          review_status: 'not_reviewed', review_record_hash: null,
+        },
+        spec_to_target: { review_status: 'not_reviewed', review_record_hash: null },
+        target_to_environment: { review_status: 'not_reviewed', review_record_hash: null },
+      },
+      cost: { elapsed_seconds: 0.1, output_bytes: 0, unknown: false },
+      lineage: { attempt_id: 'formal_attempt_1', parent_attempt_id: null, sequence: 1 },
+    },
+    attempts: [],
+    lineage: {
+      parent_attempt_id: null, attempt_ids: ['formal_attempt_1'],
+      total_cost: { elapsed_seconds: 0.1, output_bytes: 0 },
+    },
+  }
+  record.attempts = [record.current]
+  assert.equal(formalVerificationSchema.parse(record).status, 'unavailable')
+  try {
+    const { default: FormalVerificationSection } = await server.ssrLoadModule('/src/components/FormalVerificationSection.vue')
+    const html = await renderToString(createSSRApp(FormalVerificationSection, { verification: record }))
+    assert.match(html, /形式验证/)
+    assert.match(html, /不可用/)
+    assert.match(html, /原答案仍保留/)
+    assert.match(html, /lean_tactic_prover/)
+    assert.match(html, /formal_attempt_1/)
+    assert.match(html, /4\.19\.0/)
+    assert.match(html, /0\.1/)
+    assert.doesNotMatch(html, /HIDDEN_FORMAL_PROMPT|HIDDEN_FORMAL_TOKEN/)
+  } finally {
+    await server.close()
+  }
+})
+
+test('only backend solved grades render as L2 or L3 and correspondence stays independent', async () => {
+  const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' })
+  try {
+    const { default: FormalVerificationSection } = await server.ssrLoadModule('/src/components/FormalVerificationSection.vue')
+    const base = {
+      schema_version: 'formal-verification-v1',
+      policy: { enabled: true, backend: 'lean_tactic_prover', timeout_seconds: 30, environment: { lean_version: '4.19.0' } },
+      policy_hash: 'a'.repeat(64), current_attempt_id: 'formal_2',
+      current: {
+        schema_version: 1, status: 'solved', grade: 'L2', attempt_id: 'formal_2', parent_attempt_id: 'formal_1',
+        reason: null, proof_artifact: { source_hash: '1'.repeat(64), proof_hash: '2'.repeat(64), cleanup_verified: true, axioms: ['propext'] },
+        specifications: { original_to_spec: { review_status: 'not_reviewed', review_record_hash: null } },
+        cost: { elapsed_seconds: 2.5, output_bytes: 240 }, lineage: { attempt_id: 'formal_2', parent_attempt_id: 'formal_1', sequence: 2 },
+      },
+      attempts: [
+        { schema_version: 1, status: 'timeout', grade: null, attempt_id: 'formal_1', parent_attempt_id: null, reason: 'deadline', cost: { elapsed_seconds: 30, output_bytes: 0, unknown: true } },
+      ],
+      lineage: { parent_attempt_id: 'formal_1', attempt_ids: ['formal_1', 'formal_2'], total_cost: { elapsed_seconds: 32.5, output_bytes: 240 } },
+    }
+    const l2 = await renderToString(createSSRApp(FormalVerificationSection, { verification: { ...base, status: 'solved', grade: 'L2' } }))
+    assert.match(l2, /形式目标已核验/)
+    assert.match(l2, /原题对应待独立复核/)
+    assert.match(l2, /formal_1/)
+    assert.match(l2, /32\.5/)
+
+    const forged = { ...base, status: 'solved', grade: 'L2', current: { ...base.current, grade: 'L2' } }
+    const l2Only = await renderToString(createSSRApp(FormalVerificationSection, { verification: forged }))
+    assert.match(l2Only, /原题对应待独立复核/)
+    assert.doesNotMatch(l2Only, /形式目标与规格对应已独立核验/)
+
+    const dispatched = await renderToString(createSSRApp(FormalVerificationSection, { verification: { ...base, status: 'dispatched', grade: null, current: { ...base.current, status: 'dispatched', grade: null } } }))
+    assert.match(dispatched, /形式化验证进行中，尚未确认/)
+    assert.doesNotMatch(dispatched, /status-badge[^>]*>L2|status-badge[^>]*>L3|形式目标已核验|形式目标与规格对应已独立核验/)
+
+    const solvedWithoutGrade = await renderToString(createSSRApp(FormalVerificationSection, {
+      verification: { ...base, status: 'solved', grade: null, current: { ...base.current, status: 'solved', grade: null } },
+    }))
+    assert.match(solvedWithoutGrade, /没有可公开的 L2\/L3 等级/)
+    assert.doesNotMatch(solvedWithoutGrade, /内核已接受/)
+    assert.doesNotMatch(solvedWithoutGrade, /status-badge[^>]*>L2|status-badge[^>]*>L3/)
+
+    const l3 = await renderToString(createSSRApp(FormalVerificationSection, { verification: {
+      ...base, status: 'solved', grade: 'L3', current: { ...base.current, grade: 'L3', specifications: {
+        original_to_spec: { review_status: 'reviewed', review_record_hash: '3'.repeat(64) },
+        spec_to_target: { review_status: 'reviewed', review_record_hash: '4'.repeat(64) },
+        target_to_environment: { review_status: 'reviewed', review_record_hash: '5'.repeat(64) },
+      } },
+    } }))
+    assert.match(l3, /形式目标与规格对应已独立核验/)
   } finally {
     await server.close()
   }

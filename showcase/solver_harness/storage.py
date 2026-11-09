@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -197,6 +197,7 @@ class SolverStateStore:
         validated_run: Mapping[str, Any] | None = None,
         route_authorized: bool = False,
         population_owner: Mapping[str, Any] | None = None,
+        transaction_hook: Callable[[sqlite3.Connection], None] | None = None,
     ) -> dict[str, Any]:
         """Compare-and-swap one event, reusing a matching validated history when supplied."""
 
@@ -222,6 +223,12 @@ class SolverStateStore:
                     current = self._read_run(run_id)
                     if current is None:
                         raise SolverPersistenceError("commit_event")
+                    if transaction_hook is not None:
+                        try:
+                            transaction_hook(connection)
+                        except BaseException:
+                            connection.rollback()
+                            raise
                     connection.commit()
                     return current
 
@@ -415,6 +422,12 @@ class SolverStateStore:
                 )
                 if result is None:
                     raise SolverPersistenceError("commit_event")
+                if transaction_hook is not None:
+                    try:
+                        transaction_hook(connection)
+                    except BaseException:
+                        connection.rollback()
+                        raise
                 connection.commit()
                 return result
             except (SolverRevisionConflictError, SolverEventConflictError, RunStopped):
