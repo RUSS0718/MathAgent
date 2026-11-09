@@ -59,6 +59,7 @@ class PopulationLoopbackJobTest(StarJobFixture, unittest.TestCase):
         self.both_two_step_routes = False
         self.second_reasoner_gate = threading.Event()
         self.second_reasoners = 0
+        self.delayed_reasoner_started = threading.Event()
         self.reject_first_final = False
         self.whole_reviews = 0
         case = self
@@ -111,6 +112,7 @@ class PopulationLoopbackJobTest(StarJobFixture, unittest.TestCase):
                     with case.lock:
                         case.active_reasoners -= 1
                     if context.get("step", {}).get("step_id", "").endswith((":direct", ":direct-setup")):
+                        case.delayed_reasoner_started.set()
                         time.sleep(case.server_delay)
                 elif role == "step_verifier":
                     case.verifier_gate.wait(case.reasoner_barrier_timeout)
@@ -179,8 +181,8 @@ class PopulationLoopbackJobTest(StarJobFixture, unittest.TestCase):
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
                 try:
+                    self.end_headers()
                     self.wfile.write(body)
                 except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
                     pass
@@ -467,6 +469,197 @@ with SQLiteStore(sys.argv[1]) as store:
         self.assertEqual("succeeded", resumed["status"], resumed)
         self.assertEqual(before, self.reasoners)
         self.assertEqual("1+1=2 by addition.", resumed["result"]["final_response"])
+
+    def test_public_resume_after_worker_process_exit_reuses_persisted_receipt(self):
+        self.verifier_gate.set()
+        self.server_delay = 8
+        identity_path = os.path.join(self.temp.name, "crashed-job.json")
+        receipt_path = os.path.join(self.temp.name, "receipt-before-merge.json")
+        script = r"""
+import json, os, sys, time
+from pathlib import Path
+from llm_client import InternChatClient
+from showcase.adapters import InternModelAdapter
+from showcase.flask_app import create_app
+from showcase.run_budget import RunBudgetLimits
+from showcase.solver_harness import population_runtime
+
+data_dir, provider_url, problem_spec, identity_path, receipt_path = sys.argv[1:]
+os.environ['INTERN_API_KEY'] = 'loopback-child-only'
+os.environ['INTERN_API_BASE'] = provider_url
+capacity = {
+    'service_id': 'loopback-capacity-fixture', 'max_inflight': 2,
+    'worker_slots': 2, 'evidence_ref': 'fixture:two-worker-provider-v1',
+    'status': 'controlled',
+}
+app = create_app({
+    'TESTING': True, 'SHOWCASE_DATA_DIR': data_dir,
+    'SHOWCASE_JOB_DELAY_SECONDS': 0,
+    'SHOWCASE_STAR_ENABLED': False,
+    'SHOWCASE_STAR_POPULATION_ENABLED': True,
+    'SHOWCASE_STAR_POPULATION_CAPACITY': capacity,
+    'SHOWCASE_STAR_POPULATION_BUDGET': RunBudgetLimits(
+        max_model_calls=20, max_http_attempts=20, max_tool_calls=0,
+        max_tokens=2_000_000, max_runtime_seconds=120,
+    ),
+    'SHOWCASE_STAR_ADAPTER': InternModelAdapter(
+        InternChatClient(retry=1, timeout=12, loopback_only=True), max_tokens=256),
+    'SHOWCASE_STAR_EVIDENCE_KIND': 'fault_injection',
+})
+client = app.test_client()
+csrf = client.get('/api/check_auth').get_json()['csrf_token']
+session = client.post('/api/new_chat', headers={'X-CSRF-Token': csrf}).get_json()['new_session_id']
+response = client.post('/api/agent/jobs', json={
+    'message': 'Compute 1+1 and return the result.', 'session_id': session,
+    'solver_mode': 'star_population', 'problem_spec': json.loads(problem_spec),
+}, headers={'X-CSRF-Token': csrf, 'Idempotency-Key': '9cfa911b-115a-4370-a4e2-e244e4006853'})
+if response.status_code != 202:
+    raise SystemExit('job_create_failed:' + response.get_data(as_text=True))
+job_id = response.get_json()['job_id']
+cookie = client.get_cookie('auth_session').value
+Path(identity_path).write_text(json.dumps({'job_id': job_id, 'csrf': csrf, 'cookie': cookie}), encoding='utf-8')
+original = population_runtime._collect
+def exit_after_receipt(harness, run):
+    latest = harness._state_store.get_run(run['run_id'])
+    population = latest['state']['population']
+    for action in population['actions'].values():
+        route = population['routes'][action['route_id']]
+        accepted = any(step.get('verification', {}).get('verdict') == 'ACCEPT'
+                       for step in route['snapshot'].get('steps', {}).values())
+        if action.get('status') == 'completed' and not action.get('accepted') and accepted:
+            Path(receipt_path).write_text(json.dumps({
+                'action_id': action['action_id'], 'route_id': action['route_id'],
+                'state_revision': latest['state_revision'],
+            }), encoding='utf-8')
+            time.sleep(60)
+    return original(harness, run)
+population_runtime._collect = exit_after_receipt
+deadline = time.monotonic() + 25
+while time.monotonic() < deadline:
+    job = client.get(f'/api/agent/jobs/{job_id}').get_json()
+    if job['status'] in {'succeeded', 'failed', 'canceled'}:
+        break
+    time.sleep(0.01)
+os._exit(74)
+"""
+        child = subprocess.Popen(
+            [sys.executable, "-c", script, self.temp.name,
+             f"http://127.0.0.1:{self.server.server_port}", json.dumps(SPEC),
+             identity_path, receipt_path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            deadline = time.monotonic() + 15
+            while not os.path.exists(identity_path) and time.monotonic() < deadline:
+                if child.poll() is not None:
+                    break
+                time.sleep(0.01)
+            if not os.path.exists(identity_path):
+                child.kill()
+                _stdout, stderr = child.communicate(timeout=10)
+                self.fail({"child_exit": child.returncode, "stderr": stderr})
+            deadline = time.monotonic() + 20
+            while not os.path.exists(receipt_path) and time.monotonic() < deadline:
+                if child.poll() is not None:
+                    break
+                time.sleep(0.01)
+            if not os.path.exists(receipt_path):
+                child.kill()
+                _stdout, stderr = child.communicate(timeout=10)
+                self.fail({"child_exit": child.returncode, "stderr": stderr})
+            self.assertTrue(self.delayed_reasoner_started.wait(3), child.poll())
+            with open(identity_path, encoding="utf-8") as stream:
+                identity = json.load(stream)
+            before_kill = json.loads(self.app.extensions["loopback_store"]._connection.execute(
+                "SELECT state_json FROM solver_states WHERE run_id=?",
+                (identity["job_id"],),
+            ).fetchone()[0])
+            self.assertTrue(any(action.get("status") == "inflight"
+                                for action in before_kill["population"]["actions"].values()),
+                            before_kill["population"]["actions"])
+            inflight_action_ids = {
+                action["action_id"] for action in before_kill["population"]["actions"].values()
+                if action.get("status") == "inflight"
+            }
+            self.assertTrue(any(
+                call.get("status") == "dispatched"
+                and call.get("action_id") in inflight_action_ids
+                for call in before_kill.get("calls", {}).values()
+            ), before_kill.get("calls"))
+            child.kill()
+            _stdout, _stderr = child.communicate(timeout=10)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.communicate(timeout=10)
+        with open(identity_path, encoding="utf-8") as stream:
+            identity = json.load(stream)
+        with open(receipt_path, encoding="utf-8") as stream:
+            receipt = json.load(stream)
+        pre_restart = json.loads(self.app.extensions["loopback_store"]._connection.execute(
+            "SELECT state_json FROM solver_states WHERE run_id=?", (identity["job_id"],)
+        ).fetchone()[0])
+        persisted_action = pre_restart["population"]["actions"][receipt["action_id"]]
+        self.assertEqual("completed", persisted_action["status"])
+        self.assertFalse(persisted_action["accepted"])
+        self.assertTrue(any(
+            action.get("status") == "inflight"
+            for action in pre_restart["population"]["actions"].values()
+            if action["action_id"] != receipt["action_id"]
+        ), pre_restart["population"]["actions"])
+        workspace = self.app.extensions["showcase_workspace_service"]
+        self.assertEqual(1, workspace.store.recover_incomplete_jobs(workspace.checkpointer))
+        self.client.set_cookie("auth_session", identity["cookie"])
+        route_requests_before_resume = [
+            (role, context.get("call_id")) for role, context in self.requests
+            if role in {"reasoner", "step_verifier"}
+        ]
+        response = self.client.post(
+            f"/api/agent/jobs/{identity['job_id']}/resume", json={},
+            headers={"X-CSRF-Token": identity["csrf"], "Idempotency-Key": str(uuid.uuid4())},
+        )
+        self.assertEqual(202, response.status_code, response.get_json())
+        resumed = self.terminal(identity["job_id"], timeout=25)
+        if resumed["status"] != "succeeded":
+            state = json.loads(self.app.extensions["loopback_store"]._connection.execute(
+                "SELECT state_json FROM solver_states WHERE run_id=?", (identity["job_id"],)
+            ).fetchone()[0])
+            ledger = json.loads(self.app.extensions["loopback_store"]._connection.execute(
+                "SELECT ledger_json FROM run_budgets WHERE run_id=?", (identity["job_id"],)
+            ).fetchone()[0])
+            self.fail({
+                "job_error": resumed.get("error"),
+                "delivery": state.get("population", {}).get("delivery"),
+                "phase": state.get("phase"),
+                "calls": [(call_id, call.get("role"), call.get("status"),
+                           call.get("error_category"), call.get("error"))
+                          for call_id, call in state.get("calls", {}).items()],
+                "ledger": [(item.get("kind"), item.get("role"), item.get("status"),
+                            item.get("solver_call_id"), item.get("logical_call_id"),
+                            item.get("population_action_id"))
+                           for item in ledger.get("actions", [])],
+                "actions": [(action["action_id"], action.get("status"), action.get("accepted"))
+                            for action in state["population"]["actions"].values()],
+                "http_roles": [(role, context.get("role"), context.get("call_id"))
+                               for role, context in self.requests],
+                "attempts": resumed.get("result", {}).get("request_attempts", []),
+            })
+        self.assertEqual("1+1=2 by addition.", resumed["result"]["final_response"])
+        route_requests_after_resume = [
+            (role, context.get("call_id")) for role, context in self.requests
+            if role in {"reasoner", "step_verifier"}
+        ]
+        self.assertEqual(route_requests_before_resume, route_requests_after_resume)
+        stored = json.loads(self.app.extensions["loopback_store"]._connection.execute(
+            "SELECT state_json FROM solver_states WHERE run_id=?", (identity["job_id"],)
+        ).fetchone()[0])
+        completed = [action for action in stored["population"]["actions"].values()
+                     if action.get("status") == "completed"]
+        self.assertTrue(completed)
+        self.assertTrue(all(action.get("accepted") for action in completed))
+        self.assertTrue(any(action.get("status") == "unknown"
+                            for action in stored["population"]["actions"].values()))
+        self.assertGreater(resumed["result"]["budget"]["reserved_tokens"], 0)
 
     def test_original_deadline_fences_late_results(self):
         self.server_delay = 5
