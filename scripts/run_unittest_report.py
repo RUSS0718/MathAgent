@@ -49,9 +49,7 @@ def run_suite(suite, *, stream, required=frozenset()):
         def stopTestRun(self):
             started = {_canonical_test_id(test_id) for test_id in self.started}
             skipped = {_canonical_test_id(test.id()) for test, _ in self.skipped}
-            expected_failures = {
-                _canonical_test_id(test.id()) for test, _ in self.expectedFailures
-            }
+            expected_failures = {_canonical_test_id(test.id()) for test, _ in self.expectedFailures}
             required_ids = {_canonical_test_id(test_id) for test_id in required}
             missing = required_ids - started
             uncovered = missing | (required_ids & (skipped | expected_failures))
@@ -157,25 +155,46 @@ def _summary(result, *, diagnostic_lines):
     }
 
 
-def _load_suite(test_names):
-    return (
-        unittest.defaultTestLoader.loadTestsFromNames(test_names)
-        if test_names
-        else discover_suite(ROOT / "tests")
-    )
+def _load_suite(test_names, *, loader=None):
+    loader = loader or unittest.defaultTestLoader
+    return loader.loadTestsFromNames(test_names) if test_names else discover_suite(ROOT / "tests")
 
 
-def _run_worker(args):
+def _append_problem(problem, detail):
+    return "\n".join(part for part in (problem, detail) if part)
+
+
+def _selection_error(suite, *, test_names, load_errors=(), expected_count=None, problem=None):
+    """Reject broken or incomplete explicit test selections before running them."""
+    if load_errors:
+        problem = _append_problem(
+            problem, "could not load selected tests:\n" + "\n".join(load_errors)
+        )
+    actual_count = suite.countTestCases()
+    if test_names and actual_count == 0:
+        problem = _append_problem(problem, "selected tests contain no runnable test cases")
+    if expected_count is not None and actual_count != expected_count:
+        detail = f"expected {expected_count} test cases, loaded {actual_count}"
+        problem = _append_problem(problem, detail)
+    return problem
+
+
+def _load_selected_suite(test_names):
+    loader = unittest.defaultTestLoader
+    loader.errors.clear()
+    suite = _load_suite(test_names, loader=loader)
+    return suite, _selection_error(suite, test_names=test_names, load_errors=loader.errors)
+
+
+def _run_worker(args, suite):
     started_at = datetime.now(UTC).isoformat()
     started = time.perf_counter()
     result = run_suite(
-        _load_suite(args.test_names),
+        suite,
         stream=sys.stderr,
         required=REFERENCE_TESTS if args.require_reference else frozenset(),
     )
-    payload = _result_payload(
-        result, elapsed=time.perf_counter() - started, start_time=started_at
-    )
+    payload = _result_payload(result, elapsed=time.perf_counter() - started, start_time=started_at)
     _atomic_write(
         args._worker_result_json,
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -197,10 +216,15 @@ def _run_supervised(args):
         ]
         if args.require_reference:
             command.append("--require-reference")
+        if args.expect_count is not None:
+            command.extend(["--expect-count", str(args.expect_count)])
         command.extend(args.test_names)
         with output_path.open("wb") as output:
             completed = subprocess.run(
-                command, stdout=output, stderr=subprocess.STDOUT, check=False,
+                command,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                check=False,
                 env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             )
         worker_output = output_path.read_text(encoding="utf-8", errors="replace")
@@ -263,17 +287,38 @@ def _print_result(result, stream):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--require-reference", action="store_true")
+    parser.add_argument("--expect-count", type=int)
     parser.add_argument("--summary-json", type=Path)
     parser.add_argument("--diagnostics", type=Path)
     parser.add_argument("--_worker-result-json", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("test_names", nargs="*")
     args = parser.parse_args()
-    if args._worker_result_json:
-        return _run_worker(args)
+    if args.expect_count is not None and args.expect_count < 1:
+        print("test_selection=INVALID expected count must be positive", file=sys.stderr)
+        return 2
+    if args.expect_count is not None and not args.test_names:
+        print("test_selection=INVALID --expect-count requires explicit test names", file=sys.stderr)
+        return 2
     if args.diagnostics:
         return _run_supervised(args)
 
-    suite = _load_suite(args.test_names)
+    suite = None
+    problem = None
+    if args.test_names:
+        suite, problem = _load_selected_suite(args.test_names)
+        if args.expect_count is not None:
+            problem = _selection_error(
+                suite,
+                test_names=args.test_names,
+                expected_count=args.expect_count,
+                problem=problem,
+            )
+        if problem:
+            print(f"test_selection=INVALID\n{problem}", file=sys.stderr)
+            return 2
+    if args._worker_result_json:
+        return _run_worker(args, suite if suite is not None else _load_suite([]))
+    suite = suite if suite is not None else _load_suite([])
     required = REFERENCE_TESTS if args.require_reference else frozenset()
     terminal_stream = sys.stderr
     started_at = datetime.now(UTC).isoformat()
@@ -282,9 +327,7 @@ def main() -> int:
     elapsed = time.perf_counter() - started
 
     if args.summary_json:
-        payload = _result_payload(
-            result, elapsed=elapsed, start_time=started_at
-        )
+        payload = _result_payload(result, elapsed=elapsed, start_time=started_at)
         summary = _summary(payload, diagnostic_lines=0)
         _atomic_write(
             args.summary_json,

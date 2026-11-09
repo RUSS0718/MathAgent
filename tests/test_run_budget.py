@@ -28,6 +28,29 @@ class Response:
 
 
 class RunBudgetContractTest(unittest.TestCase):
+    def test_legacy_budget_without_solver_state_table_reserves_model_call(self):
+        import sqlite3
+
+        from showcase.run_budget import RunBudgetLedger, RunBudgetLimits
+
+        connection = sqlite3.connect(":memory:")
+        self.addCleanup(connection.close)
+        ledger = RunBudgetLedger(connection)
+        budget = ledger.ensure(
+            "legacy-run",
+            RunBudgetLimits(max_model_calls=1, max_http_attempts=1, max_tokens=32),
+        )
+
+        self.assertIsNone(
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='solver_states'"
+            ).fetchone()
+        )
+        call = budget.model_call("reasoner", solver_call_id="legacy-call")
+
+        self.assertEqual("legacy-call", call.solver_call_id)
+        self.assertEqual(1, budget.snapshot()["logical_calls"])
+
     def test_synchronous_run_blocks_unmetered_and_exhausted_transports(self):
         from showcase.adapters import InternAgentAdapter
         from showcase.run_service import RunService
@@ -48,7 +71,10 @@ class RunBudgetContractTest(unittest.TestCase):
             (unsupported, PipelineBudget()),
         ]
         for transport, limits in cases:
-            with self.subTest(limits=limits, transport=type(transport).__name__), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(limits=limits, transport=type(transport).__name__),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 service = RunService(
                     agent=InternAgentAdapter(InternModelAdapter(transport, max_tokens=256)),
                     run_budget_limits=limits,
@@ -58,14 +84,20 @@ class RunBudgetContractTest(unittest.TestCase):
                     with patch("llm_client.requests.post", return_value=Response()) as post:
                         client = app.test_client()
                         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
-                        run = client.post("/api/runs", json={"problem": "1+1"}, headers={"X-CSRF-Token": csrf}).get_json()
+                        run = client.post(
+                            "/api/runs", json={"problem": "1+1"}, headers={"X-CSRF-Token": csrf}
+                        ).get_json()
                         self.assertEqual("FAILED", run["status"])
                         evidence = client.get(f"/api/runs/{run['run_id']}/evidence").get_json()
                         self.assertEqual(0, evidence["budget"]["http_attempts"])
                         self.assertEqual(0, post.call_count)
                         self.assertEqual(0, unsupported.calls)
                 finally:
-                    for key in ("showcase_workspace_service", "showcase_run_service", "loopback_store"):
+                    for key in (
+                        "showcase_workspace_service",
+                        "showcase_run_service",
+                        "loopback_store",
+                    ):
                         app.extensions[key].close()
 
     def run_job(self, *, budget=None, responses=None, pipeline_factory=None, registry=None):
@@ -177,9 +209,7 @@ class RunBudgetContractTest(unittest.TestCase):
                     },
                 }
 
-        job, report, _evidence, post = self.run_job(
-            responses=[MalformedWithUsage()]
-        )
+        job, report, _evidence, post = self.run_job(responses=[MalformedWithUsage()])
 
         self.assertEqual("failed", job["status"])
         self.assertEqual(1, post.call_count)
