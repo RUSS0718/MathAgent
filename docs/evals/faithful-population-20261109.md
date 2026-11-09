@@ -1,6 +1,6 @@
 # #156 Population/APRS 接管与验收
 
-日期：2026-11-09（Asia/Shanghai）。状态：实施中，尚无最终门禁，不声明工程退出或数学能力提升。
+日期：2026-11-09（Asia/Shanghai）。状态：离线工程门禁通过（engineering-preview）；真实容量与数学效果未验证，不声明能力提升。
 
 ## 身份
 
@@ -75,8 +75,25 @@ store同事务保存rating_history，公共candidate-replay对并发Run重算全
 
 另有test_star_experiment的Docker daemon不可用环境错误；用户于本次接续手动打开Docker，实测server29.6.1，已有固定镜像SHA `fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d` 一致，未构建/下载镜像。42skip不计通过，后续完整门禁按实际环境重新记录。
 
-## 退出与未验证项
+## 门禁04与交接结论
 
-源码 SHA、门禁 SHA、source_changed、完整失败/skip、最终交接 SHA 待冻结后记录。55 项回归结束后临时检查已删除；最终门禁启动时重新建立唯一检查所有权。
+成功门禁源码 SHA：`eaaadc0b9df401b77a10b30e26546374e3e6600d`。命令：`uv run python scripts/run_final_gate.py --root . --output-dir artifacts/final-gates --run-id faithful-population-04`。当前源码最终门禁通过，后续仅更新文档，不重复产品门禁。
 
-真实 provider、服务/账户/机器容量、SLA、自然题和独立数学效果未验证。S09 Lean unavailable，无 L2/L3，不解除 F3/S10 依赖，不实施干预或记忆。不关闭完整 F6、F3 或总票 #146。官方 `user_agent.py`、`implementations/`、baseline 和默认预算隔离；`tests/test.md` 不读、不改、不提交、不删除。
+| 检查 | 实际结果 |
+| --- | --- |
+| 完整门禁04 | 6/6，1596.203秒，source_changed=false，`artifacts/final-gates/faithful-population-04/status.json` |
+| 完整回归 | 1605项，0failure、0error、42skip，1466.470秒；同目录repository-check/tests.json与diagnostics.log |
+| 发布检查 | 27项通过，40.253秒，release.log |
+| 前端 | npm ci/audit/check全部通过，0漏洞；chunk大于500kB提示不计性能验收 |
+| 浏览器 | 先前桌面/手机Chromium两项通过，前端源码其后未变化，r4证据复用 |
+| 官方隔离 | 快速边界检查通过；相对接管HEAD的user_agent.py、implementations/、BASELINE.json无差异 |
+
+42skip主要是需要显式验证镜像配置的隔离工具/Reference专项；Docker已开启且固定镜像存在，不等于这些跳过项目实际执行。没有设置新环境标志把skip变成通过。S09 Lean仍unavailable，没有L2/L3，不解除F3/S10前置，不实现干预或记忆。
+
+**#156的本轮离线并发工程实现与工程门禁达到engineering-preview。** 公开恢复、受控真实HTTP、取消/截止、证据共享、持久回放、交付与结算以及报告浏览器证据分别保留；不以浏览器fixture代替后端公共HTTP，不以单元测试代替真实服务容量。运行中路线注册由可信控制器注入验收，未新增自主Planner生产者；实际跨进程接管有store与公共恢复证据，退出窗口使用故障注入，不冒称整套进程崩溃矩阵。
+
+真实provider、服务/账户/机器容量、自然机器压力、SLA、自然题和独立数学效果未验证；faithful-D研究批次not_run。保留#156开放以追踪剩余真实环境/完整覆盖验收，不关闭完整F6、F3或总票#146。原挂起runtime06根因未知，后续带超时栈15项通过和完整门禁04通过不被写成已定位修复该挂起。
+
+门禁01/02中断、03失败和04成功全部保留。04已结束、临时检查已删除，收尾核验无遗留Python/uv门禁或回归任务。源码SHA/门禁SHA均为上述eaaadc0；最终文档交接SHA见交付回复。未push。接续仍使用当前选择模型，具体型号与实际继承未独立核实，不猜测。
+
+官方baseline和默认评分预算未变；`tests/test.md` 未读、未改、未提交、未删除。完整记录只支持所列工程覆盖，不声明数学能力提升。
