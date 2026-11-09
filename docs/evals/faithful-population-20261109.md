@@ -25,7 +25,7 @@ timeout/error 曾被 Population 当作已结清，父账本却保留未知预留
 | 1 并发/公平 | schedule 固定轮次/新成员；loopback 双路线重叠；快路线第二 WorkUnit 在慢 HTTP 返回前派发 | 不代表 provider 吞吐/SLA |
 | 2 准入/占用 | store 原子准入、单路线在途、unknown 预留、冻结后发送栅栏 | 受控 429 暂停新探索已验证；真实机器压力与容量未实测 |
 | 3 共享/版本/replay | evidence/adoption 依赖测试；公共出站上下文采用另一条路线已接受证据，action 持久化依赖；APRS 重算拒绝篡改 | 不以全局图版本代替实际依赖；不声明数学收益 |
-| 4 owner/恢复 | 独立进程接管 SQLite 后拒绝旧 owner；公共 Job 在 completed receipt 与 accept 之间退出后复用结果，reasoner 数不增加 | completed 公共恢复包含独立进程接管；进程退出窗口仍用故障注入 |
+| 4 owner/恢复 | `test_independent_process_takeover_fences_previous_dispatch_owner` 跨进程接管后拒绝旧 owner；`test_public_resume_after_worker_process_exit_reuses_persisted_receipt` 在回执已存、未合并且另一路线HTTP inflight时终止旧worker，由新服务实例启动恢复并经公开Job `/resume` 复用结果 | 跨进程旧owner fencing 为独立 store 验收；公共服务重启验收终止了旧进程，未测试两个仍存活进程并发争抢；loopback 不等同真实provider故障矩阵 |
 | 5 unknown | 普通 resume 零重发；显式新 ID lineage；timeout 保留旧预留；公共 GET/report 修复丢失结算 callback | 本地 timeout 不代表远端停止 |
 | 6 冻结/终止 | 公共首次 REJECT 后恢复合法路线并再次整题审查；cancel/deadline 迟到不改根义务或交付 | 无形式内核验收 |
 | 7 交付/结算 | 公共答案先交付、迟到后结算；报告/Evidence 分开投影；桌面/手机 Chromium 刷新重连零 POST、隐私检查 | 浏览器受控 API fixture；后端公共测试独立覆盖真实 HTTP |
@@ -92,12 +92,12 @@ store同事务保存rating_history，公共candidate-replay对并发Run重算全
 
 **#156的本轮离线并发工程实现与工程门禁达到engineering-preview。** 公开恢复、受控真实HTTP、取消/截止、证据共享、持久回放、交付与结算以及报告浏览器证据分别保留；不以浏览器fixture代替后端公共HTTP，不以单元测试代替真实服务容量。运行中路线注册由可信控制器注入验收，未新增自主Planner生产者；实际跨进程接管有store与公共恢复证据。
 
-新增真实退出窗口聚焦验收 `test_public_resume_after_worker_process_exit_reuses_persisted_receipt`：子进程在 completed receipt 已持久化、尚未 accept 且另一条 HTTP 仍 inflight 时被终止；新 `create_app` 实例自动执行恢复，公开 `/resume` 复用已完成动作，旧路线调用身份不重复，另一动作转 unknown 并保留预算预留。聚焦回放连续3次通过；11项恢复/unknown/终止/交付回归通过。该证据覆盖受控 loopback 的真实独立进程退出窗口，不等同于真实 provider 或全故障矩阵。
+新增真实退出窗口聚焦验收 `test_public_resume_after_worker_process_exit_reuses_persisted_receipt`：子进程在 completed receipt 已持久化、尚未 accept 且另一条路线已有 dispatched HTTP 时被终止；新 `create_app` 实例启动时自动将 Job 恢复为可审查失败态，再经公开 `/resume` 复用已完成动作。断言原 inflight action ID 精确变为 unknown，且同一 action ID 下仍有含 input/output estimate 的 reserved/unknown/error HTTP budget entry；reasoner/verifier 调用身份不重复，独立答案交付成功。三次重复日志：`artifacts/faithful-population-takeover/process-exit-replay-20261109.log`。相关11项回归 `Ran 11 tests in 37.760s — OK`，包含跨进程旧owner拒写、explicit retry、迟到结算、cancel/deadline与正常双路线并发。该证据覆盖受控 loopback 的真实独立进程退出窗口，不等同于真实provider或全故障矩阵。
 
 路线扩展范围核对#155 Resolution：必须满足“运行中加入时进入下一轮”的调度合同，没有要求新增自主或无界Planner生产循环。现有初始Planner已返回并登记有效alternatives；受控可信控制器注册用例覆盖晚加入路线的轮次规则。本轮不增加额外Planner调用/API，也不把该验收描述成生产中的动态Planner路线生成。
 
 真实provider、服务/账户/机器容量、自然机器压力、SLA、自然题和独立数学效果未验证；faithful-D研究批次not_run。保留#156开放以追踪剩余真实环境/完整覆盖验收，不关闭完整F6、F3或总票#146。原挂起runtime06根因未知，后续带超时栈15项通过和完整门禁04通过不被写成已定位修复该挂起。
 
-门禁01/02中断、03失败和04成功全部保留。04已结束、临时检查已删除，收尾核验无遗留Python/uv门禁或回归任务。源码SHA/门禁SHA均为上述eaaadc0；最终文档交接SHA见交付回复。未push。接续仍使用当前选择模型，具体型号与实际继承未独立核实，不猜测。
+门禁01/02中断、03失败和04成功全部保留。04覆盖旧源码`eaaadc0`，不能作为新增进程退出验收及文档的最终源码门禁；接续后运行的05门禁将单独记录最终源码SHA与结果。临时检查及门禁结束状态在下方补记。未push。接续仍使用当前选择模型，具体型号与实际继承未独立核实，不猜测。
 
 官方baseline和默认评分预算未变；`tests/test.md` 未读、未改、未提交、未删除。完整记录只支持所列工程覆盖，不声明数学能力提升。

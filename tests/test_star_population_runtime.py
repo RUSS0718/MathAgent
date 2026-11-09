@@ -628,6 +628,10 @@ os._exit(74)
             self.addCleanup(restarted_app.extensions[name].close)
         restarted_client = restarted_app.test_client()
         restarted_client.set_cookie("auth_session", identity["cookie"])
+        recovered_before_resume = restarted_client.get(
+            f"/api/agent/jobs/{identity['job_id']}"
+        ).get_json()
+        self.assertEqual("failed", recovered_before_resume["status"], recovered_before_resume)
         route_requests_before_resume = [
             (role, context.get("call_id")) for role, context in self.requests
             if role in {"reasoner", "step_verifier"}
@@ -675,8 +679,31 @@ os._exit(74)
                      if action.get("status") == "completed"]
         self.assertTrue(completed)
         self.assertTrue(all(action.get("accepted") for action in completed))
-        self.assertTrue(any(action.get("status") == "unknown"
-                            for action in stored["population"]["actions"].values()))
+        unknown_action_ids = {
+            action["action_id"] for action in stored["population"]["actions"].values()
+            if action.get("status") == "unknown"
+        }
+        self.assertTrue(unknown_action_ids, stored["population"]["actions"])
+        self.assertTrue(inflight_action_ids.issubset(unknown_action_ids), {
+            "inflight_before_kill": sorted(inflight_action_ids),
+            "unknown_after_resume": sorted(unknown_action_ids),
+        })
+        ledger = json.loads(self.app.extensions["loopback_store"]._connection.execute(
+            "SELECT ledger_json FROM run_budgets WHERE run_id=?", (identity["job_id"],)
+        ).fetchone()[0])
+        held_unknown = [item for item in ledger["actions"]
+                        if item.get("kind") == "http"
+                        and item.get("population_action_id") in unknown_action_ids]
+        for action_id in inflight_action_ids:
+            held = [item for item in held_unknown
+                    if item.get("population_action_id") == action_id]
+            self.assertTrue(held, {"action_id": action_id, "ledger": ledger["actions"]})
+            self.assertTrue(any(
+                item.get("status") in {"reserved", "unknown", "error"}
+                and isinstance(item.get("input_estimate"), int)
+                and isinstance(item.get("output_cap"), int)
+                for item in held
+            ), {"action_id": action_id, "holds": held})
         self.assertGreater(resumed["result"]["budget"]["reserved_tokens"], 0)
 
     def test_original_deadline_fences_late_results(self):
