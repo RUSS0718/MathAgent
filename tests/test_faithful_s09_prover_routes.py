@@ -66,6 +66,7 @@ class ProverRouteProjectionTest(unittest.TestCase):
                   and route["target_type"] == "natural_language_draft"]
         reviewed = next(route for route in routes
                         if route["target_type"] == "natural_language_review")
+        draft = next(route for route in drafts if route["status"] == "completed")
         polynomial = next(route for route in routes
                           if route["backend_id"] == "math_tool_backend"
                           and route["tool"] == "polynomial_check")
@@ -82,9 +83,13 @@ class ProverRouteProjectionTest(unittest.TestCase):
         self.assertEqual("LLM_REVIEWED", reviewed["maximum_grade"])
         self.assertEqual("unknown", next(route for route in drafts
                                            if route["status"] == "unknown")["status"])
+        self.assertEqual({"total_tokens": 10}, draft["cost"])
+        unknown_draft = next(route for route in drafts if route["status"] == "unknown")
+        self.assertEqual({"prompt_tokens": None, "completion_tokens": None,
+                          "total_tokens": None}, unknown_draft["cost"])
         self.assertEqual("L1", polynomial["grade"])
         self.assertEqual("L1", polynomial["maximum_grade"])
-        self.assertIn("duration_seconds", polynomial["cost"])
+        self.assertEqual({}, polynomial["cost"])
         self.assertEqual(1, polynomial["lineage"]["sequence"])
         self.assertIsNone(python_math["grade"])
         self.assertEqual("L1", python_math["maximum_grade"])

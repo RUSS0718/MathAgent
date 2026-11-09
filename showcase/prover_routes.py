@@ -52,6 +52,11 @@ def prover_route_projection(state: Mapping[str, Any]) -> list[dict[str, Any]]:
             status = ("completed" if raw_status == "completed" else
                       "failed" if raw_status in _FAILED_CALLS else "unknown")
             usage = call.get("usage") if isinstance(call.get("usage"), Mapping) else {}
+            cost_fields = ("prompt_tokens", "completion_tokens", "total_tokens")
+            if "usage" in call and call["usage"] is None:
+                cost = dict.fromkeys(cost_fields)
+            else:
+                cost = {key: usage[key] for key in cost_fields if key in usage}
             response = call.get("response") if isinstance(call.get("response"), Mapping) else {}
             grade = None
             if (role == "whole_solution_verifier" and status == "completed"
@@ -78,8 +83,7 @@ def prover_route_projection(state: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "status": status,
                 "grade": grade,
                 "maximum_grade": "LLM_REVIEWED",
-                "cost": {key: usage.get(key) for key in (
-                    "prompt_tokens", "completion_tokens", "total_tokens")},
+                "cost": cost,
                 "lineage": {"attempt_id": public_solver_call_id(run_id, call_id),
                             "parent_attempt_id": call.get("retry_of")},
             })
@@ -144,8 +148,8 @@ def prover_route_projection(state: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "unknown_outcome": receipt.get("unknown_outcome") is True,
                 "grade": grade,
                 "maximum_grade": "L1",
-                "cost": {key: receipt.get(key) for key in (
-                    "duration_seconds", "observed_output_bytes")},
+                "cost": {key: receipt[key] for key in (
+                    "duration_seconds", "observed_output_bytes") if key in receipt},
                 "lineage": {"attempt_id": public_id,
                     "parent_attempt_id": parent_attempt_id,
                     "sequence": sequence},
