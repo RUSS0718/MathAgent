@@ -88,9 +88,13 @@ store同事务保存rating_history，公共candidate-replay对并发Run重算全
 | 浏览器 | 先前桌面/手机Chromium两项通过，前端源码其后未变化，r4证据复用 |
 | 官方隔离 | 快速边界检查通过；相对接管HEAD的user_agent.py、implementations/、BASELINE.json无差异 |
 
-42skip主要是需要显式验证镜像配置的隔离工具/Reference专项；Docker已开启且固定镜像存在，不等于这些跳过项目实际执行。没有设置新环境标志把skip变成通过。S09 Lean仍unavailable，没有L2/L3，不解除F3/S10前置，不实现干预或记忆。
+门禁04的42项skip主要是需要显式验证镜像配置的隔离工具/Reference专项；该次门禁的skip仍如实保留。Docker开启后，使用仓库固定镜像ID `sha256:fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d` 和Docker readiness标志，对解析出的全部42个原skip用例单独重跑：`Ran 42 tests in 263.685s — OK`，日志 `artifacts/faithful-population-takeover/faithful-population-docker-skip-20261109-r2/tests.log`。该专门回放不改写门禁04摘要，也不以设置环境变量替代测试通过。S09 Lean仍unavailable，没有L2/L3，不解除F3/S10前置，不实现干预或记忆。
 
-**#156的本轮离线并发工程实现与工程门禁达到engineering-preview。** 公开恢复、受控真实HTTP、取消/截止、证据共享、持久回放、交付与结算以及报告浏览器证据分别保留；不以浏览器fixture代替后端公共HTTP，不以单元测试代替真实服务容量。运行中路线注册由可信控制器注入验收，未新增自主Planner生产者；实际跨进程接管有store与公共恢复证据，退出窗口使用故障注入，不冒称整套进程崩溃矩阵。
+**#156的本轮离线并发工程实现与工程门禁达到engineering-preview。** 公开恢复、受控真实HTTP、取消/截止、证据共享、持久回放、交付与结算以及报告浏览器证据分别保留；不以浏览器fixture代替后端公共HTTP，不以单元测试代替真实服务容量。运行中路线注册由可信控制器注入验收，未新增自主Planner生产者；实际跨进程接管有store与公共恢复证据。
+
+新增真实退出窗口聚焦验收 `test_public_resume_after_worker_process_exit_reuses_persisted_receipt`：子进程在 completed receipt 已持久化、尚未 accept 且另一条 HTTP 仍 inflight 时被终止；新 `create_app` 实例自动执行恢复，公开 `/resume` 复用已完成动作，旧路线调用身份不重复，另一动作转 unknown 并保留预算预留。聚焦回放连续3次通过；11项恢复/unknown/终止/交付回归通过。该证据覆盖受控 loopback 的真实独立进程退出窗口，不等同于真实 provider 或全故障矩阵。
+
+路线扩展范围核对#155 Resolution：必须满足“运行中加入时进入下一轮”的调度合同，没有要求新增自主或无界Planner生产循环。现有初始Planner已返回并登记有效alternatives；受控可信控制器注册用例覆盖晚加入路线的轮次规则。本轮不增加额外Planner调用/API，也不把该验收描述成生产中的动态Planner路线生成。
 
 真实provider、服务/账户/机器容量、自然机器压力、SLA、自然题和独立数学效果未验证；faithful-D研究批次not_run。保留#156开放以追踪剩余真实环境/完整覆盖验收，不关闭完整F6、F3或总票#146。原挂起runtime06根因未知，后续带超时栈15项通过和完整门禁04通过不被写成已定位修复该挂起。
 

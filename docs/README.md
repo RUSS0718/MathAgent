@@ -1,10 +1,10 @@
 # MathAgent 文档索引
 
-- [#156 完整并发接管与验收](evals/faithful-population-20261109.md)：离线engineering-preview门禁04通过（1605项、42skip），含恢复失败、并发HTTP、回放与独立结算证据；真实容量/机器压力/数学效果未验证，#156保持开放。
+- [#156 完整并发接管与验收](evals/faithful-population-20261109.md)：离线engineering-preview门禁04通过（1605项、42skip），并补充独立进程退出窗口恢复聚焦证据；含并发HTTP、回放与独立结算证据；真实容量/机器压力/数学效果未验证，#156保持开放。
 
-## Faithful 实施入口（2026-11-08）
+## Faithful 实施入口（截至2026-11-08的阶段快照）
 
-当前 S01–S08（含 S06 与串行 F2/S08）已工程退出（`engineering-preview`）。S09 仅完成隔离环境核验：Lean 缺失，状态 unavailable，未实现后端；S10 前置未解除。完整 F6 与完整并发仍为后续增量。真实 provider、容量/SLA、自然题与数学效果分别保留未验证状态。具体合同与依赖见 [#144 阶段决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)。执行与证据复用遵循根 [AGENTS.md](../AGENTS.md) 和[工程门禁](engineering/development-gates.md)。
+截至该快照，S01–S08（含 S06 与串行 F2/S08）已工程退出（`engineering-preview`）。S09仅完成隔离环境核验：Lean缺失，状态unavailable，未实现后端；S10前置未解除。#156完整并发的当前实现与验收状态见本页顶部最新入口。真实provider、容量/SLA、自然题与数学效果仍分别保留未验证状态。具体合同与依赖见 [#144 阶段决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)。执行与证据复用遵循根 [AGENTS.md](../AGENTS.md) 和[工程门禁](engineering/development-gates.md)。
 
 - [S06 与 S08/F2 工程退出验收](evals/faithful-s06-s08-exit-20261108.md)：门禁源码 `2f11c65`，6/6通过，1543项含42skip；分别记录基础模板输出、串行路线/APRS、双轴修复及首轮门禁失败。
 - [S06基础输出合同](engineering/faithful-s06-contract.md)、[S08串行路线合同](engineering/faithful-s08-contract.md)、[重规划诊断与S09环境](evals/faithful-replan-s09-environment-20261108.md)：S09编译exit127、无L2/L3；#156可按实际前置推进，S10不可提前实施。
