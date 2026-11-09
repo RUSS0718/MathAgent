@@ -607,14 +607,32 @@ os._exit(74)
             for action in pre_restart["population"]["actions"].values()
             if action["action_id"] != receipt["action_id"]
         ), pre_restart["population"]["actions"])
-        workspace = self.app.extensions["showcase_workspace_service"]
-        self.assertEqual(1, workspace.store.recover_incomplete_jobs(workspace.checkpointer))
-        self.client.set_cookie("auth_session", identity["cookie"])
+        restarted_provider = InternChatClient(retry=1, timeout=12, loopback_only=True)
+        restarted_provider.api_base = f"http://127.0.0.1:{self.server.server_port}"
+        restarted_app = create_app({
+            "TESTING": True,
+            "SHOWCASE_DATA_DIR": self.temp.name,
+            "SHOWCASE_JOB_DELAY_SECONDS": 0,
+            "SHOWCASE_STAR_ENABLED": False,
+            "SHOWCASE_STAR_POPULATION_ENABLED": True,
+            "SHOWCASE_STAR_POPULATION_CAPACITY": CAPACITY,
+            "SHOWCASE_STAR_POPULATION_BUDGET": RunBudgetLimits(
+                max_model_calls=20, max_http_attempts=20, max_tool_calls=0,
+                max_tokens=2_000_000, max_runtime_seconds=120,
+            ),
+            "SHOWCASE_STAR_ADAPTER": InternModelAdapter(
+                restarted_provider, max_tokens=256),
+            "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection",
+        })
+        for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
+            self.addCleanup(restarted_app.extensions[name].close)
+        restarted_client = restarted_app.test_client()
+        restarted_client.set_cookie("auth_session", identity["cookie"])
         route_requests_before_resume = [
             (role, context.get("call_id")) for role, context in self.requests
             if role in {"reasoner", "step_verifier"}
         ]
-        response = self.client.post(
+        response = restarted_client.post(
             f"/api/agent/jobs/{identity['job_id']}/resume", json={},
             headers={"X-CSRF-Token": identity["csrf"], "Idempotency-Key": str(uuid.uuid4())},
         )
