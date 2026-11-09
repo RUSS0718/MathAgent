@@ -53,6 +53,13 @@ def read_job_snapshot(store, job_id, user_id):
     # Match the ledger reader's bounded busy timeout for that commit window.
     with closing(sqlite3.connect(uri, uri=True, timeout=1)) as connection:
         connection.row_factory = sqlite3.Row
+        if connection.execute(
+            "SELECT 1 FROM workspace_jobs WHERE job_id=? AND user_id=?", (job_id, user_id)
+        ).fetchone() is None:
+            raise WorkspaceError("job_not_found", status=404)
+        from .solver_harness.population_settlement import reconcile_database
+
+        reconcile_database(store.database_path, job_id)
         connection.execute("BEGIN")
         row = connection.execute(
             "SELECT * FROM workspace_jobs WHERE job_id=? AND user_id=?", (job_id, user_id)

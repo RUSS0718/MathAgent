@@ -283,6 +283,10 @@ def response_schema(request):
             step["required"].append("method_id")
         if role == "planner":
             schema = planner
+            if request.get("population_policy", {}).get("version") == "concurrent-aprs-v1":
+                schema["properties"]["alternative_plans"] = {
+                    "type": "array", "items": deepcopy(planner),
+                }
         else:
             schema["properties"]["plan"]["oneOf"][0] = planner
             for branch in schema["properties"]["checkpoint"]["oneOf"]:

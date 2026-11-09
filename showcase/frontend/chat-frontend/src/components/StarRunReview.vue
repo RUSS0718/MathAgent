@@ -7,6 +7,7 @@ import StatusBadge from './ui/StatusBadge.vue'
 import ProofGraphView from './ProofGraphView.vue'
 const props = defineProps<{ report: JobReport; jobId: string }>()
 const solver = computed(() => props.report.solver?.solver)
+const population = computed(() => solver.value?.population)
 const steps = computed(() => (solver.value?.progress?.steps ?? []) as Record<string, unknown>[])
 const failures = computed(() => (solver.value?.progress?.failures ?? []) as Record<string, unknown>[])
 const obligations = computed(() => solver.value?.progress?.root_obligations)
@@ -37,6 +38,20 @@ async function loadReplay(): Promise<void> {
       <p>以下状态来自同一 Run 的持久记录；工程注入与回放不代表真实模型效果。</p>
       <dl class="data-list"><template v-for="field in ['run_id', 'state_revision', 'phase', 'status']" :key="field"><dt>{{ field }}</dt><dd>{{ display(solver?.[field]) }}</dd></template></dl>
       <p v-if="report.solver.missing_capabilities?.length">模式限制：{{ report.solver.missing_capabilities.join('、') }}</p>
+      <section v-if="population" class="evidence-section" aria-label="并发路线执行">
+        <h3>并发路线执行</h3>
+        <dl class="data-list">
+          <dt>调度轮次</dt><dd>{{ display(population.scheduler?.round) }}</dd>
+          <dt>本轮路线 / 已用机会</dt><dd>{{ display(population.scheduler?.member_count) }} / {{ display(population.scheduler?.opportunities_used) }}</dd>
+          <dt>已验证根义务</dt><dd>{{ display(population.scheduler?.verified_gain_count) }}</dd>
+          <dt>路线状态</dt><dd>{{ display(population.scheduler?.route_counts) }}</dd>
+          <dt>执行槽 / 在途 HTTP</dt><dd>{{ display(population.resources?.worker_slots_in_use) }} / {{ display(population.resources?.http_inflight) }}</dd>
+          <dt>未知路线 / 未知请求</dt><dd>{{ display(population.resources?.unknown_routes) }} / {{ display(population.resources?.unknown_requests) }}</dd>
+          <dt>数学交付</dt><dd>{{ population.delivery?.status === 'delivered' ? '已交付' : display(population.delivery?.status) }}<span v-if="population.delivery?.reason"> · {{ population.delivery.reason }}</span></dd>
+          <dt>请求结算</dt><dd>{{ population.settlement?.status === 'settled' ? '已结清' : population.settlement?.status === 'pending' ? '结算中' : display(population.settlement?.status) }}<span v-if="population.settlement?.unknown_count != null"> · 未知请求 {{ population.settlement.unknown_count }}</span></dd>
+        </dl>
+        <p>数学答案交付与远端请求费用结算分别记录；迟到回执不会改写已交付答案。</p>
+      </section>
       <details open><summary>当前计划、步骤与回退记录</summary>
         <p>计划版本 {{ display(solver?.progress?.plan_version) }} · 尝试 {{ display(solver?.progress?.attempt_index) }} · Meta 裁定 {{ display(solver?.progress?.meta_decision) }}</p>
         <ol v-if="steps.length"><li v-for="(step, index) in steps" :key="index">{{ step.label }}{{ step.current ? '（当前）' : '' }} · 目标 {{ display(step.goal_gate) }} · 逻辑 {{ display(step.logic_gate) }} · {{ display(step.verdict) }} · {{ step.valid === true && step.verdict === 'ACCEPT' ? '已接受' : '尚未接受' }}</li></ol>

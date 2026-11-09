@@ -5,6 +5,9 @@ import json
 
 def persisted_solver(connection, run_id, *, projection_only=False):
     """Read persisted Solver data; projections retain only tool events used by recovery."""
+    from .solver_harness.population_settlement import reconcile_settlement
+
+    reconcile_settlement(connection, run_id)
     row = connection.execute("SELECT state_json FROM solver_states WHERE run_id=?", (run_id,)).fetchone()
     if row is None:
         return None

@@ -8,12 +8,12 @@ OPTIONAL_FEATURES = frozenset({
     "final_generation", "final_solution_review", "local_code_tool", "meta_guidance",
     "reexplore_after_replan", "skills", "stream_activity", "context_pack",
     "problem_spec", "progress_scheduling",
-    "proof_graph", "serial_routes",
+    "proof_graph", "serial_routes", "concurrent_routes",
 })
 EXPERIMENTAL_FEATURES = frozenset({"planner_checkpoints", "reasoner_checkpoints"})
 CORE_FEATURES = frozenset({
     "star_routing", "persistent_sessions", "stream_recovery",
-    *(OPTIONAL_FEATURES - {"stream_activity", "context_pack", "problem_spec", "progress_scheduling", "proof_graph", "serial_routes"}),
+    *(OPTIONAL_FEATURES - {"stream_activity", "context_pack", "problem_spec", "progress_scheduling", "proof_graph", "serial_routes", "concurrent_routes"}),
 })
 SUPPORTED_FEATURES = CORE_FEATURES | OPTIONAL_FEATURES | EXPERIMENTAL_FEATURES
 
@@ -58,6 +58,8 @@ def limited_config(budget, features=None, registry=None, context_capacity=None):
         raise ValueError("star_registry_invalid")
     enabled = {"star_routing": True, "persistent_sessions": True, "stream_recovery": True,
                **(features or {})}
+    if enabled.get("concurrent_routes") is True:
+        raise ValueError("concurrent_routes_requires_star_population_preset")
     _freeze_serial_route_dependencies(enabled)
     if enabled.get("problem_spec") is True and (
         enabled.get("final_generation") is not True
@@ -81,6 +83,45 @@ def limited_config(budget, features=None, registry=None, context_capacity=None):
         if context_capacity is None:
             raise ValueError("context_capacity_required")
         config["context_capacity"] = context_capacity
+    return config
+
+
+def population_config(budget, capacity, *, evidence_kind, request_timeout_seconds):
+    """Build the explicit concurrent preset from trusted, controlled capacity evidence."""
+    if not isinstance(capacity, Mapping):
+        raise ValueError("population_capacity_required")
+    required = {"service_id", "max_inflight", "worker_slots", "evidence_ref", "status"}
+    if not required <= set(capacity):
+        raise ValueError("population_capacity_invalid")
+    if (not isinstance(capacity["service_id"], str) or not capacity["service_id"].strip()
+            or not isinstance(capacity["evidence_ref"], str) or not capacity["evidence_ref"].strip()
+            or type(capacity["max_inflight"]) is not int or capacity["max_inflight"] < 1
+            or type(capacity["worker_slots"]) is not int
+            or capacity["worker_slots"] < capacity["max_inflight"]):
+        raise ValueError("population_capacity_invalid")
+    evidence_ok = ((evidence_kind == "fault_injection" and capacity["status"] == "controlled")
+                   or (evidence_kind == "live" and capacity["status"] == "verified"))
+    if not evidence_ok:
+        raise ValueError("population_capacity_unverified")
+    if (type(request_timeout_seconds) not in {int, float}
+            or request_timeout_seconds <= 0):
+        raise ValueError("population_request_timeout_unavailable")
+    features = {
+        "problem_spec": True, "proof_graph": True, "progress_scheduling": True,
+        "final_generation": True, "final_solution_review": True,
+        "serial_routes": False,
+    }
+    config = limited_config(budget, features)
+    config["features"]["concurrent_routes"] = True
+    config["max_http_attempts"] = budget.max_http_attempts
+    config["max_tokens"] = budget.max_tokens
+    config["max_runtime_seconds"] = budget.max_runtime_seconds
+    config["max_challenge_rounds"] = 1
+    config["population_policy"] = {
+        "enabled": True, "version": "concurrent-aprs-v1",
+        "schema_version": "population-v1", "capacity": dict(capacity),
+        "request_timeout_seconds": request_timeout_seconds, "retry_limit": 1,
+    }
     return config
 
 

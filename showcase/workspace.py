@@ -583,7 +583,7 @@ class WorkspaceStore:
             if isinstance(state.get("verification"), Mapping)
             else {"status": "unknown"},
         }
-        result.update({key: state[key] for key in ("solver_mode", "preset_version", "missing_capabilities", "evidence_kind", "solver", "acceptance_mode", "engineering_delivery", "presentation_mode", "presentation_schema_version", "presentation_policy_version") if key in state})
+        result.update({key: state[key] for key in ("solver_mode", "preset_version", "population_policy_hash", "missing_capabilities", "evidence_kind", "solver", "acceptance_mode", "engineering_delivery", "presentation_mode", "presentation_schema_version", "presentation_policy_version") if key in state})
         result["verification"] = bind_verification(result["final_response"], result["verification"])
         error = state.get("error") if isinstance(state.get("error"), Mapping) else None
         error_code = str(error.get("category")) if error else None
@@ -1054,6 +1054,7 @@ class WorkspaceService:
             experiment_binding=experiment_binding,
             problem_spec=problem_spec,
             presentation_mode=presentation_mode,
+            population_policy_hash=identity.get("population_policy_hash"),
         )
         payload, existing = self.store.create_job(
             user_id=user_id,
@@ -1376,6 +1377,7 @@ def workspace_job_request_digest(
     experiment_binding: Mapping[str, Any] | None = None,
     problem_spec: Mapping[str, Any] | None = None,
     presentation_mode: str | None = None,
+    population_policy_hash: str | None = None,
 ) -> str:
     """Fingerprint the exact public Job request, including any frozen budget."""
     request_parts = (session_id, message, web_search_enabled, input_user_file_id, verification_mode)
@@ -1406,6 +1408,8 @@ def workspace_job_request_digest(
         digest = _request_digest(digest, {"problem_spec": dict(problem_spec)})
     if presentation_mode is not None:
         digest = _request_digest(digest, {"presentation_mode": presentation_mode})
+    if population_policy_hash is not None:
+        digest = _request_digest(digest, {"population_policy_hash": population_policy_hash})
     return digest
 
 

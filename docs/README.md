@@ -1,5 +1,7 @@
 # MathAgent 文档索引
 
+- [#156 完整并发接管与验收](evals/faithful-population-20261109.md)：当前实现与聚焦证据；尚无完整并发最终门禁，不能据此声明工程退出。
+
 ## Faithful 实施入口（2026-11-08）
 
 当前 S01–S08（含 S06 与串行 F2/S08）已工程退出（`engineering-preview`）。S09 仅完成隔离环境核验：Lean 缺失，状态 unavailable，未实现后端；S10 前置未解除。完整 F6 与完整并发仍为后续增量。真实 provider、容量/SLA、自然题与数学效果分别保留未验证状态。具体合同与依赖见 [#144 阶段决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)。执行与证据复用遵循根 [AGENTS.md](../AGENTS.md) 和[工程门禁](engineering/development-gates.md)。

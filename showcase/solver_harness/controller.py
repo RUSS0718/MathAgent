@@ -20,6 +20,19 @@ def run_supplied_plan_or_explore(
     problem: str,
     metadata: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    if run["state"].get("population_policy", {}).get("enabled") is True:
+        plan = None if metadata is None else metadata.get("plan")
+        if plan is not None:
+            from .population_runtime import register_plans
+
+            return register_plans(harness, run, plan)
+        if run["state"]["phase"] == "SETUP":
+            return harness.commit_event(
+                run["run_id"], expected_revision=run["state_revision"],
+                event={"event_id": "population-planning-requested", "type": "population_planning_requested"},
+                state_updates={"phase": "PLAN"},
+            )
+        return run
     if harness._config.get("features", {}).get("star_routing") is True:
         from .star_routing import prepare_hint
 
@@ -83,6 +96,10 @@ def run_exploration_phase(harness, run: dict[str, Any], problem: str) -> dict[st
 
 
 def advance(harness, run, metadata, problem):
+    if run["state"].get("population_policy", {}).get("enabled") is True:
+        from .population_lifecycle import advance_population
+
+        return advance_population(harness, run, problem, metadata or {})
     run = run_meta(
         harness,
         run,

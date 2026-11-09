@@ -381,9 +381,13 @@ class InternStreamAdapter(InternModelAdapter):
             logical_deadline = started + effective_timeout
             if call_budget is not None:
                 logical_deadline = min(logical_deadline, call_budget.absolute_deadline())
+        configured_retry_limit = (metadata or {}).get("retry_limit")
+        retry_limit = min(getattr(client, "retry", 1), 3) if call_budget else 1
+        if type(configured_retry_limit) is int and configured_retry_limit >= 0:
+            retry_limit = max(1, min(retry_limit, configured_retry_limit))
         limit = (
             None if stream_lifecycle is not None
-            else min(getattr(client, "retry", 1), 3) if call_budget else 1
+            else retry_limit
         )
         attempt.update(effective_timeout_seconds=None if stream_lifecycle else effective_timeout,
                        deadline_at=logical_deadline if call_budget is not None else

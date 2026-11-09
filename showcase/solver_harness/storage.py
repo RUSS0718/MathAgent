@@ -196,6 +196,7 @@ class SolverStateStore:
         request_hash: str,
         validated_run: Mapping[str, Any] | None = None,
         route_authorized: bool = False,
+        population_owner: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Compare-and-swap one event, reusing a matching validated history when supplied."""
 
@@ -242,6 +243,11 @@ class SolverStateStore:
                 state = json.loads(row["state_json"])
                 if not isinstance(state, dict):
                     raise SolverPersistenceError("commit_event")
+                if state.get("population_policy", {}).get("enabled") is True:
+                    if state.get("population", {}).get("owner") != population_owner:
+                        raise SolverPersistenceError("population_owner_epoch_mismatch")
+                    if {"population", "population_policy"} & state_updates.keys():
+                        raise SolverPersistenceError("population_fields_are_storage_managed")
                 state_updates = controlled_patch(connection, run_id, event, state_updates)
                 if route_authorized or any(
                     key in state_updates

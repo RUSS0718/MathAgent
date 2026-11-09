@@ -130,45 +130,42 @@ def dispatch(harness, run, operation, request):
     latest = harness.get_run(run["run_id"])
     record, prepared = prepare_session(latest, request)
     if getattr(harness, "_product_recovery", False) and any(
-        item["request"].get("call_id") == prepared["call_id"]
-        for item in record["history"]
+        item["request"].get("call_id") == prepared["call_id"] for item in record["history"]
     ):
         return operation(harness.prepare_request(latest, prepared))
     record["last_injected_state_revision"] = latest["state_revision"] + 1
-    registered = harness.commit_event(
-        run["run_id"],
-        expected_revision=latest["state_revision"],
-        event={
-            "event_id": f"session-start-{prepared['call_id']}-{latest['state_revision']}",
-            "type": "session_started",
-            "session_key": record["session_key"],
-        },
-        state_updates={
-            "session_registry": {
-                **latest["state"].get("session_registry", {}),
-                record["session_key"]: record,
-            }
-        },
-    )
+    registered = _commit_session(harness, run["run_id"], record, prepared["call_id"], "session_started")
     run.clear()
     run.update(registered)
-    latest = registered
-    prepared = harness.prepare_request(latest, prepared)
-    prepared["state_revision"] = latest["state_revision"]
+    prepared = harness.prepare_request(registered, prepared)
+    prepared["state_revision"] = registered["state_revision"]
     response = operation(deepcopy(prepared))
-    latest = harness.get_run(run["run_id"])
     record = append_exchange(record, prepared, response)
-    registry = {**latest["state"].get("session_registry", {}), record["session_key"]: record}
-    updated = harness.commit_event(
-        run["run_id"],
-        expected_revision=latest["state_revision"],
-        event={
-            "event_id": f"session-{prepared['call_id']}-{latest['state_revision']}",
-            "type": "session_recorded",
-            "session_key": record["session_key"],
-        },
-        state_updates={"session_registry": registry},
-    )
+    updated = _commit_session(harness, run["run_id"], record, prepared["call_id"], "session_recorded")
     run.clear()
     run.update(updated)
     return response
+
+
+def _commit_session(harness, run_id, record, call_id, kind):
+    """Retry only local session CAS, never the provider operation."""
+    from .storage import SolverRevisionConflictError
+
+    while True:
+        latest = harness.get_run(run_id)
+        prefix = "session-start" if kind == "session_started" else "session"
+        try:
+            return harness.commit_event(
+                run_id, expected_revision=latest["state_revision"],
+                event={"event_id": f"{prefix}-{call_id}-{latest['state_revision']}",
+                       "type": kind, "session_key": record["session_key"]},
+                state_updates={"session_registry": {
+                    **latest["state"].get("session_registry", {}), record["session_key"]: record,
+                }},
+            )
+        except SolverRevisionConflictError:
+            if harness._config.get("features", {}).get("concurrent_routes") is not True:
+                raise
+            from ..run_control import check_control
+
+            check_control()

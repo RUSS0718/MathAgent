@@ -48,6 +48,10 @@ def progress_summary(state):
         from .solver_harness.route_projection import route_summary
 
         summary["routes"] = route_summary(state)
+    if state.get("population_policy", {}).get("enabled") is True:
+        from .solver_harness.population_projection import population_projection
+
+        summary["population"] = population_projection(state)
     if "reasoner_checkpoints" in state:
         summary["reasoner_checkpoints"] = [
             {"round": item.get("round"), "status": item.get("status")}

@@ -70,6 +70,7 @@ def _request_metadata(request, deadlines=None, activity_observer=None):
         "call_id": request.get("call_id"),
         "role": request["role"],
         "timeout_seconds": request.get("timeout_seconds"),
+        "retry_limit": request.get("retry_limit"),
         "phase_deadline_at": request.get("phase_deadline_at"),
         "batch_deadline_at": request.get("batch_deadline_at"),
         "strict_completion": request.get("strict_completion") is True,
@@ -463,6 +464,10 @@ class InternModelPort:
         context.pop("activity_observer", None)
         context.pop("transport_decision_observer", None)
         context.pop("_context_admission", None)
+        context.pop("timeout_seconds", None)
+        context.pop("retry_limit", None)
+        context.pop("route_id", None)
+        context.pop("population_action_id", None)
         context["original_problem"] = original
         context["tool_argument_schemas"] = {
             name: value for name, value in tools.items() if name in request.get("allowed_tools", [])

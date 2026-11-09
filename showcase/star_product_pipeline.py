@@ -12,10 +12,11 @@ from .solver_harness.intern_port import InternModelPort
 from .solver_harness.result import export_result
 from .solver_harness.tool_ports import RegistryToolPort
 from .star_product_candidates import candidate_projection
-from .star_product_config import core_gaps, full_config, limited_config
+from .star_product_config import core_gaps, full_config, limited_config, population_config
 from .star_product_events import decision_fields, public_solver_event_id
 from .star_product_modes import BEST_EFFORT_MODES, FULL_MODES, STAR_MODES, mode_identity
 from .star_product_recovery import recovery_projection, resume_solver
+from .stream_preference import profile_set_fingerprint
 
 PUBLIC_TOOL_NAMES = frozenset({"polynomial_check", "python_math"})
 
@@ -27,7 +28,9 @@ class StarProductPipeline:
                  features=None, registry=None, hint_mode="none", full_enabled=False,
                  full_features=None, full_budget=None, experiment_policy=None,
                  transport_policy="legacy", stream_profiles=None, acceptance_mode="strict",
-                 context_capacity=None):
+                 context_capacity=None, population_capacity=None, population_budget=None,
+                 limited_enabled=True,
+                 population_enabled=None):
         from .star_experiment_policy import ExperimentRunPolicy
 
         if experiment_policy is not None and not isinstance(experiment_policy, ExperimentRunPolicy):
@@ -47,11 +50,32 @@ class StarProductPipeline:
         self.transport_policy = transport_policy
         self.stream_profiles = stream_profiles
         self.evidence_kind = evidence_kind
+        self.limited_enabled = limited_enabled is True
         if budget is not None and not isinstance(budget, RunBudgetLimits):
             raise ValueError("star_budget_invalid")
         self.budget = budget or RunBudgetLimits(max_model_calls=3, max_http_attempts=3, max_tool_calls=0)
+        self.population_budget = population_budget or self.budget
         self.config = limited_config(self.budget, features, registry,
                                      context_capacity=context_capacity)
+        self.population_config = None
+        self.population_capacity_gap = "population_capacity_unverified"
+        self.population_enabled = (population_capacity is not None if population_enabled is None
+                                   else population_enabled is True)
+        if population_capacity is not None and self.population_enabled:
+            try:
+                timeout = (self.adapter.applied_config().get("request_timeout_seconds")
+                           or self.adapter.client_timeout)
+                self.population_config = population_config(
+                    self.population_budget, population_capacity, evidence_kind=evidence_kind,
+                    request_timeout_seconds=timeout,
+                )
+                self.population_config["transport_identity"] = {
+                    "transport_policy": self.transport_policy,
+                    "stream_profiles_fingerprint": profile_set_fingerprint(self.stream_profiles),
+                }
+                self.population_capacity_gap = None
+            except ValueError as exc:
+                self.population_capacity_gap = str(exc)
         if acceptance_mode == "handoff" and self.config["features"].get("problem_spec") is True:
             raise ValueError("problem_spec_requires_strict_acceptance")
         if hint_mode not in {"none", "meta_auto"}:
@@ -119,11 +143,29 @@ class StarProductPipeline:
 
     def preset_config(self, mode):
         """The trusted server preset configuration that would execute this mode."""
+        if mode == "star_population":
+            return self.population_config
         return self.full_config if mode in FULL_MODES else self.config
+
+    def population_gaps(self):
+        from .star_product_modes import _population_gaps
+
+        if self.population_config is None:
+            return [self.population_capacity_gap or "population_capacity_unverified"]
+        return _population_gaps(self.population_config)
+
+    def mode_enabled(self, mode):
+        if mode == "star_population":
+            return self.population_enabled
+        if mode in FULL_MODES:
+            return self.full_enabled
+        return self.limited_enabled
 
     def budget_for_mode(self, mode):
         if mode in FULL_MODES and self.experiment_policy is not None:
             return self.experiment_policy.budget()
+        if mode == "star_population":
+            return self.population_budget
         return self.full_budget if mode in FULL_MODES else self.budget
 
     def run(self, run_id, problem, *, verification_mode="auto", emit=None, solver_hint=None,
@@ -132,6 +174,8 @@ class StarProductPipeline:
         """Execute STAR, applying and recording pair-only feature overrides when present."""
         if solver_mode not in STAR_MODES:
             raise ValueError("star_mode_invalid")
+        if solver_mode == "star_population" and self.population_gaps():
+            raise ValueError("population_prerequisites_unverified")
         if solver_mode in FULL_MODES and self.full_gaps():
             raise ValueError("star_prerequisites_unverified")
         check_control()
@@ -141,7 +185,8 @@ class StarProductPipeline:
         deadlines = ({"phase_deadline_at": self.experiment_policy.phase_deadline_at,
                       "batch_deadline_at": self.experiment_policy.round_deadline_at}
                      if self.experiment_policy is not None else None)
-        base = self.full_config if solver_mode in FULL_MODES else self.config
+        base = (self.population_config if solver_mode == "star_population" else
+                self.full_config if solver_mode in FULL_MODES else self.config)
         features = dict(base["features"])
         if features.get("problem_spec") is True:
             if problem_spec is None:
@@ -150,7 +195,7 @@ class StarProductPipeline:
             raise ValueError("problem_spec_feature_disabled")
         # SP-13 合同：reference 核心恰为 9 项；candidate_registry/best_effort 仅由
         # Best-Effort 附加；受限模式保留 SP-11 已验收的候选历史行为。
-        if solver_mode != "star_reference":
+        if solver_mode not in {"star_reference", "star_population"}:
             features["candidate_registry"] = True
         if solver_mode in BEST_EFFORT_MODES:
             features["best_effort"] = True
@@ -241,7 +286,17 @@ class StarProductPipeline:
                         raise
                     run = harness.get_run(run_id)
                 try:
-                    run = advance_product(harness, run, problem)
+                    if solver_mode == "star_population":
+                        from .solver_harness.population_lifecycle import (
+                            drive_population,
+                            record_delivery,
+                        )
+
+                        run = drive_population(harness, run, problem)
+                        if run["state"]["phase"] == "TERMINAL":
+                            run = record_delivery(harness, run)
+                    else:
+                        run = advance_product(harness, run, problem)
                 except RunStopped as exc:
                     if solver_mode not in BEST_EFFORT_MODES or exc.category != "run_deadline_exhausted":
                         raise
@@ -250,6 +305,10 @@ class StarProductPipeline:
 
                 run = run_best_effort(harness, run)
                 math = run["state"]
+                if math.get("population_policy", {}).get("enabled") is True:
+                    from .solver_harness.population_projection import population_projection
+
+                    math["population_public"] = population_projection(math)
                 answer = export_result(run)["final_response"]
                 bound, verification = delivery_verification(run, answer)
                 from .star_product_candidates import selection_verification
@@ -327,13 +386,18 @@ def projection(run, *, answer=None, verification_mode="auto"):
         bound, _ = delivery_verification(run, answer)
         if not bound:
             status = "completed_unverified"
-    return {"run_id": run["run_id"], "state_revision": run["state_revision"],
+    result = {"run_id": run["run_id"], "state_revision": run["state_revision"],
             "phase": state["phase"], "status": status,
             "config_hash": state["config_hash"], "checkpoint_thread_id": run["run_id"],
             "recovery": recovery_projection(run),
             "progress": progress_summary(state),
             "semantics": result_semantics(run, answer if answer is not None else state.get("final_response", ""), verification_mode=verification_mode, execution_status=run.get("execution_status")),
             **candidate_projection(run)}
+    if state.get("population_policy", {}).get("enabled") is True:
+        from .solver_harness.population_projection import population_projection
+
+        result["population"] = population_projection(state)
+    return result
 
 
 def public_tools(state):

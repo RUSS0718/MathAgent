@@ -13,6 +13,12 @@ from .results import stable_unique_results
 
 
 def _serialized_request_size(harness, model_port, run, request, *, use_snapshot=False):
+    if (harness._config.get("features", {}).get("persistent_sessions") is True
+            and "call_id" in request and "session_history" not in request):
+        from .sessions import prepare_session
+
+        latest = run if use_snapshot else harness.get_run(run["run_id"])
+        _, request = prepare_session(latest, request)
     prepared = harness.prepare_request(run, request, use_snapshot=use_snapshot)
     estimator = getattr(model_port, "serialized_payload_size", None)
     if callable(estimator):
@@ -154,6 +160,14 @@ def _skip_unneeded_work_units(harness, run):
 
 
 def commit(harness, run, kind, updates, **details):
+    if (run["state"].get("population_policy", {}).get("enabled") is True
+            and run["state"].get("population", {}).get("freeze") is not None):
+        from .population_final_commit import commit_finalization
+
+        return commit_finalization(
+            harness, run,
+            {"event_id": f"{kind}-{run['state_revision']}", "type": kind, **details}, updates,
+        )
     return harness.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],
@@ -555,8 +569,18 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
                 "handoff_final_reviewed", candidate,
             )
         if review["verdict"] == "ACCEPT":
+            if state.get("population_policy", {}).get("enabled") is True:
+                from .population_delivery import delivery_allowed
+
+                allowed, reason = delivery_allowed(harness._state_store._connection, run["state"])
+                if not allowed:
+                    return finish(harness, run, "partial_aborted", reason)
             return finish(
                 harness, run, "completed_llm_reviewed", "final_verifier_accepted", candidate
             )
+        if state.get("population_policy", {}).get("enabled") is True:
+            from .population_recovery import review_rejected
+
+            return review_rejected(harness, run)
         previous_review = review
     return finish(harness, run, "partial_aborted", "final_review_retries_exhausted")

@@ -31,6 +31,8 @@ def generate_initial_plan(harness, run, *, problem, model_port, config, metadata
         "problem": problem,
         "plan_version": version,
     }
+    if state.get("population_policy", {}).get("enabled") is True:
+        request["population_policy"] = {"version": "concurrent-aprs-v1"}
     if recovering_replan:
         failures = state.get("failure_records", [])
         request.update(
@@ -47,7 +49,12 @@ def generate_initial_plan(harness, run, *, problem, model_port, config, metadata
         request.update(
             exploration_findings=state["exploration_findings"],
             preplan_hint=state.get("preplan_hint"),
-            instruction="Return a Plan with version and 1..20 steps with step_id, title, objective and earlier-step depends_on references.",
+            instruction=("Propose a primary plan and alternative_plans with substantively distinct "
+                         "controlled methods/frontiers. Each plan must map all root obligations. "
+                         "Return no alternative when none is executable; renaming or subdividing "
+                         "the same method is not a new route. "
+                         if state.get("population_policy", {}).get("enabled") is True else "")
+            + (" Return a Plan with version and 1..20 steps with step_id, title, objective and earlier-step depends_on references."),
         )
         if isinstance(state.get("problem_spec"), dict):
             request["instruction"] += (

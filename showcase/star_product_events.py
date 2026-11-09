@@ -102,6 +102,13 @@ def decision_fields(event, state, invocations=()):
         identity_value = state.get(identity_field)
         if type(identity_value) is int and identity_value >= 0:
             fields[identity_field] = identity_value
+    if state.get("population_policy", {}).get("enabled") is True:
+        for key in ("route_id", "parent_route_id", "frontier_digest", "selected_route_id",
+                    "pareto_route_ids", "route_count", "route_status", "route_reason"):
+            fields.pop(key, None)
+        from .solver_harness.population_projection import population_projection
+
+        fields["population"] = population_projection(state)
     if isinstance(event.get("decision"), dict):
         fields["decision"] = event["decision"].get("decision")
     if event["type"] == "hint_prepared":

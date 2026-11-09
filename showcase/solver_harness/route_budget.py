@@ -137,6 +137,8 @@ def expansion_budget(harness, run, problem, model_port, planner_request):
         return _unavailable("closing_reserve_estimate_unavailable")
 
     attempts = retries + 1
+    if state.get("population_policy", {}).get("enabled") is True:
+        attempts = state["population_policy"].get("retry_limit", 1)
     closing_reserve = {
         "model_calls": 2,
         "http_attempts": 2,

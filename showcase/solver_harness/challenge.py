@@ -359,6 +359,7 @@ def run_plan(
     max_rounds,
     max_model_calls,
     max_runtime_seconds,
+    one_work_unit=False,
 ):
     """Execute at most the supplied plan, preserving the final review boundary."""
     while True:
@@ -391,6 +392,8 @@ def run_plan(
             max_runtime_seconds=max_runtime_seconds,
         )
         run = apply_traceback(harness, run)
+        if one_work_unit:
+            return run
         explore_guidance = run["state"].get("meta_guidance_decision")
         if (
             run["state"]["phase"] == "EXPLORE"

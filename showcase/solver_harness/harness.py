@@ -75,8 +75,14 @@ class SolverHarness:
             raise SolverValidationError("provide either store or database_path")
         self._instance_id = uuid.uuid4().hex
         self._product_recovery = False
+        self._population_owner = None
+        self._population_futures = {}
         self._event_observer = event_observer
         self._config = _normalize_config(config)
+        if self._config.get("features", {}).get("concurrent_routes") is True:
+            from .population_lifecycle import validate_config
+
+            validate_config(self._config)
         if self._config.get("features", {}).get("problem_spec") is True:
             if (self._config.get("acceptance_mode", "strict") != "strict"
                     or self._config.get("features", {}).get("final_generation") is not True
@@ -189,6 +195,10 @@ class SolverHarness:
         existing = self._state_store.get_run(run_id)
         if existing is not None:
             self._validate_identity(existing, run_id, problem_hash)
+            if existing["state"].get("population_policy", {}).get("enabled") is True:
+                from .population_lifecycle import resume_population
+
+                return resume_population(self, existing, problem, effective_metadata or {})
             if (serial_routes
                     and existing["state"].get("progress_policy") != {
                         "enabled": True, "version": "progress-v1"
@@ -243,6 +253,12 @@ class SolverHarness:
             if supplied_spec is None:
                 raise SolverValidationError("progress_scheduling_requires_problem_spec")
             state["progress_policy"] = {"enabled": True, "version": "progress-v1"}
+        if self._config.get("features", {}).get("concurrent_routes") is True:
+            from .population_store import initial_population
+
+            state["population_policy"] = deepcopy(self._config["population_policy"])
+            state["population_policy"]["enabled"] = True
+            state["population"] = initial_population()
         event = {
             "event_id": "initialized",
             "run_id": run_id,
@@ -262,6 +278,15 @@ class SolverHarness:
             raise SolverPersistenceError("create_run")
         if self._event_observer is not None:
             self._event_observer(created, event)
+        if state.get("population_policy", {}).get("enabled") is True:
+            from .population_lifecycle import claim
+
+            created = claim(self, created)
+            from .population_lifecycle import _ensure_closing_reserve
+
+            created = _ensure_closing_reserve(self, created, problem)
+            if created["state"]["phase"] == "TERMINAL":
+                return created
         if self._model_port is None:
             return advance(self, created, effective_metadata, problem)
         return advance(
@@ -286,7 +311,8 @@ class SolverHarness:
             None if problem is None else hashlib.sha256(problem.encode("utf-8")).hexdigest()
         )
         self._validate_identity(result, normalized_run_id, problem_hash)
-        if self._config.get("features", {}).get("stream_recovery") is True:
+        if (self._config.get("features", {}).get("stream_recovery") is True
+                and result["state"].get("population_policy", {}).get("enabled") is not True):
             from .calls import recover_inflight
 
             result = recover_inflight(self, result)
@@ -459,6 +485,7 @@ class SolverHarness:
             request_hash=request_hash,
             validated_run=current,
             route_authorized=route_authorized,
+            population_owner=self._population_owner,
         )
         if self._event_observer is not None:
             self._event_observer(result, next(item for item in result["events"] if item["event_id"] == normalized_event["event_id"]))
@@ -509,6 +536,11 @@ class SolverHarness:
             request = {**request,
                        "progress_policy": deepcopy(latest["state"]["progress_policy"]),
                        "progress": deepcopy(latest["state"].get("progress", {}))}
+        population_policy = latest["state"].get("population_policy")
+        if population_policy and population_policy.get("enabled") is True:
+            request = {**request,
+                       "timeout_seconds": population_policy.get("request_timeout_seconds"),
+                       "retry_limit": population_policy.get("retry_limit", 1)}
         specification = latest["state"].get("problem_spec")
         if isinstance(specification, Mapping):
             request = {
@@ -570,12 +602,20 @@ class SolverHarness:
             stop(self, latest, reason)
             raise HardBudgetStop(run["run_id"])
         from .sessions import dispatch
+        from contextlib import nullcontext
 
-        if self._config.get("features", {}).get("stream_recovery") is True:
-            from .calls import dispatch as audit_dispatch
+        scope = nullcontext()
+        if (latest["state"].get("population_policy", {}).get("enabled") is True
+                and not hasattr(self, "_route_id")):
+            from .population_budget import bind_population_action
 
-            return audit_dispatch(self, run, operation, request, dispatch)
-        return dispatch(self, run, operation, request)
+            scope = bind_population_action(None, self._population_owner)
+        with scope:
+            if self._config.get("features", {}).get("stream_recovery") is True:
+                from .calls import dispatch as audit_dispatch
+
+                return audit_dispatch(self, run, operation, request, dispatch)
+            return dispatch(self, run, operation, request)
 
     def execute_tool_request(
         self,
@@ -612,6 +652,9 @@ class SolverHarness:
     def close(self) -> None:
         """Close the Showcase SQLite connection if this Harness created it."""
 
+        executor = getattr(self, "_population_executor", None)
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=False)
         if self._owns_showcase_store:
             self._showcase_store.close()
 

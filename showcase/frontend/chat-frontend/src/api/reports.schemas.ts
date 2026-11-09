@@ -50,12 +50,34 @@ export const progressSchema = z.object({
   steps: z.array(z.record(z.string(), z.unknown())).optional(),
 }).passthrough()
 
+export const populationProjectionSchema = z.object({
+  version: z.string(),
+  scheduler: z.object({
+    round: z.number().int().nonnegative(),
+    member_count: z.number().int().nonnegative(),
+    opportunities_used: z.number().int().nonnegative(),
+    verified_gain_count: z.number().int().nonnegative(),
+    route_counts: z.record(z.string(), z.number().int().nonnegative()),
+    paused: z.boolean(),
+  }),
+  resources: z.object({
+    worker_slots_in_use: z.number().int().nonnegative(),
+    http_inflight: z.number().int().nonnegative(),
+    unknown_routes: z.number().int().nonnegative(),
+    unknown_requests: z.number().int().nonnegative(),
+  }),
+  delivery: z.object({ status: z.string().optional(), reason: z.string().optional() }),
+  settlement: z.object({
+    status: z.string().optional(), unknown_count: z.number().int().nonnegative().optional(),
+  }),
+})
+
 export const reportSchema = z.object({
   version: z.string(),
   evidence_id: z.string(),
   status: z.string(),
-  mode: z.enum(['live', 'fake', 'replay', 'experimental', 'unavailable', 'planned', 'star_limited', 'star_limited_best_effort', 'star_reference', 'star_best_effort']),
-  solver: z.object({ solver_mode: z.string().nullable(), evidence_kind: z.string().nullable(), missing_capabilities: z.array(z.string()).nullable(), solver: z.object({ run_id: z.string(), state_revision: z.number(), phase: z.string(), status: z.string(), recovery: recoverySchema.optional(), progress: progressSchema.optional(), candidate_history: z.array(z.record(z.string(), z.unknown())).optional(), best_effort: z.record(z.string(), z.unknown()).nullable().optional() }).passthrough().nullable() }).optional(),
+  mode: z.enum(['live', 'fake', 'replay', 'experimental', 'unavailable', 'planned', 'star_limited', 'star_limited_best_effort', 'star_reference', 'star_best_effort', 'star_population']),
+  solver: z.object({ solver_mode: z.string().nullable(), evidence_kind: z.string().nullable(), missing_capabilities: z.array(z.string()).nullable(), solver: z.object({ run_id: z.string(), state_revision: z.number(), phase: z.string(), status: z.string(), recovery: recoverySchema.optional(), progress: progressSchema.optional(), population: populationProjectionSchema.optional(), candidate_history: z.array(z.record(z.string(), z.unknown())).optional(), best_effort: z.record(z.string(), z.unknown()).nullable().optional() }).passthrough().nullable() }).optional(),
   report: z.object({
     budget: z.record(z.string(), z.unknown()).nullable().optional(),
     answer: z.string(),

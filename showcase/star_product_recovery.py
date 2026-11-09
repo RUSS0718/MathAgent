@@ -113,6 +113,11 @@ def authorize_resume(connection, row, decision):
     recovery = recovery_projection(run)
     if recovery.get("processing_failures"):
         raise WorkspaceError("star_processing_failure_requires_new_job", status=409)
+    population_enabled = state.get("population_policy", {}).get("enabled") is True
+    if population_enabled and decision is None:
+        # A new owner can advance independent routes while the old action stays
+        # fenced and reserved. It never reconstructs or resends that HTTP body.
+        return True
     unknown = recovery["unknown_calls"]
     if unknown:
         if not isinstance(decision, dict) or set(decision) != {"call_id", "new_call_id"}:
@@ -140,6 +145,10 @@ def resume_solver(harness, problem, run_id, retry):
     from .solver_harness.controller import run_supplied_plan_or_explore
 
     run = harness.get_run(run_id, problem=problem)
+    if run["state"].get("population_policy", {}).get("enabled") is True:
+        from .solver_harness.population_lifecycle import resume_population
+
+        return resume_population(harness, run, problem, {"retry_call": retry} if retry else {})
     if retry is not None:
         run = harness.commit_event(
             run_id, expected_revision=run["state_revision"],

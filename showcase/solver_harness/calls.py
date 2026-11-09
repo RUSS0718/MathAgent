@@ -55,27 +55,39 @@ def retry_parent_id(record):
 
 def _save(harness, run, record, *, status=None, event_type="call_audit", event_fields=None,
           state_updates=None):
-    latest = harness.get_run(run["run_id"])
-    updates = {"calls": {**latest["state"].get("calls", {}), record["call_id"]: redact(record)}}
-    # Use the same snapshot/revision fence for the provider failure and its audit;
-    # a cancellation that committed first must keep its terminal math state.
-    if latest["state"]["phase"] != "TERMINAL" or record.get("status") != "provider_failed":
-        updates.update(state_updates or {})
-    if status is not None and latest["state"]["phase"] != "TERMINAL":
-        updates["status"] = status
-    updated = harness._commit_event(
-        run["run_id"],
-        expected_revision=latest["state_revision"],
-        current=latest,
-        event={
-            "event_id": f"call-{record['call_id']}-{record['status']}-{latest['state_revision']}",
-            "type": event_type,
-            "call_id": record["call_id"],
-            "outcome": record["status"],
-            **(event_fields or {}),
-        },
-        state_updates=updates,
-    )
+    from .storage import SolverRevisionConflictError
+
+    while True:
+        latest = harness.get_run(run["run_id"])
+        updates = {"calls": {**latest["state"].get("calls", {}), record["call_id"]: redact(record)}}
+        # Use the same snapshot/revision fence for the provider failure and its audit;
+        # a cancellation that committed first must keep its terminal math state.
+        if latest["state"]["phase"] != "TERMINAL" or record.get("status") != "provider_failed":
+            updates.update(state_updates or {})
+        if status is not None and latest["state"]["phase"] != "TERMINAL":
+            updates["status"] = status
+        try:
+            updated = harness._commit_event(
+                run["run_id"],
+                expected_revision=latest["state_revision"],
+                current=latest,
+                event={
+                    "event_id": f"call-{record['call_id']}-{record['status']}-{latest['state_revision']}",
+                    "type": event_type,
+                    "call_id": record["call_id"],
+                    "outcome": record["status"],
+                    **(event_fields or {}),
+                },
+                state_updates=updates,
+            )
+        except SolverRevisionConflictError:
+            if harness._config.get("features", {}).get("concurrent_routes") is not True:
+                raise
+            from ..run_control import check_control
+
+            check_control()
+            continue
+        break
     run.clear()
     run.update(updated)
 

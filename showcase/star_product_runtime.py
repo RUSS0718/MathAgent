@@ -16,7 +16,9 @@ CONTRACT_PYTHON_IMAGE_ID = "sha256:fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff6
 def create_star_product_pipeline(database_path, *, storage_root, config):
     """Keep container execution disabled unless the operator supplies an exact image ID."""
     full_enabled = config.get("SHOWCASE_STAR_FULL_ENABLED") is True
-    if config.get("SHOWCASE_STAR_ENABLED") is not True and not full_enabled:
+    population_enabled = config.get("SHOWCASE_STAR_POPULATION_ENABLED") is True
+    limited_enabled = config.get("SHOWCASE_STAR_ENABLED") is True
+    if not limited_enabled and not full_enabled and not population_enabled:
         return None
 
     registry = config.get("SHOWCASE_STAR_REGISTRY")
@@ -41,11 +43,18 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
         budget = RunBudgetLimits(max_model_calls=8 if image_enabled else 3,
             max_http_attempts=8 if image_enabled else 3,
             max_tool_calls=2 if image_enabled else 0)
+    population_budget = config.get("SHOWCASE_STAR_POPULATION_BUDGET")
+    if population_budget is None:
+        population_budget = RunBudgetLimits(
+            max_model_calls=24, max_http_attempts=48, max_tool_calls=0,
+            max_tokens=2_097_152, max_runtime_seconds=7_200,
+        )
 
     return StarProductPipeline(database_path,
         acceptance_mode=config.get("SHOWCASE_STAR_ACCEPTANCE_MODE", "strict"),
         adapter=config.get("SHOWCASE_STAR_ADAPTER"),
         budget=budget,
+        population_budget=population_budget,
         features=features,
         registry=registry,
         full_enabled=full_enabled,
@@ -55,5 +64,8 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
         transport_policy=config.get("SHOWCASE_STAR_TRANSPORT_POLICY", "legacy"),
         stream_profiles=config.get("SHOWCASE_STAR_TRANSPORT_PROFILES"),
         context_capacity=config.get("SHOWCASE_STAR_CONTEXT_CAPACITY"),
+        population_capacity=config.get("SHOWCASE_STAR_POPULATION_CAPACITY"),
+        limited_enabled=limited_enabled,
+        population_enabled=population_enabled,
         hint_mode=config.get("SHOWCASE_STAR_HINT_MODE", "none"),
         evidence_kind=config.get("SHOWCASE_STAR_EVIDENCE_KIND", "live"))
