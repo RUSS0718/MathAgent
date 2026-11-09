@@ -105,6 +105,35 @@ test('report distinguishes unknown, rejection, invalid binding, required and lif
       assert.match(html, /whole_solution_llm_review/)
       assert.match(html, /polynomial_candidates/)
     })
+    await t.test('AC23 routes show source and maximum verification grade', async () => {
+      const { default: ReportSection } = await server.ssrLoadModule('/src/components/ReportSection.vue')
+      const html = await renderToString(createSSRApp(ReportSection, { report: {
+        answer: 'x+x=2*x', public_summary: '', stage: 'terminal', limitations: [],
+        prover_routes: [
+          { backend_id: 'llm_prover', target_type: 'natural_language_draft', selection_reason: 'solver_role:reasoner', attempt_id: 'call-1', parent_attempt_id: null, status: 'completed', grade: null, maximum_grade: 'LLM_REVIEWED', cost: { prompt_tokens: 12, completion_tokens: 5, total_tokens: null }, lineage: {} },
+          { backend_id: 'math_tool_backend', target_type: 'computable', selection_reason: 'explicit_registered_tool_request', attempt_id: 'tool-1', parent_attempt_id: 'tool-0', status: 'solved', grade: 'L1', maximum_grade: 'L1', cost: { duration_seconds: 0.014, observed_output_bytes: 521 }, lineage: {} },
+          { backend_id: 'lean_tactic_prover', target_type: 'stable_lean_goal', selection_reason: 'explicit_formal_policy', attempt_id: 'formal-1', parent_attempt_id: null, status: 'unavailable', grade: null, maximum_grade: 'L2', cost: { usage: { cpu_usage_usec: null, memory_peak_bytes: null } }, lineage: {} },
+          { backend_id: 'llm_prover', target_type: 'natural_language_draft', selection_reason: 'solver_role:reasoner', attempt_id: 'call-2', parent_attempt_id: 'call-1', status: 'failed', grade: null, maximum_grade: 'LLM_REVIEWED', cost: {}, lineage: {} },
+        ],
+      } }))
+      assert.match(html, /LLM 推导/)
+      assert.match(html, /计算工具/)
+      assert.match(html, /Lean 后端/)
+      assert.match(html, /最高等级/)
+      assert.match(html, /LLM_REVIEWED/)
+      assert.match(html, /L1/)
+      assert.match(html, /L2/)
+      assert.match(html, /父 Attempt/)
+      assert.match(html, /成本/)
+      assert.match(html, /输入 token：12/)
+      assert.match(html, /耗时：0\.014 秒/)
+      assert.match(html, /输出：521 字节/)
+      assert.match(html, /总 token 未知/)
+      assert.match(html, /总 token 未记录/)
+      assert.match(html, /耗时 未记录/)
+      assert.match(html, /CPU 未知/)
+      assert.match(html, /内存峰值 未知/)
+    })
   } finally {
     await server.close()
   }

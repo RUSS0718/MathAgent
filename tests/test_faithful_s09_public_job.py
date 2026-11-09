@@ -8,6 +8,7 @@ from unittest.mock import patch
 from showcase.formal import LeanTacticProver, normalize_target
 from showcase.run_budget import RunBudgetLimits
 from showcase.solver_harness.specification import normalize_problem_spec
+from showcase.tools import ToolRegistry
 from tests.star_product_support import ACCEPT, POLISH, SOLVED, StarJobFixture
 
 PROBLEM = "For every rational x, x + x = 2 * x."
@@ -41,6 +42,33 @@ POLICY = {
                     "manifest_digest": "c" * 64, "template_version": "rational-polynomial-v1"},
     "target": TARGET,
 }
+NEED_PLAN = {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
+SPEC_PLAN = {"version": 1, "steps": [{
+    "step_id": "identity", "title": "Check identity", "objective": "Prove x+x=2*x",
+    "depends_on": [],
+    "obligation_ids": ["root:identity"], "auxiliary_goal_ids": [],
+}]}
+COMPUTATION_STEP = {
+    "argument": "Distributivity proves the root obligation. The finite check is only an example.",
+    "blocked": False,
+    "claims": [
+        {"statement": "For every rational x, x+x=2*x by distributivity.", "label": "hard-verify"},
+        {
+            "statement": "At x=1, 2*x-2=0.", "label": "easy-verify",
+            "tool_request": {
+                "tool": "polynomial_check", "arguments": {
+                    "schema_version": 1, "variable": "x", "coefficients": ["2", "-2"],
+                    "domain": {"kind": "real"}, "candidates": ["1"],
+                }, "scope": "finite_computation",
+            },
+        },
+    ],
+}
+STEP_VERDICT = {
+    "goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT", "objection": "",
+    "obligation_evidence": [{"obligation_id": "root:identity",
+                             "evidence_category": "universal_proof", "claim_indexes": [0]}],
+}
 
 
 class FakeTransport:
@@ -62,23 +90,26 @@ class FakeTransport:
 
 class FaithfulS09PublicJobTest(StarJobFixture, unittest.TestCase):
     def open_formal(self, statuses=("unavailable",), *, configured=True, grade=None,
-                    solved=False, tool_budget=2):
+                    solved=False, tool_budget=2, registry=None, replies=None):
         transport = FakeTransport(statuses, solved=solved)
         backend = LeanTacticProver(transport) if configured else None
         if backend is not None and grade is not None:
             backend.verify_result = lambda request, response, value=grade: value
-        self.open_star(
-            [SOLVED, POLISH, ACCEPT],
-            SHOWCASE_STAR_FEATURES={"final_generation": True,
-                                    "final_solution_review": True,
-                                    "problem_spec": True},
-            SHOWCASE_STAR_BUDGET=RunBudgetLimits(
+        options = {
+            "SHOWCASE_STAR_FEATURES": {"final_generation": True,
+                                        "final_solution_review": True,
+                                        "problem_spec": True},
+            "SHOWCASE_STAR_BUDGET": RunBudgetLimits(
                 max_model_calls=8, max_http_attempts=8, max_tool_calls=tool_budget,
                 max_tokens=100_000, max_runtime_seconds=1_100,
             ),
-            SHOWCASE_FORMAL_VERIFICATION_CONFIG=(POLICY if configured else None),
-            SHOWCASE_FORMAL_BACKEND=backend,
-        )
+            "SHOWCASE_FORMAL_VERIFICATION_CONFIG": (POLICY if configured else None),
+            "SHOWCASE_FORMAL_BACKEND": backend,
+        }
+        if registry is not None:
+            options["SHOWCASE_STAR_REGISTRY"] = registry
+            options["SHOWCASE_STAR_FEATURES"]["local_code_tool"] = True
+        self.open_star(replies or [SOLVED, POLISH, ACCEPT], **options)
         self.transport = transport
         self.backend = backend
 
@@ -118,8 +149,48 @@ class FaithfulS09PublicJobTest(StarJobFixture, unittest.TestCase):
         job = self.terminal(response.get_json()["job_id"])
         self.assertEqual("unsupported", job["result"]["formal_verification"]["status"])
         self.assertEqual("1+1=2", job["result"]["final_response"])
-        self.assertEqual("completed_llm_reviewed", job["result"]["solver"]["status"])
+        self.assertEqual("completed_llm_reviewed", job["result"]["solver"]["status"],
+                         job["result"]["solver"])
         self.assertEqual([], self.transport.calls)
+
+    def test_ac23_public_job_records_existing_model_math_and_lean_routes_separately(self):
+        registry = ToolRegistry()
+        registry.register_polynomial_check()
+        self.open_formal(
+            statuses=("unavailable",), tool_budget=3, registry=registry,
+            replies=[NEED_PLAN, SPEC_PLAN, COMPUTATION_STEP, STEP_VERDICT,
+                     {"final_response": "For every rational x, x+x=2*x."}, ACCEPT],
+        )
+        response = self.create()
+        self.assertEqual(202, response.status_code, response.get_json())
+        job_id = response.get_json()["job_id"]
+        job = self.terminal(job_id)
+        report = self.client.get(f"/api/agent/jobs/{job_id}/report").get_json()["report"]
+        routes = report["solver"]["solver"]["prover_routes"]
+        by_backend = {item["backend_id"]: item for item in routes}
+
+        self.assertEqual("LLM_REVIEWED", by_backend["llm_prover"]["maximum_grade"])
+        self.assertTrue(any(item["target_type"] == "natural_language_draft"
+                            and item["grade"] is None for item in routes
+                            if item["backend_id"] == "llm_prover"))
+        self.assertTrue(any(item["target_type"] == "natural_language_review"
+                            and item["grade"] == "LLM_REVIEWED" for item in routes
+                            if item["backend_id"] == "llm_prover"))
+        self.assertEqual("completed_llm_reviewed", job["result"]["solver"]["status"])
+        self.assertEqual("accepted", report["semantics"]["whole_review"])
+        self.assertEqual("L1", by_backend["math_tool_backend"]["maximum_grade"])
+        self.assertEqual("L1", by_backend["math_tool_backend"]["grade"])
+        self.assertEqual("completed", by_backend["math_tool_backend"]["status"],
+                         ascii(job["result"]["tool_results"]))
+        self.assertEqual("lean_tactic_prover", by_backend["lean_tactic_prover"]["backend_id"])
+        self.assertEqual("L2", by_backend["lean_tactic_prover"]["maximum_grade"])
+        self.assertEqual("unavailable", by_backend["lean_tactic_prover"]["status"])
+        self.assertIsNone(by_backend["lean_tactic_prover"]["grade"])
+        self.assertEqual(1, len(self.transport.calls))
+
+        evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
+        self.assertEqual(routes, evidence["solver"]["solver"]["prover_routes"])
+        self.assertEqual(routes, evidence["report"]["solver"]["solver"]["prover_routes"])
 
     def test_explicit_job_keeps_original_answer_and_persists_unavailable_everywhere(self):
         self.open_formal()

@@ -1,9 +1,9 @@
 import { expect, test, type Page, type APIRequestContext } from '@playwright/test'
 
 const publicOrigin = 'http://127.0.0.1:18090'
-const appOrigin = 'http://127.0.0.1:5189'
+const appOrigin = process.env.S09_BROWSER_APP_ORIGIN ?? 'http://127.0.0.1:5176'
 const expectedGrade = process.env.S09_BROWSER_FORMAL_GRADE
-const expectedAnswer = expectedGrade ? 'x + x = 2 * x' : '1+1=2'
+const expectedAnswer = 'x + x = 2 * x'
 
 type FormalFixture = {
   problem: string
@@ -74,20 +74,44 @@ for (const viewport of [
 
     const jobId = await createFormalJob(page)
     await waitForTerminal(page, jobId)
+    const job = await (await page.request.get(`${publicOrigin}/api/agent/jobs/${jobId}`)).json()
     const report = await (await page.request.get(`${publicOrigin}/api/agent/jobs/${jobId}/report`)).json()
     const evidence = await (await page.request.get(`${publicOrigin}/api/runs/${jobId}/evidence`)).json()
+    expect(job.result.solver.prover_routes).toEqual(report.solver.solver.prover_routes)
     expect(report.report.answer).toContain(expectedAnswer)
     expect(report.solver.solver.formal_verification.status).toBe(expectedGrade ? 'solved' : 'unavailable')
     expect(report.solver.solver.formal_verification.grade).toBe(expectedGrade ?? null)
     expect(evidence.formal_verification).toEqual(report.solver.solver.formal_verification)
+    expect(evidence.solver.solver.prover_routes).toEqual(job.result.solver.prover_routes)
     expect(report.report.semantics.whole_review).toBe('accepted')
     expect(report.report.semantics.formal_verification).toBe(expectedGrade ? 'solved' : 'unavailable')
+    expect(report.report.prover_routes).toEqual(report.solver.solver.prover_routes)
+    expect(report.report.prover_routes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ backend_id: 'llm_prover', maximum_grade: 'LLM_REVIEWED' }),
+      expect.objectContaining({ backend_id: 'math_tool_backend', maximum_grade: 'L1', grade: 'L1' }),
+      expect.objectContaining({ backend_id: 'lean_tactic_prover',
+        maximum_grade: expectedGrade === 'L3' ? 'L3' : 'L2' }),
+    ]))
+    await testInfo.attach('public-job-report-evidence.json', {
+      body: JSON.stringify({ job, report, evidence }, null, 2),
+      contentType: 'application/json',
+    })
 
     posts.length = 0
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await page.goto(`${appOrigin}/dashboard-assets/run/${jobId}`)
 
     const formal = page.getByRole('region', { name: '形式验证' })
+    const routes = page.getByRole('region', { name: '证明后端路线' })
+    await expect(routes).toBeVisible()
+    await expect(routes).toContainText('LLM 推导')
+    await expect(routes).toContainText('计算工具')
+    await expect(routes).toContainText('Lean 后端')
+    await expect(routes).toContainText('LLM_REVIEWED')
+    await expect(routes).toContainText('L1')
+    await expect(routes).toContainText('成本')
+    await expect(routes).toContainText('耗时')
+    await expect(routes).toContainText('输入 token 未知')
     await expect(formal).toBeVisible()
     await expect(formal).toContainText(expectedGrade === 'L3'
       ? '形式目标与规格对应已独立核验'

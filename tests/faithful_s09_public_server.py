@@ -28,7 +28,7 @@ from showcase.formal import LeanTacticProver, ReviewAuthority, normalize_target 
 from showcase.run_budget import RunBudgetLimits  # noqa: E402
 from showcase.solver_harness.specification import normalize_problem_spec  # noqa: E402
 from showcase.tools import ToolRegistry  # noqa: E402
-from tests.star_product_support import ACCEPT, POLISH, SOLVED  # noqa: E402
+from tests.star_product_support import ACCEPT  # noqa: E402
 
 PROBLEM = "For every rational x, x + x = 2 * x."
 SPEC = normalize_problem_spec({
@@ -63,6 +63,25 @@ FORMAL_POLICY = {
     "environment": {},
     "target": TARGET,
 }
+PLAN_WITH_COMPUTATION = {"version": 1, "steps": [{
+    "step_id": "identity", "title": "Prove identity", "objective": "Prove x + x = 2 * x",
+    "depends_on": [], "obligation_ids": ["root:identity"], "auxiliary_goal_ids": [],
+}]}
+STEP_WITH_COMPUTATION = {
+    "argument": "Distributivity proves the identity. The finite check is supplemental.",
+    "blocked": False,
+    "claims": [
+        {"statement": "For every rational x, x + x = 2 * x by distributivity.",
+         "label": "hard-verify"},
+        {"statement": "At x = 1, x - 1 = 0.", "label": "easy-verify",
+         "tool_request": {
+             "tool": "polynomial_check", "arguments": {
+                 "schema_version": 1, "variable": "x", "coefficients": ["1", "-1"],
+                 "domain": {"kind": "real"}, "candidates": ["1"],
+             }, "scope": "finite_computation",
+         }},
+    ],
+}
 
 
 class UnavailableExecutor:
@@ -78,7 +97,6 @@ class UnavailableExecutor:
 
 
 class ScriptedProvider(BaseHTTPRequestHandler):
-    answer = "1+1=2"
     protocol_version = "HTTP/1.1"
 
     def log_message(self, *_args):
@@ -88,9 +106,27 @@ class ScriptedProvider(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         context = json.loads(body["messages"][-1]["content"])
         role = context.get("role")
-        reply = copy.deepcopy(SOLVED if role == "explore" else POLISH if role == "explore_polish" else ACCEPT)
-        if role in {"explore", "explore_polish"}:
-            reply["solution_candidate"] = self.answer
+        if role == "explore":
+            reply = {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []}
+        elif role == "planner":
+            reply = copy.deepcopy(PLAN_WITH_COMPUTATION)
+        elif role == "reasoner":
+            reply = copy.deepcopy(STEP_WITH_COMPUTATION)
+        elif role == "step_verifier":
+            reply = {
+                "goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
+                "objection": "", "obligation_evidence": [{
+                    "obligation_id": "root:identity", "evidence_category": "universal_proof",
+                    "claim_indexes": [0],
+                }],
+            }
+        elif role == "final_generator":
+            reply = {"final_response": "x + x = 2 * x"}
+        elif role == "whole_solution_verifier":
+            reply = copy.deepcopy(ACCEPT)
+        else:
+            self.send_error(400)
+            return
         payload = {
             "choices": [{"finish_reason": "stop", "message": {"content": json.dumps(reply)}}],
             "model": "intern-s2",
@@ -128,6 +164,7 @@ def build_app(*, data_dir: str, executor=None, independent_review=False):
             "problem_spec": True,
             "final_generation": True,
             "final_solution_review": True,
+            "local_code_tool": True,
         },
         "SHOWCASE_STAR_REGISTRY": registry,
         "SHOWCASE_STAR_BUDGET": RunBudgetLimits(
@@ -166,8 +203,6 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
-    if args.formal_manifest:
-        ScriptedProvider.answer = "x + x = 2 * x"
     args.data_dir.mkdir(parents=True, exist_ok=True)
     provider = ThreadingHTTPServer((args.host, args.provider_port), ScriptedProvider)
     threading.Thread(target=provider.serve_forever, daemon=True).start()

@@ -100,12 +100,31 @@ export const formalVerificationSchema = z.object({
 }).passthrough()
 export type FormalVerification = z.infer<typeof formalVerificationSchema>
 export type FormalAttempt = z.infer<typeof formalAttemptSchema>
+export const proverRouteSchema = z.object({
+  backend_id: z.string(),
+  target_type: z.string(),
+  selection_reason: z.string().optional(),
+  environment_identity: z.record(z.string(), z.unknown()).optional(),
+  input_format: z.string().optional(),
+  output_format: z.string().optional(),
+  deterministic: z.boolean().optional(),
+  unavailable_reason: nullableStringSchema.optional(),
+  attempt_id: z.string(),
+  parent_attempt_id: nullableStringSchema,
+  status: z.string(),
+  grade: z.enum(['L1', 'L2', 'L3', 'LLM_REVIEWED']).nullable(),
+  maximum_grade: z.enum(['L1', 'L2', 'L3', 'LLM_REVIEWED']),
+  cost: z.record(z.string(), z.unknown()),
+  lineage: z.record(z.string(), z.unknown()),
+}).passthrough()
+export type ProverRoute = z.infer<typeof proverRouteSchema>
 export const reportSchema = z.object({
   version: z.string(),
   evidence_id: z.string(),
   status: z.string(),
   mode: z.enum(['live', 'fake', 'replay', 'experimental', 'unavailable', 'planned', 'star_limited', 'star_limited_best_effort', 'star_reference', 'star_best_effort', 'star_population']),
-  solver: z.object({ solver_mode: z.string().nullable(), evidence_kind: z.string().nullable(), missing_capabilities: z.array(z.string()).nullable(), formal_verification: formalVerificationSchema.optional(), solver: z.object({ run_id: z.string(), state_revision: z.number(), phase: z.string(), status: z.string(), recovery: recoverySchema.optional(), progress: progressSchema.optional(), population: populationProjectionSchema.optional(), candidate_history: z.array(z.record(z.string(), z.unknown())).optional(), best_effort: z.record(z.string(), z.unknown()).nullable().optional(), formal_verification: formalVerificationSchema.optional() }).passthrough().nullable() }).optional(),
+  prover_routes: z.array(proverRouteSchema).optional(),
+  solver: z.object({ solver_mode: z.string().nullable(), evidence_kind: z.string().nullable(), missing_capabilities: z.array(z.string()).nullable(), formal_verification: formalVerificationSchema.optional(), solver: z.object({ run_id: z.string(), state_revision: z.number(), phase: z.string(), status: z.string(), recovery: recoverySchema.optional(), progress: progressSchema.optional(), population: populationProjectionSchema.optional(), candidate_history: z.array(z.record(z.string(), z.unknown())).optional(), best_effort: z.record(z.string(), z.unknown()).nullable().optional(), formal_verification: formalVerificationSchema.optional(), prover_routes: z.array(proverRouteSchema).optional() }).passthrough().nullable() }).optional(),
   report: z.object({
     budget: z.record(z.string(), z.unknown()).nullable().optional(),
     answer: z.string(),
@@ -113,6 +132,7 @@ export const reportSchema = z.object({
     public_summary: z.string(),
     stage: z.string(),
     tool_summaries: z.array(z.record(z.string(), z.unknown())),
+    prover_routes: z.array(proverRouteSchema).optional(),
     checks: z.object({ status: z.string().optional(), findings: z.array(z.string()).optional(), history: z.array(z.record(z.string(), z.unknown())).optional() }).passthrough(),
     semantics: resultSemanticsSchema.nullable().optional(),
     limitations: z.array(z.string()),

@@ -260,7 +260,8 @@ class StarProductPipeline:
                       "node_name": "star", "step_id": public_event_id,
                       "title": "STAR " + event["type"],
                       "summary": event["type"],
-                      "solver": projection(run, verification_mode=verification_mode),
+                      "solver": projection(run, verification_mode=verification_mode,
+                                           include_prover_routes=False),
                       **decision_fields(event, run["state"], port.invocations)})
 
         def solve():
@@ -453,7 +454,7 @@ class StarProductPipeline:
         return result
 
 
-def projection(run, *, answer=None, verification_mode="auto"):
+def projection(run, *, answer=None, verification_mode="auto", include_prover_routes=True):
     from .star_product_summary import progress_summary
     from .star_result_semantics import result_semantics
 
@@ -472,6 +473,10 @@ def projection(run, *, answer=None, verification_mode="auto"):
             **candidate_projection(run),
             **({'formal_verification': state['formal_verification']}
                if isinstance(state.get('formal_verification'), Mapping) else {})}
+    if include_prover_routes:
+        from .prover_routes import prover_route_projection
+
+        result["prover_routes"] = prover_route_projection(state)
     if state.get("population_policy", {}).get("enabled") is True:
         from .solver_harness.population_projection import population_projection
 

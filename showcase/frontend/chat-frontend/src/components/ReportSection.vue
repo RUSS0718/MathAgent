@@ -4,9 +4,10 @@ import { renderSafeMarkdown } from '../renderers/markdown-adapter'
 import StatusBadge from './ui/StatusBadge.vue'
 import type { ResultSemantics } from '../api/result-semantics.schemas'
 import { describeResultSemantics } from '../runtime/reports/result-semantics'
-import type { FormalVerification } from '../api/reports.schemas'
+import type { FormalVerification, ProverRoute } from '../api/reports.schemas'
 import FormalVerificationSection from './FormalVerificationSection.vue'
-const props = defineProps<{ title?: string; content?: string; mode?: string; status?: string; report?: { answer: string; public_summary: string; stage: string; limitations: string[]; checks?: { status?: string; findings?: string[]; history?: Record<string, unknown>[] }; semantics?: ResultSemantics | null; formal_verification?: FormalVerification | null } }>()
+import ProverRoutesSection from './ProverRoutesSection.vue'
+const props = defineProps<{ title?: string; content?: string; mode?: string; status?: string; report?: { answer: string; public_summary: string; stage: string; limitations: string[]; checks?: { status?: string; findings?: string[]; history?: Record<string, unknown>[] }; semantics?: ResultSemantics | null; formal_verification?: FormalVerification | null; prover_routes?: ProverRoute[] } }>()
 const html = computed(() => renderSafeMarkdown(props.content ?? props.report?.answer ?? ''))
 const answerText = computed(() => props.content ?? props.report?.answer ?? '')
 const isLongArtifact = computed(() => answerText.value.length > 2400)
@@ -29,6 +30,7 @@ function translate(group: keyof typeof labels, value?: string): string {
       <div class="report-content" data-public-long-artifact v-html="html"></div>
     </details>
     <p v-if="report?.public_summary" class="report-summary">{{ report.public_summary }}</p>
+    <ProverRoutesSection v-if="report?.prover_routes?.length" :routes="report.prover_routes" />
     <FormalVerificationSection v-if="report?.formal_verification" :verification="report.formal_verification" />
     <details v-if="report?.checks?.history?.length">
       <summary>验证历史（{{ report.checks.history.length }} 项）</summary>

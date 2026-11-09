@@ -182,6 +182,7 @@ def _execute(harness, run, request, config, port, step_id, claim_index, *, recei
             receipt["error_category"] = category
         output = result.get("output")
         size = len(json.dumps(output, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+        receipt["observed_output_bytes"] = size
         receipt["status"] = (
             status
             if status
@@ -240,6 +241,7 @@ def _execute(harness, run, request, config, port, step_id, claim_index, *, recei
         receipt["status"] = "tool_error"
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
+    receipt["duration_seconds"] = time.monotonic() - started
     receipt["timeout"] = receipt.get("timeout") is True or receipt["status"] == "timeout"
     receipt["unknown_outcome"] |= receipt["status"] == "unknown_outcome" or (
         not managed and receipt["status"] == "timeout")

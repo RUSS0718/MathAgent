@@ -169,6 +169,7 @@ def reserve_formal_retry(
                     "sequence": len(record.get("attempts", [])) + 1},
         "requested_operation": operation,
         "backend": backend_name,
+        "selection_reason": f"explicit_{operation}",
     }
     record["attempts"] = [*record.get("attempts", []), attempt]
     record["current_attempt_id"] = attempt_id
@@ -220,6 +221,7 @@ def execute_reserved_attempt(
             timeout_seconds=timeout_seconds, registry=registry,
             backend_registry=backend_registry,
             backend_name=child.get("backend"),
+            selection_reason=child.get("selection_reason") or "explicit_formal_policy",
         )
     except BudgetExhausted as exc:
         return _complete_reserved(
@@ -296,7 +298,8 @@ def retry_formal_verification(
     if operation not in {"retry", "switch"}:
         raise FormalIntegrationError("explicit_retry_or_switch_required")
     attempt = _attempt(state, backend, target, parent_attempt_id=expected_attempt_id,
-                       review=None, sequence=len(record["attempts"]) + 1)
+                       review=None, sequence=len(record["attempts"]) + 1,
+                       selection_reason=f"explicit_{operation}")
     total = _add_cost(record["lineage"]["total_cost"], attempt["cost"])
     record["attempts"].append(attempt)
     record["current_attempt_id"] = attempt["attempt_id"]
@@ -336,6 +339,7 @@ def reserve_formal_attempt(
         "proof_artifact": None,
         "specifications": {},
         "backend": state.policy.get("backend", state.policy.get("requested_backend")),
+        "selection_reason": "explicit_formal_policy",
         "cost": {"elapsed_seconds": 0.0, "output_bytes": 0, "usage": {}, "unknown": False},
         "lineage": {"attempt_id": attempt_id, "parent_attempt_id": None, "sequence": 1},
     }
@@ -367,11 +371,26 @@ def mark_inflight_unknown(record: Mapping[str, Any]) -> dict[str, Any]:
 
 def _attempt(state, backend, target, *, parent_attempt_id, review, sequence,
              reuse_attempt_id=None, timeout_seconds=None, registry=None,
-             backend_registry=None, backend_name=None):
+             backend_registry=None, backend_name=None,
+             selection_reason="explicit_formal_policy"):
     from ..formal import normalize_formal_request, serialize_attempt_result
     from ..run_budget import BudgetExhausted
 
     attempt_id = reuse_attempt_id or f"formal_{uuid.uuid4().hex}"
+    selected_name = backend_name or getattr(backend, "name", "unknown")
+    metadata = backend_registry.metadata(selected_name) if backend_registry is not None else None
+    route_fields = {
+        "backend": selected_name,
+        "maximum_grade": metadata.get("maximum_grade") if isinstance(metadata, Mapping) else None,
+        "selection_reason": selection_reason,
+        "environment_identity": (dict(metadata.get("environment_identity") or {})
+                                 if isinstance(metadata, Mapping) else {}),
+        "input_format": metadata.get("input_format") if isinstance(metadata, Mapping) else None,
+        "output_format": metadata.get("output_format") if isinstance(metadata, Mapping) else None,
+        "deterministic": metadata.get("deterministic") if isinstance(metadata, Mapping) else None,
+        "unavailable_reason": (metadata.get("unavailable_reason")
+                               if isinstance(metadata, Mapping) else None),
+    }
     if backend_registry is not None:
         requested_policy = dict(state.policy)
         if backend_name is not None:
@@ -382,6 +401,7 @@ def _attempt(state, backend, target, *, parent_attempt_id, review, sequence,
             reason = str(exc)
             return serialize_attempt_result({
                 "status": "unsupported" if "target" in reason else "unavailable",
+                **route_fields,
                 "grade": None,
                 "attempt_id": attempt_id,
                 "parent_attempt_id": parent_attempt_id,
@@ -516,7 +536,7 @@ def _attempt(state, backend, target, *, parent_attempt_id, review, sequence,
                              "attempt_id": attempt_id,
                              "parent_attempt_id": parent_attempt_id,
                              "sequence": sequence}
-    normalized["backend"] = getattr(backend, "name", backend_name or "unknown")
+    normalized.update({key: value for key, value in route_fields.items() if value is not None})
     return _json_copy(normalized)
 
 def _add_cost(left, right):

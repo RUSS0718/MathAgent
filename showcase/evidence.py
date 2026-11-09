@@ -59,6 +59,7 @@ class EvidencePackExporter:
             "request_attempts": _attempts(snapshot),
             "budget": (snapshot.get("result") or {}).get("budget"),
             "solver": {key: (snapshot.get("result") or {}).get(key) for key in ("solver_mode", "preset_version", "population_policy_hash", "missing_capabilities", "evidence_kind", "solver")},
+            "prover_routes": _prover_routes(snapshot),
             "verification": verification_data,
             "semantics": ((snapshot.get("result") or {}).get("solver") or {}).get("semantics"),
             **({'formal_verification': _formal_verification(snapshot)}
@@ -95,6 +96,7 @@ class EvidencePackExporter:
             "request_attempts": _attempts(snapshot),
             "budget": (snapshot.get("result") or {}).get("budget"),
             "solver": {key: (snapshot.get("result") or {}).get(key) for key in ("solver_mode", "preset_version", "population_policy_hash", "missing_capabilities", "evidence_kind", "solver")},
+            "prover_routes": _prover_routes(snapshot),
             "public_summary": summary,
             "stage": snapshot.get("stage"),
             "asset_refs": snapshot.get("asset_refs", []),
@@ -121,6 +123,14 @@ def _formal_verification(snapshot: Mapping[str, Any]) -> Mapping[str, Any] | Non
     solver = result.get("solver")
     formal = solver.get("formal_verification") if isinstance(solver, Mapping) else None
     return formal if isinstance(formal, Mapping) else None
+
+
+def _prover_routes(snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
+    result = snapshot.get("result") if isinstance(snapshot.get("result"), Mapping) else {}
+    solver = result.get("solver") if isinstance(result.get("solver"), Mapping) else {}
+    routes = solver.get("prover_routes")
+    return [dict(item) for item in routes if isinstance(item, Mapping)] if isinstance(routes, list) else []
+
 
 def _verification_dict(value: VerificationResult | Mapping[str, Any] | None) -> dict[str, Any]:
     if isinstance(value, VerificationResult):
