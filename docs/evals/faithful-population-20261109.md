@@ -1,6 +1,6 @@
 # #156 Population/APRS 接管与验收
 
-日期：2026-11-09（Asia/Shanghai）。状态：历史门禁05支持engineering-preview；本次接续已补聚焦证据，当前源码最终门禁待运行。真实容量与数学效果未验证，不声明能力提升。
+日期：2026-11-09（Asia/Shanghai）。状态：接续门禁06通过（engineering-preview）；门禁源码为 `5d80f906953ef97286eceddeaa49a960ed4c283d`。真实容量与数学效果未验证，不声明能力提升。
 
 ## 身份
 
@@ -150,3 +150,26 @@ Standards初审发现报告脚本在diagnostics模式父/子进程重复导入�
 `uv run python scripts/check_fast.py` 本轮通过（5项、4.160秒，baseline/Demo/CLI/接缝均通过），但它仍是冻结前聚焦证据；最终门禁将重新执行。Ruff检查/格式检查7文件通过，diff --check无空白错误；官方baseline相对接续9442d87无差异。当前源码最终门禁尚未运行，历史05与Docker42专项继续独立记载。
 
 冻结前双轴复查：Standards确认callback异常已主线程显式回传、报告重复场景已去重，准入预算delta/loser零ledger/子进程finally/容量冲突透传/最终DB重读无阻塞；Spec确认不同route/action单槽竞争及unknown分层含义符合本轮公共最小纵切。两轴分别报告，均无新增阻塞；完整故障组合和真实环境仍不在已验证结论。源代码冻结后只运行一个最终门禁06，运行中不改源。
+
+## 接续最终门禁06与交付
+
+门禁源码 SHA：`5d80f906953ef97286eceddeaa49a960ed4c283d`。本次接续原5文件及选择器修复提交 `6b10b07`，准入验收 `bca5d93`，证据/unknown验收 `57040b9`，映射冻结 `5d80f90`；均本地提交，未push。本节及索引/合同随后以独立纯文档提交交接，不改变门禁源码身份。
+
+命令：`uv run python scripts/run_final_gate.py --root . --output-dir artifacts/final-gates --run-id faithful-population-06`。2026-11-09 19:26:26（Asia/Shanghai）启动，19:54:12结束。
+
+| 检查 | 实际结果与证据 |
+| --- | --- |
+| 唯一最终门禁06 | 6/6，1665.328秒，`source_changed=false`；`artifacts/final-gates/faithful-population-06/status.json` |
+| 完整仓库回归 | 1624项，0failure、0error、42skip，1513.504秒；同目录 `repository-check/tests.json`、`diagnostics.log`；mutation probes随offline阶段通过 |
+| 发布检查 | 27项通过，40.544秒；`release.log` |
+| 前端 | install/audit/check通过，audit 0漏洞；`frontend-*.log`；既有大chunk提示不作为性能验收 |
+| 源码冻结 | source-manifest前后tracked/untracked dirty均为空；内容指纹一致；官方baseline/default路径相对9442d87无差异 |
+| 浏览器 | 本轮未改前端，复用前述r4桌面/手机受控fixture证据；不升级为真实provider浏览器验收 |
+
+门禁06的42skip不计通过；门禁05之后的固定Docker42项专项仅作为旧源码的独立分层证据，不改写06摘要，也不证明当前源码执行了这42项。当前完整回归通过与12项新增验收、102项聚焦证据分别记录，不能相互替代。
+
+本轮生产Population行为未改；新增验收覆盖受控单槽跨进程原子准入、等价frontier/动作重放、依赖撤销/冲突拒绝与无关版本接纳、双来源收益去重/成本保留、unknown依赖拒交和独立交付迟到unknown。检查脚本修复是诊断选择器单次导入与错误保留，不是数学能力提升。回顾改进5文件已保留并提交。
+
+#156/#146保持open，状态engineering-preview。真实provider、服务/账户/机器容量、自然压力与SLA、自然题、独立数学效果、faithful-D仍未验证；完整故障组合未穷尽；Lean/S09仍unavailable，F3/S10门槛未解除，不关闭完整F6或F3。#155不要求新的自主Planner生产循环，本轮未扩张该范围。
+
+最终门禁已结束，无遗留测试进程；当前会话的临时监控已结束，清理仅删除临时读取脚本，全部测试/失败日志保留。应用约束要求单次运行在当前会话跟进，因此没有创建定时自动化。未读取、修改、提交或删除 `tests/test.md`。后续仍使用当前选择模型，未指定子代理模型覆盖；实际型号与继承未独立核实。

@@ -1,6 +1,6 @@
 # #156 完整并发 Population 工程合同
 
-日期：2026-11-08（Asia/Shanghai）。状态：历史门禁05支持离线engineering-preview；2026-11-09接续正在补公共验收映射与回归，当前源码须重新冻结门禁。分层结果与未验证项见[验收记录](../evals/faithful-population-20261109.md)，不代表真实容量或数学效果退出。依据 [#156](https://github.com/RUSS0718/MathAgent/issues/156) 与 [#155 决议](https://github.com/RUSS0718/MathAgent/issues/155#issuecomment-6704660319)。本合同不扩张串行 F2，也不解除 F3/S10 门槛。
+日期：2026-11-08（Asia/Shanghai）。状态：2026-11-09接续门禁06在源码 `5d80f90` 上6/6通过，离线engineering-preview；公共验收最小纵切和未完成故障组合分层记录。分层结果与未验证项见[验收记录](../evals/faithful-population-20261109.md)，不代表真实容量或数学效果退出。依据 [#156](https://github.com/RUSS0718/MathAgent/issues/156) 与 [#155 决议](https://github.com/RUSS0718/MathAgent/issues/155#issuecomment-6704660319)。本合同不扩张串行 F2，也不解除 F3/S10 门槛。
 
 起点：集成树 `faithful-integration/Challenge-Cup-2026`，分支 `mathagent-faithful`，HEAD `0aec0ff2bd422237782c4ae82af62fe770f4387f`，工作树干净。相对总票审计基线 `b7038798cccdf5bfdc80175ebfe68dcbf12dc2d6` 的变化为 S01–S08 及交接增量，具体证据由[索引](../README.md)定位。已核对 #144、#146、#148、#149、#155、#156；F1/F2 的工程前置已满足。Lean 缺失仍为 unavailable，不接入 L2/L3，不实施干预或记忆。
 
