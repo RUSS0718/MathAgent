@@ -250,6 +250,18 @@ class PopulationLoopbackJobTest(StarJobFixture, unittest.TestCase):
         for private in ("frontier_digest", "evidence_ref", "population_action_id"):
             self.assertNotIn(private, json.dumps(exported))
         self.assertEqual(count, len(self.requests))
+        replay = self.client.get(f"/api/agent/jobs/{job_id}/candidate-replay").get_json()
+        self.assertGreater(replay["population"]["rating_count"], 0)
+        self.assertTrue(replay["population"]["replay_matches"])
+        connection = self.app.extensions["loopback_store"]._connection
+        row = connection.execute("SELECT state_json FROM solver_states WHERE run_id=?", (job_id,)).fetchone()
+        state = json.loads(row[0])
+        state["population"]["rating_history"][0]["rating"]["input_hash"] = "tampered"
+        connection.execute("UPDATE solver_states SET state_json=? WHERE run_id=?", (json.dumps(state), job_id))
+        connection.commit()
+        tampered = self.client.get(f"/api/agent/jobs/{job_id}/candidate-replay").get_json()
+        self.assertFalse(tampered["population"]["replay_matches"])
+        self.assertEqual(count, len(self.requests))
 
     def test_delivery_can_settle_before_late_request_without_resending_or_changing_math(self):
         self.provider.timeout = 12

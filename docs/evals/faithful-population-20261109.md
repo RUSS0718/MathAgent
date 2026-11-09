@@ -59,6 +59,12 @@ timeout/error 曾被 Population 当作已结清，父账本却保留未知预留
 - transport policy与profile集指纹已进入population配置和幂等身份，`identity-delivery05.log` 11项通过。该补丁测试先落盘但未单独运行补丁前红阶段，如实保留流程缺口。
 - Standards审查未确认可行动阻塞，但完整锁顺序检查范围有限；Spec提出HTTP账本完整性，已按上述故障用例修复。动态Planner、机器压力和容量仍不在已验证范围。
 
+## 门禁01中断与公共回放补缺
+
+源码提交 `36844cb32f68987450a56b213594123b2c45d168`，门禁01快速阶段通过后进入offline。冻结后只读复核发现并发评分没有公共replay接线或历史，协调者停止唯一门禁树，临时检查已删除。原status停在running仅是强制停止时快照，实际结果以 `artifacts/final-gates/faithful-population-01/interruption.json` 为中断，不计最终通过。
+
+store同事务保存rating_history，公共candidate-replay对并发Run重算全部历史，只返回policy/count/matches，不输出私有路线输入。`replay-public-red.log` 先复现缺字段；`replay-tamper-green.log` 5项通过，含持久历史篡改后replay不匹配、零模型新调用。
+
 ## 退出与未验证项
 
 源码 SHA、门禁 SHA、source_changed、完整失败/skip、最终交接 SHA 待冻结后记录。55 项回归结束后临时检查已删除；最终门禁启动时重新建立唯一检查所有权。

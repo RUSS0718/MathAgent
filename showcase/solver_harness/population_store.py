@@ -218,6 +218,12 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             raise PopulationConflict("population_terminal_frozen")
         if all(population.get(key) == value for key, value in updates.items()):
             return None, {}
+        if "rating" in updates:
+            rating = updates["rating"]
+            history = population.setdefault("rating_history", [])
+            if not history or history[-1]["rating"] != rating:
+                history.append({"round": updates.get("round", population.get("round", 0)),
+                                "rating": deepcopy(rating)})
         population.update(updates)
         return _event("population_updated", changed=sorted(updates)), {"population": population}
 
