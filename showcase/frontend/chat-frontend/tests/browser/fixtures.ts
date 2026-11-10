@@ -33,6 +33,10 @@ export async function mockWorkspace(page: Page, populated = false, eventStream?:
     else if (path === '/api/capabilities') body = { profile: 'showcase', execution: { mode: 'fake', provider: 'demo', status: 'available' }, jobs: { enabled: true, status: 'available' }, sse: { enabled: true, status: 'available' }, verification_mode: ['auto'], files: { upload: { enabled: false } }, capabilities: { jobs: true, sse: true, verification_mode: ['auto'], file_upload: { enabled: false } } }
     else if (path === '/api/experiments/campaigns') body = { campaigns: [campaign], offset: 0, limit: 20 }
     else if (path.includes('/api/experiments/campaigns/')) body = campaign
+    else if (path.endsWith('/memory') || path.endsWith('/population-memory')) {
+      await route.fulfill({ status: 404, json: { code: 'not_found' } })
+      return
+    }
     else if (path.endsWith('/report')) body = report
     else if (path.endsWith('/evidence')) body = { evidence_id: 'evidence-demo', mode: 'fake', run: {} }
     else if (path.endsWith('/events')) {
