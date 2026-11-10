@@ -943,6 +943,7 @@ def main() -> None:
     parser.add_argument("--data-dir", default=None)
     parser.add_argument("--star-limited", action="store_true", help="Enable explicit limited STAR selection")
     parser.add_argument("--star-full", action="store_true", help="Enable full STAR presets after isolated runtime preflight; requires exact image configuration")
+    parser.add_argument("--faithful-memory-review", action="store_true", help="Expose read-only Faithful memory review")
     parser.add_argument(
         "--experiment-idempotency-lookup",
         action="store_true",
@@ -951,6 +952,7 @@ def main() -> None:
     args = parser.parse_args()
     config: dict[str, Any] = {"SHOWCASE_MODE": args.mode, "SHOWCASE_STAR_ENABLED": args.star_limited,
                               "SHOWCASE_STAR_FULL_ENABLED": args.star_full,
+                              "SHOWCASE_FAITHFUL_MEMORY_ENABLED": args.faithful_memory_review,
                               "SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED": args.experiment_idempotency_lookup}
     if args.data_dir:
         config["SHOWCASE_DATA_DIR"] = args.data_dir

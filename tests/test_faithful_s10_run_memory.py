@@ -2,6 +2,7 @@
 
 import unittest
 from copy import deepcopy
+from unittest.mock import MagicMock, patch
 
 from showcase.faithful_memory_api import project_run_memory
 from showcase.run_budget import RunBudgetLimits
@@ -10,6 +11,17 @@ from tests.test_faithful_s03_job import FEATURES, REPLIES, SPEC
 
 
 class FaithfulS10RunMemoryTest(StarJobFixture, unittest.TestCase):
+    def test_cli_requires_explicit_memory_review_flag(self):
+        from showcase.flask_app import main
+
+        app = MagicMock()
+        with (
+            patch("sys.argv", ["showcase_server.py", "--faithful-memory-review"]),
+            patch("showcase.flask_app.create_app", return_value=app) as create,
+        ):
+            main()
+        self.assertIs(create.call_args.args[0]["SHOWCASE_FAITHFUL_MEMORY_ENABLED"], True)
+
     def test_conjecture_and_invalidated_result_are_not_effective_evidence(self):
         state = {
             "proof_graph": {"current_version": 3, "snapshots": []},
