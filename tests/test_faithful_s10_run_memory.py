@@ -78,6 +78,29 @@ class FaithfulS10RunMemoryTest(StarJobFixture, unittest.TestCase):
         denied = anonymous.get(f"/api/agent/jobs/{job_id}/memory")
         self.assertEqual(401, denied.status_code)
         self.assertEqual("auth_required", denied.get_json()["code"])
+        identity = self.app.extensions["loopback_store"]
+        with identity._connection:
+            identity._connection.execute(
+                "INSERT INTO loopback_users VALUES (?,?,?,?)",
+                ("second-user", "second", "[]", "2026-11-10T00:00:00Z"),
+            )
+            identity._connection.execute(
+                "INSERT INTO auth_sessions VALUES (?,?,?,?,?,?)",
+                (
+                    "second-session",
+                    "second-user",
+                    "csrf",
+                    "2026-11-10T00:00:00Z",
+                    "2026-11-10T00:00:00Z",
+                    None,
+                ),
+            )
+        other_user = self.app.test_client()
+        other_user.set_cookie("auth_session", "second-session")
+        self.assertEqual(404, other_user.get(f"/api/agent/jobs/{job_id}/memory").status_code)
+        self.assertEqual(
+            404, other_user.get(f"/api/sessions/{self.session}/population-memory").status_code
+        )
 
     def test_memory_endpoint_is_disabled_by_default(self):
         self.open_star([SOLVED, POLISH, ACCEPT])
