@@ -252,6 +252,8 @@ class FaithfulMemoryStore:
     ) -> dict[str, Any]:
         if not isinstance(observation, Mapping) or not isinstance(provenance, Mapping):
             raise ValueError("memory_observation_invalid")
+        if not isinstance(provenance.get("source_run_id"), str) or not provenance["source_run_id"].strip():
+            raise ValueError("memory_observation_source_required")
         if observation.get("outcome") not in {"success", "failure", "unknown"}:
             raise ValueError("memory_observation_outcome_invalid")
         if any(not isinstance(observation.get(key), Mapping)

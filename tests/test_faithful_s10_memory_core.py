@@ -93,6 +93,14 @@ class FaithfulMemoryCoreTest(unittest.TestCase):
                 )
         connection.close()
 
+    def test_observation_requires_traceable_source_run(self):
+        connection = sqlite3.connect(":memory:")
+        store = FaithfulMemoryStore(connection)
+        with self.assertRaisesRegex(ValueError, "memory_observation_source_required"):
+            store.record_observation(_scope(), _observation(), provenance={})
+        self.assertEqual([], store.list_observations(_scope()))
+        connection.close()
+
     def test_cross_scope_import_is_explicit_and_records_origin(self):
         connection = sqlite3.connect(":memory:")
         store = FaithfulMemoryStore(connection)
