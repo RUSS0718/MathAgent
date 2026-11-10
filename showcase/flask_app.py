@@ -137,6 +137,10 @@ def create_app(
     app.extensions["showcase_files"] = persisted_files if isinstance(persisted_files, dict) else {}
     app.extensions["showcase_files_index"] = files_index
     register_campaigns(app, workspace_service, service, resolved_database, storage_root)
+    if app.config.get("SHOWCASE_FAITHFUL_MEMORY_ENABLED") is True:
+        from .faithful_memory_api import register_run_memory
+
+        register_run_memory(app, resolved_database)
 
     @app.before_request
     def attach_request_context() -> Response | None:
