@@ -12,7 +12,10 @@ import ToolArtifactLinks from './ToolArtifactLinks.vue'
 import AgentTimeline from './AgentTimeline.vue'
 import ReportSection from './ReportSection.vue'
 import FormalVerificationSection from './FormalVerificationSection.vue'
+import FaithfulMemorySection from './FaithfulMemorySection.vue'
+import type { PopulationMemoryResponse, RunMemoryResponse } from '../api/memory.schemas'
 import PresentationSection from './PresentationSection.vue'
+import { isApiError } from '../api/errors'
 import PageFrame from './ui/PageFrame.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
@@ -22,6 +25,9 @@ const jobs = useJobsStore()
 const controller = new JobController(jobs)
 const job = computed(() => jobs.byId(props.jobId))
 const report = ref<JobReport | null>(null)
+type MemoryResult<T> = { status: 'loading' | 'unavailable' | 'error' } | { status: 'available'; data: T }
+const runMemory = ref<MemoryResult<RunMemoryResponse>>({ status: 'unavailable' })
+const populationMemory = ref<MemoryResult<PopulationMemoryResponse>>({ status: 'unavailable' })
 const recovery = computed(() => report.value?.solver?.solver?.recovery)
 const notice = ref('')
 const connected = ref(false)
@@ -30,6 +36,7 @@ const busy = ref(false)
 const loading = ref(true)
 let reportTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
+let memoryGeneration = 0
 watch(() => job.value?.events.length, () => {
   if (reportTimer || disposed) return
   reportTimer = setTimeout(() => {
@@ -43,7 +50,37 @@ const fields = ['attempt_id', 'logical_call_id', 'attempt_index', 'started_at_ut
 const toolFields = ['name', 'tool_call_id', 'protocol', 'transport_mode', 'status', 'error_category', 'continuation_status', 'continuation_tool_call_id', 'continuation_response_received', 'candidate_status', 'coverage_status', 'result_summary', 'limitations', 'receipt']
 const budgetLabels: Record<string, string> = { http_attempts: 'HTTP 请求数', unknown_attempts: '未知请求数', reserved_tokens: '未决预留 Token', charged_tokens: '累计计入 Token', deadline_at: '原截止时间' }
 function display(value: unknown): string { return value === null || value === undefined ? 'unknown（未知）' : typeof value === 'object' ? JSON.stringify(value) : String(value) }
-async function refresh(): Promise<void> { loading.value = true; try { jobs.observe(await api.getJob(props.jobId)); report.value = await api.jobReport(props.jobId); notice.value = '' } catch (error) { notice.value = error instanceof Error ? error.message : '报告 unavailable（不可用）' } finally { loading.value = false } }
+async function refresh(): Promise<void> {
+  const generation = ++memoryGeneration
+  runMemory.value = { status: 'loading' }
+  populationMemory.value = { status: 'loading' }
+  loading.value = true
+  try {
+    const currentJob = jobs.observe(await api.getJob(props.jobId))
+    if (generation !== memoryGeneration) return
+    const [loadedReport, loadedRunMemory, loadedPopulationMemory] = await Promise.allSettled([
+      api.jobReport(props.jobId),
+      api.runMemory(props.jobId),
+      api.populationMemory(currentJob.sessionId),
+    ])
+    if (generation !== memoryGeneration) return
+    runMemory.value = memoryResult(loadedRunMemory)
+    populationMemory.value = memoryResult(loadedPopulationMemory)
+    if (loadedReport.status === 'rejected') throw loadedReport.reason
+    report.value = loadedReport.value
+    notice.value = ''
+  } catch (error) {
+    if (generation !== memoryGeneration) return
+    if (runMemory.value.status === 'loading') runMemory.value = { status: 'error' }
+    if (populationMemory.value.status === 'loading') populationMemory.value = { status: 'error' }
+    notice.value = error instanceof Error ? error.message : '报告 unavailable（不可用）'
+  }
+  finally { if (generation === memoryGeneration) loading.value = false }
+}
+function memoryResult<T>(result: PromiseSettledResult<T>): MemoryResult<T> {
+  if (result.status === 'fulfilled') return { status: 'available', data: result.value }
+  return isApiError(result.reason) && result.reason.status === 404 ? { status: 'unavailable' } : { status: 'error' }
+}
 async function reconnect(): Promise<void> { await refresh(); connected.value = true; await controller.subscribe(props.jobId); connected.value = false; await refresh() }
 async function exportEvidence(): Promise<void> { try { const evidence = await api.evidence(props.jobId); downloadJson(props.jobId + '-evidence.json', evidence); notice.value = '已导出持久公开 Evidence JSON。' } catch (error) { notice.value = error instanceof Error ? error.message : 'Evidence 导出失败，请重试。' } }
 async function cancel(): Promise<void> { busy.value = true; try { await api.cancelJob(props.jobId, cancelKey); await refresh(); notice.value = '取消已记录；在途远端请求费用可能未知。' } catch (error) { notice.value = error instanceof Error ? error.message : '取消失败' } finally { busy.value = false } }
@@ -59,7 +96,7 @@ async function resume(callId?: string): Promise<void> {
   } finally { busy.value = false }
 }
 onMounted(() => { void reconnect() })
-onUnmounted(() => { disposed = true; clearTimeout(reportTimer); controller.stopAll() })
+onUnmounted(() => { disposed = true; memoryGeneration += 1; clearTimeout(reportTimer); controller.stopAll() })
 </script>
 <template>
   <PageFrame title="子 Run 审阅" description="查看公开答案、最终验证范围与脱敏执行记录。" active="run">
@@ -86,6 +123,7 @@ onUnmounted(() => { disposed = true; clearTimeout(reportTimer); controller.stopA
     </section>
     <div v-if="loading && !report" class="loading-state" role="status" aria-busy="true">正在读取运行报告…<div v-for="n in 3" :key="n" class="skeleton"></div></div>
     <section v-else-if="!report" class="empty-state"><h2>报告当前不可用</h2><p>请刷新重试，尚不能判断运行成功。</p></section>
+    <FaithfulMemorySection :run-memory="runMemory" :population-memory="populationMemory" />
     <template v-if="report">
       <StarRunReview :report="report" :job-id="jobId" />
       <RoutePanel v-if="report.solver?.solver?.progress?.routes" :routes="report.solver.solver.progress.routes" />
