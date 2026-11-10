@@ -1,12 +1,12 @@
 # MathAgent 文档索引
 
-- [S09/F3 受限形式化实施记录](evals/faithful-s09-20261109.md)：2026-11-10 实现、真实 L2/L3 和公共持久化验收完成；唯一最终门禁和双轴复核待完成，完成前不解除 F4/F5 前置。[S09 合同映射](engineering/faithful-s09-contract.md)记录公共入口、持久断言和证据范围。
+- [S09/F3 受限形式化实施记录](evals/faithful-s09-20261109.md)：门禁源码 `4df0953`；最终门禁06 6/6通过（1683项、0 failure、0 error、2 skip），Reference 发布41项通过；真实 L2/L3、AC23 公共 Job/Report/Evidence 路线和桌面/移动 UI 验收完成，状态为 `engineering-preview`。2 skip 未计通过，真实 provider、自然题及独立数学效果未验证。[S09 合同映射](engineering/faithful-s09-contract.md)记录公共入口、持久断言和证据范围。
 
 - [#156 完整并发接管与验收](evals/faithful-population-20261109.md)：接续门禁06在源码 `5d80f90` 上6/6通过（1624项、42skip）；新增12项验收与102项聚焦通过，八组公共入口/持久证据逐项映射。42skip仍未执行，旧Docker专项独立记载；真实provider/容量/SLA/数学效果未验证，#156/#146保持开放。
 
 ## Faithful 实施入口（截至2026-11-10）
 
-S01–S08（含 S06 与串行 F2/S08）已按 `engineering-preview` 退出。S09/F3 已完成实现、固定 Lean 环境、真实 L2/L3 和公共 Job/Report/Evidence 验收；源码最终门禁与双轴复核仍待完成。门禁通过并关闭 #149 后，才解除 F4/F5 的工程前置。S10/F4/F5 尚未实施。#146 与完整并发 #156 继续开放。真实 provider、容量/SLA、自然题与独立数学效果仍为未验证。阶段合同与依赖见 [#144 决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)、[S09 合同](engineering/faithful-s09-contract.md)和[工程门禁](engineering/development-gates.md)。
+S01–S09（含 S06、串行 F2/S08、F3/S09）已按 `engineering-preview` 退出。S09 源码门禁 SHA 为 `4df095355d2eb5c39f94ba24cb7e367486973428`，最终纯文档交接 SHA 会单独记录；门禁 6/6 通过，2 项显式 Docker readiness integration 测试 skip 未计通过。真实 L2/L3 和公共 Prover Route Job/Report/Evidence 验收完成，#149 已关闭，F4/F5 的 F2/F3 工程前置已满足。S10/F4/F5 尚未实施；#146 与完整并发 #156 保持开放。真实 provider、容量/SLA、自然题和独立数学效果仍为未验证。阶段合同与依赖见 [#144 决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)、[S09 合同](engineering/faithful-s09-contract.md)和[工程门禁](engineering/development-gates.md)。
 
 - [S06 与 S08/F2 工程退出验收](evals/faithful-s06-s08-exit-20261108.md)：门禁源码 `2f11c65`，6/6通过，1543项含42skip；分别记录基础模板输出、串行路线/APRS、双轴修复及首轮门禁失败。
 - [S06基础输出合同](engineering/faithful-s06-contract.md)、[S08串行路线合同](engineering/faithful-s08-contract.md)、[重规划诊断与S09环境](evals/faithful-replan-s09-environment-20261108.md)：S09编译exit127、无L2/L3；#156可按实际前置推进，S10不可提前实施。
