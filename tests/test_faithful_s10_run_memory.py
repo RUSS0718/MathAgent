@@ -1,9 +1,12 @@
 """S10 Run Memory is a scoped view of the authoritative persisted Job state."""
 
 import unittest
+from copy import deepcopy
 
 from showcase.faithful_memory_api import project_run_memory
+from showcase.run_budget import RunBudgetLimits
 from tests.star_product_support import ACCEPT, POLISH, SOLVED, StarJobFixture
+from tests.test_faithful_s03_job import FEATURES, REPLIES, SPEC
 
 
 class FaithfulS10RunMemoryTest(StarJobFixture, unittest.TestCase):
@@ -70,9 +73,69 @@ class FaithfulS10RunMemoryTest(StarJobFixture, unittest.TestCase):
         )
         self.assertEqual(outbound_count, len(self.outbound))
         anonymous = self.app.test_client()
-        self.assertEqual(401, anonymous.get(f"/api/agent/jobs/{job_id}/memory").status_code)
+        denied = anonymous.get(f"/api/agent/jobs/{job_id}/memory")
+        self.assertEqual(401, denied.status_code)
+        self.assertEqual("auth_required", denied.get_json()["code"])
 
     def test_memory_endpoint_is_disabled_by_default(self):
         self.open_star([SOLVED, POLISH, ACCEPT])
         response = self.client.get("/api/agent/jobs/any/memory")
         self.assertEqual(404, response.status_code)
+
+    def test_population_observation_is_scoped_to_chat_session(self):
+        replies = deepcopy(REPLIES)
+        replies[1]["steps"][0]["method_id"] = "computation"
+        self.open_star(
+            replies,
+            SHOWCASE_FAITHFUL_MEMORY_ENABLED=True,
+            SHOWCASE_STAR_FEATURES={
+                **FEATURES,
+                "serial_routes": True,
+                "progress_scheduling": True,
+                "proof_graph": True,
+                "context_pack": False,
+            },
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(
+                max_model_calls=8,
+                max_http_attempts=8,
+                max_tool_calls=0,
+                max_tokens=100_000,
+                max_runtime_seconds=1_100,
+            ),
+        )
+        created = self.client.post(
+            "/api/agent/jobs",
+            json={
+                "message": SPEC["original_problem"],
+                "session_id": self.session,
+                "solver_mode": "star_limited",
+                "problem_spec": SPEC,
+            },
+            headers=self.headers(),
+        )
+        self.assertEqual(202, created.status_code, created.get_json())
+        job_id = created.get_json()["job_id"]
+        terminal = self.terminal(job_id)
+        self.assertEqual("succeeded", terminal["status"], terminal.get("error"))
+        outbound_count = len(self.outbound)
+        observed = self.client.get(f"/api/sessions/{self.session}/population-memory").get_json()
+        self.assertEqual("observations_only", observed["authority"])
+        self.assertEqual(job_id, observed["observations"][0]["source_run_id"])
+        self.assertTrue(observed["observations"][0]["route_id"])
+        self.assertIn("status", observed["observations"][0])
+        self.assertNotIn("verified_gain", observed["observations"][0])
+        self.assertNotIn("statement", str(observed))
+
+        other_session = self.client.post("/api/new_chat", headers=self.headers()).get_json()
+        other_id = other_session["new_session_id"]
+        scoped = self.client.get(f"/api/sessions/{other_id}/population-memory")
+        self.assertEqual(200, scoped.status_code)
+        self.assertEqual([], scoped.get_json()["observations"])
+        self.assertEqual(
+            404, self.client.get("/api/sessions/unknown/population-memory").status_code
+        )
+        self.assertEqual(
+            400,
+            self.client.get(f"/api/sessions/{self.session}/population-memory?limit=0").status_code,
+        )
+        self.assertEqual(outbound_count, len(self.outbound))

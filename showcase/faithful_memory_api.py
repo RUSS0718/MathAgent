@@ -7,9 +7,10 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from flask import g, jsonify
+from flask import g, jsonify, request
 
 from .run_budget import _summary
+from .workspace import WorkspaceError
 
 
 def project_run_memory(run_id, revision, state, budget=None):
@@ -57,7 +58,7 @@ def register_run_memory(app, database_path):
     def run_memory(job_id):
         session = g.auth_session
         if session is None:
-            return jsonify({"success": False, "code": "auth_required"}), 401
+            raise WorkspaceError("auth_required", status=401)
         uri = Path(database_path).resolve().as_uri() + "?mode=ro"
         with closing(sqlite3.connect(uri, uri=True, timeout=1)) as connection:
             connection.row_factory = sqlite3.Row
@@ -67,13 +68,13 @@ def register_run_memory(app, database_path):
                 (job_id, session.user_id),
             ).fetchone()
             if owner is None:
-                return jsonify({"success": False, "code": "job_not_found"}), 404
+                raise WorkspaceError("job_not_found", status=404)
             row = connection.execute(
                 "SELECT state_json,state_revision FROM solver_states WHERE run_id=?",
                 (job_id,),
             ).fetchone()
             if row is None:
-                return jsonify({"success": False, "code": "run_memory_unavailable"}), 404
+                raise WorkspaceError("run_memory_unavailable", status=404)
             state = json.loads(row["state_json"])
             ledger = connection.execute(
                 "SELECT ledger_json FROM run_budgets WHERE run_id=?", (job_id,)
@@ -81,3 +82,72 @@ def register_run_memory(app, database_path):
             budget = _summary(json.loads(ledger[0])) if ledger is not None else None
             memory = project_run_memory(job_id, row["state_revision"], state, budget)
         return jsonify({"success": True, "run_memory": memory})
+
+    @app.get("/api/sessions/<session_id>/population-memory")
+    def population_memory(session_id):
+        """Read historical route observations within one owned chat session."""
+        session = g.auth_session
+        if session is None:
+            raise WorkspaceError("auth_required", status=401)
+        try:
+            limit = int(request.args.get("limit", "25"))
+            offset = int(request.args.get("offset", "0"))
+        except ValueError as exc:
+            raise WorkspaceError("memory_page_invalid") from exc
+        if not 1 <= limit <= 100 or offset < 0:
+            raise WorkspaceError("memory_page_invalid")
+        uri = Path(database_path).resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=1)) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute("BEGIN")
+            owned = connection.execute(
+                "SELECT 1 FROM chat_sessions WHERE session_id=? AND user_id=?",
+                (session_id, session.user_id),
+            ).fetchone()
+            if owned is None:
+                raise WorkspaceError("session_not_found", status=404)
+            total_jobs = connection.execute(
+                "SELECT COUNT(*) FROM workspace_jobs j "
+                "JOIN solver_states s ON s.run_id=j.job_id "
+                "WHERE j.session_id=? AND j.user_id=?",
+                (session_id, session.user_id),
+            ).fetchone()[0]
+            rows = connection.execute(
+                "SELECT j.job_id,s.state_json,s.state_revision FROM workspace_jobs j "
+                "JOIN solver_states s ON s.run_id=j.job_id "
+                "WHERE j.session_id=? AND j.user_id=? "
+                "ORDER BY j.created_at DESC,j.job_id DESC LIMIT ? OFFSET ?",
+                (session_id, session.user_id, limit, offset),
+            ).fetchall()
+            observations = []
+            for row in rows:
+                state = json.loads(row["state_json"])
+                for route in state.get("route_registry", []):
+                    if not isinstance(route, dict):
+                        continue
+                    observations.append(
+                        {
+                            "source_run_id": row["job_id"],
+                            "source_state_revision": row["state_revision"],
+                            "route_id": route.get("route_id"),
+                            "parent_route_id": route.get("parent_route_id"),
+                            "status": route.get("status"),
+                            "stop_reason": route.get("stop_reason"),
+                            "graph_version": route.get("graph_version"),
+                            "plan_version": route.get("plan_version"),
+                            "policy_version": route.get("policy_version"),
+                            "unknown_observation_count": len(
+                                route.get("unknown_observations") or []
+                            ),
+                        }
+                    )
+        return jsonify(
+            {
+                "success": True,
+                "authority": "observations_only",
+                "observations": observations,
+                "total_jobs": total_jobs,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
