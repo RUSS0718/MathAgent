@@ -36,7 +36,7 @@ def project_run_memory(run_id, revision, state, budget=None):
         "phase": state.get("phase"),
         "status": state.get("status"),
         "plan_version": state.get("plan_version"),
-        "graph_version": (state.get("proof_graph") or {}).get("graph_version"),
+        "graph_version": (state.get("proof_graph") or {}).get("current_version"),
         "budget": budget,
         "valid_evidence": evidence,
         "invalidated_count": sum(

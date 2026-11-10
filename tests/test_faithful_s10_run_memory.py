@@ -12,6 +12,7 @@ from tests.test_faithful_s03_job import FEATURES, REPLIES, SPEC
 class FaithfulS10RunMemoryTest(StarJobFixture, unittest.TestCase):
     def test_conjecture_and_invalidated_result_are_not_effective_evidence(self):
         state = {
+            "proof_graph": {"current_version": 3, "snapshots": []},
             "verified_results_ledger": [
                 {
                     "result_id": "a",
@@ -34,11 +35,12 @@ class FaithfulS10RunMemoryTest(StarJobFixture, unittest.TestCase):
                     "evidence_level": "tool_verified",
                     "category": "Computation",
                 },
-            ]
+            ],
         }
         memory = project_run_memory("run-1", 4, state)
         self.assertEqual(["a"], [item["result_id"] for item in memory["valid_evidence"]])
         self.assertEqual("llm_reviewed", memory["valid_evidence"][0]["evidence_level"])
+        self.assertEqual(3, memory["graph_version"])
         self.assertEqual(1, memory["invalidated_count"])
 
     def test_public_memory_uses_persisted_run_without_promoting_evidence(self):
