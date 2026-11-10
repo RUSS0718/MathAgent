@@ -119,6 +119,34 @@ class FaithfulS10RunMemoryTest(StarJobFixture, unittest.TestCase):
         response = self.client.get("/api/agent/jobs/any/memory")
         self.assertEqual(404, response.status_code)
 
+    def test_run_memory_survives_new_app_process(self):
+        from showcase.flask_app import create_app
+
+        self.open_star([SOLVED, POLISH, ACCEPT], SHOWCASE_FAITHFUL_MEMORY_ENABLED=True)
+        created = self.client.post(
+            "/api/agent/jobs",
+            json={"message": "Compute 1+1", "session_id": self.session, "solver_mode": "star_limited"},
+            headers=self.headers(),
+        )
+        self.assertEqual(202, created.status_code, created.get_json())
+        job_id = created.get_json()["job_id"]
+        self.terminal(job_id)
+        before = self.client.get(f"/api/agent/jobs/{job_id}/memory").get_json()["run_memory"]
+
+        restarted = create_app({
+            "TESTING": True,
+            "SHOWCASE_DATA_DIR": self.data_dir,
+            "SHOWCASE_FAITHFUL_MEMORY_ENABLED": True,
+            "SHOWCASE_WORKER_ENABLED": False,
+        })
+        for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
+            self.addCleanup(restarted.extensions[name].close)
+        client = restarted.test_client()
+        client.set_cookie("auth_session", self.client.get_cookie("auth_session").value)
+        response = client.get(f"/api/agent/jobs/{job_id}/memory")
+        self.assertEqual(200, response.status_code, response.get_json())
+        self.assertEqual(before, response.get_json()["run_memory"])
+
     def test_population_observation_is_scoped_to_chat_session(self):
         replies = deepcopy(REPLIES)
         replies[1]["steps"][0]["method_id"] = "computation"
