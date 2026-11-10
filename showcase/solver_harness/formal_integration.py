@@ -98,6 +98,9 @@ def run_formal_verification(
     target: Mapping[str, Any],
     existing: Mapping[str, Any] | None = None,
     review: Mapping[str, Any] | None = None,
+    goal_cache_connection: Any = None,
+    registry: Any = None,
+    backend_registry: Any = None,
 ) -> dict[str, Any]:
     """Run one attempt. An existing non-disabled record is returned unchanged."""
     record = _record_for_public(existing) if existing is not None else _initial(state.policy)
@@ -107,7 +110,9 @@ def run_formal_verification(
     if isinstance(current, Mapping) and current.get("status") != "disabled":
         return record
     attempt = _attempt(state, backend, target, parent_attempt_id=None,
-                       review=review, sequence=1)
+                       review=review, sequence=1,
+                       goal_cache_connection=goal_cache_connection,
+                       registry=registry, backend_registry=backend_registry)
     record["current_attempt_id"] = attempt["attempt_id"]
     record["attempts"] = [attempt]
     record["current"] = attempt
@@ -192,6 +197,7 @@ def execute_reserved_attempt(
     budget: Any = None,
     registry: Any = None,
     backend_registry: Any = None,
+    goal_cache_connection: Any = None,
 ) -> dict[str, Any]:
     """Execute a persisted dispatch through the registered bounded tool path."""
     from ..run_budget import BudgetExhausted
@@ -222,6 +228,7 @@ def execute_reserved_attempt(
             backend_registry=backend_registry,
             backend_name=child.get("backend"),
             selection_reason=child.get("selection_reason") or "explicit_formal_policy",
+            goal_cache_connection=goal_cache_connection,
         )
     except BudgetExhausted as exc:
         return _complete_reserved(
@@ -372,7 +379,7 @@ def mark_inflight_unknown(record: Mapping[str, Any]) -> dict[str, Any]:
 def _attempt(state, backend, target, *, parent_attempt_id, review, sequence,
              reuse_attempt_id=None, timeout_seconds=None, registry=None,
              backend_registry=None, backend_name=None,
-             selection_reason="explicit_formal_policy"):
+             selection_reason="explicit_formal_policy", goal_cache_connection=None):
     from ..formal import normalize_formal_request, serialize_attempt_result
     from ..run_budget import BudgetExhausted
 
@@ -433,8 +440,47 @@ def _attempt(state, backend, target, *, parent_attempt_id, review, sequence,
         request = normalize_formal_request(raw_request)
     except (TypeError, ValueError) as exc:
         raise FormalIntegrationError(f"formal_request_invalid:{exc}") from exc
+    goal_cache = None
+    cached_result = None
+    cache_current_result = None
+    cache_dispatched = False
+    if goal_cache_connection is not None:
+        try:
+            from .faithful_goal_cache_integration import prepare_goal_cache
+
+            goal_cache = prepare_goal_cache(goal_cache_connection, request, backend)
+            if goal_cache is not None:
+                def invoke_current(current_request):
+                    nonlocal cache_current_result, cache_dispatched
+                    cache_dispatched = True
+                    if registry is None:
+                        cache_current_result = backend.invoke(current_request)
+                        return cache_current_result
+                    invocation = registry.invoke(
+                        backend.name, current_request, tool_call_id=attempt_id,
+                    )
+                    if invocation.status != "success":
+                        raise RuntimeError("formal_cache_recheck_unavailable")
+                    cache_current_result = invocation.value
+                    return cache_current_result
+
+                cached_result = goal_cache.recheck(request, invoke_current=invoke_current)
+        except Exception:  # noqa: BLE001 - the optional cache cannot change formal execution
+            goal_cache = None
+            cached_result = None
     try:
-        if registry is not None:
+        if cached_result is not None:
+            response = cached_result
+        elif cache_dispatched:
+            response = cache_current_result or {
+                "status": "unknown", "grade": None,
+                "attempt_id": attempt_id, "parent_attempt_id": parent_attempt_id,
+                "reason": "formal_cache_recheck_unavailable",
+                "cost": {"elapsed_seconds": 0.0, "output_bytes": 0,
+                         "usage": {}, "unknown": True},
+                "specifications": {}, "proof_artifact": None,
+            }
+        elif registry is not None:
             invocation = registry.invoke(
                 backend.name, request, tool_call_id=attempt_id,
             )
@@ -537,6 +583,8 @@ def _attempt(state, backend, target, *, parent_attempt_id, review, sequence,
                              "parent_attempt_id": parent_attempt_id,
                              "sequence": sequence}
     normalized.update({key: value for key, value in route_fields.items() if value is not None})
+    if goal_cache is not None and cached_result is None and not cache_dispatched:
+        goal_cache.admit(request, response)
     return _json_copy(normalized)
 
 def _add_cost(left, right):
@@ -703,6 +751,7 @@ def run_explicit_formal_retry(
         completed = execute_reserved_attempt(
             state, backend=backend, record=record, budget=budget,
             registry=service.star_pipeline.registry, backend_registry=backend_registry,
+            goal_cache_connection=store._connection,
         )
     with store._lock:
         current = state_store.get_run(run_id)
