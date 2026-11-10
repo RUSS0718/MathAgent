@@ -6,7 +6,7 @@
 
 ## Faithful 实施入口（截至2026-11-10）
 
-S01–S09（含 S06、串行 F2/S08、F3/S09）已按 `engineering-preview` 退出。S09 源码门禁 SHA 为 `4df095355d2eb5c39f94ba24cb7e367486973428`，最终纯文档交接 SHA 会单独记录；门禁 6/6 通过，2 项显式 Docker readiness integration 测试 skip 未计通过。真实 L2/L3 和公共 Prover Route Job/Report/Evidence 验收完成，#149 已关闭，F4/F5 的 F2/F3 工程前置已满足。S10/F4/F5 尚未实施；#146 与完整并发 #156 保持开放。真实 provider、容量/SLA、自然题和独立数学效果仍为未验证。阶段合同与依赖见 [#144 决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)、[S09 合同](engineering/faithful-s09-contract.md)和[工程门禁](engineering/development-gates.md)。
+S01–S09（含 S06、串行 F2/S08、F3/S09）已按 `engineering-preview` 退出。S09 源码门禁 SHA 为 `4df095355d2eb5c39f94ba24cb7e367486973428`，随后纯文档交接 SHA 为 `f7d9c530978fbcbf453e06ba0a24500cb9593721`；门禁 6/6 通过，2 项显式 Docker readiness integration 测试 skip 未计通过。真实 L2/L3 和公共 Prover Route Job/Report/Evidence 验收完成，#149 已关闭，F4/F5 的 F2/F3 工程前置已满足。S10 已开始最小只读记忆视图，但 F4/F5 均未达到工程退出；状态及未验收项见 [S10 合同映射](engineering/faithful-s10-contract.md)。#146 与完整并发 #156 保持开放。真实 provider、容量/SLA、自然题和独立数学效果仍为未验证。阶段依赖见 [#144 决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)、[S09 合同](engineering/faithful-s09-contract.md)和[工程门禁](engineering/development-gates.md)。
 
 - [S06 与 S08/F2 工程退出验收](evals/faithful-s06-s08-exit-20261108.md)：门禁源码 `2f11c65`，6/6通过，1543项含42skip；分别记录基础模板输出、串行路线/APRS、双轴修复及首轮门禁失败。
 - [S06基础输出合同](engineering/faithful-s06-contract.md)、[S08串行路线合同](engineering/faithful-s08-contract.md)、[重规划诊断与S09环境](evals/faithful-replan-s09-environment-20261108.md)：S09编译exit127、无L2/L3；#156可按实际前置推进，S10不可提前实施。
