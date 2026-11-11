@@ -27,6 +27,7 @@ else:
 
 from .campaign_api import register_campaigns
 from .evidence import EvidencePackExporter, replay_evidence
+from .faithful_system_api import register_faithful_system_api
 from .final_evidence import checked_verification
 from .job_events import register_job_event_route
 from .loopback import AuthSession, LoopbackStore
@@ -77,6 +78,7 @@ def create_app(
         SHOWCASE_EXPERIMENT_PAIR_ENABLED=False,
         SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION=None,
         SHOWCASE_PRESENTATION_ENABLED=False,
+        SHOWCASE_F7_SYSTEM_VIEW_ENABLED=False,
         SHOWCASE_POPULATION_MEMORY_ENABLED=False,
         SHOWCASE_FAITHFUL_INTERVENTION_ENABLED=False,
     )
@@ -261,6 +263,10 @@ def create_app(
                     "enabled": bool(app.config.get("SHOWCASE_PRESENTATION_ENABLED", False)),
                     "modes": ["solve", "teach", "report"] if app.config.get("SHOWCASE_PRESENTATION_ENABLED", False) else [],
                     "status": "available" if app.config.get("SHOWCASE_PRESENTATION_ENABLED", False) else "unavailable",
+                },
+                "faithful_system_view": {
+                    "enabled": bool(app.config.get("SHOWCASE_F7_SYSTEM_VIEW_ENABLED", False)),
+                    "status": "available" if app.config.get("SHOWCASE_F7_SYSTEM_VIEW_ENABLED", False) else "unavailable",
                 },
             }
         )
@@ -882,6 +888,8 @@ def create_app(
             job_loader=workspace_service.get_job,
             report_loader=job_report_payload,
         )
+    if app.config.get("SHOWCASE_F7_SYSTEM_VIEW_ENABLED") is True:
+        register_faithful_system_api(app, workspace_service=workspace_service)
     return app
 
 
@@ -961,6 +969,7 @@ def main() -> None:
     parser.add_argument("--faithful-memory-review", action="store_true", help="Expose Faithful memory controls and review")
     parser.add_argument("--faithful-population-memory", action="store_true", help="Allow explicitly enabled session observations as advisory context in STAR Runs")
     parser.add_argument("--faithful-intervention", action="store_true", help="Expose authenticated Faithful Intervention controls")
+    parser.add_argument("--faithful-system-view", action="store_true", help="Enable the opt-in read-only F7 system view API")
     parser.add_argument(
         "--experiment-idempotency-lookup",
         action="store_true",
@@ -974,6 +983,7 @@ def main() -> None:
                               ),
                               "SHOWCASE_POPULATION_MEMORY_ENABLED": args.faithful_population_memory,
                               "SHOWCASE_FAITHFUL_INTERVENTION_ENABLED": args.faithful_intervention,
+                              "SHOWCASE_F7_SYSTEM_VIEW_ENABLED": args.faithful_system_view,
                               "SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED": args.experiment_idempotency_lookup}
     if args.data_dir:
         config["SHOWCASE_DATA_DIR"] = args.data_dir
