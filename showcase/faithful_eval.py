@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+from collections import Counter
 from pathlib import Path
 
 from .faithful_eval_store import load_json, write_sealed
@@ -52,6 +53,7 @@ def register_batch(manifest_path, expected_hash, output_root):
     from .faithful_eval_contract import GROUPS, digest, validate_manifest
 
     manifest = validate_manifest(load_json(manifest_path))
+    validate_pilot(manifest)
     if digest(manifest) != expected_hash:
         raise ValueError("faithful_manifest_hash_mismatch")
     if manifest["protocol_sha256"] != hashlib.sha256(PROTOCOL.read_bytes()).hexdigest():
@@ -177,6 +179,19 @@ def record_name(record):
     """Use a hash for opaque sample IDs instead of accepting sample paths."""
     sample_hash = hashlib.sha256(record["sample_id"].encode()).hexdigest()
     return f"{record['group']}-{sample_hash}-{record['repetition']}.json"
+
+
+def validate_pilot(manifest):
+    """Keep the actual registered pilot's denominator, seed and strata fixed."""
+    samples = manifest["dataset"]["samples"]
+    strata = Counter(sample["stratum"] for sample in samples)
+    if (len(samples) != 14 or manifest["repetitions"] != 1
+            or manifest["seed"] != "faithful-f8-pilot-20261111-v1"
+            or manifest["dataset"]["sha256"] != "345b891e3c45f6a95a5b69107d294f7a2f61bd29843c5ba2a82b9c8cd4a0cd7f"
+            or strata != {"AIME2025/answer": 4, "HMMT2026/answer": 3, "Putnam2025/proof": 3,
+                          "IMO2025/proof": 2, "Apex2025/answer": 2}
+            or any(s["development_history"] != "unknown" or any(s["targets"].values()) for s in samples)):
+        raise ValueError("faithful_pilot_registration_drift")
 
 
 def _members(directory):

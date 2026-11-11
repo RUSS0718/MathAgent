@@ -64,6 +64,18 @@ class FaithfulEvaluationCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             manifest = manifest_fixture()
+            import copy
+            samples = []
+            for competition, count, scope in (("AIME2025", 4, "answer"), ("HMMT2026", 3, "answer"),
+                                               ("Putnam2025", 3, "proof"), ("IMO2025", 2, "proof"),
+                                               ("Apex2025", 2, "answer")):
+                for index in range(count):
+                    sample = copy.deepcopy(manifest["dataset"]["samples"][0])
+                    sample.update(id=f"{competition}/{index}", stratum=f"{competition}/{scope}")
+                    samples.append(sample)
+            manifest["dataset"]["samples"] = samples
+            manifest["dataset"]["sha256"] = "345b891e3c45f6a95a5b69107d294f7a2f61bd29843c5ba2a82b9c8cd4a0cd7f"
+            manifest["seed"] = "faithful-f8-pilot-20261111-v1"
             manifest["protocol_sha256"] = protocol_digest()
             baseline = Path(__file__).resolve().parents[1] / "BASELINE.json"
             manifest["baseline_sha256"] = hashlib.sha256(baseline.read_bytes()).hexdigest()
@@ -86,8 +98,8 @@ class FaithfulEvaluationCliTest(unittest.TestCase):
                 after = {p.relative_to(batch).as_posix(): p.read_bytes() for p in batch.rglob("*") if p.is_file()}
                 self.assertEqual(before, after)
             report = json.loads(output.getvalue().splitlines()[1])
-            self.assertEqual(7, sum(g["N_registered"] for g in report["groups"].values()))
-            self.assertEqual(1, report["groups"]["faithful-E"]["counts"]["unsupported"])
+            self.assertEqual(98, sum(g["N_registered"] for g in report["groups"].values()))
+            self.assertEqual(14, report["groups"]["faithful-E"]["counts"]["unsupported"])
 
     def test_replay_rejects_extra_l1_files(self):
         from unittest.mock import patch
@@ -104,6 +116,13 @@ class FaithfulEvaluationCliTest(unittest.TestCase):
             with patch("showcase.faithful_eval.read_batch", return_value=(manifest_fixture(), [], {}, source)):
                 with self.assertRaises(ValueError):
                     replay(Path(directory))
+
+    def test_registration_rejects_reduced_pilot_denominator(self):
+        from showcase.faithful_eval import validate_pilot
+        from tests.test_faithful_f8_contract import manifest_fixture
+
+        with self.assertRaises(ValueError):
+            validate_pilot(manifest_fixture())
 
 
 def protocol_digest():
