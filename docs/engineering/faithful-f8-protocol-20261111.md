@@ -2,9 +2,9 @@
 
 日期：2026-11-11。此协议先于 F8 实现评审与冻结。GitHub 实施票：[F8 #154](https://github.com/RUSS0718/MathAgent/issues/154)。变更指标、分母或状态语义时必须新建协议版本，不得覆盖既有批次。
 
-状态：frozen，版本 faithful-f8-v1.1-engineering，冻结日期 2026-11-11。规范轴与规格轴最终定向复查均解除阻塞，允许按下方 v1.1 工程合同实现。本文前部 review_draft 内容保留为审查历史；冲突处以 v1.1 为准。冻结不代表实现或实验验收通过。
+状态：frozen，版本 faithful-f8-v1.1.1-engineering，冻结日期 2026-11-11。规范轴与规格轴最终定向复查均解除阻塞，允许按下方 v1.1.1 工程合同实现。本文前部 review_draft 内容保留为审查历史；冲突处以 v1.1.1 为准。冻结不代表实现或实验验收通过。
 
-2026-11-11 用户明确授权替换审查安排：R1/R2 使用两个隔离子智能体，R3 在收到两份初审后裁决；不再以真人到位作为本轮工程开工门槛。此决定替代下文旧草案中的真人要求。自动数学审查单列为 model_assisted，不得冒充 independent_math 或真人 L3；provider-live、自然题求解、官方重评分依安排继续 not_run。本次冻结目标为 faithful-f8-v1.1-engineering；旧 review_draft 不覆盖、不改写既有实验结果。
+2026-11-11 用户明确授权替换审查安排：R1/R2 使用两个隔离子智能体，R3 在收到两份初审后裁决；不再以真人到位作为本轮工程开工门槛。此决定替代下文旧草案中的真人要求。自动数学审查单列为 model_assisted，不得冒充 independent_math 或真人 L3；provider-live、自然题求解、官方重评分依安排继续 not_run。本次冻结目标为 faithful-f8-v1.1.1-engineering；旧 review_draft 不覆盖、不改写既有实验结果。
 
 ## 分组
 
@@ -201,7 +201,7 @@ integrity.json 列全部成员的相对路径、字节数、SHA256（自身除�
 
 冻结前剩余：L3 安排与计划、精确逐字段 schema／CLI 合同、协议双轴审查和问题修复。表格不表示功能已实现。F7 无故不重跑；F6 late-usage 若再现保留并诊断。长测试及 30 分钟本地静默检查遵循工程门禁和用户偏好，不用子代理持续轮询。
 
-## v1.1 本轮冻结工程合同（替代上方待定安排）
+## v1.1.1 本轮冻结工程合同（替代上方待定安排）
 
 ### 登记与审查计划
 
@@ -232,7 +232,7 @@ reviews/ 为人工触发的子代理记录输入，replay 不发起代理。每�
 
 每个封存JSON旁置同名.sha256文本回执（原始文件字节hash）。replay/export核对manifest/registration、record、review、L1原始机器报告及诊断和侧录的全部回执，拒绝未登记文件；hash不是防恶意重签的密码学身份认证，只能证明包内一致性。协议文件hash不循环引用自身，在登记回执中保存；源码清单hash复用experiment_sources.source_identity，登记时写入本地source.json及其回执，replay当前源码变化单列not_comparable，不能回写旧身份。
 
-manifest 顶层键：schema_version、protocol_version、protocol_sha256、batch_id、source_revision、dataset、model、prompt_sha256、seed、repetitions、environment、resources、groups。schema_version=faithful-f8-manifest-v1，protocol_version=faithful-f8-v1.1-engineering。dataset={sha256,samples}，每个 sample={id,input_sha256,stratum,development_history,targets}，development_history=unknown/development/held_out；本试点全部 unknown。targets 恰含 A–G，值为 null 或 {target_sha256,scope,environment_sha256}，本试点全 null；model={provider,id,snapshot}，本轮无 provider 使用可登记 none/scripted/unknown，不将当前审查模型填成实际求解 provider。environment={identity_sha256,tools_status}，resources={identity_sha256,limits_status,stop_rules}，完整配置、环境和预算输入仅在本地私密冻结文件保存并以 hash 引用；public manifest 不携带原文。上述 hash 覆盖的实际文件在运行证据侧留存，缺文件不能升级真实实验为 executed。
+manifest 顶层键：schema_version、protocol_version、protocol_sha256、batch_id、source_revision、baseline_sha256、dataset、model、prompt_sha256、seed、repetitions、environment、resources、groups。schema_version=faithful-f8-manifest-v1，protocol_version=faithful-f8-v1.1.1-engineering。dataset={sha256,samples}，每个 sample={id,input_sha256,source_sha256,source_ref,stratum,development_history,targets}，development_history=unknown/development/held_out；本试点全部 unknown。targets 恰含 A–G，值为 null 或 {target_sha256,scope,environment_sha256}，本试点全 null；model={provider,id,snapshot}，本轮无 provider 使用可登记 none/scripted/unknown，不将当前审查模型填成实际求解 provider。environment={identity_sha256,tools_status}，resources={identity_sha256,limits_status,stop_rules}，完整配置、环境和预算输入仅在本地私密冻结文件保存并以 hash 引用；public manifest 不携带原文。上述 hash 覆盖的实际文件在运行证据侧留存，缺文件不能升级真实实验为 executed。
 
 groups 恰含 faithful-A 至 faithful-G，每项={parent,policy,capability_status,reason,config_sha256}。parent 为 null 或已登记组，禁止循环；policy 为实际 policy 身份，capability_status=available/unsupported，reason 为受控标识。可用不代表已执行。D 必须 concurrent-aprs-v1，C 必须 serial-aprs-v1；F 的本轮独立串行专项 policy 为 serial-intervention-v1，parent=faithful-C；对 E 的增量比较固定 not_comparable。E/G 的 parent 必须如实记录。注册表按清单笛卡尔积生成，禁止调用者传更小子集。组配置 hash 不同属于预登记干预差异，不能仅因此拒绝所有比较；实际 applied hash 必须与该组期望值一致。
 
@@ -247,3 +247,5 @@ metrics 固定键 accuracy、root_coverage、valid_evidence、route_efficiency�
 F8-01–08 为工程交付；L1 25 项必须实际通过，七组必要失败路径有生产者测试证据，98 槽登记、只读 replay／完整性导出、28 槽三代理辅助审查、双轴复查及最终唯一门禁均需实际执行。真人独立数学、真实 provider、自然题求解、官方重评分、广泛真实工具环境和数学效果明确 not_run，不因本轮工程通过关闭这些历史任务。若本轮工程全满足，可关闭 #154 的工程交付，保留 #130/#146/#156 和旧真实实验票状态；最终报告必须写明此范围由用户于 2026-11-11 明确修订，不能称原真人 L3 合同已满足。
 
 冻结审查记录：Standards 解除路径隔离、精确schema/审查导入、登记状态继承三项；Spec 解除28槽审查导入与封存闭环。早期审查提出的循环散列、冻结时序、L2分母与分层汇总均已修复并复查。审查者继承当前所选模型，具体型号无法核实；仅审查协议，未运行测试。准备材料与源码核验见本地 artifacts/faithful-f8-inputs-20261111/ 和 artifacts/faithful-f8-protocol-review-20261111/，后续工程验收独立记录。
+
+v1.1.1 实现前补充：baseline_sha256 绑定 BASELINE.json 原始字节；每题 source_sha256/source_ref 保留来源字节身份与不带查询串的固定来源引用（只接收可信本地映射的公开URL，不含题面）。这是schema补齐，无实验登记或实现启动；与v1.1共同接受原审查者定向复查。
