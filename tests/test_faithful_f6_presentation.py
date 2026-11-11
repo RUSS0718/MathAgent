@@ -13,10 +13,12 @@ from showcase.presentation import (
     revalidate,
 )
 from showcase.solver_harness import SolverHarness
+from showcase.solver_harness.best_effort import select_best_effort
 from showcase.star_product_candidates import candidate_projection
 from showcase.star_product_pipeline import projection
 from tests import test_faithful_s07_graph as s07
 from tests import test_s06_presentation as s06
+from tests import test_solver_harness_best_effort as best_effort_fixtures
 
 
 def evidence_job():
@@ -99,19 +101,24 @@ class FaithfulF6PresentationTest(unittest.TestCase):
         self.assertEqual(artifact["source_fingerprint"], artifact["delivery"]["source_fingerprint"])
         self.assertEqual(artifact["budget"], artifact["delivery"]["budget"])
         self.assertEqual(original, job)
+        job["result"]["solver"]["state_revision"] += 1
+        stale = revalidate(artifact, presentation_snapshot(job))
+        self.assertEqual("incomplete", stale["completion"])
+        self.assertEqual([], stale["delivery"]["verified_claims"])
 
     def test_selected_candidate_uses_actual_public_projection_field_names(self):
         job = evidence_job()
         roots = job["result"]["solver"]["progress"]["root_obligations"]
         roots.update({"covered": 2, "items": [{"ordinal": 1, "status": "satisfied"},
                                               {"ordinal": 2, "status": "satisfied"}]})
-        record = {"candidate_id": "candidate-1", "version": 1, "answer_text": "1+1=2",
-                  "answer_completeness": "complete", "selection_eligible": True,
-                  "review_state": "whole_reviewed"}
-        decision = {"status": "selected", "selected_source_record": record,
-                    "excluded_candidate_ids": [], "exclusion_reasons": {}}
+        record = best_effort_fixtures.candidate("candidate-1", "1+1=2")
+        state = {"candidate_registry": [record], "steps": {}, "accepted_results": [],
+                 "failure_records": []}
+        decision = select_best_effort(state)
+        self.assertEqual("candidate_selected", decision["status"])
         job["result"]["solver"].update(candidate_projection({"state": {
-            "candidate_registry": [record], "best_effort_decision": decision}}))
+            **state, "best_effort_decision": decision}}))
+        self.assertEqual("candidate_selected", job["result"]["solver"]["best_effort"]["status"])
         artifact = build_presentation(presentation_snapshot(job), "report")
         self.assertEqual("complete", artifact["completion"])
         self.assertTrue(artifact["delivery"]["selection"]["eligible"])

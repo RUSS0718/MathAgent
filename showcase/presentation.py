@@ -222,7 +222,7 @@ def build_presentation(snapshot, mode, *, paragraphs=None):
     complete = (snapshot["job_status"] == "succeeded" and scope["total"] > 0
                 and scope["covered"] == scope["total"] and not scope["unresolved"])
     selection = snapshot.get("selection")
-    no_candidate = bool(selection and (selection.get("status") != "selected"
+    no_candidate = bool(selection and (selection.get("status") != "candidate_selected"
                         or not selection.get("eligible")
                         or selection.get("selected_answer_artifact") != snapshot["answer_artifact"]))
     if snapshot.get("policy_version") == POLICY_VERSION:
@@ -293,7 +293,8 @@ def revalidate(artifact, snapshot):
             current["delivery"]["verified_claims"] = []
             current["delivery"]["grade"] = "not_verified"
             current["formal_verification"] = "not_verified"
-            current["completion"] = "partial" if current["answer"] else "incomplete"
+            if current["completion"] == "complete":
+                current["completion"] = "partial" if current["answer"] else "incomplete"
             for source in current["sources"]:
                 source["status"] = "needs_review"
     return current
