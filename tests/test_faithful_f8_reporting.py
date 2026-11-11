@@ -203,16 +203,22 @@ class FaithfulReportingTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.api.validate_review(review, self.manifest, [], {})
 
-    def test_review_snapshot_must_bind_imported_slot(self):
-        review = self.review()
-        entry = review["entries"][0]
-        record = record_fixture(self.manifest, entry["group"])
-        record["sample_id"] = entry["sample_id"]
-        entry.update(snapshot_sha256=H, verdict="pass", reason="review_pass")
-        self.assertIs(self.api.validate_review(review, self.manifest, [record], {}), review)
-        entry["snapshot_sha256"] = "0" * 64
-        with self.assertRaises(ValueError):
-            self.api.validate_review(review, self.manifest, [record], {})
+    def test_pilot_reviews_reject_math_verdicts_even_with_matching_imported_hash(self):
+        prior = {role: self.review(role) for role in ("R1", "R2")}
+        for role in ("R1", "R2", "R3"):
+            for verdict, reason, snapshot in (("pass", "review_pass", H),
+                                               ("fail", "review_fail", H),
+                                               ("unresolved", "missing_artifact", H),
+                                               ("unresolved", "review_unresolved", None)):
+                review = self.review(role)
+                if role == "R3":
+                    review["input_review_sha256"] = [digest(prior[r]) for r in ("R1", "R2")]
+                entry = review["entries"][0]
+                record = record_fixture(self.manifest, entry["group"])
+                record["sample_id"] = entry["sample_id"]
+                entry.update(verdict=verdict, reason=reason, snapshot_sha256=snapshot)
+                with self.subTest(role=role, verdict=verdict, reason=reason), self.assertRaises(ValueError):
+                    self.api.validate_review(review, self.manifest, [record], prior)
 
     def test_initial_reviews_require_empty_input_hashes(self):
         for role in ("R1", "R2"):
@@ -356,3 +362,33 @@ class FaithfulReportingTest(unittest.TestCase):
         row = self.api.build_report(self.manifest, [record])["l2"][0]
         self.assertEqual((row["N_fail"], row["N_decidable"]), (0, 0))
         self.assertIsNone(row["conditional_rate"]["value"])
+
+    def test_unknown_and_censored_counts_independent_of_observation(self):
+        records = [record_fixture(self.manifest, index=i, status=s)
+                   for i, s in enumerate(("completed", "unknown", "incomplete", "failed"))]
+        for record, latency in zip(records, (20, 900, 800, 700)):
+            record["metrics"].update(latency_ms=latency, cost=1)
+        metrics = self.api.build_report(self.manifest, records)["groups"]["faithful-A"]["metrics"]
+        for metric in metrics.values():
+            self.assertEqual((metric["unknown_count"], metric["censored_count"]), (1, 1))
+        latency = metrics["latency_ms"]
+        self.assertEqual((latency["eligible_count"], latency["p50"], latency["p95"]), (1, 20, 20))
+        self.assertEqual(latency["censored_values"], {"unknown": [900], "incomplete": [800]})
+        self.assertEqual(latency["missing_count"], 10)
+
+    def test_no_completed_latency_does_not_report_completion_percentiles(self):
+        record = record_fixture(self.manifest, status="unknown")
+        record["metrics"]["latency_ms"] = 42
+        latency = self.api.build_report(self.manifest, [record])["groups"]["faithful-A"]["metrics"]["latency_ms"]
+        self.assertEqual((latency["eligible_count"], latency["p50"], latency["p95"]), (0, None, None))
+        self.assertEqual(latency["status"], "not_available")
+
+    def test_review_requires_all_four_strata_and_exact_28_slots(self):
+        for competition in ("AIME2025", "HMMT2026", "Putnam2025", "IMO2025"):
+            self.manifest = manifest_fixture()
+            self.manifest["dataset"]["samples"] = [s for s in self.manifest["dataset"]["samples"]
+                                                    if not s["stratum"].startswith(competition + "/")]
+            review = self.review()
+            self.assertEqual(len(review["entries"]), 21)
+            with self.subTest(competition=competition), self.assertRaises(ValueError):
+                self.api.validate_review(review, self.manifest, [], {})

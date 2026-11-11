@@ -26,7 +26,6 @@ _REVIEW_KEYS = {"schema_version", "reviewer", "model_id", "manifest_sha256",
                 "input_review_sha256", "entries"}
 _ENTRY_KEYS = {"group", "sample_id", "repetition", "verdict", "reason", "snapshot_sha256"}
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
-_REASONS = {"missing_artifact", "review_pass", "review_fail", "review_unresolved"}
 _COMPS = ("AIME2025", "HMMT2026", "Putnam2025", "IMO2025")
 
 
@@ -61,19 +60,22 @@ def _record_map(manifest: dict[str, Any], records: list[dict[str, Any]]) -> dict
 
 
 def _metric_summary(name: str, values: list[tuple[str, Any]]) -> dict:
-    if name in {"accuracy", "explanation_rubric"}:
-        return {"value": None, "status": "not_available", "eligible_count": 0}
-    observed = [v for _, v in values if v is not None]
+    observed = [v for status, v in values if v is not None
+                and (name != "latency_ms" or status == "completed")]
     missing = Counter(status for status, value in values if value is None)
+    statuses = Counter(status for status, _ in values)
     result = {"value": None, "status": "not_available" if not observed else "observed_subset",
-              "eligible_count": len(observed), "unknown_count": missing["unknown"],
-              "censored_count": missing["incomplete"],
+              "eligible_count": len(observed), "unknown_count": statuses["unknown"],
+              "censored_count": statuses["incomplete"],
               "missing_count": sum(missing.values()),
               "missing_by_status": {s: missing[s] for s in STATUSES}}
     if name in {"root_coverage", "valid_evidence", "route_efficiency", "cache_recheck"} and observed:
         result["mean"] = sum(observed) / len(observed)
     if name == "latency_ms":
         ordered = sorted(observed)
+        result["censored_values"] = {
+            status: sorted(v for s, v in values if s == status and v is not None)
+            for status in ("unknown", "incomplete")}
         result.update(p50=ordered[math.ceil(.50 * len(ordered)) - 1] if ordered else None,
                       p95=ordered[math.ceil(.95 * len(ordered)) - 1] if ordered else None)
     return result
@@ -220,7 +222,8 @@ def review_selection(manifest: dict) -> list[dict]:
     samples = manifest["dataset"]["samples"]
     selected = []
     for competition in _COMPS:
-        candidates = [s for s in samples if s["stratum"].startswith(competition + "/")]
+        scope = "answer" if competition in {"AIME2025", "HMMT2026"} else "proof"
+        candidates = [s for s in samples if s["stratum"] == f"{competition}/{scope}"]
         if candidates:
             sample = min(candidates, key=lambda s: hashlib.sha256(
                 f"{manifest['seed']}:{s['id']}:0".encode()).digest())
@@ -240,6 +243,8 @@ def _validate_review_shape(review: Any, manifest: dict, role: str) -> list[dict]
         _fail("review manifest hash mismatch")
     expected = {tuple(x[k] for k in ("group", "sample_id", "repetition"))
                 for x in review_selection(manifest)}
+    if len(expected) != 28:
+        _fail("pilot review requires four complete strata and exactly 28 selected slots")
     if not isinstance(review["entries"], list) or len(review["entries"]) != len(expected):
         _fail("review must contain the complete selection")
     seen = set()
@@ -249,15 +254,9 @@ def _validate_review_shape(review: Any, manifest: dict, role: str) -> list[dict]
         slot = (entry["group"], entry["sample_id"], entry["repetition"])
         if slot in seen or slot not in expected or isinstance(entry["repetition"], bool) or not isinstance(entry["repetition"], int):
             _fail("duplicate or invalid review slot")
-        if (entry["verdict"] not in {"pass", "fail", "unresolved"}
-                or not isinstance(entry["reason"], str) or entry["reason"] not in _REASONS):
-            _fail("invalid review verdict or reason")
-        snapshot = entry["snapshot_sha256"]
-        if snapshot is None:
-            if entry["verdict"] != "unresolved" or entry["reason"] != "missing_artifact":
-                _fail("missing snapshot requires unresolved/missing_artifact")
-        elif not _is_hash(snapshot):
-            _fail("invalid review snapshot hash")
+        if (entry["verdict"] != "unresolved" or entry["reason"] != "missing_artifact"
+                or entry["snapshot_sha256"] is not None):
+            _fail("engineering pilot requires unresolved/missing_artifact/null; hashes do not prove artifacts")
         seen.add(slot)
     if seen != expected:
         _fail("review selection incomplete")
@@ -265,9 +264,9 @@ def _validate_review_shape(review: Any, manifest: dict, role: str) -> list[dict]
 
 
 def validate_review(review: dict, manifest: dict, records: list, prior_reviews: dict) -> dict:
-    """Validate a sealed R1/R2/R3 review and bind each artifact to its imported slot."""
+    """Validate sealed engineering-only reviews; imported hashes cannot authorize math verdicts."""
     validate_manifest(manifest)
-    entries = _validate_review_shape(review, manifest, review.get("reviewer") if isinstance(review, dict) else "")
+    _validate_review_shape(review, manifest, review.get("reviewer") if isinstance(review, dict) else "")
     role = review["reviewer"]
     if not isinstance(role, str) or role not in {"R1", "R2", "R3"}:
         _fail("invalid reviewer role")
@@ -282,26 +281,12 @@ def validate_review(review: dict, manifest: dict, records: list, prior_reviews: 
             _fail("R3 requires both initial reviews")
         for prior_role in ("R1", "R2"):
             prior = prior_reviews[prior_role]
-            prior_entries = _validate_review_shape(prior, manifest, prior_role)
+            _validate_review_shape(prior, manifest, prior_role)
             if prior["input_review_sha256"] != []:
                 _fail("initial reviews require empty input hashes")
-            for entry in prior_entries:
-                if entry["snapshot_sha256"] is not None:
-                    slot = (entry["group"], entry["sample_id"], entry["repetition"])
-                    if not any((r["group"], r["sample_id"], r["repetition"]) == slot
-                               and r["snapshot_sha256"] == entry["snapshot_sha256"]
-                               for r in records):
-                        _fail("prior review snapshot does not bind to imported record")
         if hashes != [digest(prior_reviews[r]) for r in ("R1", "R2")]:
             _fail("R3 input review hash mismatch")
     else:
         _fail("invalid reviewer role")
-    records_by_slot = _record_map(manifest, records)
-    for entry in entries:
-        snapshot = entry["snapshot_sha256"]
-        if snapshot is not None:
-            slot = (entry["group"], entry["sample_id"], entry["repetition"])
-            record = records_by_slot.get(slot)
-            if record is None or record["snapshot_sha256"] != snapshot:
-                _fail("review snapshot does not bind to imported record")
+    _record_map(manifest, records)
     return review
