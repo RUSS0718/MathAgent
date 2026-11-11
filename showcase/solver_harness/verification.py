@@ -1,5 +1,6 @@
 """Strict step review and evidence persistence for supplied plans."""
 
+import hashlib
 from collections.abc import Mapping
 from typing import Any
 
@@ -154,7 +155,10 @@ def verify_step(
 
     def reserve_and_dispatch(current, seq, continuation_call_id, continuation_request,
                              *, purpose="compute"):
-        event_suffix = f"{purpose}-{seq + 1}"
+        # Claim-target repairs may continue an already answered computation.
+        # Its call identity must own a distinct reservation event.
+        identity = hashlib.sha256(continuation_call_id.encode()).hexdigest()[:16]
+        event_suffix = f"{purpose}-{seq + 1}-{identity}"
         reserved = harness.commit_event(
             current["run_id"],
             expected_revision=current["state_revision"],
