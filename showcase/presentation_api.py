@@ -54,10 +54,14 @@ def register_presentation_api(app, *, workspace_service, job_loader: Callable, r
                 source_fingerprint=snapshot["fingerprint"],
             )
             if artifact is None:
-                artifact = build_presentation(snapshot, mode)
-                artifact = workspace_service.save_presentation(
-                    user_id=user_id, job_id=job_id, artifact=artifact,
-                )
+                try:
+                    artifact = build_presentation(snapshot, mode)
+                except (TimeoutError, ConnectionError, ValueError):
+                    artifact = failed_presentation(snapshot, mode, "presentation_renderer_failed")
+                else:
+                    artifact = workspace_service.save_presentation(
+                        user_id=user_id, job_id=job_id, artifact=artifact,
+                    )
         history = []
         for old in workspace_service.list_presentations(user_id=user_id, job_id=job_id, mode=mode):
             if old.get("source_fingerprint") != snapshot["fingerprint"]:

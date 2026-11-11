@@ -202,3 +202,45 @@ test('refreshing a terminal report rechecks a changed presentation source', asyn
   await page.getByRole('button', { name: '刷新持久报告' }).click()
   await expect(output).toContainText('历史表达需要重新审阅')
 })
+
+test('F6 paragraph references open their versioned public evidence without replacing the answer', async ({ page }, testInfo) => {
+  const seeded = await seedOutput(page, 'F6 evidence walkthrough', 'teach')
+  const formalRef = 'verification:' + 'a'.repeat(64)
+  await page.route(`**/api/agent/jobs/${seeded.job}/teach`, async route => {
+    const response = await route.fetch()
+    const body = await response.json()
+    // Controlled public evidence fixture; backend provenance is covered by API contracts.
+    body.presentation.sources = [
+      { id: 'graph:v3:p1', kind: 'Proposition', grade: 'llm_reviewed', status: 'current', scope: 'statement', graph_version: 3 },
+      { id: 'graph:v3:a1', kind: 'Inference', grade: 'llm_reviewed', status: 'current', scope: 'statement', graph_version: 3 },
+      { id: formalRef, kind: 'VerificationRecord', grade: 'L2', status: 'current', scope: 'formal_target', specification_version: 1 },
+    ]
+    const mathematical = body.presentation.paragraphs.find((item: { kind: string }) => item.kind === 'mathematical')
+    mathematical.claim_refs = body.presentation.sources.map((item: { id: string }) => item.id)
+    await route.fulfill({ response, json: body })
+  })
+  await page.goto(`/dashboard-assets/run/${seeded.job}`)
+  const output = page.getByLabel('S06 输出模式')
+  await expect(output).toHaveAttribute('data-artifact-id', /^presentation:/)
+  const original = await output.getByLabel('原答案内容').innerText()
+  await output.getByRole('button', { name: '表达内容', exact: true }).click()
+  const expression = output.getByLabel('表达内容', { exact: true })
+  for (const reference of ['graph:v3:p1', 'graph:v3:a1', formalRef]) {
+    const link = expression.getByRole('link', { name: reference, exact: true })
+    await expect(link).toBeVisible()
+    await link.click()
+    const targetText = await link.evaluate(element => {
+      const target = decodeURIComponent((element as HTMLAnchorElement).hash.slice(1))
+      return document.getElementById(target)?.textContent
+    })
+    expect(targetText).toContain(reference)
+  }
+  await expect(output.getByLabel('段落来源')).toContainText('formal_target')
+  await expect(output.getByLabel('段落来源')).toContainText('L2')
+  await output.screenshot({ path: testInfo.outputPath('f6-desktop.png') })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await output.screenshot({ path: testInfo.outputPath('f6-mobile.png') })
+  await output.getByRole('button', { name: '原答案', exact: true }).click()
+  await expect(output.getByLabel('原答案内容')).toHaveText(original)
+})

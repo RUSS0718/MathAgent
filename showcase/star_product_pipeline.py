@@ -516,6 +516,11 @@ def projection(run, *, answer=None, verification_mode="auto", include_prover_rou
         from .prover_routes import prover_route_projection
 
         result["prover_routes"] = prover_route_projection(state)
+    if state.get("proof_graph") is not None or state.get("specification_version") is not None:
+        from .presentation_evidence import presentation_evidence
+
+        result["presentation_evidence"] = presentation_evidence(
+            state, answer if answer is not None else state.get("final_response", ""))
     if state.get("population_policy", {}).get("enabled") is True:
         from .solver_harness.population_projection import population_projection
 

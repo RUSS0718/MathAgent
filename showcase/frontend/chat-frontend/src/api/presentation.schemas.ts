@@ -2,6 +2,22 @@ import { z } from 'zod'
 
 export const presentationModeSchema = z.enum(['solve', 'teach', 'report'])
 
+const presentationSourceSchema = z.object({
+  id: z.string(),
+  scope: z.string(),
+  grade: z.string(),
+  status: z.string(),
+  kind: z.string().optional(),
+  graph_version: z.number().int().optional(),
+  specification_version: z.number().int().optional(),
+  node_id: z.string().optional(),
+  attempt_id: z.string().optional(),
+  target_hash: z.string().nullable().optional(),
+  proof_hash: z.string().nullable().optional(),
+  conclusion: z.string().optional(),
+  dependencies: z.array(z.string()).optional(),
+}).passthrough()
+
 const presentationParagraphSchema = z.object({
   id: z.string(),
   version: z.number().int(),
@@ -23,7 +39,7 @@ export const presentationArtifactSchema = z.object({
   answer_artifact: z.record(z.string(), z.unknown()),
   source_fingerprint: z.string(),
   source_versions: z.record(z.string(), z.unknown()),
-  sources: z.array(z.record(z.string(), z.unknown())),
+  sources: z.array(presentationSourceSchema),
   paragraphs: z.array(presentationParagraphSchema),
   budget: z.record(z.string(), z.unknown()).nullable(),
   request_attempts: z.array(z.record(z.string(), z.unknown())),
@@ -36,6 +52,17 @@ export const presentationArtifactSchema = z.object({
   formal_verification: z.string(),
   revalidation_reason: z.string().nullable(),
   renderer: z.string(),
+  output_request: z.object({
+    id: z.string(), kind: z.literal('presentation_only'), model_calls: z.literal(0), solver_resumed: z.literal(false),
+  }).optional(),
+  delivery: z.object({
+    source_fingerprint: z.string(), source_versions: z.record(z.string(), z.unknown()),
+    verified_claims: z.array(presentationParagraphSchema),
+    unresolved_goals: z.array(z.record(z.string(), z.unknown())),
+    selection: z.object({ status: z.string() }).passthrough().nullable(),
+    grade: z.string(), budget: z.record(z.string(), z.unknown()).nullable(),
+    request_attempts: z.array(z.record(z.string(), z.unknown())),
+  }).optional(),
   artifact: z.object({ schema: z.string(), sha256: z.string(), id: z.string() }),
 }).passthrough()
 

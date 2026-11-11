@@ -11,11 +11,19 @@ from unittest.mock import patch
 
 from showcase.final_evidence import artifact_identity, bind_verification
 from showcase.flask_app import create_app
-from showcase.run_budget import RunBudgetLimits
 from showcase.presentation import build_presentation, presentation_snapshot, revalidate
+from showcase.run_budget import RunBudgetLimits
 from tests.star_product_support import ACCEPT, StarJobFixture
 from tests.test_faithful_s03_job import (
-    CAPACITY_POLICY, ENDPOINT, FEATURES as SPEC_FEATURES, REPLIES as SPEC_REPLIES, SPEC,
+    CAPACITY_POLICY,
+    ENDPOINT,
+    SPEC,
+)
+from tests.test_faithful_s03_job import (
+    FEATURES as SPEC_FEATURES,
+)
+from tests.test_faithful_s03_job import (
+    REPLIES as SPEC_REPLIES,
 )
 from tests.test_star_product_planning import FEATURES
 from tests.test_star_product_tools import NEED_PLAN
@@ -154,7 +162,7 @@ class PublicPresentationApiTest(unittest.TestCase):
         job_id, headers = self._job("teach")
         job = self.client.get(f"/api/agent/jobs/{job_id}").get_json()
         self.assertEqual("teach", job["result"]["presentation_mode"])
-        self.assertEqual("faithful-output-v1", job["result"]["presentation_policy_version"])
+        self.assertEqual("faithful-output-v2", job["result"]["presentation_policy_version"])
         session = job["session_id"]
         conflict = self.client.post("/api/agent/jobs", json={
             "message": "计算 1+1", "session_id": session, "presentation_mode": "report",
@@ -254,7 +262,7 @@ class CurrentSolverPresentationTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(200, response.status_code, response.get_json())
         artifact = response.get_json()["presentation"]
         self.assertEqual(1, artifact["source_versions"]["specification_version"])
-        self.assertEqual(0, artifact["source_versions"]["graph_version"])
+        self.assertEqual(2, artifact["source_versions"]["graph_version"])
         self.assertEqual(artifact, self.app.extensions["showcase_workspace_service"].get_presentation(
             user_id=self.app.extensions["loopback_store"].get(
                 self.client.get_cookie("auth_session").value).user_id,

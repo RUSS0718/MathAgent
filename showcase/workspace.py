@@ -723,7 +723,7 @@ class WorkspaceStore:
                     "source_event_id": int(event[0]),
                     "state_revision": int(solver_row["state_revision"]) if solver_row is not None else None,
                     "specification_version": state.get("specification_version"),
-                    "graph_version": (state.get("proof_graph") or {}).get("graph_version"),
+                    "graph_version": (state.get("proof_graph") or {}).get("current_version"),
                 }
                 if any(expected.get(key) != value for key, value in actual.items()):
                     raise WorkspaceError("presentation_source_changed", status=409)
