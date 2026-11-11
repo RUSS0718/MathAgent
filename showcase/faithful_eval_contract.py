@@ -165,6 +165,7 @@ def validate_record(value, manifest):
         _need(not started or _token(value["run_id"]) and _hash(value["snapshot_sha256"]))
         metrics = value["metrics"]
         _object(metrics, set(METRICS))
+        _need(started or all(metric is None for metric in metrics.values()))
         for metric in metrics.values():
             _need(metric is None or type(metric) in {int, float} and math.isfinite(metric) and metric >= 0)
         _need(metrics["accuracy"] is None and metrics["explanation_rubric"] is None
@@ -176,6 +177,11 @@ def validate_record(value, manifest):
             _need(formal["grade"] in {None, "L2", "L3"}
                   and (formal["scope"] != "formal_target" or formal["grade"] != "L3")
                   and formal["outcome"] in {"pass", "fail", "unknown", "incomplete", "unsupported", "not_run"})
+            _need(started or formal["outcome"] == status)
+            if formal["outcome"] == "pass":
+                _need(status == "completed" and formal["grade"] in {"L2", "L3"})
+            else:
+                _need(formal["grade"] is None)
         pair = value["pair"]
         if group == "faithful-F":
             if pair is None:

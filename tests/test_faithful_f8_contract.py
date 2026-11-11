@@ -213,34 +213,85 @@ class FaithfulF8ContractTest(unittest.TestCase):
         self.assertIs(self.api.validate_record(record, self.manifest), record)
 
     def test_metrics_ranges_and_reserved_scores(self):
+        identity = {"execution_status": "completed", "run_id": "run-1", "snapshot_sha256": "a" * 64}
         for key in METRIC_NAMES:
             for value in (True, -1, float("inf"), float("nan"), "1", {}):
                 metrics = dict.fromkeys(METRIC_NAMES)
                 metrics[key] = value
-                self.reject_record(metrics=metrics)
+                self.reject_record(metrics=metrics, **identity)
         for key, value in (("accuracy", 1), ("explanation_rubric", 0), ("root_coverage", 1.01)):
             metrics = dict.fromkeys(METRIC_NAMES)
             metrics[key] = value
-            self.reject_record(metrics=metrics)
+            self.reject_record(metrics=metrics, **identity)
         metrics = dict.fromkeys(METRIC_NAMES)
         metrics.update(root_coverage=1, cost=0, latency_ms=2.5, valid_evidence=3)
-        self.api.validate_record(record_fixture(self.manifest, metrics=metrics), self.manifest)
+        self.api.validate_record(record_fixture(self.manifest, metrics=metrics, **identity), self.manifest)
 
     def test_formal_requires_registered_target(self):
         self.reject_record(formal={"target_sha256": "a" * 64, "scope": "formal_target",
-                                   "grade": "L2", "outcome": "pass", "environment_sha256": "b" * 64})
+                                   "grade": "L2", "outcome": "pass", "environment_sha256": "b" * 64},
+                           execution_status="completed", run_id="run-1", snapshot_sha256="a" * 64)
+
+    def test_unstarted_records_require_all_metrics_null_including_zero(self):
+        for status in ("not_run", "unsupported"):
+            record = record_fixture(self.manifest, execution_status=status)
+            self.assertIs(self.api.validate_record(record, self.manifest), record)
+            for key in METRIC_NAMES:
+                for metric in (0, 1):
+                    with self.subTest(status=status, key=key, metric=metric):
+                        metrics = dict.fromkeys(METRIC_NAMES)
+                        metrics[key] = metric
+                        self.reject_record(execution_status=status, metrics=metrics)
+
+    def test_unstarted_formal_requires_matching_outcome_and_null_grade(self):
+        target = {"target_sha256": "a" * 64, "scope": "original_problem",
+                  "environment_sha256": "b" * 64}
+        self.manifest["dataset"]["samples"][0]["targets"]["faithful-A"] = target
+        for status in ("not_run", "unsupported"):
+            for outcome in ("pass", "fail", "unknown", "incomplete", "unsupported", "not_run"):
+                for grade in (None, "L2", "L3"):
+                    with self.subTest(status=status, outcome=outcome, grade=grade):
+                        record = record_fixture(
+                            self.manifest, execution_status=status,
+                            formal={**target, "outcome": outcome, "grade": grade})
+                        if outcome == status and grade is None:
+                            self.assertIs(self.api.validate_record(record, self.manifest), record)
+                        else:
+                            with self.assertRaises(ValueError):
+                                self.api.validate_record(record, self.manifest)
+
+    def test_started_formal_pass_requires_completed_and_grade_nonpass_has_no_grade(self):
+        target = {"target_sha256": "a" * 64, "scope": "original_problem",
+                  "environment_sha256": "b" * 64}
+        self.manifest["dataset"]["samples"][0]["targets"]["faithful-A"] = target
+        for status in ("completed", "failed", "unknown", "incomplete"):
+            for outcome in ("pass", "fail", "unknown", "incomplete", "unsupported", "not_run"):
+                for grade in (None, "L2", "L3"):
+                    with self.subTest(status=status, outcome=outcome, grade=grade):
+                        record = record_fixture(
+                            self.manifest, execution_status=status, run_id="run-1",
+                            snapshot_sha256="a" * 64,
+                            formal={**target, "outcome": outcome, "grade": grade})
+                        valid = ((status == "completed" and grade in ("L2", "L3"))
+                                 if outcome == "pass" else grade is None)
+                        if valid:
+                            self.assertIs(self.api.validate_record(record, self.manifest), record)
+                        else:
+                            with self.assertRaises(ValueError):
+                                self.api.validate_record(record, self.manifest)
 
     def test_formal_identity_scope_environment_and_grade(self):
         target = {"target_sha256": "a" * 64, "scope": "formal_target",
                   "environment_sha256": "b" * 64}
         self.manifest["dataset"]["samples"][0]["targets"]["faithful-A"] = target
         formal = {**target, "grade": "L2", "outcome": "pass"}
-        record = record_fixture(self.manifest, formal=formal)
+        identity = {"execution_status": "completed", "run_id": "run-1", "snapshot_sha256": "a" * 64}
+        record = record_fixture(self.manifest, formal=formal, **identity)
         self.assertIs(self.api.validate_record(record, self.manifest), record)
         for key, value in (("target_sha256", "0" * 64), ("environment_sha256", "0" * 64),
                            ("scope", "original_problem"), ("grade", "L3"),
                            ("outcome", "completed"), ("private_proof", "secret")):
-            self.reject_record(formal={**formal, key: value})
+            self.reject_record(formal={**formal, key: value}, **identity)
         self.reject_manifest(("dataset", "samples", 0, "targets", "faithful-A"),
                              {**target, "grade": "L3"})
 
@@ -248,7 +299,8 @@ class FaithfulF8ContractTest(unittest.TestCase):
         target = {"target_sha256": "a" * 64, "scope": "original_problem",
                   "environment_sha256": "b" * 64}
         self.manifest["dataset"]["samples"][0]["targets"]["faithful-A"] = target
-        record = record_fixture(self.manifest, formal={**target, "grade": "L3", "outcome": "pass"})
+        record = record_fixture(self.manifest, formal={**target, "grade": "L3", "outcome": "pass"},
+                                execution_status="completed", run_id="run-1", snapshot_sha256="a" * 64)
         self.assertIs(self.api.validate_record(record, self.manifest), record)
         self.assertNotIn("independently_verified", record)
 
