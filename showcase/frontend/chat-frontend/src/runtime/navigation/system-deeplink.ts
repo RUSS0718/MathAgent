@@ -15,7 +15,7 @@ export type SystemDeepLinkResult =
   | { kind: 'list' }
   | { kind: 'not_system' }
   | { kind: 'invalid'; reason: string }
-  | { kind: 'valid'; state: SystemDeepLinkState }
+  | { kind: 'valid'; state: SystemDeepLinkState; unavailableReason?: string }
 
 const PATH = '/dashboard/system'
 const SCHEME = 'f7-deeplink-v1'
@@ -95,9 +95,8 @@ export function parseSystemDeepLink(pathname: string, search: string): SystemDee
     if (!validOpaqueId(artifactId)) return { kind: 'invalid', reason: 'artifact_id_invalid' }
     state.artifactId = artifactId
   }
-  if (Boolean(outputId) !== Boolean(artifactId)) {
-    return { kind: 'invalid', reason: 'presentation_identity_incomplete' }
-  }
+  let unavailableReason: string | undefined
+  if (Boolean(outputId) !== Boolean(artifactId)) unavailableReason = 'presentation_identity_incomplete'
   const graph = params.get('graph')
   if (graph !== null) {
     if (!/^(0|[1-9][0-9]*)$/.test(graph) || !Number.isSafeInteger(Number(graph))) {
@@ -114,10 +113,17 @@ export function parseSystemDeepLink(pathname: string, search: string): SystemDee
   }
   const paragraphId = params.get('paragraph')
   if (paragraphId !== null) {
-    if (!PARAGRAPH_ID.test(paragraphId) || state.artifactId === undefined) {
+    if (!PARAGRAPH_ID.test(paragraphId)) {
       return { kind: 'invalid', reason: 'paragraph_identity_invalid' }
     }
-    state.paragraphId = paragraphId
+    if (!state.artifactId) unavailableReason ??= 'paragraph_identity_incomplete'
+    else state.paragraphId = paragraphId
+  }
+  if (unavailableReason) {
+    delete state.outputId
+    delete state.artifactId
+    delete state.paragraphId
+    return { kind: 'valid', state, unavailableReason }
   }
   return { kind: 'valid', state }
 }

@@ -173,6 +173,16 @@ class FaithfulF7SystemViewApiTest(unittest.TestCase):
         self.assertEqual("unavailable", response.get_json()["selection"]["status"])
         self.assertIsNone(response.get_json()["selection"]["presentation"])
 
+    def test_partial_output_identity_keeps_the_run_without_selecting_a_saved_output(self):
+        for identity in ({"output": self.presentation["output_request"]["id"]},
+                         {"artifact": self.presentation["artifact"]["id"]}):
+            response = self.client.get(f"/api/faithful/runs/{self.run_id}", query_string={
+                "scheme": "f7-deeplink-v1", "paragraph": "paragraph:1", **identity,
+            })
+            self.assertEqual(200, response.status_code)
+            self.assertEqual(self.run_id, response.get_json()["run"]["run_id"])
+            self.assertIsNone(response.get_json()["selection"]["presentation"])
+
     def test_non_get_methods_are_not_registered_for_f7(self):
         response = self.client.post("/api/faithful/runs", headers=self.headers)
         self.assertEqual(405, response.status_code)

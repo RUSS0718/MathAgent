@@ -14,6 +14,7 @@ const detail = ref<SystemRunResponse | null>(null)
 const loading = ref(false)
 const error = ref('')
 let loadGeneration = 0
+let loadedLocation = ''
 const selected = computed(() => route.value.kind === 'valid' ? route.value.state : null)
 const selectedPresentation = computed(() => detail.value?.selection.presentation ?? null)
 
@@ -46,6 +47,7 @@ function sourceHref(nodeId: string, graphVersion: number): string {
 }
 
 async function load(): Promise<void> {
+  loadedLocation = globalThis.location.pathname + globalThis.location.search
   const generation = ++loadGeneration
   route.value = parseSystemDeepLink(globalThis.location.pathname, globalThis.location.search)
   const requested = route.value
@@ -83,7 +85,9 @@ async function load(): Promise<void> {
   }
 }
 
-function onPopState(): void { void load() }
+function onPopState(): void {
+  if (loadedLocation !== globalThis.location.pathname + globalThis.location.search) void load()
+}
 onMounted(() => { void load(); globalThis.addEventListener('popstate', onPopState) })
 onUnmounted(() => { loadGeneration += 1; globalThis.removeEventListener('popstate', onPopState) })
 </script>
@@ -93,6 +97,9 @@ onUnmounted(() => { loadGeneration += 1; globalThis.removeEventListener('popstat
     <div class="f7-toolbar"><a href="/dashboard">返回数学工作区</a><a href="/dashboard/system">Run 列表</a></div>
     <p v-if="loading" role="status" aria-busy="true">正在读取持久化公开数据…</p>
     <p v-if="error" class="notice notice--warning" role="alert">{{ error }}</p>
+    <p v-if="route.kind === 'valid' && route.unavailableReason" class="notice notice--warning" role="status">
+      输出身份不完整（{{ route.unavailableReason }}）；已保留当前 Run，输出 unavailable。
+    </p>
     <template v-if="route.kind === 'list' && !loading && !error">
       <p class="muted">共 {{ total }} 个持久化 Run。此页面只读取已保存数据。</p>
       <ul class="f7-run-list">

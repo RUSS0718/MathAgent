@@ -152,3 +152,27 @@ test('unknown identities retain the Run and inference nodes have restorable link
   await expect(page.getByLabel('F6 交付物')).toHaveCount(0)
   expect(writes).toEqual([])
 })
+
+test('partial identities retain the Run and source anchors do not reload its snapshot', async ({ page }) => {
+  const fixture = await prepare(page)
+  const writes = trackWrites(page)
+  const partial = new URL(deepLink(fixture), 'http://127.0.0.1:8096')
+  partial.searchParams.delete('artifact')
+  await page.goto(partial.toString())
+  await expect(page.getByRole('heading', { name: fixture.run_id })).toBeVisible()
+  await expect(page.getByText(/输出身份不完整/)).toBeVisible()
+  await expect(page.getByLabel('F6 交付物')).toHaveCount(0)
+  await page.reload()
+  await expect(page.getByRole('heading', { name: fixture.run_id })).toBeVisible()
+  await page.goto(deepLink(fixture))
+  await expect(page.locator('a[href^="#f7-source-"]').first()).toBeVisible()
+  let detailReads = 0
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === `/api/faithful/runs/${fixture.run_id}`) detailReads += 1
+  })
+  await page.locator('a[href^="#f7-source-"]').first().click()
+  await expect(page).toHaveURL(/#f7-source-/)
+  await expect(page.locator('li[id^="f7-source-"]').first()).toBeInViewport()
+  expect(detailReads).toBe(0)
+  expect(writes).toEqual([])
+})

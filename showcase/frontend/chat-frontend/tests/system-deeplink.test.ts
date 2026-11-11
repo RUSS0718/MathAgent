@@ -42,3 +42,12 @@ test('rejects partial output identity and paragraph anchors without an artifact 
     '?scheme=f7-deeplink-v1&run=run_a&node=p1'),
   { kind: 'invalid', reason: 'node_identity_invalid' })
 })
+
+test('keeps the Run available when an incoming link has only half an output identity', () => {
+  assert.deepEqual(parseSystemDeepLink('/dashboard/system',
+    '?scheme=f7-deeplink-v1&run=run_a&output=output:one&paragraph=paragraph:2'),
+  { kind: 'valid', state: { runId: 'run_a' }, unavailableReason: 'presentation_identity_incomplete' })
+  assert.deepEqual(parseSystemDeepLink('/dashboard/system',
+    '?scheme=f7-deeplink-v1&run=run_a&artifact=presentation:one'),
+  { kind: 'valid', state: { runId: 'run_a' }, unavailableReason: 'presentation_identity_incomplete' })
+})

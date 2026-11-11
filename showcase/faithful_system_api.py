@@ -67,10 +67,8 @@ def register_faithful_system_api(app, *, workspace_service):
         except ValueError:
             return _error("graph_version_invalid", 400)
         node_id = request.args.get("node")
-        if bool(output_id) != bool(artifact_id):
-            return _error("presentation_identity_incomplete", 400)
-        if paragraph_id and (not output_id or not paragraph_id.startswith("paragraph:")):
-            return _error("paragraph_identity_incomplete", 400)
+        if paragraph_id and not paragraph_id.startswith("paragraph:"):
+            return _error("paragraph_identity_invalid", 400)
         if node_id and graph_version is None:
             return _error("graph_identity_incomplete", 400)
 
