@@ -1,6 +1,7 @@
 """Initial persisted Solver Run shape."""
 
 import uuid
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
@@ -10,7 +11,8 @@ def initial_state(run_id: str, problem_hash: str, config_hash: str, *,
                   problem_spec: dict[str, Any] | None = None,
                   work_units: list[dict[str, Any]] | None = None,
                   proof_graph: bool = False,
-                  serial_routes: bool = False) -> dict[str, Any]:
+                  serial_routes: bool = False,
+                  population_memory_advisory: dict[str, Any] | None = None) -> dict[str, Any]:
     now = datetime.now(UTC).isoformat()
     state = {
         "schema_version": "1.1",
@@ -90,4 +92,6 @@ def initial_state(run_id: str, problem_hash: str, config_hash: str, *,
         state["route_invalidations"] = []
         state["active_route_id"] = None
         state["route_budget"] = {"closing_reserve": {}, "unknown": []}
+    if population_memory_advisory is not None:
+        state["population_memory_advisory"] = deepcopy(population_memory_advisory)
     return state

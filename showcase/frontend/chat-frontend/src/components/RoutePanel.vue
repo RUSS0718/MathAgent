@@ -34,6 +34,28 @@ const ratingFields = [['verified_gain', '新增有效信用'], ['evidence_qualit
         </template>
         <dt>输入摘要</dt><dd>{{ rating.input_hash }}</dd>
       </dl>
+      <section v-if="rating.memory_hits?.length" aria-label="该路线使用的历史观察">
+        <h4>历史观察来源（仅 advisory，需当前 Run 复核）</h4>
+        <ul>
+          <li v-for="hit in rating.memory_hits" :key="hit.record_id">
+            记录 {{ hit.record_id }} · 来源 Run {{ hit.source_run_id }}
+            <span v-if="hit.imported_from"> · 导入来源 {{ hit.imported_from.record_id }}</span>
+            · {{ hit.outcome ?? '结果未知' }} · {{ hit.use ?? '用途未记录' }} · {{ hit.review_status ?? '复核状态未知' }}
+          </li>
+        </ul>
+      </section>
+      <section v-if="rating.population_memory_cost" aria-label="该路线的记忆注入增量成本">
+        <h4>记忆注入增量成本</h4>
+        <p v-if="rating.population_memory_cost.status === 'not_injected'">本路线未注入 Population Memory。</p>
+        <p v-else-if="rating.population_memory_cost.status === 'unknown'">
+          本路线存在记忆观察，但注入增量成本未知；没有归属完整的估算，不按零成本处理。
+        </p>
+        <p v-else>
+          估算增加 {{ rating.population_memory_cost.estimated_tokens }} tokens、
+          {{ rating.population_memory_cost.additional_utf8_bytes }} UTF-8 字节，
+          覆盖 {{ rating.population_memory_cost.call_count }} 次调用。此值是序列化字节估算，不是 provider 实测 token。
+        </p>
+      </section>
     </details>
     <details v-if="routes.budget">
       <summary>共享预算与收尾预留</summary>

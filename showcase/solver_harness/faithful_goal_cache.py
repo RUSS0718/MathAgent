@@ -234,22 +234,27 @@ class GlobalGoalCache:
     ) -> str:
         """Admit only a current, genuinely verified L2+ Lean receipt."""
         self._check_actor(actor_id)
-        self._check_identity(identity, request, prover)
-        self._verified_grade(request, result, prover)
-        grade = str(result.get("grade"))
-        proof = result.get("proof_artifact") or {}
-        if (
-            identity.proof_identity != "sha256:" + str(proof.get("source_hash"))
-            or proof.get("target_hash") != identity.goal["target"]["hash"]
-            or proof.get("environment_hash") != identity.environment["deployment_manifest_sha256"]
-            or proof.get("dependency_audit", {}).get("passed") is not True
-            or proof.get("dependency_audit", {}).get("recursive") is not True
-        ):
-            raise ValueError("goal_cache_receipt_identity_invalid")
-        run_id = request.get("run_id")
-        attempt_id = request.get("attempt_id")
-        if not isinstance(run_id, str) or not isinstance(attempt_id, str):
-            raise ValueError("goal_cache_receipt_provenance_invalid")
+        try:
+            self._check_identity(identity, request, prover)
+            self._verified_grade(request, result, prover)
+            grade = str(result.get("grade"))
+            proof = result.get("proof_artifact") or {}
+            if (
+                identity.proof_identity != "sha256:" + str(proof.get("source_hash"))
+                or proof.get("target_hash") != identity.goal["target"]["hash"]
+                or proof.get("environment_hash")
+                != identity.environment["deployment_manifest_sha256"]
+                or proof.get("dependency_audit", {}).get("passed") is not True
+                or proof.get("dependency_audit", {}).get("recursive") is not True
+            ):
+                raise ValueError("goal_cache_receipt_identity_invalid")
+            run_id = request.get("run_id")
+            attempt_id = request.get("attempt_id")
+            if not isinstance(run_id, str) or not isinstance(attempt_id, str):
+                raise ValueError("goal_cache_receipt_provenance_invalid")
+        except Exception as error:
+            self._audit_rejected_receipt(actor_id, error)
+            raise
         now = _utc_now()
         with _LOCK, self._savepoint():
             self._require_enabled()
@@ -308,14 +313,15 @@ class GlobalGoalCache:
                 drifted = self._latest_by_lookup(identity.lookup_key)
                 if drifted is None:
                     return None
-                self._transition(drifted[0], "stale", "goal_cache_key_drift", actor_id)
-                return self._state_result(drifted[0], "stale", "goal_cache_key_drift")
+                reason = self._identity_drift_reason(drifted[3], identity)
+                self._transition(drifted[0], "stale", reason, actor_id)
+                return self._state_result(drifted[0], "stale", reason)
             if row[4] != "active":
                 return self._state_result(row[0], row[4], row[5])
 
         try:
             self._check_identity(identity, request, prover)
-        except (ValueError, TypeError, KeyError, AttributeError):
+        except Exception:
             self._transition(row[0], "stale", "current_lean_identity_untrusted", actor_id)
             return self._state_result(row[0], "stale", "current_lean_identity_untrusted")
 
@@ -325,7 +331,7 @@ class GlobalGoalCache:
                 else prover.invoke(request)
             )
             self._verified_grade(request, fresh_result, prover)
-        except (ValueError, TypeError, RuntimeError, KeyError, AttributeError):
+        except Exception:
             self._transition(row[0], "stale", "lean_recheck_failed", actor_id)
             return self._state_result(row[0], "stale", "lean_recheck_failed")
         proof = fresh_result.get("proof_artifact") or {}
@@ -490,6 +496,39 @@ class GlobalGoalCache:
                ORDER BY created_at DESC, cache_id DESC LIMIT 1""",
             (self.owner_id, self.workspace_id, lookup_key),
         ).fetchone()
+
+    @staticmethod
+    def _identity_drift_reason(previous_json: str, current: GoalCacheIdentity) -> str:
+        """Name the first changed cache dimension without exposing stored proof data."""
+        previous = json.loads(previous_json)
+        current_value = current.to_dict()
+        for key, reason in (
+            ("declarations", "declaration_drift"),
+            ("imports", "import_dependency_drift"),
+            ("template_version", "template_drift"),
+            ("axiom_policy", "axiom_policy_drift"),
+            ("proof_identity", "proof_identity_drift"),
+        ):
+            if previous.get(key) != current_value[key]:
+                return reason
+        if previous.get("environment", {}).get("dependency_audit") != (
+            current_value["environment"].get("dependency_audit")
+        ):
+            return "dependency_audit_drift"
+        if previous.get("environment") != current_value["environment"]:
+            return "lean_environment_drift"
+        return "goal_cache_key_drift"
+
+    def _audit_rejected_receipt(self, actor_id: str, error: Exception) -> None:
+        """Persist a bounded admission reason only while this scope is enabled."""
+        message = str(error)
+        reason = (
+            message if re.fullmatch(r"goal_cache_[a-z0-9_]{1,80}", message)
+            else "goal_cache_admission_validation_failed"
+        )
+        with _LOCK, self._savepoint():
+            if self._enabled():
+                self._audit(None, "receipt_rejected", actor_id, {"reason": reason})
 
     def _transition(self, cache_id: str, state: str, reason: str, actor_id: str) -> None:
         with _LOCK, self._savepoint():

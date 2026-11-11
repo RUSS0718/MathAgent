@@ -707,6 +707,8 @@ def _summary(state):
         charged += max(usage["total_tokens"] or 0, accounted)
     return {
         "limits": state["limits"],
+        **({"intervention_resources": state["intervention_resources"]}
+           if "intervention_resources" in state else {}),
         **({"stream_timeout_policy": state["stream_timeout_policy"]}
            if "stream_timeout_policy" in state else {}),
         "logical_calls": sum(a["kind"] == "logical" for a in state["actions"]),

@@ -19,6 +19,18 @@ export const routesSchema = z.object({
   })),
   evaluations: z.array(z.object({
     route_id: z.string(), input_hash: z.string().nullable(), hard_gate: z.boolean(), current: z.boolean().optional(),
+    memory_hits: z.array(z.object({
+      record_id: z.string(), source_run_id: z.string(), outcome: z.string().optional(),
+      use: z.string().optional(), review_status: z.string().optional(), authority: z.string().optional(),
+      imported_from: z.object({ record_id: z.string() }).optional(),
+    })).optional(),
+    population_memory_cost: z.object({
+      status: z.enum(['not_injected', 'estimated', 'unknown']),
+      call_count: z.number().int().nonnegative(),
+      estimated_tokens: z.number().int().nonnegative().nullable(),
+      additional_utf8_bytes: z.number().int().nonnegative().nullable(),
+      estimator_versions: z.array(z.string()),
+    }).optional(),
     vector: z.object({
       verified_gain: z.number().nonnegative().nullable().optional(),
       evidence_quality: z.number().nonnegative().nullable().optional(),

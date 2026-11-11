@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from langgraph.graph import END, START, StateGraph
 
 from .adapters import InternModelAdapter
+from .faithful_intervention_control import maybe_pause
 from .run_budget import RunBudgetLimits, current_budget, public_solver_call_id
 from .run_control import RunStopped, check_control
 from .solver_harness import SolverHarness
@@ -33,7 +34,8 @@ class StarProductPipeline:
                  transport_policy="legacy", stream_profiles=None, acceptance_mode="strict",
                  context_capacity=None, population_capacity=None, population_budget=None,
                  limited_enabled=True,
-                 population_enabled=None, formal_backend=None,
+                 population_enabled=None, population_memory_enabled=False,
+                 intervention_enabled=False, formal_backend=None,
                  formal_registry=None, formal_server_policy=None):
         from .star_experiment_policy import ExperimentRunPolicy
 
@@ -65,6 +67,8 @@ class StarProductPipeline:
         self.population_capacity_gap = "population_capacity_unverified"
         self.population_enabled = (population_capacity is not None if population_enabled is None
                                    else population_enabled is True)
+        self.population_memory_enabled = population_memory_enabled is True
+        self.intervention_enabled = intervention_enabled is True
         if population_capacity is not None and self.population_enabled:
             try:
                 timeout = (self.adapter.applied_config().get("request_timeout_seconds")
@@ -250,6 +254,8 @@ class StarProductPipeline:
             }
             on_component_config_applied(applied_components)
 
+        harness_ref = {}
+
         def observe(run, event):
             if event:
                 public_event_id = public_solver_event_id(run, event)
@@ -263,6 +269,13 @@ class StarProductPipeline:
                       "solver": projection(run, verification_mode=verification_mode,
                                            include_prover_routes=False),
                       **decision_fields(event, run["state"], port.invocations)})
+                if self.intervention_enabled and solver_mode != "star_population":
+                    harness = harness_ref["harness"]
+                    maybe_pause(
+                        harness._state_store._connection, run, event, config, problem,
+                        applied_config=self.adapter.applied_config(),
+                        harness=harness, model_port=port,
+                    )
 
         def solve():
             with SolverHarness(database_path=self.database_path, config=config,
@@ -270,6 +283,7 @@ class StarProductPipeline:
                                meta_port=port,
                                tool_port=RegistryToolPort(self.registry) if self.registry else None,
                                event_observer=observe) as harness:
+                harness_ref["harness"] = harness
                 existing = harness._state_store.get_run(run_id)
                 harness._product_recovery = existing is not None
                 if existing is not None:
@@ -286,6 +300,18 @@ class StarProductPipeline:
                         metadata = {"run_id": run_id, "user_hint": solver_hint}
                         if problem_spec is not None:
                             metadata["problem_spec"] = problem_spec
+                        if self.population_memory_enabled and problem_spec is not None:
+                            from .solver_harness.faithful_memory_injection import (
+                                load_population_memory,
+                            )
+
+                            memory = load_population_memory(
+                                harness._state_store._connection,
+                                run_id=run_id,
+                                problem_spec=problem_spec,
+                            )
+                            if memory["observations"]:
+                                metadata["population_memory_advisory"] = memory
                         run = harness.solve(problem, metadata)
                 except (CallInterrupted, HardBudgetStop) as exc:
                     run = harness.get_run(run_id)
@@ -378,6 +404,7 @@ class StarProductPipeline:
                             formal_state, backend=self.formal_backend,
                             record=reserved, budget=current_budget(),
                             registry=self.registry, backend_registry=self.formal_registry,
+                            goal_cache_connection=harness._state_store._connection,
                         )
                         run = harness.commit_event(
                             run_id,
@@ -434,6 +461,18 @@ class StarProductPipeline:
 
                     result["engineering_delivery"] = delivery_check(run, answer)
                 check_control(allow_expired_selection=math.get("best_effort_decision") is not None)
+                if self.population_memory_enabled:
+                    from .solver_harness.faithful_memory_capture import (
+                        capture_population_observation,
+                    )
+
+                    capture_population_observation(
+                        harness._state_store._connection,
+                        run_id=run_id,
+                        state=math,
+                        budget=current_budget().snapshot(),
+                        reviewed=result["status"] == "COMPLETED",
+                    )
                 return result
 
         builder = StateGraph(dict)

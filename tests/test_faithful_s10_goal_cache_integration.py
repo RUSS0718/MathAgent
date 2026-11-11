@@ -297,6 +297,72 @@ class GoalCacheFormalIntegrationTest(unittest.TestCase):
         self.assertIn("receipt_admitted", events)
         self.assertIn("receipt_rechecked", events)
 
+    def test_real_l3_lean_and_independent_review_admit_with_l2_ceiling(self):
+        import secrets
+
+        from showcase.formal import ReviewAuthority
+        from showcase.formal_correspondence import CHECKER_VERSION
+
+        authority = ReviewAuthority(
+            {CHECKER_VERSION: secrets.token_hex(32)},
+            {CHECKER_VERSION: "independent_service"},
+        )
+        base = _trusted_lean()
+        backend = LeanTacticProver(base.executor, review_authority=authority)
+        cache = GlobalGoalCache(
+            self.connection, owner_id="owner-1", workspace_id="session-1"
+        )
+        cache.enable(actor_id="owner-1")
+        self.connection.commit()
+
+        problem = "For every rational x, x + x = 2 * x."
+        spec = normalize_problem_spec({
+            "specification_version": 1,
+            "original_problem": problem,
+            "domain": "rationals",
+            "quantifiers": ["forall x"],
+            "assumptions": [],
+            "directions": ["equality"],
+            "output_requirements": [],
+            "root_obligations": [{
+                "obligation_id": "root:identity",
+                "obligation_type": "universal",
+                "statement": "x + x = 2 * x",
+            }],
+            "auxiliary_goals": [],
+        })
+        target = normalize_target({
+            "domain": "rationals",
+            "variables": ["x"],
+            "lhs": "x + x",
+            "rhs": "2 * x",
+            "quantifiers": ["forall x"],
+            "assumptions": [],
+            "direction": "equality",
+        })
+        state = FormalIntegrationState(
+            job_id="job-1", run_id="l3-run", problem=problem,
+            problem_spec=spec, policy=POLICY, target=target,
+        )
+        record = run_formal_verification(
+            state, backend=backend, target=target,
+            goal_cache_connection=self.connection,
+        )
+
+        self.assertEqual("solved", record["status"])
+        self.assertEqual("L3", record["grade"], record.get("reason"))
+        review = record["current"]["proof_artifact"]["independent_review"]
+        self.assertTrue(backend.review_service.verify(review))
+        self.assertEqual(1, len(cache.list_entries()))
+        entry = cache.list_entries()[0]
+        self.assertEqual("L3", entry["source_grade"])
+        self.assertEqual("L2", entry["grade_ceiling"])
+        admission = next(
+            event for event in cache.list_audit_events()
+            if event["event"] == "receipt_admitted"
+        )
+        self.assertEqual("L3", admission["details"]["grade"])
+
 
 if __name__ == "__main__":
     unittest.main()

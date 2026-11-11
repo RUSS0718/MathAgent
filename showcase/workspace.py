@@ -488,6 +488,14 @@ class WorkspaceStore:
                         self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled", "scope": "future_dispatch", "remote_request": "cannot_revoke"})
                     result = {"success": True, "job_id": job_id, "status": "canceled"}
                 else:
+                    intervention_control = self._connection.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' "
+                        "AND name='faithful_intervention_control'"
+                    ).fetchone()
+                    if intervention_control is not None:
+                        from .faithful_intervention_control import resume_guard
+
+                        resume_guard(self._connection, job_id)
                     from .star_product_recovery import authorize_resume
 
                     star_resume = authorize_resume(self._connection, row, retry_call)
@@ -516,10 +524,21 @@ class WorkspaceStore:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             rows = self._connection.execute("SELECT job_id,status,result_json FROM workspace_jobs WHERE status IN ('queued','running','waiting_input')").fetchall()
+            intervention_table = self._connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='faithful_intervention_control'"
+            ).fetchone()
             for row in rows:
                 job_id = row["job_id"]
                 if row["status"] == "waiting_input" and checkpointer is not None and checkpointer.is_interrupted(job_id):
                     continue
+                if row["status"] == "waiting_input" and intervention_table is not None:
+                    paused = self._connection.execute(
+                        "SELECT 1 FROM faithful_intervention_control "
+                        "WHERE job_id=? AND status='paused'", (job_id,),
+                    ).fetchone()
+                    if paused is not None:
+                        continue
                 now = _utc_now()
                 result = _loads(row["result_json"]) if row["result_json"] else {}
                 _mark_pair_config_not_applied(result)
@@ -1390,6 +1409,8 @@ class WorkspaceService:
             self._executor.submit(self._execute, job_id)
 
     def _execute(self, job_id: str) -> None:
+        from .faithful_intervention_control import InterventionPaused
+
         try:
             identity = self.store.job_identity(job_id)
             pair_binding = identity.get("experiment_pair")
@@ -1484,6 +1505,8 @@ class WorkspaceService:
                 self.store.fail_job(job_id, "needs_review")
             else:
                 self.store.complete_job(job_id, "Fake Agent completed a deterministic showcase run.", "fake adapter")
+        except InterventionPaused:
+            return
         except RunStopped as exc:
             if exc.category == "run_deadline_exhausted":
                 self.store.fail_job(job_id, exc.category)

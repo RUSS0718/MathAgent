@@ -246,7 +246,11 @@ class SolverHarness:
                               problem_spec=supplied_spec,
                               work_units=work_units,
                               proof_graph=self._config.get("features", {}).get("proof_graph") is True,
-                              serial_routes=self._config.get("features", {}).get("serial_routes") is True)
+                              serial_routes=self._config.get("features", {}).get("serial_routes") is True,
+                              population_memory_advisory=(
+                                  effective_metadata.get("population_memory_advisory")
+                                  if isinstance(effective_metadata, Mapping) else None
+                              ))
         if self._config.get("features", {}).get("serial_routes") is True and supplied_spec is None:
             raise SolverValidationError("serial_routes_requires_problem_spec")
         if self._config.get("features", {}).get("progress_scheduling") is True:

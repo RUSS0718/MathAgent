@@ -79,6 +79,12 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
         population_capacity=config.get("SHOWCASE_STAR_POPULATION_CAPACITY"),
         limited_enabled=limited_enabled,
         population_enabled=population_enabled,
+        population_memory_enabled=(
+            config.get("SHOWCASE_POPULATION_MEMORY_ENABLED") is True
+        ),
+        intervention_enabled=(
+            config.get("SHOWCASE_FAITHFUL_INTERVENTION_ENABLED") is True
+        ),
         hint_mode=config.get("SHOWCASE_STAR_HINT_MODE", "none"),
         evidence_kind=config.get("SHOWCASE_STAR_EVIDENCE_KIND", "live"),
         formal_backend=formal_backend,

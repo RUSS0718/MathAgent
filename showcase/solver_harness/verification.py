@@ -131,7 +131,9 @@ def verify_step(
         state_updates={"counters": counters},
     )
     report = state["steps"][step_id]["report"]
-    call_id = f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
+    call_id = getattr(harness, "namespace_call_id", lambda value: value)(
+        f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
+    )
     request = {
         "run_id": run["run_id"],
         "call_id": call_id,

@@ -81,7 +81,9 @@ def register_run_memory(app, database_path):
             ).fetchone()
             budget = _summary(json.loads(ledger[0])) if ledger is not None else None
             memory = project_run_memory(job_id, row["state_revision"], state, budget)
-        return jsonify({"success": True, "run_memory": memory})
+        response = jsonify({"success": True, "run_memory": memory})
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/api/sessions/<session_id>/population-memory")
     def population_memory(session_id):
@@ -141,7 +143,7 @@ def register_run_memory(app, database_path):
                             ),
                         }
                     )
-        return jsonify(
+        response = jsonify(
             {
                 "success": True,
                 "authority": "observations_only",
@@ -151,3 +153,5 @@ def register_run_memory(app, database_path):
                 "offset": offset,
             }
         )
+        response.headers["Cache-Control"] = "no-store"
+        return response

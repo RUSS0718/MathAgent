@@ -54,6 +54,19 @@ def route_summary(state):
         "evaluations": [{
             "route_id": key, "input_hash": item.get("input_hash"), "current": current(item),
             "hard_gate": current(item) and item.get("hard_gate") is True,
+            "memory_hits": [{field: hit[field] for field in (
+                "record_id", "source_run_id", "outcome", "use", "review_status", "authority",
+                "imported_from",
+            ) if field in hit} for hit in item.get("snapshot", {}).get("memory_hits", [])
+                if isinstance(hit, dict)],
+            "population_memory_cost": {
+                key: value for key, value in item.get("snapshot", {}).get(
+                    "population_memory_cost", {}
+                ).items() if key in {
+                    "status", "call_count", "estimated_tokens", "additional_utf8_bytes",
+                    "estimator_versions",
+                }
+            },
             "vector": {**_numbers(item.get("vector", {}), (
                 "verified_gain", "evidence_quality", "novelty", "cost", "http_attempts", "tool_calls", "wall_time_seconds")),
                        "cost_known": item.get("vector", {}).get("cost_known") is True},

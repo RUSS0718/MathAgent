@@ -13,7 +13,9 @@ import AgentTimeline from './AgentTimeline.vue'
 import ReportSection from './ReportSection.vue'
 import FormalVerificationSection from './FormalVerificationSection.vue'
 import FaithfulMemorySection from './FaithfulMemorySection.vue'
-import type { PopulationMemoryResponse, RunMemoryResponse } from '../api/memory.schemas'
+import GoalCacheSection from './GoalCacheSection.vue'
+import FaithfulInterventionSection from './FaithfulInterventionSection.vue'
+import type { PopulationMemoryControlResponse, PopulationMemoryResponse, RunMemoryResponse } from '../api/memory.schemas'
 import PresentationSection from './PresentationSection.vue'
 import { isApiError } from '../api/errors'
 import PageFrame from './ui/PageFrame.vue'
@@ -28,6 +30,7 @@ const report = ref<JobReport | null>(null)
 type MemoryResult<T> = { status: 'loading' | 'unavailable' | 'error' } | { status: 'available'; data: T }
 const runMemory = ref<MemoryResult<RunMemoryResponse>>({ status: 'unavailable' })
 const populationMemory = ref<MemoryResult<PopulationMemoryResponse>>({ status: 'unavailable' })
+const populationMemoryControl = ref<MemoryResult<PopulationMemoryControlResponse & { sessionId?: string }>>({ status: 'unavailable' })
 const recovery = computed(() => report.value?.solver?.solver?.recovery)
 const notice = ref('')
 const connected = ref(false)
@@ -54,18 +57,21 @@ async function refresh(): Promise<void> {
   const generation = ++memoryGeneration
   runMemory.value = { status: 'loading' }
   populationMemory.value = { status: 'loading' }
+  populationMemoryControl.value = { status: 'loading' }
   loading.value = true
   try {
     const currentJob = jobs.observe(await api.getJob(props.jobId))
     if (generation !== memoryGeneration) return
-    const [loadedReport, loadedRunMemory, loadedPopulationMemory] = await Promise.allSettled([
+    const [loadedReport, loadedRunMemory, loadedPopulationMemory, loadedPopulationMemoryControl] = await Promise.allSettled([
       api.jobReport(props.jobId),
       api.runMemory(props.jobId),
       api.populationMemory(currentJob.sessionId),
+      api.populationMemoryControl(currentJob.sessionId),
     ])
     if (generation !== memoryGeneration) return
     runMemory.value = memoryResult(loadedRunMemory)
     populationMemory.value = memoryResult(loadedPopulationMemory)
+    populationMemoryControl.value = memoryResult(loadedPopulationMemoryControl)
     if (loadedReport.status === 'rejected') throw loadedReport.reason
     report.value = loadedReport.value
     notice.value = ''
@@ -73,6 +79,7 @@ async function refresh(): Promise<void> {
     if (generation !== memoryGeneration) return
     if (runMemory.value.status === 'loading') runMemory.value = { status: 'error' }
     if (populationMemory.value.status === 'loading') populationMemory.value = { status: 'error' }
+    if (populationMemoryControl.value.status === 'loading') populationMemoryControl.value = { status: 'error' }
     notice.value = error instanceof Error ? error.message : '报告 unavailable（不可用）'
   }
   finally { if (generation === memoryGeneration) loading.value = false }
@@ -123,7 +130,9 @@ onUnmounted(() => { disposed = true; memoryGeneration += 1; clearTimeout(reportT
     </section>
     <div v-if="loading && !report" class="loading-state" role="status" aria-busy="true">正在读取运行报告…<div v-for="n in 3" :key="n" class="skeleton"></div></div>
     <section v-else-if="!report" class="empty-state"><h2>报告当前不可用</h2><p>请刷新重试，尚不能判断运行成功。</p></section>
-    <FaithfulMemorySection :run-memory="runMemory" :population-memory="populationMemory" />
+    <FaithfulMemorySection :run-memory="runMemory" :population-memory="populationMemory" :population-memory-control="populationMemoryControl" />
+    <GoalCacheSection v-if="job?.sessionId" :session-id="job.sessionId" />
+    <FaithfulInterventionSection :job-id="jobId" :job-status="job?.status ?? 'unknown'" :refresh-token="job?.events.length ?? 0" />
     <template v-if="report">
       <StarRunReview :report="report" :job-id="jobId" />
       <RoutePanel v-if="report.solver?.solver?.progress?.routes" :routes="report.solver.solver.progress.routes" />

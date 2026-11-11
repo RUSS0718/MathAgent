@@ -30,6 +30,7 @@ def pending_call(run):
         "call_audit", "call_activity", "session_recorded", "call_retry_authorized",
         "session_started", "transport_selected", "transport_rejected",
         "context_pack_measured", "context_capacity_rejected",
+        "population_memory_cost_measured",
     }
     if any(event["state_revision"] > record["request_revision"]
            and event["type"] not in audit for event in run["events"]):
@@ -159,6 +160,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "schema_fingerprint",
             "input_fingerprint",
             "activity_observer",
+            "_population_memory_cost_observer",
         }
         safe_request = {
             key: deepcopy(value) for key, value in prepared.items() if key not in excluded
@@ -186,6 +188,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "run_id": run["run_id"],
             "plan_version": latest["state"].get("plan_version"),
             "attempt_index": latest["state"].get("attempt_index"),
+            "route_id": latest["state"].get("active_route_id"),
             "consumed_receipt_ids": [
                 receipt["receipt_id"]
                 for receipt in receipts
@@ -266,6 +269,18 @@ def dispatch(harness, run, operation, request, session_dispatch):
                 return pack
 
             prepared["_context_admission"] = admit_context
+
+        def observe_population_memory_cost(cost, _request):
+            if not isinstance(cost, Mapping):
+                return
+            record["population_memory_cost"] = dict(cost)
+            _save(
+                harness, run, record, event_type="population_memory_cost_measured",
+                event_fields={"cost_status": cost.get("status"),
+                              "estimator_version": cost.get("estimator_version")},
+            )
+
+        prepared["_population_memory_cost_observer"] = observe_population_memory_cost
 
         def observe_transport(decision, _request):
             latest = harness.get_run(run["run_id"])

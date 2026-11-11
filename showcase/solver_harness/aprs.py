@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from copy import deepcopy
 from typing import Any
 
 from .routes import POLICY_VERSION
+
+_ROUTE_COST_FIELDS = (
+    "charged_tokens", "logical_calls", "http_attempts", "tool_calls",
+    "tool_wall_time_seconds", "wall_time_seconds",
+)
+_ROUTE_STOP_STATES = {"stalled", "completed", "terminated", "pruned"}
 
 
 def _hash(value: Any) -> str:
@@ -110,6 +117,120 @@ def verified_gain(state: dict[str, Any]) -> list[str]:
     return sorted(credit)
 
 
+def _route_cost_delta(start, end):
+    """Compute only costs proven by both route-boundary ledger snapshots."""
+    costs = {}
+    if not isinstance(start, dict) or not isinstance(end, dict):
+        return {key: None for key in _ROUTE_COST_FIELDS}
+    if not any(key in start for key in _ROUTE_COST_FIELDS):
+        return {key: None for key in _ROUTE_COST_FIELDS}
+    unknown = False
+    for key in ("unknown_attempts", "unresolved_attempts", "unknown_tool_calls", "reserved_tokens"):
+        before, after = start.get(key, 0), end.get(key, 0)
+        if (type(before) not in (int, float) or type(after) not in (int, float)
+                or not math.isfinite(before) or not math.isfinite(after) or after > before):
+            unknown = True
+    before_unknown = start.get("provider_unknown_fields", {})
+    after_unknown = end.get("provider_unknown_fields", {})
+    if isinstance(before_unknown, dict) and isinstance(after_unknown, dict):
+        for key, count in after_unknown.items():
+            prior = before_unknown.get(key, 0)
+            if (type(prior) is not int or type(count) is not int or count > prior):
+                unknown = True
+    elif before_unknown or after_unknown:
+        unknown = True
+    for key in _ROUTE_COST_FIELDS:
+        before, after = start.get(key), end.get(key)
+        if (type(before) in (int, float) and type(after) in (int, float)
+                and math.isfinite(before) and math.isfinite(after)
+                and before >= 0 and after >= before):
+            costs[key] = after - before
+        else:
+            costs[key] = None
+    return {key: None for key in _ROUTE_COST_FIELDS} if unknown else costs
+
+
+def _frozen_route_snapshot(state, route_id):
+    """Find the first persisted APRS input recorded after this route stopped."""
+    for group in state.get("route_evaluations", []):
+        for evaluation in group.get("evaluations", []):
+            snapshot = evaluation.get("snapshot")
+            if (isinstance(snapshot, dict) and snapshot.get("route_id") == route_id
+                    and snapshot.get("route_status") in _ROUTE_STOP_STATES):
+                return snapshot
+    return None
+
+
+def _memory_hits(state):
+    """Keep bounded source identity for advisory hits, without their content."""
+    advisory = state.get("population_memory_advisory")
+    if not isinstance(advisory, dict) or advisory.get("authority") != "advisory_only":
+        return []
+    hits = []
+    for item in advisory.get("observations", []):
+        if not isinstance(item, dict) or not isinstance(item.get("record_id"), str):
+            continue
+        provenance = item.get("provenance")
+        source_run_id = provenance.get("source_run_id") if isinstance(provenance, dict) else None
+        if not isinstance(source_run_id, str) or not source_run_id:
+            continue
+        hit = {
+            "record_id": item["record_id"],
+            "source_run_id": source_run_id,
+            "outcome": item.get("outcome"),
+            "use": item.get("use"),
+            "review_status": item.get("review_status"),
+            "authority": "advisory_only",
+        }
+        imported = provenance.get("imported_from")
+        if isinstance(imported, dict) and isinstance(imported.get("record_id"), str):
+            hit["imported_from"] = {"record_id": imported["record_id"]}
+        hits.append(hit)
+    return hits
+
+
+def _population_memory_cost(state, route_id):
+    """Aggregate only this route's prompt-size estimates, preserving unknowns."""
+    records = [
+        call["population_memory_cost"]
+        for call in state.get("calls", {}).values()
+        if isinstance(call, dict) and call.get("route_id") == route_id
+        and isinstance(call.get("population_memory_cost"), dict)
+    ]
+    base = {
+        "status": "not_injected" if not records else "estimated",
+        "call_count": len(records),
+        "estimated_tokens": 0 if not records else None,
+        "additional_utf8_bytes": 0 if not records else None,
+        "estimator_versions": sorted({
+            item["estimator_version"] for item in records
+            if isinstance(item.get("estimator_version"), str)
+        }),
+    }
+    if not records:
+        advisory = state.get("population_memory_advisory")
+        if (isinstance(advisory, dict) and advisory.get("authority") == "advisory_only"
+                and advisory.get("observations")):
+            return {**base, "status": "unknown", "estimated_tokens": None,
+                    "additional_utf8_bytes": None}
+        return base
+    if any(
+        item.get("status") != "estimated"
+        or type(item.get("estimated_tokens")) is not int
+        or item["estimated_tokens"] < 0
+        or type(item.get("additional_utf8_bytes")) is not int
+        or item["additional_utf8_bytes"] < 0
+        or not isinstance(item.get("estimator_version"), str)
+        for item in records
+    ) or len(base["estimator_versions"]) != 1:
+        return {**base, "status": "unknown"}
+    return {
+        **base,
+        "estimated_tokens": sum(item["estimated_tokens"] for item in records),
+        "additional_utf8_bytes": sum(item["additional_utf8_bytes"] for item in records),
+    }
+
+
 def rater_snapshot(state: dict[str, Any], route: dict[str, Any]) -> dict[str, Any]:
     current_credit = verified_gain(state)
     gain = sorted(set(current_credit) - set(route.get("credit_at_start", [])))
@@ -124,12 +245,9 @@ def rater_snapshot(state: dict[str, Any], route: dict[str, Any]) -> dict[str, An
     }
     budget = state.get("route_budget", {}).get("current_snapshot") or {}
     baseline = route.get("budget_at_start") or {}
-    unknown = bool(budget.get("unknown_attempts") or budget.get("unresolved_attempts")
-                   or budget.get("unknown_tool_calls") or budget.get("reserved_tokens"))
-    costs = {}
-    for key in ("charged_tokens", "logical_calls", "http_attempts", "tool_calls", "tool_wall_time_seconds", "wall_time_seconds"):
-        current, start = budget.get(key), baseline.get(key, 0)
-        costs[key] = max(0, current - start) if not unknown and current is not None and start is not None else None
+    frozen = _frozen_route_snapshot(state, route.get("route_id"))
+    costs = (deepcopy(frozen.get("consumed_resources", {})) if frozen is not None
+             else _route_cost_delta(baseline, budget))
     actual_cost = costs["charged_tokens"]
     return {
         "run_id": state.get("run_id"),
@@ -145,13 +263,15 @@ def rater_snapshot(state: dict[str, Any], route: dict[str, Any]) -> dict[str, An
         "cost_known": actual_cost is not None,
         "actual_cost": actual_cost,
         "consumed_resources": costs,
-        "cost_basis": "route_delta" if baseline else "run_cumulative",
+        "cost_basis": "frozen_route_boundary" if frozen is not None else "route_delta",
         "route_status": route.get("status"),
         "needs_reevaluation": route.get("needs_reevaluation") is True,
         "unknown_observations": deepcopy(route.get("unknown_observations") or []),
         "remaining_budget": deepcopy(budget),
         "closing_reserve": deepcopy(state.get("route_budget", {}).get("closing_reserve") or {}),
         "policy_version": state.get("route_policy", {}).get("policy_version", POLICY_VERSION),
+        "memory_hits": _memory_hits(state),
+        "population_memory_cost": _population_memory_cost(state, route.get("route_id")),
     }
 
 

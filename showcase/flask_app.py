@@ -77,6 +77,8 @@ def create_app(
         SHOWCASE_EXPERIMENT_PAIR_ENABLED=False,
         SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION=None,
         SHOWCASE_PRESENTATION_ENABLED=False,
+        SHOWCASE_POPULATION_MEMORY_ENABLED=False,
+        SHOWCASE_FAITHFUL_INTERVENTION_ENABLED=False,
     )
     if config:
         app.config.from_mapping(dict(config))
@@ -138,9 +140,22 @@ def create_app(
     app.extensions["showcase_files_index"] = files_index
     register_campaigns(app, workspace_service, service, resolved_database, storage_root)
     if app.config.get("SHOWCASE_FAITHFUL_MEMORY_ENABLED") is True:
+        from .faithful_goal_cache_api import register_goal_cache_api
         from .faithful_memory_api import register_run_memory
+        from .faithful_memory_control_api import register_memory_control_api
 
+        register_goal_cache_api(app, resolved_database)
         register_run_memory(app, resolved_database)
+        register_memory_control_api(app, resolved_database)
+    if app.config.get("SHOWCASE_FAITHFUL_INTERVENTION_ENABLED") is True:
+        from .faithful_intervention_api import register_faithful_intervention_api
+        from .faithful_intervention_runtime import runtime_hooks
+
+        register_faithful_intervention_api(app, resolved_database, enabled=True)
+        estimator, executor_factory = runtime_hooks(star_pipeline, resolved_database)
+        if estimator is not None:
+            app.config["SHOWCASE_FAITHFUL_INTERVENTION_RESERVATION_ESTIMATOR"] = estimator
+            app.config["SHOWCASE_FAITHFUL_INTERVENTION_EXECUTION_FACTORY"] = executor_factory
 
     @app.before_request
     def attach_request_context() -> Response | None:
@@ -943,7 +958,9 @@ def main() -> None:
     parser.add_argument("--data-dir", default=None)
     parser.add_argument("--star-limited", action="store_true", help="Enable explicit limited STAR selection")
     parser.add_argument("--star-full", action="store_true", help="Enable full STAR presets after isolated runtime preflight; requires exact image configuration")
-    parser.add_argument("--faithful-memory-review", action="store_true", help="Expose read-only Faithful memory review")
+    parser.add_argument("--faithful-memory-review", action="store_true", help="Expose Faithful memory controls and review")
+    parser.add_argument("--faithful-population-memory", action="store_true", help="Allow explicitly enabled session observations as advisory context in STAR Runs")
+    parser.add_argument("--faithful-intervention", action="store_true", help="Expose authenticated Faithful Intervention controls")
     parser.add_argument(
         "--experiment-idempotency-lookup",
         action="store_true",
@@ -952,7 +969,11 @@ def main() -> None:
     args = parser.parse_args()
     config: dict[str, Any] = {"SHOWCASE_MODE": args.mode, "SHOWCASE_STAR_ENABLED": args.star_limited,
                               "SHOWCASE_STAR_FULL_ENABLED": args.star_full,
-                              "SHOWCASE_FAITHFUL_MEMORY_ENABLED": args.faithful_memory_review,
+                              "SHOWCASE_FAITHFUL_MEMORY_ENABLED": (
+                                  args.faithful_memory_review or args.faithful_population_memory
+                              ),
+                              "SHOWCASE_POPULATION_MEMORY_ENABLED": args.faithful_population_memory,
+                              "SHOWCASE_FAITHFUL_INTERVENTION_ENABLED": args.faithful_intervention,
                               "SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED": args.experiment_idempotency_lookup}
     if args.data_dir:
         config["SHOWCASE_DATA_DIR"] = args.data_dir

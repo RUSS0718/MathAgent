@@ -1,12 +1,43 @@
 <script setup lang="ts">
-import type { PopulationMemoryResponse, RunMemoryResponse } from '../api/memory.schemas'
+import { ref, watch } from 'vue'
+import { isApiError } from '../api/errors'
+import { api } from '../api/client'
+import type { PopulationMemoryControlResponse, PopulationMemoryResponse, RunMemoryResponse } from '../api/memory.schemas'
 
 type MemoryResult<T> = { status: 'loading' | 'unavailable' | 'error' } | { status: 'available'; data: T }
+type SessionPopulationMemory = PopulationMemoryControlResponse & { sessionId?: string }
 
 const props = defineProps<{
   runMemory: MemoryResult<RunMemoryResponse>
   populationMemory: MemoryResult<PopulationMemoryResponse>
+  populationMemoryControl: MemoryResult<SessionPopulationMemory>
 }>()
+
+const injectionEnabled = ref(false)
+const injectionPending = ref(false)
+const injectionUnavailable = ref(false)
+const injectionError = ref('')
+
+watch(() => props.populationMemoryControl, (memory) => {
+  injectionUnavailable.value = false
+  injectionError.value = ''
+  if (memory.status === 'available') injectionEnabled.value = memory.data.injection_enabled
+}, { immediate: true })
+
+async function updateInjection(enabled: boolean): Promise<void> {
+  if (props.populationMemoryControl.status !== 'available' || !props.populationMemoryControl.data.sessionId) return
+  injectionPending.value = true
+  injectionError.value = ''
+  try {
+    const result = await api.setPopulationMemoryInjection(props.populationMemoryControl.data.sessionId, enabled)
+    injectionEnabled.value = result.injection_enabled
+  } catch (error) {
+    if (isApiError(error) && error.status === 404) injectionUnavailable.value = true
+    injectionError.value = error instanceof Error ? `保存注入设置失败：${error.message}` : '保存注入设置失败；服务端状态无法确认。'
+  } finally {
+    injectionPending.value = false
+  }
+}
 
 const runFields = [
   ['run_id', 'Run ID'],
@@ -32,7 +63,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function evidenceItems(value: unknown): Record<string, unknown>[] {
   if (Array.isArray(value)) return value.filter(isRecord)
   if (!isRecord(value)) return []
-  if ('evidence_level' in value || 'result_id' in value) return [value]
+  if (['evidence_level', 'grade', 'id', 'evidence_id', 'result_id'].some(key => key in value)) return [value]
   return Object.values(value).filter(isRecord)
 }
 
@@ -45,18 +76,18 @@ function hasEvidence(value: unknown): boolean {
 }
 
 function evidenceLabel(evidence: Record<string, unknown>, index: number): string {
-  const id = evidence.result_id
+  const id = evidence.result_id ?? evidence.id ?? evidence.evidence_id
   return id === undefined || id === null ? `证据 ${index + 1}` : `证据 ${index + 1} · ${display(id)}`
 }
 
 function evidenceKey(evidence: Record<string, unknown>, index: number): string {
-  const id = evidence.result_id
+  const id = evidence.result_id ?? evidence.id ?? evidence.evidence_id
   return id === undefined || id === null ? String(index) : String(id)
 }
 </script>
 
 <template>
-  <section v-if="props.runMemory.status !== 'unavailable' || props.populationMemory.status !== 'unavailable'" class="evidence-section" aria-label="运行记忆与历史路线观察">
+  <section v-if="props.runMemory.status !== 'unavailable' || props.populationMemory.status !== 'unavailable' || props.populationMemoryControl.status !== 'unavailable'" class="evidence-section" aria-label="运行记忆与历史路线观察">
     <template v-if="props.runMemory.status === 'available'">
       <h2>运行记忆</h2>
       <p>只读的本次运行状态与证据记录；展示等级不会扩大其验证范围。</p>
@@ -71,7 +102,7 @@ function evidenceKey(evidence: Record<string, unknown>, index: number): string {
       <p v-else-if="!evidenceItems(props.runMemory.data.run_memory.valid_evidence).length">有效证据记录：{{ display(props.runMemory.data.run_memory.valid_evidence) }} · 等级：未知（未提供）</p>
       <ul v-else aria-label="有效证据记录">
         <li v-for="(evidence, index) in evidenceItems(props.runMemory.data.run_memory.valid_evidence)" :key="evidenceKey(evidence, index)">
-          {{ evidenceLabel(evidence, index) }} · 等级：{{ display(evidence.evidence_level) }} · 类别：{{ display(evidence.category) }}
+          {{ evidenceLabel(evidence, index) }} · 等级：{{ display(evidence.evidence_level ?? evidence.grade) }} · 类别：{{ display(evidence.category) }}
         </li>
       </ul>
     </template>
@@ -97,5 +128,40 @@ function evidenceKey(evidence: Record<string, unknown>, index: number): string {
     </section>
     <p v-else-if="props.populationMemory.status === 'loading'" role="status" aria-busy="true">正在读取历史路线观察…</p>
     <p v-else-if="props.populationMemory.status === 'error'" class="notice notice--warning" role="status">历史路线观察暂时无法读取。</p>
+    <p v-else-if="props.populationMemory.status === 'unavailable'" class="muted" role="status">此会话的历史路线观察不可用。</p>
+    <section v-if="props.populationMemoryControl.status === 'available'" aria-label="会话记忆观察与注入设置">
+      <h2>会话记忆观察</h2>
+      <p>历史记忆仅供参考，不代表已验证的数学结论或收益。</p>
+      <div v-if="props.populationMemoryControl.data.sessionId && !injectionUnavailable">
+        <label>
+          <input
+            type="checkbox"
+            :checked="injectionEnabled"
+            :disabled="injectionPending"
+            aria-describedby="population-memory-injection-help"
+            @change="updateInjection(($event.target as HTMLInputElement).checked)"
+          >
+          启用此会话的 Population Memory 注入
+        </label>
+        <p id="population-memory-injection-help" class="muted">服务端启用 Population Memory 功能时，此开关允许本会话的新 STAR Run 读取并注入历史观察，也允许记录终态 Run 的观察。关闭后，新 Run 不再读取观察，完成时关闭的 Run 不会记录观察；已开始的 Run 可能继续使用先前载入的观察。已有记录仍可显示、清理和审计。</p>
+        <p v-if="injectionPending" role="status" aria-busy="true">正在提交注入设置请求…</p>
+        <p v-else role="status" aria-live="polite">服务端报告的注入状态：{{ injectionEnabled ? '启用' : '停用' }}</p>
+        <p v-if="injectionError" class="notice notice--warning" role="alert">{{ injectionError }}</p>
+      </div>
+      <p v-else class="notice notice--warning" role="status">此会话的记忆注入控制不可用。</p>
+      <p v-if="!props.populationMemoryControl.data.observations.length" class="muted" role="status">没有可显示的记忆观察。</p>
+      <article v-for="observation in props.populationMemoryControl.data.observations" :key="observation.record_id">
+        <dl class="data-list">
+          <dt>结果观察</dt><dd>{{ display(observation.observation.outcome) }}</dd>
+          <dt>适用范围</dt><dd>{{ display(observation.observation.applicability) }}</dd>
+          <dt>版本</dt><dd>{{ display(observation.observation.versions) }}</dd>
+          <dt>成本观察</dt><dd>{{ display(observation.observation.cost) }}</dd>
+          <dt>来源记录</dt><dd>{{ display(observation.provenance) }}</dd>
+        </dl>
+      </article>
+    </section>
+    <p v-if="props.populationMemoryControl.status === 'loading'" role="status" aria-busy="true">正在读取会话记忆控制…</p>
+    <p v-else-if="props.populationMemoryControl.status === 'error'" class="notice notice--warning" role="status">会话记忆控制暂时无法读取。</p>
+    <p v-else-if="props.populationMemoryControl.status === 'unavailable'" class="muted" role="status">会话记忆注入控制不可用。</p>
   </section>
 </template>

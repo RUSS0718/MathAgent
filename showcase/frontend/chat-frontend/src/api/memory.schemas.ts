@@ -1,5 +1,13 @@
 import { z } from 'zod'
 
+const runEvidenceSchema = z.object({
+  result_id: z.string().optional(),
+  category: z.string().optional(),
+  evidence_level: z.string().optional(),
+  source: z.unknown().optional(),
+  obligation_id: z.string().optional(),
+}).passthrough()
+
 const runMemorySchema = z.object({
   run_id: z.string(),
   source: z.string().nullable(),
@@ -9,7 +17,7 @@ const runMemorySchema = z.object({
   plan_version: z.unknown(),
   graph_version: z.unknown(),
   budget: z.unknown(),
-  valid_evidence: z.unknown(),
+  valid_evidence: z.array(runEvidenceSchema),
   invalidated_count: z.number().int().nonnegative(),
 }).passthrough()
 
@@ -40,5 +48,37 @@ export const populationMemoryResponseSchema = z.object({
   offset: z.number().int().nonnegative(),
 }).passthrough()
 
+export const populationMemoryControlResponseSchema = z.object({
+  success: z.literal(true),
+  authority: z.literal('observations_only'),
+  injection_enabled: z.boolean(),
+  observations: z.array(z.object({
+    record_id: z.string(),
+    observation: z.object({
+      outcome: z.unknown(),
+      applicability: z.unknown(),
+      versions: z.unknown(),
+      cost: z.unknown(),
+      content: z.unknown(),
+    }).passthrough().refine(
+      value => ['outcome', 'applicability', 'versions', 'cost', 'content'].every(field => Object.prototype.hasOwnProperty.call(value, field)),
+      { error: 'Missing population observation field' },
+    ),
+    provenance: z.unknown(),
+    authority: z.literal('historical_observation'),
+    trust: z.literal('advisory'),
+  }).passthrough().refine(
+    value => Object.prototype.hasOwnProperty.call(value, 'provenance'),
+    { error: 'Missing population observation provenance' },
+  )),
+}).passthrough()
+
+export const populationMemoryUpdateResponseSchema = z.object({
+  success: z.literal(true),
+  enabled: z.boolean(),
+  injection_enabled: z.boolean(),
+}).passthrough()
+
 export type RunMemoryResponse = z.infer<typeof runMemoryResponseSchema>
 export type PopulationMemoryResponse = z.infer<typeof populationMemoryResponseSchema>
+export type PopulationMemoryControlResponse = z.infer<typeof populationMemoryControlResponseSchema>

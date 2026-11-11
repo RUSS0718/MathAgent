@@ -86,6 +86,15 @@ class FaithfulMemoryStore:
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY(owner_id, workspace_id, scope_kind, scope_id)
                 );
+                CREATE TABLE IF NOT EXISTS faithful_memory_injection_controls (
+                    owner_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    scope_kind TEXT NOT NULL,
+                    scope_id TEXT NOT NULL,
+                    enabled INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(owner_id, workspace_id, scope_kind, scope_id)
+                );
                 CREATE TABLE IF NOT EXISTS faithful_memory_audit (
                     event_id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
@@ -152,11 +161,18 @@ class FaithfulMemoryStore:
         ]
 
     def import_observation(
-        self, record_id: str, destination: MemoryScope, *, actor_id: str
+        self,
+        record_id: str,
+        destination: MemoryScope,
+        *,
+        actor_id: str,
+        allow_cross_workspace: bool = False,
     ) -> str:
-        """Copy one observation across scopes with explicit, same-owner provenance."""
+        """Copy an observation with explicit provenance and same-owner controls."""
         if not isinstance(actor_id, str) or actor_id != destination.owner_id:
             raise ValueError("memory_import_actor_mismatch")
+        if type(allow_cross_workspace) is not bool:
+            raise ValueError("memory_import_scope_mismatch")
         with _LOCK, self._savepoint():
             row = self._connection.execute(
                 """SELECT owner_id, workspace_id, scope_kind, scope_id, payload_json
@@ -168,7 +184,8 @@ class FaithfulMemoryStore:
                 raise ValueError("memory_observation_unavailable")
             source_scope = MemoryScope(row[2], row[3], row[0], row[1])
             if (source_scope.owner_id != destination.owner_id
-                    or source_scope.workspace_id != destination.workspace_id
+                    or (source_scope.workspace_id != destination.workspace_id
+                        and not allow_cross_workspace)
                     or source_scope == destination):
                 raise ValueError("memory_import_scope_mismatch")
             if not self._enabled(source_scope) or not self._enabled(destination):
@@ -288,6 +305,38 @@ class FaithfulMemoryStore:
             self._scope_values(scope),
         ).fetchone()
         return row is None or bool(row[0])
+
+    def injection_enabled(self, scope: MemoryScope) -> bool:
+        """Require an explicit user enablement before injecting memory into a Run."""
+        row = self._connection.execute(
+            """SELECT enabled FROM faithful_memory_injection_controls
+               WHERE owner_id=? AND workspace_id=? AND scope_kind=? AND scope_id=?""",
+            self._scope_values(scope),
+        ).fetchone()
+        return row is not None and bool(row[0])
+
+    def set_injection_enabled(self, scope: MemoryScope, enabled: bool, *, actor_id: str) -> None:
+        """Set Run-injection consent without hiding or disabling stored observations."""
+        self._check_actor(scope, actor_id)
+        if type(enabled) is not bool:
+            raise ValueError("memory_control_enabled_invalid")
+        now = _utc_now()
+        with _LOCK, self._savepoint():
+            self._connection.execute(
+                """INSERT INTO faithful_memory_injection_controls(
+                       owner_id, workspace_id, scope_kind, scope_id, enabled, updated_at
+                   ) VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(owner_id, workspace_id, scope_kind, scope_id)
+                   DO UPDATE SET enabled=excluded.enabled, updated_at=excluded.updated_at""",
+                (*self._scope_values(scope), int(enabled), now),
+            )
+            self._audit(
+                scope,
+                "injection_enabled" if enabled else "injection_disabled",
+                actor_id,
+                None,
+                {"injection_only": True},
+            )
 
     def _audit(
         self,

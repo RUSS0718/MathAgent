@@ -1,11 +1,14 @@
 """S10 Run Memory is a scoped view of the authoritative persisted Job state."""
 
+import sqlite3
 import unittest
+from contextlib import closing
 from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
 from showcase.faithful_memory_api import project_run_memory
 from showcase.run_budget import RunBudgetLimits
+from showcase.solver_harness.faithful_memory import FaithfulMemoryStore, MemoryScope
 from tests.star_product_support import ACCEPT, POLISH, SOLVED, StarJobFixture
 from tests.test_faithful_s03_job import FEATURES, REPLIES, SPEC
 
@@ -72,6 +75,7 @@ class FaithfulS10RunMemoryTest(StarJobFixture, unittest.TestCase):
 
         response = self.client.get(f"/api/agent/jobs/{job_id}/memory")
         self.assertEqual(200, response.status_code, response.get_json())
+        self.assertEqual("no-store", response.headers.get("Cache-Control"))
         memory = response.get_json()["run_memory"]
         self.assertEqual(job_id, memory["run_id"])
         self.assertIsInstance(memory["state_revision"], int)
@@ -147,6 +151,65 @@ class FaithfulS10RunMemoryTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(200, response.status_code, response.get_json())
         self.assertEqual(before, response.get_json()["run_memory"])
 
+    def test_clearing_run_memory_keeps_authoritative_run_state_and_budget_ledger(self):
+        self.open_star([SOLVED, POLISH, ACCEPT], SHOWCASE_FAITHFUL_MEMORY_ENABLED=True)
+        created = self.client.post(
+            "/api/agent/jobs",
+            json={"message": "Compute 1+1", "session_id": self.session,
+                  "solver_mode": "star_limited"},
+            headers=self.headers(),
+        )
+        self.assertEqual(202, created.status_code, created.get_json())
+        run_id = created.get_json()["job_id"]
+        self.terminal(run_id)
+        scope = MemoryScope("run", run_id, "local-user", self.session)
+        with closing(sqlite3.connect(self.app.config["SHOWCASE_DATABASE_PATH"])) as db:
+            store = FaithfulMemoryStore(db)
+            store.enable_scope(scope, actor_id="local-user")
+            memory_id = store.record_observation(
+                scope,
+                {"outcome": "success", "applicability": {}, "versions": {},
+                 "cost": {}, "content": {"route_id": "historic"}},
+                provenance={"source_run_id": run_id},
+            )
+            db.commit()
+            before_state = db.execute(
+                "SELECT state_json FROM solver_states WHERE run_id=?", (run_id,)
+            ).fetchone()[0]
+            before_budget = db.execute(
+                "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
+            ).fetchone()[0]
+
+        cleared = self.client.delete(
+            f"/api/sessions/{self.session}/memory/run/{run_id}", headers=self.headers()
+        )
+        self.assertEqual(200, cleared.status_code, cleared.get_json())
+        self.assertEqual([], self.client.get(
+            f"/api/sessions/{self.session}/memory/run/{run_id}", headers=self.headers()
+        ).get_json()["observations"])
+        after_memory = self.client.get(f"/api/agent/jobs/{run_id}/memory").get_json()["run_memory"]
+        with closing(sqlite3.connect(self.app.config["SHOWCASE_DATABASE_PATH"])) as db:
+            after_state = db.execute(
+                "SELECT state_json FROM solver_states WHERE run_id=?", (run_id,)
+            ).fetchone()[0]
+            after_budget = db.execute(
+                "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
+            ).fetchone()[0]
+            entry = db.execute(
+                "SELECT state FROM faithful_memory_entries WHERE record_id=?", (memory_id,)
+            ).fetchone()
+            tombstones = db.execute(
+                "SELECT COUNT(*) FROM faithful_memory_audit WHERE record_id=? AND event='entry_cleared'",
+                (memory_id,),
+            ).fetchone()[0]
+
+        self.assertEqual(before_state, after_state)
+        self.assertEqual(before_budget, after_budget)
+        self.assertEqual("invalidated", entry[0])
+        self.assertEqual(1, tombstones)
+        self.assertEqual(run_id, after_memory["run_id"])
+        self.assertIsNotNone(after_memory["budget"])
+
     def test_population_observation_is_scoped_to_chat_session(self):
         replies = deepcopy(REPLIES)
         replies[1]["steps"][0]["method_id"] = "computation"
@@ -183,7 +246,9 @@ class FaithfulS10RunMemoryTest(StarJobFixture, unittest.TestCase):
         terminal = self.terminal(job_id)
         self.assertEqual("succeeded", terminal["status"], terminal.get("error"))
         outbound_count = len(self.outbound)
-        observed = self.client.get(f"/api/sessions/{self.session}/population-memory").get_json()
+        history = self.client.get(f"/api/sessions/{self.session}/population-memory")
+        self.assertEqual("no-store", history.headers.get("Cache-Control"))
+        observed = history.get_json()
         self.assertEqual("observations_only", observed["authority"])
         self.assertEqual(job_id, observed["observations"][0]["source_run_id"])
         self.assertTrue(observed["observations"][0]["route_id"])

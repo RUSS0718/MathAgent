@@ -8,7 +8,9 @@ import { filesResponseSchema, uploadResponseSchema } from './files.schemas'
 import { reportSchema } from './reports.schemas'
 import { capabilitiesResponseSchema } from './capabilities.schemas'
 import { presentationResponseSchema, type PresentationMode } from './presentation.schemas'
-import { populationMemoryResponseSchema, runMemoryResponseSchema } from './memory.schemas'
+import { populationMemoryControlResponseSchema, populationMemoryResponseSchema, populationMemoryUpdateResponseSchema, runMemoryResponseSchema } from './memory.schemas'
+import { goalCacheResponseSchema } from './goal-cache.schemas'
+import { interventionMutationSchema, interventionsResponseSchema, type CreateInterventionActionInput, type CreateInterventionHypothesisInput, type ReserveInterventionPairInput } from './interventions.schemas'
 
 let csrfToken = ''
 export function setCsrfToken(value: string): void { csrfToken = value }
@@ -64,5 +66,28 @@ export const api = {
   candidateReplay: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/candidate-replay`, {}, z.object({ evidence_kind: z.literal('replay'), run_id: z.string(), state_revision: z.number(), audit: z.record(z.string(), z.unknown()), decision: z.unknown() })),
   runMemory: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/memory`, {}, runMemoryResponseSchema),
   populationMemory: (sessionId: string) => requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/population-memory`, {}, populationMemoryResponseSchema),
+  populationMemoryControl: async (sessionId: string) => {
+    if (!sessionId) throw new ApiError({ status: 404, code: 'session_unavailable', message: '会话记忆不可用。' })
+    const data = await requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/memory/population/${encodeURIComponent(sessionId)}`, {}, populationMemoryControlResponseSchema)
+    return { ...data, sessionId }
+  },
+  setPopulationMemoryInjection: async (sessionId: string, enabled: boolean) => {
+    if (!sessionId) throw new ApiError({ status: 404, code: 'session_unavailable', message: '会话记忆不可用。' })
+    return requestJson(
+      `/api/sessions/${encodeURIComponent(sessionId)}/memory/population/${encodeURIComponent(sessionId)}/injection`,
+      { ...json({ enabled }), method: 'PUT' },
+      populationMemoryUpdateResponseSchema,
+    )
+  },
+  goalCache: (sessionId: string) => requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/goal-cache`, {}, goalCacheResponseSchema),
+  setGoalCacheEnabled: (sessionId: string, enabled: boolean) => requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/goal-cache`, { ...json({ enabled }), method: 'PUT' }, z.unknown()),
+  clearGoalCache: (sessionId: string) => requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/goal-cache`, { method: 'DELETE' }, z.unknown()),
+  interventions: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/interventions`, {}, interventionsResponseSchema),
+  requestInterventionPause: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/interventions/pause`, json({}), interventionMutationSchema),
+  createInterventionHypothesis: (jobId: string, body: CreateInterventionHypothesisInput) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/interventions/hypotheses`, json(body), interventionMutationSchema),
+  createInterventionAction: (jobId: string, body: CreateInterventionActionInput) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/interventions/actions`, json(body), interventionMutationSchema),
+  reserveInterventionPair: (jobId: string, body: ReserveInterventionPairInput) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/interventions/pairs`, json(body), interventionMutationSchema),
+  executeInterventionPair: (jobId: string, pairId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/interventions/pairs/${encodeURIComponent(pairId)}/execute`, json({}), interventionMutationSchema),
+  resumeInterventionParent: (jobId: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/interventions/resume`, { ...json({}), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   capabilities: () => requestJson('/api/capabilities', {}, capabilitiesResponseSchema),
 }
