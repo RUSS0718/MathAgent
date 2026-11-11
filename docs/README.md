@@ -6,6 +6,8 @@
 
 ## Faithful 实施入口（截至2026-11-11）
 
+- F8 真实接续修复：[新源码接续条款 v1.3](engineering/faithful-f8-real-source-continuation-20261112.md)已双轴冻结。F8-R19 已完成非法 Meta 终止修复及聚焦回归；七个首次主槽保留，仅63未派发槽待新源码门禁与glue审查后继续，跨源码比较标 not_comparable。实验与报告尚未完成，#157保持开放。
+
 - F8 真实题集接续在 [#157](https://github.com/RUSS0718/MathAgent/issues/157)：[真实试点冻结合同](engineering/faithful-f8-real-protocol-20261111.md)为 `faithful-f8-real-v1`，双轴审查问题已解除。14 题参考材料事前封存，A/B/C/G 必需主槽 56 个，D/F 为真实条件任务，E 原题目标域不支持且工具专项分开。官方重评分 unavailable；usage 缺失 observe_only。冻结不是实验完成，旧工程试点及门禁证据保持原样。
 
 - F8/#154 已按 faithful-f8-v1.1.1-engineering 达到 `engineering-preview`：[冻结合同及评审记录](engineering/faithful-f8-protocol-20261111.md)、[分层验收记录](evals/faithful-f8-20261111.md)。2026-11-11 用户明确将真人替换为 R1/R2 子智能体隔离初审、R3 核对；14 题登记 98 槽全部 not_run，28 个抽查槽各角色均 unresolved，辅助链 complete 不代表数学通过。固定 L1 25 项、71 项 F8 聚焦及七组失败见证通过，双轴问题清零；门禁源码 `e40d240`，`faithful-f8-20261111-02` 6/6 通过（1915 项、0 failure/error、42 skip、source_changed=false），42 skip 与 F6/F7 的 ID／原因一致且不计通过。首轮真实 Lean timeout 与 SQLite 锁错误保留，有界诊断通过但间歇根因未确认。核心与阶段证据包均已封存；independent_math/provider-live/自然题求解/官方重评分继续 not_run，11 个 baseline 文件只确认字节一致。
