@@ -6,6 +6,8 @@
 
 ## Faithful 实施入口（截至2026-11-11）
 
+- F7/F8 启动冻结材料：[F7 只读系统视图与深链合同](engineering/faithful-f7-contract.md)、[F8 A–G 评测协议 v1](engineering/faithful-f8-protocol-20261111.md)、[F6 42 项 skip 原因与等级覆盖审计](evals/faithful-f6-skip-audit-20261111.md)。GitHub 正式入口为 [F7 #153](https://github.com/RUSS0718/MathAgent/issues/153) 与 [F8 #154](https://github.com/RUSS0718/MathAgent/issues/154)。
+
 - F6/#152 已达到 `engineering-preview`：[任务合同](engineering/faithful-f6-contract.md)、[分层验收记录](evals/faithful-f6-20261111.md)。逐段来源定位、独立输出身份、同源 Best-Effort 交付及旧 Run 策略边界完成；门禁源码 `c1d17bc`，`faithful-f6-20261111-02` 六阶段通过（1832 项、0 failure/error、42 skip、`source_changed=false`），25 项表达/API、5 项 Chromium 和双轴修复复查通过。首轮 readiness 迟到用量间歇失败保留，根因未确认，第二轮成功不证明已修复。独立受控 rubric 为 8/10，不外推自然题质量；真实 provider、自然题及数学效果 `not_run`。下一入口 F7/#153，F8/#154 按依赖推进。
 
 - S10/F4/F5 实施与阶段验收记录：[验收报告](evals/faithful-s10-20261111.md)及[合同映射](engineering/faithful-s10-contract.md)；`faithful-s10-20261111-02` 最终门禁 6/6 阶段通过（1821 项、0 failure、0 error、42 skip、`source_changed=false`），S10 达到 `engineering-preview` 并可进入下一阶段。135 项非 Docker S10 回归、前端 46 项单测/构建、9 项 F4/F5 Playwright 用例及快速检查通过。首轮门禁 01 的前端并行端口竞态失败保留在独立证据目录并已修复。42 项 skip 未计通过；固定 Lean、provider-live、容量/SLA、自然题与独立数学效果仍按独立证据层级记录。门禁源码 hash `421b9face1da7e8aa687a67ceecc4ff31fd0db495b24ebe707136ce1398e71c6`；#130 已追加 S10 路线进展并建议下一入口 #152，#146/#150/#151 未评论或关闭。S10 已提交为 `b02f8b4`；历史门禁与 artifacts 的证据身份保持不变。
