@@ -6,7 +6,7 @@
 
 ## Faithful 实施入口（截至2026-11-11）
 
-- F8/#154 协议已冻结为 faithful-f8-v1.1.1-engineering：[冻结合同及评审记录](engineering/faithful-f8-protocol-20261111.md)。2026-11-11 用户明确替换真人为 R1/R2 子智能体独立初审、R3 裁决；辅助模型证据单列，independent_math/provider-live/自然题求解/官方重评分继续 not_run。14题试点登记98槽、抽查28槽，历史开发使用 unknown；已实现显式登记、replay、审查导入及证据包，当前阶段验收见 [F8验收记录](evals/faithful-f8-20261111.md)，最终门禁前不称F8工程退出。
+- F8/#154 已按 faithful-f8-v1.1.1-engineering 达到 `engineering-preview`：[冻结合同及评审记录](engineering/faithful-f8-protocol-20261111.md)、[分层验收记录](evals/faithful-f8-20261111.md)。2026-11-11 用户明确将真人替换为 R1/R2 子智能体隔离初审、R3 核对；14 题登记 98 槽全部 not_run，28 个抽查槽各角色均 unresolved，辅助链 complete 不代表数学通过。固定 L1 25 项、71 项 F8 聚焦及七组失败见证通过，双轴问题清零；门禁源码 `e40d240`，`faithful-f8-20261111-02` 6/6 通过（1915 项、0 failure/error、42 skip、source_changed=false），42 skip 与 F6/F7 的 ID／原因一致且不计通过。首轮真实 Lean timeout 与 SQLite 锁错误保留，有界诊断通过但间歇根因未确认。核心与阶段证据包均已封存；independent_math/provider-live/自然题求解/官方重评分继续 not_run，11 个 baseline 文件只确认字节一致。
 
 - F7/#153 已达到 `engineering-preview`：[任务合同](engineering/faithful-f7-contract.md)、[分层验收记录](evals/faithful-f7-20261111.md)。只读 Run/依赖图/F6 交付和等级、版本化段落深链与刷新/重开恢复完成；门禁源码 `1da9aee`，`faithful-f7-20261111-01` 6/6 通过（1844 项、0 failure/error、42 skip、`source_changed=false`）。37 项后端聚焦、52 项前端单测、5 项最终浏览器及真实 Lean L2/L3 专项通过，双轴问题已清零。500 节点 synthetic 三次渲染 P95 149 ms；最大真实样本仅 2 个命题，二者不混称。42 skip 与 F6 逐项一致，不计通过；11 个 baseline 文件字节一致，本轮未重新评分。F8/#154 后续已完成修订冻结，当前状态以上方 F8 入口为准。
 
