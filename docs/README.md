@@ -6,6 +6,8 @@
 
 ## Faithful 实施入口（截至2026-11-11）
 
+- [F8真实执行与故障处置](evals/faithful-f8-real-20261112.md)：19个首次主槽已保留；R19源码门禁6/6通过（1916项、42 skip），R20续审事件冲突已精确复现并最小修复，下一源码门禁及51剩余主槽待验收。真实实验尚未完成，#157开放。
+
 - F8 真实接续修复：[新源码接续条款 v1.3](engineering/faithful-f8-real-source-continuation-20261112.md)已双轴冻结。F8-R19 已完成非法 Meta 终止修复及聚焦回归；七个首次主槽保留，仅63未派发槽待新源码门禁与glue审查后继续，跨源码比较标 not_comparable。实验与报告尚未完成，#157保持开放。
 
 - F8 真实题集接续在 [#157](https://github.com/RUSS0718/MathAgent/issues/157)：[真实试点冻结合同](engineering/faithful-f8-real-protocol-20261111.md)为 `faithful-f8-real-v1`，双轴审查问题已解除。14 题参考材料事前封存，A/B/C/G 必需主槽 56 个，D/F 为真实条件任务，E 原题目标域不支持且工具专项分开。官方重评分 unavailable；usage 缺失 observe_only。冻结不是实验完成，旧工程试点及门禁证据保持原样。
