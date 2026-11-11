@@ -13,6 +13,7 @@ from showcase.presentation import (
     revalidate,
 )
 from showcase.solver_harness import SolverHarness
+from showcase.star_product_candidates import candidate_projection
 from showcase.star_product_pipeline import projection
 from tests import test_faithful_s07_graph as s07
 from tests import test_s06_presentation as s06
@@ -99,6 +100,28 @@ class FaithfulF6PresentationTest(unittest.TestCase):
         self.assertEqual(artifact["budget"], artifact["delivery"]["budget"])
         self.assertEqual(original, job)
 
+    def test_selected_candidate_uses_actual_public_projection_field_names(self):
+        job = evidence_job()
+        roots = job["result"]["solver"]["progress"]["root_obligations"]
+        roots.update({"covered": 2, "items": [{"ordinal": 1, "status": "satisfied"},
+                                              {"ordinal": 2, "status": "satisfied"}]})
+        record = {"candidate_id": "candidate-1", "version": 1, "answer_text": "1+1=2",
+                  "answer_completeness": "complete", "selection_eligible": True,
+                  "review_state": "whole_reviewed"}
+        decision = {"status": "selected", "selected_source_record": record,
+                    "excluded_candidate_ids": [], "exclusion_reasons": {}}
+        job["result"]["solver"].update(candidate_projection({"state": {
+            "candidate_registry": [record], "best_effort_decision": decision}}))
+        artifact = build_presentation(presentation_snapshot(job), "report")
+        self.assertEqual("complete", artifact["completion"])
+        self.assertTrue(artifact["delivery"]["selection"]["eligible"])
+        self.assertEqual("complete", artifact["delivery"]["selection"]["completeness"])
+        record["answer_completeness"] = "partial"
+        job["result"]["solver"].update(candidate_projection({"state": {
+            "candidate_registry": [record], "best_effort_decision": decision}}))
+        partial = build_presentation(presentation_snapshot(job), "report")
+        self.assertEqual("partial", partial["completion"])
+
     def test_claim_without_current_review_cannot_complete_or_borrow_formal_reference(self):
         job = evidence_job()
         job["result"]["verification"] = {}
@@ -159,4 +182,3 @@ class FaithfulF6OutputApiTest(unittest.TestCase):
                 self.assertNotIn("private", str(output))
         current = client.get(f"/api/agent/jobs/{job_id}").get_json()["result"]
         self.assertEqual(original, current)
-

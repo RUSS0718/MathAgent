@@ -98,13 +98,15 @@ def _selection(solver):
     if not decision:
         return None
     result = {key: decision[key] for key in ("status", "reason_codes", "termination_reason",
-              "selected_candidate_id", "selected_candidate_version", "selected_answer_artifact",
-              "evidence_grade") if key in decision}
+              "selected_candidate_id", "selected_candidate_version", "evidence_grade")
+              if key in decision}
+    if "artifact" in decision:
+        result["selected_answer_artifact"] = decision["artifact"]
     candidate = next((item for item in solver.get("candidate_history", [])
                       if item.get("candidate_id") == decision.get("selected_candidate_id")
                       and item.get("version") == decision.get("selected_candidate_version")), None)
-    result["completeness"] = candidate.get("completeness") if candidate else None
-    result["eligible"] = candidate.get("eligible", False) if candidate else False
+    result["completeness"] = candidate.get("answer_completeness") if candidate else None
+    result["eligible"] = candidate.get("selection_eligible", False) if candidate else False
     return result
 
 
