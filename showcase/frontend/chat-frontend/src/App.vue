@@ -7,6 +7,7 @@ import ChatWorkspace from './components/ChatWorkspace.vue'
 import CampaignWorkbench from './components/CampaignWorkbench.vue'
 import RunReview from './components/RunReview.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import FaithfulSystemView from './components/FaithfulSystemView.vue'
 import UiButton from './components/ui/UiButton.vue'
 import UiIcon from './components/ui/UiIcon.vue'
 
@@ -28,6 +29,7 @@ onUnmounted(() => globalThis.removeEventListener('popstate', navigate))
   <main v-if="!ready" class="startup-state"><div class="brand-block"><span class="brand-mark"><UiIcon name="sigma" /></span><h1>MathAgent</h1></div><template v-if="error"><p class="notice notice--error" role="alert">{{ error }}</p><UiButton variant="primary" @click="initialize">重新连接</UiButton></template><div v-else role="status" aria-busy="true"><p>正在连接本机工作区…</p><div v-for="n in 3" :key="n" class="skeleton"></div></div></main>
   <CampaignWorkbench v-else-if="route.view === 'campaigns'" />
   <RunReview v-else-if="route.view === 'run'" :key="route.runId" :job-id="route.runId!" />
+  <FaithfulSystemView v-else-if="route.view === 'system'" />
   <SettingsPanel v-else-if="route.view === 'settings'" />
   <ChatWorkspace v-else :key="route.path" :path="route.path" :session-id="route.sessionId" />
 </template>

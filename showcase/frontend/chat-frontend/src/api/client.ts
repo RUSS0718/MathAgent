@@ -11,6 +11,8 @@ import { presentationResponseSchema, type PresentationMode } from './presentatio
 import { populationMemoryControlResponseSchema, populationMemoryResponseSchema, populationMemoryUpdateResponseSchema, runMemoryResponseSchema } from './memory.schemas'
 import { goalCacheResponseSchema } from './goal-cache.schemas'
 import { interventionMutationSchema, interventionsResponseSchema, type CreateInterventionActionInput, type CreateInterventionHypothesisInput, type ReserveInterventionPairInput } from './interventions.schemas'
+import { systemRunResponseSchema, systemRunsResponseSchema, type SystemRunResponse } from './system.schemas'
+import type { SystemDeepLinkState } from '../runtime/navigation/system-deeplink'
 
 let csrfToken = ''
 export function setCsrfToken(value: string): void { csrfToken = value }
@@ -90,4 +92,15 @@ export const api = {
   executeInterventionPair: (jobId: string, pairId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/interventions/pairs/${encodeURIComponent(pairId)}/execute`, json({}), interventionMutationSchema),
   resumeInterventionParent: (jobId: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/interventions/resume`, { ...json({}), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   capabilities: () => requestJson('/api/capabilities', {}, capabilitiesResponseSchema),
+  faithfulRuns: (limit = 50, offset = 0) => requestJson(`/api/faithful/runs?limit=${limit}&offset=${offset}`, {}, systemRunsResponseSchema),
+  faithfulRun: (state: SystemDeepLinkState) => {
+    const query = new URLSearchParams({ scheme: 'f7-deeplink-v1' })
+    if (state.mode) query.set('mode', state.mode)
+    if (state.outputId) query.set('output', state.outputId)
+    if (state.artifactId) query.set('artifact', state.artifactId)
+    if (state.graphVersion !== undefined) query.set('graph', String(state.graphVersion))
+    if (state.nodeId) query.set('node', state.nodeId)
+    if (state.paragraphId) query.set('paragraph', state.paragraphId)
+    return requestJson(`/api/faithful/runs/${encodeURIComponent(state.runId)}?${query}`, {}, systemRunResponseSchema)
+  },
 }
