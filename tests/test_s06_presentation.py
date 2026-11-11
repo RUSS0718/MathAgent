@@ -13,7 +13,7 @@ from showcase.final_evidence import artifact_identity, bind_verification
 from showcase.flask_app import create_app
 from showcase.presentation import build_presentation, presentation_snapshot, revalidate
 from showcase.run_budget import RunBudgetLimits
-from tests.star_product_support import ACCEPT, StarJobFixture
+from tests.star_product_support import ACCEPT, SOLVED, StarJobFixture
 from tests.test_faithful_s03_job import (
     CAPACITY_POLICY,
     ENDPOINT,
@@ -241,6 +241,26 @@ class PublicPresentationApiTest(unittest.TestCase):
 
 
 class CurrentSolverPresentationTest(StarJobFixture, unittest.TestCase):
+    def test_budget_stopped_real_candidate_is_partial_and_output_adds_no_model_call(self):
+        self.open_star([SOLVED],
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=1, max_http_attempts=1, max_tool_calls=0),
+            SHOWCASE_PRESENTATION_ENABLED=True)
+        created = self.client.post("/api/agent/jobs", json={
+            "message": "1+1", "session_id": self.session,
+            "solver_mode": "star_limited_best_effort", "presentation_mode": "report",
+        }, headers=self.headers())
+        self.assertEqual(202, created.status_code, created.get_json())
+        job_id = created.get_json()["job_id"]
+        self.assertEqual("failed", self.terminal(job_id)["status"])
+        response = self.client.post(f"/api/agent/jobs/{job_id}/report", json={}, headers=self.headers())
+        self.assertEqual(200, response.status_code, response.get_json())
+        artifact = response.get_json()["presentation"]
+        self.assertEqual("partial", artifact["completion"])
+        self.assertEqual("candidate_selected", artifact["delivery"]["selection"]["status"])
+        self.assertTrue(artifact["delivery"]["selection"]["eligible"])
+        self.assertEqual(artifact["budget"], artifact["delivery"]["budget"])
+        self.assertEqual(1, len(self.outbound))
+
     def test_public_artifact_saves_with_authoritative_graph_and_specification_versions(self):
         self.enterContext(patch.dict(os.environ, {"INTERN_API_BASE": ENDPOINT}))
         self.open_star(SPEC_REPLIES,
