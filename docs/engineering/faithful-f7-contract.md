@@ -1,6 +1,6 @@
 # F7 公开系统视图与可恢复深链合同
 
-状态：范围与 URL scheme v1 于 2026-11-11 冻结；实现尚未验收。GitHub 合同：[F7 #153](https://github.com/RUSS0718/MathAgent/issues/153)。
+状态：范围与 URL scheme v1 于 2026-11-11 冻结；工程退出已完成，达到 `engineering-preview`。结果、源码 SHA 和证据见 [F7 分层验收记录](../evals/faithful-f7-20261111.md)。GitHub 合同：[F7 #153](https://github.com/RUSS0718/MathAgent/issues/153)。
 
 ## 范围
 
