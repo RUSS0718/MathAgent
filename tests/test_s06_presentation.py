@@ -268,6 +268,15 @@ class CurrentSolverPresentationTest(StarJobFixture, unittest.TestCase):
                 self.client.get_cookie("auth_session").value).user_id,
             job_id=job_id, mode="teach", source_fingerprint=artifact["source_fingerprint"],
         ))
+        deadline = artifact["budget"]["deadline_at"]
+        calls = len(self.outbound)
+        with patch("showcase.run_budget.time.time", return_value=deadline + 1):
+            expired = self.client.post(f"/api/agent/jobs/{job_id}/teach", json={}, headers=self.headers())
+        self.assertEqual(200, expired.status_code, expired.get_json())
+        expired_output = expired.get_json()["presentation"]
+        self.assertEqual(deadline, expired_output["budget"]["deadline_at"])
+        self.assertFalse(expired_output["output_request"]["solver_resumed"])
+        self.assertEqual(calls, len(self.outbound))
 
     def test_evidence_invalidation_marks_history_without_mutating_old_artifact(self):
         self.open_star([
