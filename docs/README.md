@@ -6,6 +6,8 @@
 
 ## Faithful 实施入口（截至2026-11-11）
 
+- F8/#154 协议已冻结为 faithful-f8-v1.1-engineering：[冻结合同及评审记录](engineering/faithful-f8-protocol-20261111.md)。2026-11-11 用户明确替换真人为 R1/R2 子智能体独立初审、R3 裁决；辅助模型证据单列，independent_math/provider-live/自然题求解/官方重评分继续 not_run。14题试点登记98槽、抽查28槽，历史开发使用 unknown；开始最小登记、replay与证据包工程实现，完成前不称F8已验收。
+
 - F7/#153 已达到 `engineering-preview`：[任务合同](engineering/faithful-f7-contract.md)、[分层验收记录](evals/faithful-f7-20261111.md)。只读 Run/依赖图/F6 交付和等级、版本化段落深链与刷新/重开恢复完成；门禁源码 `1da9aee`，`faithful-f7-20261111-01` 6/6 通过（1844 项、0 failure/error、42 skip、`source_changed=false`）。37 项后端聚焦、52 项前端单测、5 项最终浏览器及真实 Lean L2/L3 专项通过，双轴问题已清零。500 节点 synthetic 三次渲染 P95 149 ms；最大真实样本仅 2 个命题，二者不混称。42 skip 与 F6 逐项一致，不计通过；11 个 baseline 文件字节一致，本轮未重新评分。F8/#154 协议仍为 `review_draft`，评审冻结前不启动实现。
 
 - F7/F8 范围与协议材料：[F7 只读系统视图与深链合同](engineering/faithful-f7-contract.md)、[F8 A–G 评测协议 v1](engineering/faithful-f8-protocol-20261111.md)、[F6 42 项 skip 原因与等级覆盖审计](evals/faithful-f6-skip-audit-20261111.md)。GitHub 正式入口为 [F7 #153](https://github.com/RUSS0718/MathAgent/issues/153) 与 [F8 #154](https://github.com/RUSS0718/MathAgent/issues/154)。
