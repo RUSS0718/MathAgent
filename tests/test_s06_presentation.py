@@ -2,6 +2,7 @@
 
 import copy
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -13,6 +14,9 @@ from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
 from showcase.presentation import build_presentation, presentation_snapshot, revalidate
 from tests.star_product_support import ACCEPT, StarJobFixture
+from tests.test_faithful_s03_job import (
+    CAPACITY_POLICY, ENDPOINT, FEATURES as SPEC_FEATURES, REPLIES as SPEC_REPLIES, SPEC,
+)
 from tests.test_star_product_planning import FEATURES
 from tests.test_star_product_tools import NEED_PLAN
 
@@ -229,6 +233,34 @@ class PublicPresentationApiTest(unittest.TestCase):
 
 
 class CurrentSolverPresentationTest(StarJobFixture, unittest.TestCase):
+    def test_public_artifact_saves_with_authoritative_graph_and_specification_versions(self):
+        self.enterContext(patch.dict(os.environ, {"INTERN_API_BASE": ENDPOINT}))
+        self.open_star(SPEC_REPLIES,
+            SHOWCASE_STAR_FEATURES={**SPEC_FEATURES, "proof_graph": True},
+            SHOWCASE_STAR_CONTEXT_CAPACITY=CAPACITY_POLICY,
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8),
+            SHOWCASE_PRESENTATION_ENABLED=True)
+        headers = self.headers()
+        created = self.client.post("/api/agent/jobs", json={
+            "message": "1+1", "session_id": self.session, "solver_mode": "star_limited",
+            "presentation_mode": "teach", "problem_spec": SPEC,
+        }, headers=headers)
+        self.assertEqual(202, created.status_code, created.get_json())
+        job_id = created.get_json()["job_id"]
+        self.assertEqual("succeeded", self.terminal(job_id)["status"], self.terminal(job_id))
+
+        response = self.client.post(f"/api/agent/jobs/{job_id}/teach", json={}, headers=self.headers())
+
+        self.assertEqual(200, response.status_code, response.get_json())
+        artifact = response.get_json()["presentation"]
+        self.assertEqual(1, artifact["source_versions"]["specification_version"])
+        self.assertEqual(0, artifact["source_versions"]["graph_version"])
+        self.assertEqual(artifact, self.app.extensions["showcase_workspace_service"].get_presentation(
+            user_id=self.app.extensions["loopback_store"].get(
+                self.client.get_cookie("auth_session").value).user_id,
+            job_id=job_id, mode="teach", source_fingerprint=artifact["source_fingerprint"],
+        ))
+
     def test_evidence_invalidation_marks_history_without_mutating_old_artifact(self):
         self.open_star([
             NEED_PLAN,
