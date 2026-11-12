@@ -41,3 +41,11 @@
 状态：frozen。2026-11-12 Standards（Galileo）与Spec（Boyle）均确认本增量文本无阻塞，可冻结；不代替glue复查、新源码门禁及派发准入。仅澄清原Git文本blob与原Windows工作树的字节表示，不改变v1.4的样本、预算、原始结果或派发条件。原315ae9b门禁591个runtime成员中37个raw hash与Git blob不同，其中6个为混合LF/CRLF。已封存这37个文件的工作树字节前像：每个raw hash必须逐字节匹配旧门禁成员；仅把CRLF转换为LF后必须逐字节等于原Git blob的相同转换结果，其他字节不得改变。证据`artifacts/faithful-f8-real-20261111/historical-source-preimages-01/attestation.json`，SHA256 `ef68b934c15c815dfb049fb8df5dfef1ba03e55a222f4880484cf57fab00e1b4`。
 
 核验器必须同时保留原raw hash、Git blob hash和转换后的hash，并核对原revision、完整成员集合及门禁source fingerprint。对上述37个成员，归档前像缺失、raw hash不同、Git身份不同或除CRLF/LF之外任何字节变化均拒绝；不得从当前产品源码推断整套旧源码身份。其他成员仍需原Git字节直接匹配旧门禁。历史协议/prompt的Git表示仅可用原blob或纯LF/CRLF双向转换精确重建其原冻结hash，不能忽略hash或接受任意规范化文本。新派发仍核验当前实际磁盘字节与新门禁，不采用该历史表示规则。
+
+### 主目录工作台源码接续增量（2026-11-12）
+
+状态：frozen。2026-11-12 Standards（Zeno）与Spec（Halley）确认本增量无阻塞；正式companion及manifest仍须准入核验。用户将唯一活跃工作树改为`D:\project\工程化MathAgent\Challenge-Cup-2026`，分支`feat/conversation-workbench`，交付源码`050fe86`；原C盘工作树只作只读归档来源。仅复制ignored F8证据和执行接缝，不恢复旧工作树，不修改归档原件、旧数据库或41份首次记录。29个未派发槽、98/70/28分母、模型、输入、预算和原截止沿用v1.4.1；工作台源码另分层，跨源码not_comparable，旧unknown不重发。
+
+复用`workbench-20261112-02`真实6/6门禁，原快照明确含30项tracked改动和10项untracked项，不称当时干净。必须核验原status/source manifest hash、前后完整快照与fingerprint一致、测试零failure/error，且当前工作树干净、所有非文档实际文件的路径/hash与门禁一致。提交前快照中sha为null的删除记录表示文件缺失，比较实际文件集合时去除该墓碑；若文件重新出现仍须拒绝。只允许提交导致的tracked/untracked归类变化及已提交文档变化，禁止产品字节变化。保留该提交绑定的独立attestation，不改原门禁。
+
+49项skip按实际ID/原因保留，不计通过，不把旧42项或受控Lean专项扩称全部通过。完整manifest记录当前实际源码与runtime hash、新gate及上述attestation和迁移来源；若源码或接缝不符则停止。旧v1.4.1历史源码核验规则、正式双轴companion、F/辅助审查/报告及包退出条件全部保留。此增量需双轴审查后冻结；工程门禁不代替真实provider或数学评测。
