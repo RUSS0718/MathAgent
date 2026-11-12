@@ -2,6 +2,16 @@
 
 日期：2026-11-12；本次事实截面为11:31 +08:00。状态：重启中断后归档，按用户要求完成本次交接后停止，真实实验未完成。接续 [真实合同v1](../engineering/faithful-f8-real-protocol-20261111.md)、[v1.2格式恢复](../engineering/faithful-f8-real-recovery-20261112.md)及[新源码接续v1.3](../engineering/faithful-f8-real-source-continuation-20261112.md)，执行入口为[#157](https://github.com/RUSS0718/MathAgent/issues/157)。官方重评分unavailable，真人L3 not_run，usage缺失observe_only。
 
+## 用户授权恢复后的准备记录
+
+以下为2026-11-12 12:31 +08:00的增量，优先于下方11:31交接时的停止安排。用户交接`bceb233`（#158本地工具拒绝后一次预算内纠正）与`b5929bf`（#159空答案只能unresolved）并明确要求继续实验。两笔源码改变需要新门禁和新manifest，不能用R20旧门禁代替。
+
+双轴复查中Spec发现native纠正历史丢失原assistant文本，已按公共Pipeline先红后绿修复为`dc21478`；Standards（Galileo）与Spec（Boyle）复查解除。10项聚焦、53项相关回归与Ruff通过，证据`artifacts/faithful-f8-resume-20261112/product-{focused,regression}.json`。#159实际adapter hash仍为`7f26f9d49bfe0c6e0e85daca2843745293a857ad13d2bb3692bd72402001bba2`。Docker已恢复，固定Python镜像身份匹配；本截面没有发新provider请求。
+
+[接续合同v1.4及历史文本表示增量](../engineering/faithful-f8-real-source-continuation-20261112.md)继续保持41份首次记录、29未派发、98/70/28分母、原预算和绝对截止。新只读核验器复用原R07/重启语义断言，同时核对原Git、旧gate及原raw hash；旧591成员中554份Git字节直接匹配，37份原工作树前像（6份混合换行）经有限CRLF/LF表示证明，原DB/WAL及旧冻结模块不改写。最小6项验收通过，只将authority freeze作为fixture，不构成正式派发授权；此前12项3error的字节差异记录原样保留。来源为`history-v14-acceptance-01/v141-01/receipt.json`及封存`historical-source-preimages-01/attestation.json`。
+
+当前准入/F/报告路由的7/4/4项检查及必要依赖冻结1项检查通过。F未知双臂会按现有worker抛出硬停止，首轮测试未断言此预期异常的1error日志保留，随后修正测试，未改变worker行为。完整glue双轴结论、正式companion、一次新源码完整门禁及29槽实际执行仍待取得；尚无`resume-manifest.json`或`resume-execution-01`，不把受控检查当实验完成。用户要求后续只做必要离线检查，通过准入后直接推进原剩余槽，按真实错误归因修复，不扩展候选风险矩阵。
+
 ## R19源码门禁
 
 非法Meta已完成决定未退出阶段导致18次无进展Meta派发；原B/AIMEI5失败保留，修复提交`d3ccd9f`。门禁及文档冻结源码`543177955392beb514bae2c26bf1c26b49986d9f`，两轴审查均解除。

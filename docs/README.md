@@ -8,7 +8,7 @@
 
 - [F8-R18 空答案辅助审查修复](evals/faithful-f8-empty-review-20261112.md)：#159 的真实空答案身份 pass/fail 已拒绝、unresolved 保留；本地 adapter 接入及 hash 见记录。41/29 与固定28槽不变，#157仍未完成。[Python 工具拒绝后的有界纠正](evals/showcase-tool-recovery-20261112.md)另见 #158；两项均只有离线修复证据。
 
-- [F8真实执行与故障处置](evals/faithful-f8-real-20261112.md)：R20源码`315ae9b`门禁6/6通过（1917项、0 failure/error、42 skip、source_changed=false）。41份首次主槽为1 completed、39 failed、1 unknown，29槽未派发；主机重启现场已封存，unknown不重发。按用户要求本次提交归档后停止；重启接续合同仍review_draft，F8实验及#157未完成。
+- [F8真实执行与故障处置](evals/faithful-f8-real-20261112.md)：2026-11-12用户交接#158/#159并授权恢复，接续准备增量见记录首节及[v1.4合同](engineering/faithful-f8-real-source-continuation-20261112.md)。41份首次仍为1 completed、39 failed、1 unknown，29槽未派发，unknown不重发；新源码完整门禁及正式接续身份待验收。R20源码`315ae9b`的6/6、1917项、42skip是历史证据，不能替代新源码门禁。F8实验及#157未完成。
 
 - F8 真实接续修复：[新源码接续条款 v1.3](engineering/faithful-f8-real-source-continuation-20261112.md)已双轴冻结；该条款中的7/63是R19时点历史截面，当前以[真实执行记录](evals/faithful-f8-real-20261112.md)的41/29及重启unknown处置为准。跨源码比较标not_comparable，原失败不覆盖；实验与报告尚未完成，#157保持开放。
 

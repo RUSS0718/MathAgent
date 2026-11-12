@@ -35,3 +35,9 @@
 最小接缝验收包括：41/29/98/70守恒、原序列唯一性、不同源码/配置/截止拒绝、原R07语义与所有绑定字节漂移拒绝、精确重启unknown处置及未来unknown拒绝、原DB/WAL不变、C到F真实暂停和同源双臂/父恢复、实际报告来源与unknown分母，以及#159空答案pass/fail拒绝而unresolved保留。不得用fixture freeze或mock结果替代正式封存、真实工具、provider-live或数学判断。先通过失败/成功检查与双轴复查，再冻结源码并运行门禁；门禁期间不改源码、测试、配置、脚本或文档。
 
 退出沿用原合同：29剩余主槽的首次记录、14个C实际F筛查及适用双臂、固定28槽R1/R2独立代理与R3核对、G五维解释、来源分层报告及独立最终包校验。primary_settled仅表示证据归档，单列disposed_unknown，原unknown继续保留在总登记与未知计数中；空答案只能unresolved。真人L3 not_run、官方重评分unavailable，参考答案正确率不得称官方分数。必需not_run或应执行F/审查/包仍缺失时#157不关闭。
+
+### v1.4.1 历史文本字节表示增量
+
+状态：frozen。2026-11-12 Standards（Galileo）与Spec（Boyle）均确认本增量文本无阻塞，可冻结；不代替glue复查、新源码门禁及派发准入。仅澄清原Git文本blob与原Windows工作树的字节表示，不改变v1.4的样本、预算、原始结果或派发条件。原315ae9b门禁591个runtime成员中37个raw hash与Git blob不同，其中6个为混合LF/CRLF。已封存这37个文件的工作树字节前像：每个raw hash必须逐字节匹配旧门禁成员；仅把CRLF转换为LF后必须逐字节等于原Git blob的相同转换结果，其他字节不得改变。证据`artifacts/faithful-f8-real-20261111/historical-source-preimages-01/attestation.json`，SHA256 `ef68b934c15c815dfb049fb8df5dfef1ba03e55a222f4880484cf57fab00e1b4`。
+
+核验器必须同时保留原raw hash、Git blob hash和转换后的hash，并核对原revision、完整成员集合及门禁source fingerprint。对上述37个成员，归档前像缺失、raw hash不同、Git身份不同或除CRLF/LF之外任何字节变化均拒绝；不得从当前产品源码推断整套旧源码身份。其他成员仍需原Git字节直接匹配旧门禁。历史协议/prompt的Git表示仅可用原blob或纯LF/CRLF双向转换精确重建其原冻结hash，不能忽略hash或接受任意规范化文本。新派发仍核验当前实际磁盘字节与新门禁，不采用该历史表示规则。
