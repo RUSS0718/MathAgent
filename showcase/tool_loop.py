@@ -11,6 +11,7 @@ from .graph import ToolExecutionResult
 from .redaction import redact_text
 from .run_budget import current_budget
 from .tool_protocol import ToolProtocol, ToolRequest
+from .tool_recovery import SOURCE_REJECTIONS, repair_messages
 from .tools import ToolRegistry
 
 EventSink = Callable[[Mapping[str, Any]], None]
@@ -41,6 +42,7 @@ def run_tool_roundtrip(
     sink: EventSink,
     ensure_runtime: Callable[[], None],
     emit_node: NodeEmitter,
+    recovery_used: bool = False,
 ) -> ToolLoopOutcome:
     """Validate, execute, and continue a model request while retaining its call ID."""
 
@@ -70,7 +72,7 @@ def run_tool_roundtrip(
     if error:
         record = _rejected_record(run_id, sink, request.protocol, request, error)
         return ToolLoopOutcome("", (record,), error, "Solver 工具请求无效")
-    if current_budget() is None and tool_count >= max_tool_calls:
+    if tool_count >= max_tool_calls:
         record = _rejected_record(
             run_id, sink, request.protocol, request, "tool_budget_exhausted"
         )
@@ -126,6 +128,43 @@ def run_tool_roundtrip(
         "end", status="completed" if result.status == "success" else "failed",
     )
     if result.status != "success":
+        if (not recovery_used and request.name == "python_math" and result.status == "rejected"
+                and result.error_category in SOURCE_REJECTIONS):
+            if model_calls[0] >= max_model_calls:
+                return ToolLoopOutcome("", (record,), "model_budget_exhausted", "模型预算不足，无法纠正工具请求")
+            history = repair_messages(messages, request, record)
+            model_calls[0] += 1
+            record["continuation_tool_call_id"] = request.tool_call_id
+            record["continuation_status"] = "repair_requested"
+            try:
+                ensure_runtime()
+                repaired = model.complete(
+                    history, tools=registry.provider_schemas() if tool_protocol == "native" else (),
+                    metadata={"role": "continuation"},
+                )
+                ensure_runtime()
+            except AdapterError:
+                record["continuation_status"] = "missing"
+                return ToolLoopOutcome("", (record,), "tool_continuation_missing", "模型未返回纠正结果")
+            except RuntimeError as exc:
+                category = getattr(exc, "category", "pipeline_timeout")
+                record["continuation_status"] = "missing"
+                record["continuation_error_category"] = category
+                return ToolLoopOutcome("", (record,), category, "工具纠正未在 Run 预算或时限内完成")
+            record["continuation_response_received"] = True
+            record["continuation_status"] = "response_received"
+            try:
+                outcome = run_tool_roundtrip(
+                    run_id=run_id, response=repaired, messages=history, registry=registry, model=model,
+                    tool_protocol=tool_protocol, execution_mode=execution_mode, tool_count=tool_count + 1,
+                    max_tool_calls=max_tool_calls, model_calls=model_calls, max_model_calls=max_model_calls,
+                    sink=sink, ensure_runtime=ensure_runtime, emit_node=emit_node, recovery_used=True,
+                )
+            except RuntimeError as exc:
+                category = getattr(exc, "category", "pipeline_timeout")
+                return ToolLoopOutcome("", (record,), category, "工具纠正超出 Run 预算或时限")
+            return ToolLoopOutcome(outcome.solver_text, (record,) + outcome.tool_results,
+                                   outcome.error_category, outcome.error_summary)
         return ToolLoopOutcome(
             "", (record,), result.error_category or "tool_failed", "数学工具调用失败，需要复核"
         )
