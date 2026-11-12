@@ -1,5 +1,9 @@
 # MathAgent 文档索引
 
+- [Faithful 自主 Agent 完整本机服务实施规格](https://github.com/RUSS0718/MathAgent/issues/168)：已拆分 #169–#183，按 A–H 端到端切片推进。[首票 #169 验收记录](evals/faithful-service-169-20261113.md)包含普通输入、真实 2+3 整题检查与刷新证据；最终门禁状态以记录为准。完整服务仍未交付，后续票按真实依赖领取。验收以少量真实模型、工具和浏览器场景跑通为主，不新增准确率、性能或大样本门槛。
+- [Faithful 自主能力调度与前端闭环决策地图](https://github.com/RUSS0718/MathAgent/issues/160)：2026-11-12 七项决策完成，规划退出；实施要求已汇总到 #168，完整服务尚未交付。能力准入、普通输入、动态调度、形式化、记忆及前端合同见地图的已决事项。
+- [自主服务实施交接与验收决议](https://github.com/RUSS0718/MathAgent/issues/167#issuecomment-6828389803)：首次交付在当前机器完成；按端到端切片接通真实服务，减少无关或重复离线测试，保留关键故障检查、阶段门禁与真实模型、工具、浏览器验收。既有未提交草稿须按决议核对，不算已验收实现；官方路径与独立 F8 数学评测保持各自边界。
+
 - [对话式工作台集成合同](engineering/conversation-workbench-contract.md)：新主页替换旧聊天布局；共享事件投影、真实 Job/SSE、线程/星图/计划及来源边界。验收结果见 [工作台集成记录](evals/conversation-workbench-20261112.md)。
 
 - [S09/F3 受限形式化实施记录](evals/faithful-s09-20261109.md)：门禁源码 `4df0953`；最终门禁06 6/6通过（1683项、0 failure、0 error、2 skip），Reference 发布41项通过；真实 L2/L3、AC23 公共 Job/Report/Evidence 路线和桌面/移动 UI 验收完成，状态为 `engineering-preview`。2 skip 未计通过，真实 provider、自然题及独立数学效果未验证。[S09 合同映射](engineering/faithful-s09-contract.md)记录公共入口、持久断言和证据范围。

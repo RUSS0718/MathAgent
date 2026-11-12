@@ -10,6 +10,7 @@ defineProps<{
   selectedFileName?: string
   waiting?: boolean
   submitLabel?: string
+  submitDisabled?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -37,7 +38,7 @@ function handleKeydown(event: KeyboardEvent): void {
     <textarea id="math-question" :value="modelValue" :disabled="disabled" :placeholder="waiting ? '补充题目条件，继续当前运行' : '输入数学问题，Shift + Enter 换行'" @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)" @keydown="handleKeydown"></textarea>
     <div class="composer-footer">
       <div class="composer-tools"><template v-if="visionEnabled"><input ref="fileInput" hidden type="file" accept="image/png" @change="emit('upload', $event)" /><UiButton variant="ghost" :disabled="disabled || running" @click="fileInput?.click()"><UiIcon name="image" />题图</UiButton></template><span class="composer-hint">公开报告会保留验证边界</span></div>
-      <div class="composer-actions"><span class="keyboard-hint">Enter 提交</span><UiButton v-if="running" variant="danger" @click="emit('cancel')"><UiIcon name="stop" />停止</UiButton><UiButton v-if="!running || waiting" variant="primary" type="submit" :disabled="disabled || !modelValue.trim()">{{ submitLabel ?? (waiting ? '补充条件' : '发送') }}<UiIcon name="arrowUp" /></UiButton></div>
+      <div class="composer-actions"><span class="keyboard-hint">Enter 提交</span><UiButton v-if="running" variant="danger" @click="emit('cancel')"><UiIcon name="stop" />停止</UiButton><UiButton v-if="!running || waiting" variant="primary" type="submit" :disabled="disabled || submitDisabled || !modelValue.trim()">{{ submitLabel ?? (waiting ? '补充条件' : '发送') }}<UiIcon name="arrowUp" /></UiButton></div>
     </div>
   </form>
 </template>

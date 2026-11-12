@@ -151,6 +151,19 @@ class StarProductPipeline:
             return ["model_configuration_unavailable"]
         if self.adapter.model_id != "intern-s2":
             return ["intern_s2_required"]
+        if self.transport_policy == "stream_first":
+            from .stream_preference import select_transport
+
+            if not callable(getattr(self.adapter, "stream_complete", None)):
+                return ["stream_adapter_unavailable"]
+            decision = select_transport(
+                self.adapter, [{"role": "user", "content": "readiness"}],
+                policy=self.transport_policy, profiles=self.stream_profiles)
+            if decision["transport"] == "reject":
+                # Synthetic fixtures require per-schema checks at dispatch;
+                # live profiles admit ordinary text messages of any shape.
+                if not (self.evidence_kind != "live" and self.stream_profiles is not None):
+                    return [decision["reason"]]
         return []
 
     def readiness_state(self):
@@ -205,7 +218,7 @@ class StarProductPipeline:
                 self.full_config if solver_mode in FULL_MODES else self.config)
         features = dict(base["features"])
         if features.get("problem_spec") is True:
-            if problem_spec is None:
+            if problem_spec is None and features.get("auto_problem_spec") is not True:
                 raise ValueError("problem_spec_required")
         elif problem_spec is not None:
             raise ValueError("problem_spec_feature_disabled")
@@ -511,6 +524,10 @@ def projection(run, *, answer=None, verification_mode="auto", include_prover_rou
             status = "completed_unverified"
     result = {"run_id": run["run_id"], "state_revision": run["state_revision"],
             "phase": state["phase"], "status": status,
+            "specification_version": state.get("specification_version"),
+            "intake_status": state.get("problem_intake", {}).get("status"),
+            "result_reason": state.get("result_reason"),
+            "budget_exhaustion_reason": state.get("budget", {}).get("exhaustion_reason"),
             "config_hash": state["config_hash"], "checkpoint_thread_id": run["run_id"],
             "recovery": recovery_projection(run),
             "progress": progress_summary(state),

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import math
@@ -239,12 +238,15 @@ def create_app(
             "max_bytes": MAX_PNG_BYTES,
         }
         solver_modes = star_capabilities(star_pipeline is not None, star_pipeline)
+        from .faithful_capabilities import faithful_capabilities
+
         response = jsonify(
             {
                 "profile": profile,
                 "jobs": {"enabled": True, "status": "available"},
                 "sse": {"enabled": True, "status": "available"},
                 "solver_modes": solver_modes,
+                "faithful": faithful_capabilities(app.config, solver_modes, star_pipeline),
                 "verification_mode": VERIFICATION_MODES,
                 "files": {"upload": upload},
                 "execution": {
@@ -432,7 +434,8 @@ def create_app(
                 verification_mode=payload.get("verification_mode", "auto"),
                 budget_limits=budget_limits,
                 deadline_at=deadline_at,
-                solver_mode=payload.get("solver_mode", "legacy"),
+                solver_mode=payload.get("solver_mode", "star_reference"
+                    if app.config.get("SHOWCASE_FAITHFUL_AUTONOMOUS") is True else "legacy"),
                 solver_options=payload.get("solver_options"),
                 solver_hint=payload.get("solver_hint"),
                 problem_spec=payload.get("problem_spec"),
@@ -959,34 +962,13 @@ def _applied_model_config(star_pipeline: Any, solver_modes: list[dict[str, Any]]
 def main() -> None:
     """Run the loopback Flask Showcase server."""
 
-    parser = argparse.ArgumentParser(description="Local v0.2 Flask Showcase API")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8090)
-    parser.add_argument("--mode", choices=("fake", "live"), default="fake")
-    parser.add_argument("--data-dir", default=None)
-    parser.add_argument("--star-limited", action="store_true", help="Enable explicit limited STAR selection")
-    parser.add_argument("--star-full", action="store_true", help="Enable full STAR presets after isolated runtime preflight; requires exact image configuration")
-    parser.add_argument("--faithful-memory-review", action="store_true", help="Expose Faithful memory controls and review")
-    parser.add_argument("--faithful-population-memory", action="store_true", help="Allow explicitly enabled session observations as advisory context in STAR Runs")
-    parser.add_argument("--faithful-intervention", action="store_true", help="Expose authenticated Faithful Intervention controls")
-    parser.add_argument("--faithful-system-view", action="store_true", help="Enable the opt-in read-only F7 system view API")
-    parser.add_argument(
-        "--experiment-idempotency-lookup",
-        action="store_true",
-        help="Enable the experiment CLI's idempotency lookup Job route",
-    )
-    args = parser.parse_args()
-    config: dict[str, Any] = {"SHOWCASE_MODE": args.mode, "SHOWCASE_STAR_ENABLED": args.star_limited,
-                              "SHOWCASE_STAR_FULL_ENABLED": args.star_full,
-                              "SHOWCASE_FAITHFUL_MEMORY_ENABLED": (
-                                  args.faithful_memory_review or args.faithful_population_memory
-                              ),
-                              "SHOWCASE_POPULATION_MEMORY_ENABLED": args.faithful_population_memory,
-                              "SHOWCASE_FAITHFUL_INTERVENTION_ENABLED": args.faithful_intervention,
-                              "SHOWCASE_F7_SYSTEM_VIEW_ENABLED": args.faithful_system_view,
-                              "SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED": args.experiment_idempotency_lookup}
-    if args.data_dir:
-        config["SHOWCASE_DATA_DIR"] = args.data_dir
+    from .server_cli import parse_server_args
+
+    args, config = parse_server_args()
+    if args.check_runtime:
+        from .faithful_service_check import run_runtime_check
+
+        raise SystemExit(run_runtime_check(config))
     app = create_app(config)
     app.run(host=args.host, port=args.port, debug=False)
 

@@ -2,6 +2,8 @@
 
 from copy import deepcopy
 
+from .problem_intake_schema import PROBLEM_SPEC_SCHEMA
+
 
 def obj(properties, required=None, *, additional_properties=False):
     return {
@@ -56,6 +58,7 @@ STEP = obj(
     ["argument", "claims", "blocked"],
 )
 SCHEMAS = {
+    "problem_intake": PROBLEM_SPEC_SCHEMA,
     "explore": obj(
         {
             "assessment": {"enum": ["SOLVED", "PARTIALLY_SOLVED", "NEED_PLAN", "UNKNOWN"]},

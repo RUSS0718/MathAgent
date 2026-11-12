@@ -106,9 +106,10 @@ def maybe_pause(connection, run, event, config, problem, *, applied_config=None,
     raise InterventionPaused()
 
 
-def resume_guard(connection, job_id):
+def resume_guard(connection, job_id, *, read_only=False):
     """Reject ordinary parent resume while an F4 pair owns its checkpoint."""
-    ensure_control_schema(connection)
+    if not read_only:
+        ensure_control_schema(connection)
     row = connection.execute(
         "SELECT status,resume_authorized FROM faithful_intervention_control WHERE job_id=?",
         (job_id,),

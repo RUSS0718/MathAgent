@@ -10,6 +10,15 @@ const capabilitySchema = z.object({
 
 export const capabilitiesResponseSchema = z.object({
   profile: z.string(),
+  faithful: z.object({
+    version: z.literal('faithful-capabilities-v1').optional(),
+    maturity: z.literal('experimental').optional(),
+    features: z.record(z.string(), z.boolean()).optional(),
+    optional_limitations: z.array(z.string()).optional(),
+    enabled: z.boolean(), ready: z.boolean(),
+    solver_mode: z.literal('star_reference'), input_mode: z.literal('automatic'),
+    unavailable_reasons: z.array(z.string()),
+  }).optional(),
   solver_modes: z.array(z.object({ solver_mode: z.string(), enabled: z.boolean(), missing_capabilities: z.array(z.string()) })).optional(),
   execution: z.object({ mode: z.string(), provider: z.string(), status: z.string() }).optional(),
   jobs: z.object({ enabled: z.boolean(), status: z.string() }),

@@ -79,6 +79,11 @@ class SolverHarness:
         self._population_futures = {}
         self._event_observer = event_observer
         self._config = _normalize_config(config)
+        if self._config.get("features", {}).get("auto_problem_spec") is True and any(
+            self._config.get("features", {}).get(key) is not True
+            for key in ("problem_spec", "stream_recovery")
+        ):
+            raise SolverValidationError("auto_problem_spec_requires_problem_spec_and_stream_recovery")
         if self._config.get("features", {}).get("concurrent_routes") is True:
             from .population_lifecycle import validate_config
 
@@ -158,7 +163,8 @@ class SolverHarness:
         supplied_spec = None if metadata is None else metadata.get("problem_spec")
         if supplied_spec is not None and not spec_enabled:
             raise SolverValidationError("problem_spec_feature_disabled")
-        if spec_enabled and supplied_spec is None:
+        auto_spec = self._config.get("features", {}).get("auto_problem_spec") is True
+        if spec_enabled and supplied_spec is None and not auto_spec:
             if self._state_store.get_run(_run_id(metadata)) is None:
                 raise SolverValidationError("problem_spec_required")
         if supplied_spec is not None:
@@ -195,6 +201,19 @@ class SolverHarness:
         existing = self._state_store.get_run(run_id)
         if existing is not None:
             self._validate_identity(existing, run_id, problem_hash)
+            from .problem_intake import ensure_problem_spec, intake_pending
+
+            if intake_pending(existing):
+                existing = self.get_run(run_id, problem=problem)
+                retry = (effective_metadata or {}).get("retry_call")
+                if retry is not None:
+                    from .calls import retry_call
+
+                    existing = retry_call(self, existing, problem, retry)
+                    effective_metadata.pop("retry_call")
+                existing = ensure_problem_spec(self, existing, problem)
+                if intake_pending(existing) or existing["state"]["phase"] == "TERMINAL":
+                    return existing
             if existing["state"].get("population_policy", {}).get("enabled") is True:
                 from .population_lifecycle import resume_population
 
@@ -251,13 +270,18 @@ class SolverHarness:
                                   effective_metadata.get("population_memory_advisory")
                                   if isinstance(effective_metadata, Mapping) else None
                               ))
-        if self._config.get("features", {}).get("serial_routes") is True and supplied_spec is None:
+        pending_intake = auto_spec and supplied_spec is None
+        if pending_intake:
+            from .problem_intake import POLICY
+
+            state["problem_intake"] = dict(POLICY)
+        if serial_routes and supplied_spec is None and not pending_intake:
             raise SolverValidationError("serial_routes_requires_problem_spec")
         if self._config.get("features", {}).get("progress_scheduling") is True:
-            if supplied_spec is None:
+            if supplied_spec is None and not pending_intake:
                 raise SolverValidationError("progress_scheduling_requires_problem_spec")
             state["progress_policy"] = {"enabled": True, "version": "progress-v1"}
-        if self._config.get("features", {}).get("concurrent_routes") is True:
+        if self._config.get("features", {}).get("concurrent_routes") is True and not pending_intake:
             from .population_store import initial_population
 
             state["population_policy"] = deepcopy(self._config["population_policy"])
@@ -282,7 +306,13 @@ class SolverHarness:
             raise SolverPersistenceError("create_run")
         if self._event_observer is not None:
             self._event_observer(created, event)
-        if state.get("population_policy", {}).get("enabled") is True:
+        if pending_intake:
+            from .problem_intake import ensure_problem_spec, intake_pending
+
+            created = ensure_problem_spec(self, created, problem)
+            if intake_pending(created) or created["state"]["phase"] == "TERMINAL":
+                return created
+        if created["state"].get("population_policy", {}).get("enabled") is True:
             from .population_lifecycle import claim
 
             created = claim(self, created)

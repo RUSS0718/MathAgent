@@ -53,24 +53,7 @@ def initial_state(run_id: str, problem_hash: str, config_hash: str, *,
         "finalization_reason": None,
     }
     if problem_spec is not None:
-        state.update({
-            "problem_spec_policy": {"enabled": True, "version": "problem-spec-v1"},
-            "problem_spec": problem_spec,
-            "specification_version": problem_spec["specification_version"],
-            "specification_history": [problem_spec],
-            "work_units": work_units or [],
-            "obligation_ledger": [
-                {
-                    "obligation_id": item["obligation_id"],
-                    "status": "open",
-                    "evidence_refs": [],
-                    "specification_version": problem_spec["specification_version"],
-                }
-                for item in problem_spec["root_obligations"]
-            ],
-            "obligation_evidence_ledger": [],
-            "skipped_work_units": [],
-        })
+        state.update(problem_spec_state(problem_spec, work_units))
     if proof_graph:
         from .proof_graph import initial_proof_graph
 
@@ -95,3 +78,25 @@ def initial_state(run_id: str, problem_hash: str, config_hash: str, *,
     if population_memory_advisory is not None:
         state["population_memory_advisory"] = deepcopy(population_memory_advisory)
     return state
+
+
+def problem_spec_state(problem_spec, work_units=None):
+    """Initial specification fields, shared by supplied and audited intake paths."""
+    return {
+        "problem_spec_policy": {"enabled": True, "version": "problem-spec-v1"},
+        "problem_spec": problem_spec,
+        "specification_version": problem_spec["specification_version"],
+        "specification_history": [problem_spec],
+        "work_units": work_units or [],
+        "obligation_ledger": [
+            {
+                "obligation_id": item["obligation_id"],
+                "status": "open",
+                "evidence_refs": [],
+                "specification_version": problem_spec["specification_version"],
+            }
+            for item in problem_spec["root_obligations"]
+        ],
+        "obligation_evidence_ledger": [],
+        "skipped_work_units": [],
+    }

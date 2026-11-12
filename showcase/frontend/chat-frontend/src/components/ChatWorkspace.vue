@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api/client'
+import type { CapabilitiesResponse } from '../api/capabilities.schemas'
 import { createIdempotencyKey } from '../runtime/jobs/idempotency'
 import { sessionHref, settingsHref, workspaceHref } from '../runtime/navigation/app-route'
 import { useJobsStore } from '../stores/jobs.store'
@@ -14,6 +15,7 @@ import type { PresentationMode } from '../runtime/presentation/mode'
 import SessionSidebar from './SessionSidebar.vue'
 import ComposerBar from './ComposerBar.vue'
 import StarModeSelector from './StarModeSelector.vue'
+import FaithfulEntryControls from './FaithfulEntryControls.vue'
 import PresentationCommandHint from './PresentationCommandHint.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
@@ -28,6 +30,9 @@ const notice = ref('')
 const visionEnabled = ref(false)
 const presentationEnabled = ref(false)
 const solverMode = ref('legacy')
+const faithful = ref<CapabilitiesResponse['faithful']>()
+const faithfulBlocked = computed(() => faithful.value?.enabled === true && !faithful.value.ready)
+const autonomous = computed(() => faithful.value?.enabled === true && solverMode.value === faithful.value.solver_mode)
 const solverModes = ref<Array<{ solver_mode: string; enabled: boolean }>>([])
 const selectedFile = ref<string | undefined>()
 const selectedFileName = ref<string | undefined>()
@@ -54,6 +59,7 @@ const workbenchResult = computed(() => ({ ...selectedJob.value?.result,
   ...(report.value?.mode === 'fake' ? { execution_mode: 'fake' } : {}) }))
 
 async function send(): Promise<void> {
+  if (loading.value || loadFailed.value || faithfulBlocked.value) return
   if (current.value?.status === 'waiting_input') { notice.value = '文本插话尚未接入；请使用恢复执行按钮。'; return }
   const parsed = parsePresentationInput(draft.value)
   const message = parsed.problem
@@ -165,6 +171,8 @@ async function initialize(): Promise<void> {
   try {
   try {
     const capabilities = await api.capabilities()
+    faithful.value = capabilities.faithful?.enabled ? capabilities.faithful : undefined
+    solverMode.value = faithful.value?.solver_mode ?? 'legacy'
     if (capabilities.execution?.mode === 'live' && capabilities.execution.status !== 'configured') {
       notice.value = 'live 模式未检测到 Intern API 凭证。'
     }
@@ -173,6 +181,7 @@ async function initialize(): Promise<void> {
     visionEnabled.value = capabilities.files.upload.enabled
     if (visionEnabled.value) await files.load()
   } catch (error) {
+    loadFailed.value = true
     notice.value = error instanceof Error ? error.message : '能力检查失败。'
   }
   if (props.path === settingsHref()) return
@@ -217,8 +226,8 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
       <p v-if="current?.status === 'waiting_input'" class="notice notice--warning" role="status">运行已暂停。文本插话待接入；恢复执行不会追加新约束。<UiButton :disabled="submitting" @click="resumeCurrent">恢复执行</UiButton></p>
       <div v-if="loading" class="loading-state" role="status">正在加载工作台…</div>
       <section v-else-if="!selectedJob" class="workbench-entry" aria-label="提交数学题干">
-        <div class="entry-heading"><small>PLANNER → REASONER → GATE</small><h2>把题干交给一组会互相质疑的子智能体</h2><p>提交后查看公开执行摘要、实时计划与协作星图。运行能力取决于所选模式；模拟数据和历史回放始终单独标记。</p></div>
-        <ComposerBar submit-label="开始求解" v-model="draft" :disabled="loadFailed || submitting" :running="false" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><StarModeSelector v-model="solverMode" :modes="solverModes" :disabled="submitting" /><PresentationCommandHint :enabled="presentationEnabled" /></template></ComposerBar>
+        <div class="entry-heading"><small>{{ faithful ? 'FAITHFUL AGENT' : 'PLANNER → REASONER → GATE' }}</small><h2>{{ faithful ? 'Faithful 自主求解' : '把题干交给一组会互相质疑的子智能体' }}</h2><p>{{ faithful ? '直接输入数学题，Faithful 自主选择已配置能力与求解步骤。提交后可查看公开执行摘要、实时计划与协作星图。' : '提交后查看公开执行摘要、实时计划与协作星图。运行能力取决于所选模式；模拟数据和历史回放始终单独标记。' }}</p></div>
+        <ComposerBar :submit-label="submitting ? '正在提交…' : autonomous ? 'Faithful 自主求解' : '开始求解'" v-model="draft" :disabled="loadFailed || submitting" :submit-disabled="faithfulBlocked" :running="false" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><FaithfulEntryControls v-if="faithful" v-model="solverMode" :faithful="faithful" :modes="solverModes" :disabled="submitting" /><StarModeSelector v-else v-model="solverMode" :modes="solverModes" :disabled="submitting" /><PresentationCommandHint :enabled="presentationEnabled" /></template></ComposerBar>
         <div class="entry-examples"><span>示例题干 · 点击回填</span><button type="button" @click="useStarter('解方程 x² − 5x + 6 = 0，并验证候选根。')">方程与候选根</button><button type="button" @click="useStarter('分步推导 1 + 2 + … + n 的求和公式，n 为正整数。')">数列求和</button></div>
       </section>
       <section v-else class="active-workbench">

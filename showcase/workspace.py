@@ -640,7 +640,7 @@ class WorkspaceStore:
                     return
                 prior = _loads(row["result_json"]) if row["result_json"] else {}
                 result.update(_presentation_identity(prior))
-                for frozen_key in ("formal_policy", "formal_policy_hash"):
+                for frozen_key in ("formal_policy", "formal_policy_hash", "faithful"):
                     if frozen_key in prior:
                         result[frozen_key] = prior[frozen_key]
                 _apply_formal_requirement(result)
@@ -1101,7 +1101,8 @@ class WorkspaceService:
             if problem_spec["original_problem"] != problem:
                 raise WorkspaceError("problem_spec_original_problem_mismatch", status=400)
         elif (solver_mode in STAR_MODES
-              and selected.preset_config(solver_mode).get("features", {}).get("problem_spec") is True):
+              and selected.preset_config(solver_mode).get("features", {}).get("problem_spec") is True
+              and selected.preset_config(solver_mode).get("features", {}).get("auto_problem_spec") is not True):
             raise WorkspaceError("problem_spec_required", status=400)
         if web_search_enabled:
             raise WorkspaceError("capability_unavailable", status=503)
@@ -1129,6 +1130,8 @@ class WorkspaceService:
             population_policy_hash=identity.get("population_policy_hash"),
             formal_policy=formal_policy,
         )
+        from .faithful_task import task_identity
+
         payload, existing = self.store.create_job(
             user_id=user_id,
             session_id=session_id,
@@ -1143,6 +1146,7 @@ class WorkspaceService:
                    if self.stream_timeout_policy is not None else {}),
                 **presentation_identity,
                 **formal_identity,
+                **task_identity(selected, solver_mode),
             },
             experiment_binding=experiment_binding,
             problem_spec=problem_spec,

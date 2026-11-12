@@ -10,6 +10,7 @@ from .job_observation import observe_deadline
 from .run_budget import _summary
 from .star_product_modes import STAR_MODES
 from .star_product_projection import current_solver, persisted_solver
+from .star_product_recovery import allowed_job_actions
 
 
 def _attach_formal(payload):
@@ -35,10 +36,13 @@ def read_job(service, job_id, user_id):
     attempts = [event["data"]["attempt"] for event in store.events(job_id, user_id)
                 if event["event"] == "request_attempt"]
     budget, ledger_attempts = service.budget_ledger.view(job_id) if service.budget_ledger is not None else (None, [])
-    return _with_accounting(payload, attempts, budget, ledger_attempts, star)
+    with store._lock:
+        row = store._connection.execute("SELECT * FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+        actions = allowed_job_actions(store._connection, row)
+    return _with_accounting(payload, attempts, budget, ledger_attempts, star, actions)
 
 
-def _with_accounting(payload, attempts, budget, ledger_attempts, star):
+def _with_accounting(payload, attempts, budget, ledger_attempts, star, actions=None):
     if budget is not None and (star or not (payload.get("result") or {}).get("budget")):
         payload["result"] = {**(payload.get("result") or {}), "budget": budget}
     attempts = list({item["attempt_id"]: item for item in [*attempts, *ledger_attempts]}.values())
@@ -46,7 +50,9 @@ def _with_accounting(payload, attempts, budget, ledger_attempts, star):
         payload["result"] = {**(payload.get("result") or {}), "request_attempts": attempts}
     if star:
         observe_deadline(payload, ledger_attempts, budget)
-    return payload
+    from .faithful_task import attach_task_state
+
+    return attach_task_state(payload, allowed_actions=actions)
 
 
 def read_job_snapshot(store, job_id, user_id):
@@ -99,6 +105,7 @@ def read_job_snapshot(store, job_id, user_id):
         ).fetchall()
         attempts = [json.loads(event["payload_json"])["attempt"] for event in attempt_events]
         ledger = connection.execute("SELECT ledger_json FROM run_budgets WHERE run_id=?", (job_id,)).fetchone()
+        actions = allowed_job_actions(connection, row)
         # Projection only uses the fetched snapshot. Release its SQLite read
         # lock before computing it so stream progress writers can commit.
         connection.commit()
@@ -117,4 +124,4 @@ def read_job_snapshot(store, job_id, user_id):
             budget = _summary(state)
             ledger_attempts = [action["public_attempt"] for action in state["actions"]
                                if action.get("public_attempt")]
-        return _with_accounting(payload, attempts, budget, ledger_attempts, star)
+        return _with_accounting(payload, attempts, budget, ledger_attempts, star, actions)
