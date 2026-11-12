@@ -213,4 +213,3 @@ class FaithfulServiceJobTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(4, terminal["result"]["budget"]["logical_calls"])
         self.assertEqual(report["answer"], self.report(job_id)["answer"])
         self.assertEqual(4, len(self.outbound))
-
