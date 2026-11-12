@@ -19,3 +19,7 @@ uv run python scripts/check_fast.py
 ```
 
 7项新增用例和53项相关回归通过，0 failure/error/skip；Ruff及快速检查通过。新增用例涵盖直接答案、两协议修正工具、再次拒绝、模型预算、工具预算、预算异常回执保留和未知传输停止（两协议属于同一测试）。运行报告由既有报告入口保存在 ignored artifacts。此次为小范围修复，未运行完整阶段门禁；未发真实 provider 请求，不证明数学正确率。官方 baseline 由快速检查核验。
+
+## 接续前复查增量
+
+Spec复查发现native拒绝续接将原assistant content固定为None，缺失同轮随工具请求返回的候选文本。公共LiveAgentPipeline新增`test_native_rejection_retains_assistant_text_with_call_and_receipt`先失败，实际None不等于marker；最小修复仅将原ModelResponse文本传入既有纠正历史，保留原call ID、请求和rejected回执，text_action行为不变。修复后的8项本切片测试与2项空答案测试通过，Ruff通过；完整阶段门禁及实际模型证据仍待后续运行，不能沿用旧门禁证明新源码。

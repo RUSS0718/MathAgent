@@ -31,13 +31,13 @@ class LiveToolRecoveryTest(unittest.TestCase):
         self.assertEqual("call_not_allowed", result["tool_results"][0]["error_category"])
         self.assertNotEqual("pass", result["verification"]["status"])
 
-    def run_repair(self, repair, *, protocol="native", budget=None, registry=None):
+    def run_repair(self, repair, *, protocol="native", budget=None, registry=None, response_text=""):
         request = ToolRequest("python_math", {"code": "print(broken.diff())"},
                               tool_call_id="first-rejected", protocol=protocol,
                               assistant_content="private tool action")
         model = ScriptedModel([
             ModelResponse(text="计划"),
-            ModelResponse(tool_requests=(request,), finish_reason="tool_calls"),
+            ModelResponse(text=response_text, tool_requests=(request,), finish_reason="tool_calls"),
             repair, ModelResponse(text="计算后得到候选答案"), ModelResponse(text="公开答案"),
         ])
         registry = registry or ToolRegistry()
@@ -47,6 +47,16 @@ class LiveToolRecoveryTest(unittest.TestCase):
             "run-repair", "题目", emit=events.append,
         )
         return result, model, events
+
+    def test_native_rejection_retains_assistant_text_with_call_and_receipt(self):
+        marker = "assistant-context-marker"
+        result, model, _ = self.run_repair(ModelResponse(text="候选答案"), response_text=marker)
+        history = model.calls[2][0]
+        assistant = next(message for message in history if message.get("tool_calls"))
+        self.assertEqual(marker, assistant["content"])
+        self.assertEqual("first-rejected", assistant["tool_calls"][0]["id"])
+        self.assertTrue(result["final_response"])
+        self.assertEqual("rejected", result["tool_results"][0]["status"])
 
     def test_repaired_code_executes_with_both_receipts_and_history(self):
         for protocol in ("native", "text_action"):

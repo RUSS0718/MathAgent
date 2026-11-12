@@ -132,7 +132,9 @@ def run_tool_roundtrip(
                 and result.error_category in SOURCE_REJECTIONS):
             if model_calls[0] >= max_model_calls:
                 return ToolLoopOutcome("", (record,), "model_budget_exhausted", "模型预算不足，无法纠正工具请求")
-            history = repair_messages(messages, request, record)
+            history = repair_messages(
+                messages, request, record, assistant_content=response.text or request.assistant_content,
+            )
             model_calls[0] += 1
             record["continuation_tool_call_id"] = request.tool_call_id
             record["continuation_status"] = "repair_requested"

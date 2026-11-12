@@ -10,7 +10,7 @@ SOURCE_REJECTIONS = frozenset({
 })
 
 
-def repair_messages(messages, request, record):
+def repair_messages(messages, request, record, *, assistant_content=None):
     """Keep the rejected call paired with its receipt and preserve conversation history."""
     receipt = {
         "tool_call_id": request.tool_call_id, "name": request.name,
@@ -21,7 +21,8 @@ def repair_messages(messages, request, record):
     }
     if request.protocol == "native":
         exchange = [
-            {"role": "assistant", "content": None, "tool_calls": [{
+            {"role": "assistant", "content": assistant_content if assistant_content is not None
+             else request.assistant_content or None, "tool_calls": [{
                 "id": request.tool_call_id, "type": "function", "function": {
                     "name": request.name, "arguments": json.dumps(request.arguments, ensure_ascii=False),
                 },
