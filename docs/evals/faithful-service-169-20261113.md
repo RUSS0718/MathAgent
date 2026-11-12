@@ -33,3 +33,15 @@
 启动配置及命令见 [README](../../README.md#faithful-普通输入服务)；合同见 [入口合同](../engineering/faithful-service-entry-contract.md)。停止再以相同数据目录启动可读取既有结果。经验捕获、澄清消费、热切换、自然形式目标等后续票未完成；本票不宣称完整架构、数学正确率或效率提升。
 
 下一 session 继续当前工作区和集成分支，先核验 GitHub 真实依赖再领取下一票，使用 `implement-spec`，不创建 worktree，不读取用户保留的 `tests/test.md`，继续使用当前选择的同一模型；当前具体 agent 型号无法可靠确认，不猜测。
+
+## 最终退出与接续
+
+实现提交 `952a1a6`；测试文件尾空行维护提交 `12cac608efc828d4b4c31f6419d04dd8bb7da9b3` 为最终门禁源码。Standards 与 Spec 复查均 0 剩余阻塞，修复冻结聚焦 17 项通过、0 skip。最终仅修正两处测试导入排序及文件尾空行，行为不变，完整门禁覆盖最终字节。
+
+`artifacts/issue-168-work/gate-01/status.json`：6/6 阶段通过，`source_changed=false`，耗时 1675.641 秒。全仓 1962 项，0 failure、0 error、49 skip；发布检查通过，前端安装、审计和检查通过，审计 0 漏洞。49 skip 清单见 `gate-01/skip-index.json`：7 项固定 Lean 环境未准入，40 项精确 Docker 测试镜像环境变量未设置，2 项 Docker readiness integration 未显式启用。它们不计通过，不复用旧 42 skip 的结论，不代表这些工具当前已失败或已经真实验收。官方 baseline 字节及官方边界由快速门禁核对。
+
+最终源码重启后只读打开原成功任务，`final-read-summary.json` 确认答案 5、请求记录相同、Job POST=0、浏览器 errors=[]；`live-answer-final.png` 保存答案及核验等级。运行时就绪检查 `runtime-final.log` 为 ready。两项临时 30 分钟检查均已删除，无运行中的模型或门禁。
+
+本机服务仍在 8090，根 launcher PID 10732，创建于 2026-11-13 01:20:51 +08:00，数据目录 `artifacts/issue-168-work/live-data`。具体进程及源码见 `service-process.json`；后续操作先核验 PID 与创建时间，不猜测复用 PID。服务仅保留供读取及下一票使用，不新增求解。停止方式为终端 Ctrl+C，后台实例可按该 PID 查询并终止其实际服务子进程。Docker 保持运行。
+
+#169 达到 A1 工程退出；#168 仍开放。下一票优先 #170，其真实 GitHub 前置仅 #169，依赖图快照为 `task-graph.json`。后续 session 必须重新核验依赖及领取状态，沿用 `feat/faithful-autonomous-service`，每票完成后提交推送再交新 session。此记录提交为纯文档交接，不重跑上述冻结源码门禁。
