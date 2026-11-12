@@ -2,7 +2,7 @@ import type { Page } from '@playwright/test'
 
 /** Synthetic public report: this is presentation data, never capability evidence. */
 export const report = {
-  version: '1', evidence_id: 'evidence-demo', mode: 'fake', status: 'succeeded',
+  version: '1', evidence_id: 'run-demo', mode: 'fake', status: 'succeeded',
   report: {
     answer: '## 解题过程\n由 $x^2-5x+6=0$，因式分解得 $(x-2)(x-3)=0$。\n\n## 最终答案\n$x=2$ 或 $x=3$。',
     public_summary: '演示数据：候选根已代回检查，检查通过不等于一般数学证明。',
@@ -33,10 +33,11 @@ export async function mockWorkspace(page: Page, populated = false, eventStream?:
     else if (path === '/api/capabilities') body = { profile: 'showcase', execution: { mode: 'fake', provider: 'demo', status: 'available' }, jobs: { enabled: true, status: 'available' }, sse: { enabled: true, status: 'available' }, verification_mode: ['auto'], files: { upload: { enabled: false } }, capabilities: { jobs: true, sse: true, verification_mode: ['auto'], file_upload: { enabled: false } } }
     else if (path === '/api/experiments/campaigns') body = { campaigns: [campaign], offset: 0, limit: 20 }
     else if (path.includes('/api/experiments/campaigns/')) body = campaign
-    else if (path.endsWith('/memory') || path.endsWith('/population-memory')) {
+    else if (path.endsWith('/memory') || path.includes('/memory/') || path.endsWith('/population-memory') || path.endsWith('/goal-cache') || path.endsWith('/interventions')) {
       await route.fulfill({ status: 404, json: { code: 'not_found' } })
       return
     }
+    else if (path === '/api/agent/jobs/active') body = { success: true, jobs: [] }
     else if (path.endsWith('/report')) body = report
     else if (path.endsWith('/evidence')) body = { evidence_id: 'evidence-demo', mode: 'fake', run: {} }
     else if (path.endsWith('/events')) {

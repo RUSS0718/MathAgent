@@ -1,5 +1,7 @@
 # MathAgent 文档索引
 
+- [对话式工作台集成合同](engineering/conversation-workbench-contract.md)：新主页替换旧聊天布局；共享事件投影、真实 Job/SSE、线程/星图/计划及来源边界。验收结果见 [工作台集成记录](evals/conversation-workbench-20261112.md)。
+
 - [S09/F3 受限形式化实施记录](evals/faithful-s09-20261109.md)：门禁源码 `4df0953`；最终门禁06 6/6通过（1683项、0 failure、0 error、2 skip），Reference 发布41项通过；真实 L2/L3、AC23 公共 Job/Report/Evidence 路线和桌面/移动 UI 验收完成，状态为 `engineering-preview`。2 skip 未计通过，真实 provider、自然题及独立数学效果未验证。[S09 合同映射](engineering/faithful-s09-contract.md)记录公共入口、持久断言和证据范围。
 
 - [#156 完整并发接管与验收](evals/faithful-population-20261109.md)：接续门禁06在源码 `5d80f90` 上6/6通过（1624项、42skip）；新增12项验收与102项聚焦通过，八组公共入口/持久证据逐项映射。42skip仍未执行，旧Docker专项独立记载；真实provider/容量/SLA/数学效果未验证，#156/#146保持开放。

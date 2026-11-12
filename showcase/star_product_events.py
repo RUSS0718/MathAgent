@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from .redaction import redact
 from .run_budget import public_solver_call_id
 from .solver_harness.skills import PROTOCOLS
+from .workbench_projection import collaboration_fields
 
 _PUBLIC_CALL_ROLES = frozenset({
     "reasoner", "reason_noncoding", "explore", "explore_polish", "planner", "researcher",
@@ -49,6 +50,9 @@ def decision_fields(event, state, invocations=()):
         "route_status", "route_reason", "policy_version", "pareto_route_ids",
         "selected_route_id", "route_count", "route_replayable",
     ) if key in event}
+    workbench = collaboration_fields(event, state)
+    if workbench is not None:
+        fields["workbench"] = workbench
     run_id = state.get("run_id")
     if isinstance(run_id, str) and run_id:
         fields["run_id"] = run_id

@@ -6,6 +6,7 @@ export interface ReadJobEventsOptions {
   maxRetries?: number
   retryDelayMs?: number
   fetchImpl?: typeof fetch
+  terminalSeen?: boolean
 }
 export class SseTransportError extends Error {
   readonly code: string
@@ -33,7 +34,7 @@ function wait(delayMs: number, signal?: AbortSignal): Promise<void> {
 
 async function consumeResponse(
   response: Response,
-  cursor: { value: number },
+  cursor: { value: number; terminalSeen: boolean },
   events: DecodedSseEvent[],
   options: ReadJobEventsOptions,
 ): Promise<boolean> {
@@ -48,8 +49,9 @@ async function consumeResponse(
     }
     events.push(event)
     await options.onEvent?.(event)
-    // An interrupt is a successful observation boundary; resume opens a new stream.
-    return isTerminalEvent(event) || event.event === 'interrupt'
+    cursor.terminalSeen ||= isTerminalEvent(event)
+    // Drain committed tail events through EOF; only waiting input stops observation.
+    return event.event === 'interrupt'
   }
   try {
     while (true) {
@@ -67,7 +69,7 @@ async function consumeResponse(
     for (const block of parser.finish()) {
       if (await accept(decodeSseBlock(block))) return true
     }
-    return false
+    return cursor.terminalSeen
   } finally {
     reader.releaseLock()
   }
@@ -84,7 +86,7 @@ export async function readJobEvents(
   const fetchImpl = options.fetchImpl ?? fetch
   const maxRetries = Math.max(0, options.maxRetries ?? 2)
   const retryDelayMs = Math.max(0, options.retryDelayMs ?? 50)
-  const cursor = { value: afterId }
+  const cursor = { value: afterId, terminalSeen: options.terminalSeen ?? false }
   const events: DecodedSseEvent[] = []
   let attempt = 0
   let first = true

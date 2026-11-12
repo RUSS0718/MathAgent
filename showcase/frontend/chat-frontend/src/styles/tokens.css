@@ -50,3 +50,25 @@
   --ease-out: cubic-bezier(.16, 1, .3, 1);
   --shadow-overlay: 0 16px 48px rgb(24 35 47 / 16%);
 }
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --background: #101719;
+  --surface: #172125;
+  --surface-muted: #1d2b30;
+  --sidebar: #132025;
+  --text: #e3eceb;
+  --muted: #a5b9bb;
+  --border: #34464b;
+  --border-strong: #557078;
+  --accent: #80d3c3;
+  --accent-strong: #b0eadb;
+  --accent-wash: #193e39;
+  --success: #8ad6a7;
+  --success-wash: #183527;
+  --warning: #e5bd79;
+  --warning-wash: #3b301c;
+  --danger: #f3a3a3;
+  --danger-wash: #402628;
+  --on-accent: #102924;
+}

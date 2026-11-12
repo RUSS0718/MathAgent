@@ -1,4 +1,4 @@
-import { isTerminalEvent, SseProtocolError, type DecodedSseEvent } from '../../api/events.schemas'
+import { SseProtocolError, type DecodedSseEvent } from '../../api/events.schemas'
 import { SseTransportError, readJobEvents } from './sse-transport'
 import { useJobsStore } from '../../stores/jobs.store'
 
@@ -18,10 +18,10 @@ export class JobController {
     try {
       await readJobEvents(jobId, record.lastEventId, {
         signal: abort.signal,
+        terminalSeen: ['succeeded', 'failed', 'canceled'].includes(record.status),
         onEvent: (event: DecodedSseEvent) => {
           if (generation !== this.generation || abort.signal.aborted) return
           this.jobs.applyEvent(jobId, event)
-          if (isTerminalEvent(event)) abort.abort()
         },
       })
     } catch (error) {

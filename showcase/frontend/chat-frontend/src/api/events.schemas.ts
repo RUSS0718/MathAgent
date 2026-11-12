@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { resultSemanticsSchema } from './result-semantics.schemas.ts'
+import { collaborationSchema, evidenceChainSchema } from './workbench.schemas.ts'
 
 export const decodedSseEventSchema = z.object({
   id: z.number().int().positive().nullable(),
@@ -86,6 +87,12 @@ export function decodeSseBlock(raw: RawSseBlock): DecodedSseEvent {
 }
 
 function validatePublicEvent(event: string, data: Record<string, unknown>, raw: RawSseBlock): void {
+  if (data.evidence_chain !== undefined && !evidenceChainSchema.safeParse(data.evidence_chain).success) {
+    throw new SseProtocolError('SSE 证据链不符合协议', raw)
+  }
+  if (data.workbench !== undefined && !collaborationSchema.safeParse(data.workbench).success) {
+    throw new SseProtocolError('SSE 协作字段不符合协议', raw)
+  }
   if (data.semantics !== undefined && !resultSemanticsSchema.safeParse(data.semantics).success) {
     throw new SseProtocolError('SSE 结果语义字段不符合协议', raw)
   }
@@ -145,8 +152,10 @@ function validatePublicEvent(event: string, data: Record<string, unknown>, raw: 
   } else if (event === 'final_result') {
     if (!('data' in data)) throw new SseProtocolError('SSE 公共事件字段不符合协议', raw)
   } else if (event === 'interrupt') {
-    requireString('message')
-    requireString('question_id')
+    const legacyQuestion = typeof data.message === 'string' && typeof data.question_id === 'string'
+    if (!legacyQuestion && !(typeof data.job_id === 'string' && data.status === 'waiting_input')) {
+      throw new SseProtocolError('SSE 等待输入状态不符合协议', raw)
+    }
   } else if (event === 'canceled') {
     requireString('job_id')
     requireString('status')

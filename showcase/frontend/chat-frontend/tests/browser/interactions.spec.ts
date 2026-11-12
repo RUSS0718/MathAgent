@@ -1,14 +1,17 @@
 import { expect, test } from '@playwright/test'
 import { mockWorkspace } from './fixtures'
 
-test('desktop observer really closes and gives space back', async ({ page }) => {
-  await mockWorkspace(page)
+test('new workspace replaces the observer and shares state across its views', async ({ page }) => {
+  await mockWorkspace(page, true)
   await page.goto('/dashboard-assets/session/session-demo')
-  const main = page.locator('.workspace-shell > main')
-  const before = await main.boundingBox()
-  await page.getByRole('button', { name: '隐藏运行观察' }).click()
-  await expect(page.getByRole('heading', { name: '运行观察' })).toBeHidden()
-  expect((await main.boundingBox())!.width).toBeGreaterThan(before!.width)
+  await expect(page.locator('[data-workspace="conversation-workbench"]')).toBeVisible()
+  await expect(page.locator('.workspace-shell')).toHaveCount(0)
+  const workbench = page.getByRole('region', { name: '对话式执行工作台' })
+  await expect(workbench.locator('[data-workbench-event]')).toHaveCount(2)
+  await workbench.getByRole('button', { name: '完整星图', exact: true }).click()
+  await expect(workbench.locator('.constellation:not(.mini)')).toBeVisible()
+  await workbench.getByRole('button', { name: '对话事件', exact: true }).click()
+  await expect(workbench.locator('[data-workbench-event]:visible')).toHaveCount(2)
 })
 
 test('IME Enter confirms composition without sending', async ({ page }) => {

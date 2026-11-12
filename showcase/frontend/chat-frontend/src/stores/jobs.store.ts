@@ -14,6 +14,8 @@ export interface JobRecord {
   error: string | null
   presentationMode: PresentationMode | null
   events: DecodedSseEvent[]
+  result: Record<string, unknown> | null
+  replay: boolean
 }
 
 const terminalStatuses = new Set<Status>(['succeeded', 'failed', 'canceled'])
@@ -42,6 +44,8 @@ export const useJobsStore = defineStore('jobs', {
         error: null,
         presentationMode: null,
         events: [],
+        result: null,
+        replay: false,
       }
       record.sessionId = sessionId
       if (presentationMode !== undefined) record.presentationMode = presentationMode
@@ -55,6 +59,7 @@ export const useJobsStore = defineStore('jobs', {
       const cursor = existing?.lastEventId ?? 0
       const record = this.start(job.job_id, job.session_id, job.status, cursor)
       record.error = typeof job.error === 'string' ? job.error : null
+      if (job.result && typeof job.result === 'object') record.result = job.result as Record<string, unknown>
       const mode = (job as ActiveJobResponse & { result?: { presentation_mode?: unknown } }).result?.presentation_mode
       if (mode === 'solve' || mode === 'teach' || mode === 'report') record.presentationMode = mode
       return record

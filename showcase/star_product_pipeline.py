@@ -260,6 +260,7 @@ class StarProductPipeline:
             if event:
                 public_event_id = public_solver_event_id(run, event)
                 sink({"type": "solver_progress", "job_id": run_id,
+                      "evidence_kind": self.evidence_kind,
                       "solver_event_id": public_event_id,
                       "solver_revision": event.get("state_revision", 0),
                       "solver_event_type": event["type"],
@@ -489,6 +490,11 @@ class StarProductPipeline:
               "message": "star_completed_llm_reviewed" if result["status"] == "COMPLETED"
                          else result["error"]["category"],
               "semantics": result["solver"]["semantics"],
+              "evidence_chain": [
+                  {"step_label": step["label"], "verdict": "ACCEPT", "valid": True}
+                  for step in result["solver"]["progress"]["steps"]
+                  if step.get("verdict") == "ACCEPT" and step.get("valid") is True
+              ],
               "data": {"type": "text", "summary": result["summary"]}})
         return result
 
