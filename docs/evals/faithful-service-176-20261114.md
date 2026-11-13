@@ -9,9 +9,17 @@
 - `npm run typecheck` 与 `npm run build` 通过，日志 `ui-typecheck.log`、`ui-build.log`；构建保留既有 chunk 大小提示。
 - `npx playwright test tests/browser/serial-intervention.spec.ts --workers=1 --output ../../../artifacts/issue-176/ui-browser` 一项通过，覆盖 320/768/1024/1440 宽度和只读重开，零写请求、零浏览器错误。`ui-browser.log` 与对应截图；仅受控 public report 数据，不是自然模型自主触发证据。
 
-## 真实验收准备
+## 真实验收
 
-尚未启动真实模型运行。`artifacts/issue-176/live01/contract.json` 登记普通输入、独立答案和判据；核对正整数方程 `x²+y²+1=3xy` 的完整解及穷尽证明，期望答案不注入模型。复用原服务配置、48 调用/2400秒上界与固定 Python 镜像，凭证仅检查是否配置，不输出。源码、配置 hash、Run/Job/Attempt 与终态在实际运行后记录；已完成的 #175 旧运行不恢复、不重复派发。
+live01 使用源码 `803cc001783d096ab98590fa34387624558b7559`，配置 SHA256 `9170fa5f39e8262e2ea780a54478bdd14d10e4c6da6531381d3f9a055cf97364`；48 调用/2400秒上界和固定 Python 镜像沿用既有授权。普通浏览器输入正整数方程 `x²+y²+1=3xy` 的全部解及穷尽证明，期望答案不注入模型。Run/Job `run_bb98df2f10cbb06134a7c30bf929e9df` 失败，5 个物理 Attempt 的传输记录均为 success，但 Planner 逻辑调用记录为 timeout / `unknown_outcome`，不能据物理传输成功升级求解结果。未进入干预、未交付答案，unknown 不恢复或自动重发。
+
+证据为 `artifacts/issue-176/live01/diagnosis.json`、`job-final.json`、`persisted-latest.json`、`report.json`、`interventions.json` 与 `job-reopened.json`；五个 Attempt 完整 ID 见 diagnosis。原观察脚本的 GBK 编码错误、重接时误用资源路径导致的 404/401 分别保存在 `observer-failure01.json` / `observer-failure02.json`；修复后只读接回原 Job，刷新前后 Attempt 身份不变，零写请求。可选 goal-cache GET 出现 SQLite 锁错误，不能称干净 UI 正向通过。观察进程最后为 PID23440，服务 PID24012；终态已停服务并删除 `MathAgent-Issue176-live01` 临时检查，见 `service-closure.json`。旧失败不覆盖。
+
+live02 合同已准备但尚未派发：缩为四次实多项式的两参数恒非负条件题，目的是降低原题规划负担，检验有效串行步骤；使用新 Job，不重试旧 unknown。源码待身份修复集成后冻结。
+
+## 初审及修复
+
+`artifacts/issue-176/reviews/standards.md`：一项 P2 重复适用性检查的判断性建议，未确认硬性标准违规，11个 baseline 文件哈希匹配。`spec.md`：P1 实验身份缺少 Run 命名空间、P2 采用后父审查硬编码轮次导致身份冲突。已交由新的隔离实现代理修复；尚未复审，不作为通过。
 
 ## 待完成
 
