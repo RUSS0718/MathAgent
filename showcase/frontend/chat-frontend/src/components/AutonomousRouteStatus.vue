@@ -37,6 +37,9 @@ const switchLabels = {
 }
 const modeLabel = (mode: string) => mode === 'population' ? '并发' : '串行'
 const reasons: Record<string, string> = {
+  reviewed_serial_progress_with_independent_frontiers: '串行已有核验进展，启用可用的独立方向',
+  population_progress_converge_to_ranked_route: '并发已产生核验进展，收敛到有效路线',
+  unknown_actions: '在途结果尚未确认，等待复核',
   independent_routes_admitted: '独立方向已通过容量与根预算准入',
   model_selected_serial: 'Agent 选择串行推进',
   no_population_proposal: '未提出并发路线，继续串行推进',
@@ -51,7 +54,7 @@ const reasons: Record<string, string> = {
 <template>
   <section v-if="executionSwitch" aria-label="运行路线切换" aria-live="polite">
     <h3>{{ switchLabels[executionSwitch.status] }} · {{ modeLabel(executionSwitch.source) }} → {{ modeLabel(executionSwitch.target) }}</h3>
-    <p>{{ executionSwitch.reason }}</p>
+    <p>{{ reasons[executionSwitch.reason] ?? executionSwitch.reason }}</p>
     <p v-if="executionSwitch.status === 'converging'">正在等待在途动作结算，受影响的新派发已停止。</p>
     <p v-if="executionSwitch.status === 'needs_review'">未知结果保留原预留，相关切换等待复核。</p>
     <p v-if="executionSwitch.status === 'switched' && executionSwitch.checkpoint_revision != null">检查点版本 {{ executionSwitch.checkpoint_revision }}；继续使用原任务预算与截止时间。</p>
