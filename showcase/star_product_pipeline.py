@@ -35,6 +35,7 @@ class StarProductPipeline:
                  context_capacity=None, population_capacity=None, population_budget=None,
                  limited_enabled=True,
                  population_enabled=None, population_memory_enabled=False,
+                 population_request_timeout_seconds=None,
                  intervention_enabled=False, formal_backend=None,
                  formal_registry=None, formal_server_policy=None):
         from .star_experiment_policy import ExperimentRunPolicy
@@ -73,10 +74,18 @@ class StarProductPipeline:
             try:
                 timeout = (self.adapter.applied_config().get("request_timeout_seconds")
                            or self.adapter.client_timeout)
+                finalization_timeout = timeout
+                if population_request_timeout_seconds is not None:
+                    if (type(population_request_timeout_seconds) not in {int, float}
+                            or not 0 < population_request_timeout_seconds <= timeout):
+                        raise ValueError("population_request_timeout_invalid")
+                    timeout = population_request_timeout_seconds
                 self.population_config = population_config(
                     self.population_budget, population_capacity, evidence_kind=evidence_kind,
                     request_timeout_seconds=timeout,
                 )
+                if population_request_timeout_seconds is not None:
+                    self.population_config["population_policy"]["finalization_timeout_seconds"] = finalization_timeout
                 self.population_config["transport_identity"] = {
                     "transport_policy": self.transport_policy,
                     "stream_profiles_fingerprint": profile_set_fingerprint(self.stream_profiles),
@@ -106,6 +115,9 @@ class StarProductPipeline:
             raise ValueError("star_budget_invalid")
         self.full_config = full_config(self.full_budget, full_features,
                                        context_capacity=context_capacity)
+        from .solver_harness.autonomous_routes import freeze_permission
+
+        freeze_permission(self.full_config, self.population_config, self.population_capacity_gap)
         if acceptance_mode == "handoff" and self.full_config["features"].get("problem_spec") is True:
             raise ValueError("problem_spec_requires_strict_acceptance")
         if acceptance_mode == "handoff":
@@ -283,7 +295,8 @@ class StarProductPipeline:
                       "solver": projection(run, verification_mode=verification_mode,
                                            include_prover_routes=False),
                       **decision_fields(event, run["state"], port.invocations)})
-                if self.intervention_enabled and solver_mode != "star_population":
+                if (self.intervention_enabled and solver_mode != "star_population"
+                        and run["state"].get("population_policy", {}).get("enabled") is not True):
                     harness = harness_ref["harness"]
                     maybe_pause(
                         harness._state_store._connection, run, event, config, problem,
@@ -540,6 +553,8 @@ def projection(run, *, answer=None, verification_mode="auto", include_prover_rou
             **candidate_projection(run),
             **({'formal_verification': state['formal_verification']}
                if isinstance(state.get('formal_verification'), Mapping) else {})}
+    if state.get("execution_selection"):
+        result["execution_selection"] = state["execution_selection"]
     if include_prover_routes:
         from .prover_routes import prover_route_projection
 

@@ -62,6 +62,9 @@ def generate_initial_plan(harness, run, *, problem, model_port, config, metadata
                 "only for non-root work. Every root obligation must be mapped; WorkUnit count does not "
                 "change the root-obligation progress denominator."
             )
+    from .autonomous_routes import planner_request
+
+    request = planner_request(harness, run, request)
     if config.get("features", {}).get("planner_checkpoints") is True:
         from .planner_checkpoint import generate_checkpoint_plan
 

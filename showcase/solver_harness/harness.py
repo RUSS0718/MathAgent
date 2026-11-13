@@ -272,9 +272,11 @@ class SolverHarness:
                               ))
         pending_intake = auto_spec and supplied_spec is None
         if pending_intake:
+            from .autonomous_routes import initial_permission
             from .problem_intake import POLICY
 
             state["problem_intake"] = dict(POLICY)
+            state["autonomous_routes"] = initial_permission(self._config)
         if serial_routes and supplied_spec is None and not pending_intake:
             raise SolverValidationError("serial_routes_requires_problem_spec")
         if self._config.get("features", {}).get("progress_scheduling") is True:
@@ -578,7 +580,10 @@ class SolverHarness:
         population_policy = latest["state"].get("population_policy")
         if population_policy and population_policy.get("enabled") is True:
             request = {**request,
-                       "timeout_seconds": population_policy.get("request_timeout_seconds"),
+                       "timeout_seconds": population_policy.get(
+                           "finalization_timeout_seconds", population_policy.get("request_timeout_seconds"))
+                       if request.get("role") in {"final_generator", "whole_solution_verifier"}
+                       else population_policy.get("request_timeout_seconds"),
                        "retry_limit": population_policy.get("retry_limit", 1)}
         specification = latest["state"].get("problem_spec")
         if isinstance(specification, Mapping):

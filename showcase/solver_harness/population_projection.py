@@ -26,6 +26,20 @@ def population_projection(state):
              or actions.get(call.get("action_id"), {}).get("status") == "inflight")
     ]
     http_inflight = len(unresolved_calls)
+    ordinals = {rid: index for index, rid in enumerate(routes, 1)}
+    route_items = []
+    for rid, route in routes.items():
+        snapshot = route.get("snapshot", {})
+        steps = snapshot.get("plan", {}).get("steps", [])
+        accepted = sum(item.get("verification", {}).get("verdict") == "ACCEPT"
+                       and item.get("verification", {}).get("valid") is True
+                       for item in snapshot.get("steps", {}).values())
+        route_items.append({
+            "ordinal": ordinals[rid], "parent_ordinal": ordinals.get(route.get("parent_route_id")),
+            "status": route.get("status", "unknown"), "step_count": len(steps),
+            "completed_steps": accepted,
+            "result": "accepted_evidence" if route.get("produced") else "pending",
+        })
     if not unresolved_calls:
         http_inflight = sum(
             action.get("reservation", {}).get("http_inflight", 0)
@@ -35,6 +49,7 @@ def population_projection(state):
         )
     return {
         "version": population.get("schema_version", "population-v1"),
+        "routes": route_items,
         "scheduler": {
             "round": population.get("round", 0),
             "member_count": len(members),

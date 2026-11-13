@@ -74,6 +74,20 @@ class FaithfulServiceConfigTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.load()
 
+    def test_population_timeout_is_explicit_and_preserves_root_limits(self):
+        self.value["population"] = {"capacity": {
+            "service_id": "intern", "max_inflight": 2, "worker_slots": 2,
+            "evidence_ref": "existing-two-slot-observation", "status": "verified"},
+            "budget": self.value["budget"], "request_timeout_seconds": 30}
+        config = self.load()
+        self.assertEqual(30, config["SHOWCASE_STAR_POPULATION_REQUEST_TIMEOUT_SECONDS"])
+        self.assertEqual(1100, config["SHOWCASE_STAR_FULL_BUDGET"].max_runtime_seconds)
+        self.assertEqual(180, config["SHOWCASE_STAR_ADAPTER"].client_timeout)
+        for invalid in (0, True, 181, float("inf")):
+            self.value["population"]["request_timeout_seconds"] = invalid
+            with self.subTest(timeout=invalid), self.assertRaises(ValueError):
+                self.load()
+
     def test_cli_defaults_preserved_and_fake_config_rejected(self):
         from showcase.server_cli import parse_server_args
 

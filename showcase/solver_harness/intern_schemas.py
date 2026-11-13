@@ -325,6 +325,15 @@ def response_schema(request):
                 + "; unknown denotes an unresolved method and cannot start a serial route.",
             }
             step["required"].append("method_id")
+        if request.get("autonomous_routes"):
+            planner["properties"]["alternative_plans"] = {
+                "type": "array", "maxItems": 3, "items": deepcopy(planner),
+            }
+            planner["properties"]["execution_selection"] = obj({
+                "mode": {"enum": ["serial", "population"]}, "reason": TEXT,
+            })
+            if request["autonomous_routes"].get("capacity"):
+                planner["required"].append("execution_selection")
         if role == "planner":
             schema = planner
             if request.get("population_policy", {}).get("version") == "concurrent-aprs-v1":

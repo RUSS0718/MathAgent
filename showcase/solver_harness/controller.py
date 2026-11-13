@@ -133,6 +133,13 @@ def advance(harness, run, metadata, problem):
         config=harness._config,
         metadata=metadata or {},
     )
+    from .autonomous_routes import select_initial_execution
+
+    run = select_initial_execution(harness, run, problem)
+    if run["state"].get("population_policy", {}).get("enabled") is True:
+        from .population_lifecycle import advance_population
+
+        return advance_population(harness, run, problem, {})
     if harness._config.get("features", {}).get("serial_routes") is True:
         from .routes import sync_plan_route
 

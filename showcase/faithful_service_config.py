@@ -69,15 +69,20 @@ def load_faithful_config(path):
         "SHOWCASE_F7_SYSTEM_VIEW_ENABLED": True,
     }
     if "population" in value:
-        population = _object(value["population"], {"capacity", "budget"})
+        population = _object(value["population"], {"capacity", "budget"},
+                             {"request_timeout_seconds"})
         budget = _budget(population["budget"])
         # Validate with the current production adapter's default timeout; the
         # runtime repeats admission against the actual configured adapter.
+        timeout = population.get("request_timeout_seconds", 180)
+        if type(timeout) not in {int, float} or not 0 < timeout <= 180:
+            raise ValueError("population_request_timeout_invalid")
         population_config(budget, population["capacity"], evidence_kind="live",
-                          request_timeout_seconds=180)
+                          request_timeout_seconds=timeout)
         config.update(SHOWCASE_STAR_POPULATION_ENABLED=True,
                       SHOWCASE_STAR_POPULATION_CAPACITY=population["capacity"],
-                      SHOWCASE_STAR_POPULATION_BUDGET=budget)
+                      SHOWCASE_STAR_POPULATION_BUDGET=budget,
+                      SHOWCASE_STAR_POPULATION_REQUEST_TIMEOUT_SECONDS=timeout)
     if "formal" in value:
         from .formal import LeanTacticProver
         from .formal_docker import LeanDockerExecutor

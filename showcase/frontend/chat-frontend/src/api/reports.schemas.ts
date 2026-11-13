@@ -52,6 +52,11 @@ export const progressSchema = z.object({
 
 export const populationProjectionSchema = z.object({
   version: z.string(),
+  routes: z.array(z.object({
+    ordinal: z.number().int().positive(), parent_ordinal: z.number().int().positive().nullable(),
+    status: z.string(), step_count: z.number().int().nonnegative(),
+    completed_steps: z.number().int().nonnegative(), result: z.string(),
+  })).optional(),
   scheduler: z.object({
     round: z.number().int().nonnegative(),
     member_count: z.number().int().nonnegative(),

@@ -1,0 +1,33 @@
+# #174 普通入口自主 Population/APRS 合同
+
+范围：#168 C2；进行中串并行转换属于 #175。真实模型、浏览器验收、评测记录及最终门禁由集成负责人负责。本合同不声明自然选择或数学能力已经验收。
+
+## 公共入口及冻结范围
+
+普通 `POST /api/agent/jobs` 不需要提交技术模式。现有自动 ProblemSpec 与 Explore 之后，首份 Planner 计划在执行任何 WorkUnit 前提出 `execution_selection: {mode: serial|population, reason}`；并发提案通过 `alternative_plans` 提供独立前沿。必要能力、容量和根预算不足时记录串行替代理由。简单题仍可直接经整题检查完成。
+
+能力权限在新任务初始化时持久化到 `state.autonomous_routes`。选择仅发生一次，不修改 config hash，不创建新 Job/Run，不重置计数或 deadline。旧任务没有此权限记录时沿用原合同。
+
+配置沿用 `population.capacity` 的已核实容量和来源。可选 `population.request_timeout_seconds` 设置并发动作的逻辑请求上界，必须大于零且不超过当前 adapter 的请求上界（服务 loader 上限 180 秒）。未配置时沿用 adapter。整题收尾保留原 adapter 上界；底层 socket 超时与逻辑截止不同，公开 Attempt 的 `effective_timeout_seconds` 表示实际逻辑上界，unknown 仍保留原预留并等待结算。
+
+普通任务始终使用原 `budget`；高级 Population 预设的独立预算不替换它。运行时分别估计路线动作和整题收尾预留，派发时继续通过现有原子准入复核。
+
+## 选择、执行及交付
+
+| 内容 | 持久 / 公共位置 |
+| --- | --- |
+| 选择 | `state.execution_selection` / Job `result.solver.execution_selection` / Report `solver.solver.execution_selection` |
+| 选择字段 | `version=autonomous-routes-v1`、`requested`、`selected`、`reason`、脱敏 `proposal_reason`、`independent_routes`、`capacity`、选择时 `budget` |
+| 实际路线 | Job `result.solver.population.routes`，逐项 `ordinal`、`parent_ordinal`、`status`、`step_count`、`completed_steps`、`result` |
+| 动作及来源 | 既有 `state.population.routes/actions`、同一根账本、独立 Call/Attempt；公共路线只展示序号 |
+| 工作台 / 报告 | `自主路线选择`、`实际求解路线`；报告保留 `并发路线执行` 和 `累计预算与未知消耗` |
+
+完整候选沿用现有义务、冲突和来源检查、独立整题 Verifier 及答案 artifact 绑定。获准收尾后冻结其余新派发；不依赖的在途或 unknown 请求单独结算。迟到回执不能改写终态答案；GET、刷新和报告读取不能新增求解。
+
+## 聚焦验证边界
+
+- `tests.test_faithful_service_population`：普通提交实际并发、根预算及 deadline、独立调用、动作逻辑超时与收尾上界、绑定答案与只读重开；预算不足时明确串行替代。
+- `tests.test_faithful_service_config`：显式配置、原根预算和 adapter 上界、非法超时拒绝。
+- 复用公共 unknown/迟到结算、简单题及 Planner checkpoint 的受影响回归；前端复用 `population-report.test.ts` 检查实际路线及预算显示。
+
+上述受控 provider 检查只证明工程接线。自然并发选择及真实工具/模型回执以父任务验收产物为准；未执行项保持 `not_run`。

@@ -36,6 +36,8 @@ def progress_summary(state):
             for item in state.get("verified_results_ledger", [])
             if isinstance(item, dict) and isinstance(item.get("category"), str)],
         "meta_decision": (state.get("meta_decision") or {}).get("decision")}
+    if state.get("execution_selection"):
+        summary["execution_selection"] = state["execution_selection"]
     if autonomous:
         summary["partial"] = partial_progress(state, steps)
     if state.get("problem_spec_policy", {}).get("enabled") is True:
@@ -50,7 +52,8 @@ def progress_summary(state):
             ],
         }
         summary["plan_history"] = _plan_history(state)
-    if state.get("route_policy", {}).get("enabled") is True:
+    if (state.get("route_policy", {}).get("enabled") is True
+            and state.get("population_policy", {}).get("enabled") is not True):
         from .solver_harness.route_projection import route_summary
 
         summary["routes"] = route_summary(state)

@@ -82,7 +82,7 @@ def _estimates(harness, run, route, problem):
     if type(retry_limit) is not int or retry_limit < 1:
         raise ValueError("population_retry_policy_unavailable")
     retry_slots = max(1, retry_limit)
-    challenges = harness._config.get("max_challenge_rounds", 1)
+    challenges = policy.get("max_challenge_rounds", harness._config.get("max_challenge_rounds", 1))
     roles = ["reasoner", "step_verifier"] * (1 + challenges)
     # A protocol repair can consume one more logical request for either role.
     roles.extend(("reasoner", "step_verifier"))
@@ -137,7 +137,8 @@ def _work(parent, database_path, run_id, rid, aid, problem):
         try:
             result = run_plan(local, result, problem=problem, plan=result["state"]["plan"],
                               model_port=worker._model_port, verifier_port=worker._verifier_port,
-                              max_rounds=worker._config.get("max_challenge_rounds", 3),
+                              max_rounds=worker._config.get("population_policy", {}).get(
+                                  "max_challenge_rounds", worker._config.get("max_challenge_rounds", 3)),
                               max_model_calls=worker._config["max_model_calls"],
                               max_runtime_seconds=worker._config["max_total_duration_seconds"],
                               one_work_unit=True)
