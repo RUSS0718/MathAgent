@@ -103,6 +103,21 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
             {"clarification": None, "applicable_condition": None},
             {},
         )
+        with self.subTest(initial="empty root obligations"):
+            def repair_empty_roots(context):
+                self.assertIn("repair_instruction", context)
+                return SPEC
+
+            _, waiting = self.waiting(
+                {**SPEC, "root_obligations": [], "applicable_condition": None},
+                repair_empty_roots,
+            )
+            self.assertEqual(["problem_intake", "problem_intake"],
+                             [request["role"] for request in self.outbound])
+            self.assertEqual(2, waiting["result"]["budget"]["logical_calls"])
+            self.assertEqual(SPEC["clarification"]["question"],
+                             waiting["result"]["faithful"]["clarification"]["question"])
+
         for index, shape in enumerate(shapes):
             with self.subTest(shape=shape):
                 def repair_initial(context):

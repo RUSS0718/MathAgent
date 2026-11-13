@@ -16,7 +16,7 @@ PROBLEM_SPEC_SCHEMA = _object({
     "original_problem": _TEXT, "domain": _TEXT,
     "quantifiers": _TEXTS, "assumptions": _TEXTS, "directions": _TEXTS,
     "output_requirements": _TEXTS,
-    "root_obligations": {"type": "array", "items": _object({
+    "root_obligations": {"type": "array", "minItems": 1, "items": _object({
         "obligation_type": {"enum": sorted(OBLIGATION_TYPES)},
         "statement": _TEXT, "obligation_id": _TEXT,
         "direction": {"oneOf": [_TEXT, {"enum": [None]}]}, "prerequisite_ids": _TEXTS,
