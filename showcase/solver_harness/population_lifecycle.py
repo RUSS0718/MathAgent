@@ -64,7 +64,15 @@ def resume_population(harness, run, problem, metadata):
         )
     retry = metadata.get("retry_call")
     if retry is not None:
-        run = command(harness, run["run_id"], "retry", retry_call=retry)
+        pending = run["state"].get("execution_mode_pending")
+        from .calls import latest_retry_id
+        if pending and latest_retry_id(run["state"].get("calls", {}), pending["call_id"]) == retry["call_id"]:
+            run = harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
+                event={"event_id": "retry-authorized-" + retry["new_call_id"],
+                       "type": "call_retry_authorized", "retry_of": retry["call_id"]},
+                state_updates={"authorized_retry": retry, "status": "running"})
+        else:
+            run = command(harness, run["run_id"], "retry", retry_call=retry)
     run = command(harness, run["run_id"], "patch", updates={"paused_reason": None})
     return drive_population(harness, run, problem)
 

@@ -13,7 +13,7 @@ from tests.test_star_population_runtime import CAPACITY, PROBLEM, ROOT_ID, SPEC
 
 class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
     def run_plain_submission(self, *, runtime=7200, timeout=15, capacity=CAPACITY,
-                             selection_mode="population", multi_step=False, fault=None, modes=None, step_count=3):
+                             selection_mode="population", multi_step=False, fault=None, modes=None, step_count=3, job_timeout=20):
         entered = threading.Barrier(2)
         concurrent = []
         failed_once = set()
@@ -50,6 +50,10 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                         "execution_selection": {"mode": selection_mode,
                                                 "reason": "Two independent methods cover the goal."}}
             if request.get("execution_mode_decision"):
+                if fault == "mode_unknown" and not failed_once:
+                    from requests.exceptions import ConnectionError
+                    failed_once.add("mode_unknown")
+                    raise ConnectionError("unknown mode response")
                 return {"mode": next(decisions, "keep"), "reason": "Current fronts and progress justify this mode."}
             if role == "reasoner":
                 try:
@@ -110,8 +114,8 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                 json={"message": PROBLEM, "session_id": self.session})
             self.assertEqual(202, response.status_code, response.get_json())
             job_id = response.get_json()["job_id"]
-            final = self.terminal(job_id, timeout=20)
-        self.assertEqual("canceled" if fault == "cancel" else "failed" if fault == "unknown" else "succeeded",
+            final = self.terminal(job_id, timeout=job_timeout)
+        self.assertEqual("canceled" if fault == "cancel" else "failed" if fault in {"unknown", "mode_unknown", "mode_crash"} else "succeeded",
                          final["status"], final)
         return job_id, final, concurrent
 
@@ -228,7 +232,7 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
         self.assertEqual("serial", solver["execution_switch"]["current_mode"])
         self.assertEqual(1, len(solver["execution_switch_history"]))
         checkpoint = solver["serial_checkpoint"]
-        self.assertEqual(solver["execution_switch"]["checkpoint_revision"], checkpoint["revision"])
+        self.assertLessEqual(solver["execution_switch"]["checkpoint_revision"], checkpoint["revision"])
         self.assertIsInstance(checkpoint["route_revision"], int)
         before = len(self.outbound)
         report = self.report(job_id)
@@ -320,3 +324,137 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
         self.assertEqual("serial", requests[0]["current_mode"])
         history = final["result"]["solver"]["execution_switch_history"]
         self.assertEqual("population", history[0]["target"])
+
+    def test_parent_mode_unknown_requires_explicit_retry_and_retains_hold(self):
+        import uuid
+        from concurrent.futures import wait
+
+        from showcase.solver_harness.harness import SolverHarness
+        from showcase.solver_harness.population_runtime import _collect
+
+        original_dispatch = SolverHarness.dispatch
+        def dispatch(harness, run, operation, request):
+            if request.get("execution_mode_decision"):
+                wait(list(harness._population_futures.values()))
+                run = _collect(harness, harness.get_run(run["run_id"]))
+            return original_dispatch(harness, run, operation, request)
+        with patch.object(SolverHarness, "dispatch", dispatch):
+            job_id, failed, _ = self.run_plain_submission(multi_step=True, fault="mode_unknown")
+        pipeline = self.app.extensions["showcase_workspace_service"].star_pipeline
+        self.enterContext(patch.object(pipeline, "full_gaps", return_value=[]))
+        old = failed["result"]["solver"]["recovery"]["unknown_calls"][0]["call_id"]
+        before = len(self.outbound)
+        response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={}, headers=self.headers())
+        self.assertEqual(202, response.status_code)
+        resumed = self.terminal(job_id, timeout=20)
+        self.assertEqual(before, len(self.outbound))
+        self.assertEqual("failed", resumed["status"])
+        replacement = str(uuid.uuid4())
+        response = self.client.post(f"/api/agent/jobs/{job_id}/resume",
+            json={"retry_call": {"call_id": old, "new_call_id": replacement}}, headers=self.headers())
+        self.assertEqual(202, response.status_code, response.get_json())
+        final = self.terminal(job_id, timeout=20)
+        self.assertEqual("succeeded", final["status"], final.get("error"))
+        self.assertEqual(1, sum(r.get("call_id") == replacement for r in self.outbound))
+        self.assertEqual(3, sum(bool(r.get("execution_mode_decision")) for r in self.outbound))
+        self.assertGreater(final["result"]["budget"]["reserved_tokens"], 0)
+        self.assertEqual(failed["result"]["budget"]["deadline_at"], final["result"]["budget"]["deadline_at"])
+
+    def test_serial_checkpoint_refreshes_after_selected_route_settles(self):
+        from showcase.solver_harness.autonomous_routes import serial_checkpoint_view
+        from showcase.solver_harness.population_store import command
+
+        observed = []
+        def capture(*args, **kwargs):
+            run = command(*args, **kwargs)
+            state = run["state"]
+            checkpoint = state.get("serial_checkpoint")
+            if args[2] == "accept" and checkpoint:
+                route = state["population"]["routes"][checkpoint["route_id"]]
+                if (not route.get("inflight_action_id") and route["snapshot"].get("phase") == "STEP_EXECUTE"
+                        and route["revision"] > checkpoint["route_revision"]):
+                    serial_checkpoint_view(state, expected_revision=run["state_revision"])
+                if (route["snapshot"].get("phase") == "STEP_EXECUTE"
+                        and checkpoint["revision"] > state["execution_switch"]["checkpoint_revision"]):
+                    observed.append(serial_checkpoint_view(state, expected_revision=run["state_revision"]))
+                    stale = deepcopy(state)
+                    stale["serial_checkpoint"]["snapshot_hash"] = "stale"
+                    from showcase.solver_harness.faithful_intervention_records import (
+                        FaithfulInterventionError,
+                    )
+                    with self.assertRaisesRegex(FaithfulInterventionError, "serial_checkpoint_source_changed"):
+                        serial_checkpoint_view(stale, expected_revision=run["state_revision"])
+                    if len(observed) == 1:
+                        from showcase.solver_harness.faithful_intervention import (
+                            FaithfulInterventionEngine,
+                        )
+                        from tests.test_faithful_s10_intervention_execution import _PausedParentGate
+
+                        harness = args[0]
+                        engine = FaithfulInterventionEngine(harness._state_store._connection,
+                                                           connection_lock=threading.RLock())
+                        engine.register_hypothesis({
+                            "hypothesis_id": "refresh-hyp", "failure_category": "invalid_inference",
+                            "evidence": {"event_id": "checkpoint"},
+                            "candidate_action_ids": ("refresh-control", "refresh-treatment"),
+                            "falsification_criteria": {"condition": "same result after review"}})
+                        for name, mode in (("refresh-control", "direct"), ("refresh-treatment", "decompose")):
+                            engine.register_action({"action_id": name, "action_type": "review_strategy",
+                                "target": observed[-1]["current_step"], "parameters": {"mode": mode}})
+                        pair = engine.reserve_pair(job_id=run["run_id"], job_gate=_PausedParentGate(),
+                            run_id=run["run_id"], expected_revision=run["state_revision"],
+                            hypothesis_id="refresh-hyp", control_action_id="refresh-control",
+                            intervention_action_id="refresh-treatment", pair_id="refresh-pair", seed=17,
+                            reservation={"input_estimate": 10, "output_cap": 20})
+                        self.assertEqual("reserved", pair["status"])
+                        self.assertEqual(state, harness.get_run(run["run_id"])["state"])
+            return run
+        with patch("showcase.solver_harness.population_store.command", capture):
+            self.run_plain_submission(multi_step=True, step_count=8, job_timeout=40)
+        self.assertTrue(observed)
+
+    def test_completed_mode_receipt_replays_before_marker_and_intent(self):
+        from showcase.solver_harness.harness import SolverHarness
+        from showcase.solver_harness.population_store import command
+
+        for boundary in ("execution_mode_decided", "execution_intent"):
+            with self.subTest(boundary=boundary):
+                stopped = []
+                original = SolverHarness.commit_event
+                def commit(harness, *args, **kwargs):
+                    if boundary == "execution_mode_decided" and kwargs.get("event", {}).get("type") == boundary and not stopped:
+                        stopped.append(True)
+                        from concurrent.futures import wait
+
+                        from showcase.solver_harness.population_runtime import _collect
+                        wait(list(harness._population_futures.values()))
+                        _collect(harness, harness.get_run(args[0]))
+                        raise RuntimeError("mode completion consumption interrupted")
+                    return original(harness, *args, **kwargs)
+                def transition(*args, **kwargs):
+                    if boundary == "execution_intent" and args[2] == boundary and not stopped:
+                        stopped.append(True)
+                        from concurrent.futures import wait
+
+                        from showcase.solver_harness.population_runtime import _collect
+                        wait(list(args[0]._population_futures.values()))
+                        _collect(args[0], args[0].get_run(args[1]))
+                        raise RuntimeError("mode intent interrupted")
+                    return command(*args, **kwargs)
+                with patch.object(SolverHarness, "commit_event", commit), patch(
+                        "showcase.solver_harness.population_store.command", transition):
+                    job_id, failed, _ = self.run_plain_submission(multi_step=True, fault="mode_crash")
+                self.assertTrue(stopped)
+                prior = [r for r in self.outbound if r.get("execution_mode_decision")]
+                self.assertEqual(1, len(prior))
+                pipeline = self.app.extensions["showcase_workspace_service"].star_pipeline
+                with patch.object(pipeline, "full_gaps", return_value=[]):
+                    response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={}, headers=self.headers())
+                    self.assertEqual(202, response.status_code, response.get_json())
+                    final = self.terminal(job_id, timeout=20)
+                self.assertEqual("succeeded", final["status"], final.get("error"))
+                self.assertEqual(len(self.outbound), final["result"]["budget"]["logical_calls"])
+                self.assertEqual("serial", final["result"]["solver"]["execution_switch"]["current_mode"])
+                self.assertEqual(1, sum(r.get("call_id") == prior[0]["call_id"] for r in self.outbound))
+                self.assertEqual(2, sum(bool(r.get("execution_mode_decision")) for r in self.outbound))
+                self.assertEqual(failed["result"]["budget"]["deadline_at"], final["result"]["budget"]["deadline_at"])

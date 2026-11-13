@@ -213,20 +213,24 @@ def advance_switch(harness, run, problem):
               "trigger": state.get("progress", {}).get("trigger")}
     if not (marker["rounds"] or marker["actions"] or marker["steps"] or marker["trigger"]):
         return run
-    if state.get("execution_mode_progress") == marker:
+    pending = state.get("execution_mode_pending")
+    if pending:
+        marker = pending["marker"]
+    if not pending and state.get("execution_mode_progress") == marker:
         return run
     run, proposal = _mode_decision(harness, run, problem, mode, marker, local)
     state = run["state"]
     target = proposal.get("mode", "keep")
-    if target in {"keep", mode}:
-        return run
-    if target == "population" and not _switch_budget_available(harness, run, plans, problem):
-        return run
+    if target in {"keep", mode} or (target == "population" and not _switch_budget_available(harness, run, plans, problem)):
+        return harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
+            event={"event_id": f"execution-mode-consumed-{run['state_revision']}", "type": "execution_mode_consumed"},
+            state_updates={"execution_mode_progress": marker, "execution_mode_pending": None})
     reason = ("reviewed_serial_progress_with_independent_frontiers" if target == "population"
               else "population_progress_converge_to_ranked_route")
     projection = {"status": "converging", "source": mode, "target": target,
                   "reason": reason, "checkpoint_revision": None, "current_mode": mode}
-    updates = {"execution_switch": projection}
+    updates = {"execution_switch": projection, "execution_mode_progress": marker,
+               "execution_mode_pending": None}
     if mode == "serial" and not state.get("population"):
         from .population_store import _canonical
         import hashlib
@@ -237,7 +241,7 @@ def advance_switch(harness, run, problem):
                            for key, call in state.get("calls", {}).items()
                            if call.get("status") == "completed"})
     if state.get("population"):
-        run = command(harness, run["run_id"], "execution_intent", projection=projection)
+        run = command(harness, run["run_id"], "execution_intent", projection=projection, mode_progress=marker)
     else:
         run = harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
             event={"event_id": f"execution-switch-intent-{run['state_revision']}",
@@ -329,7 +333,7 @@ def _mode_decision(harness, run, problem, mode, marker, local):
     from .route_budget import route_budget_snapshot
     from ..redaction import redact
 
-    if harness._meta_port is None or budget_reason(run["state"], harness._config):
+    if not run["state"].get("execution_mode_pending") and (harness._meta_port is None or budget_reason(run["state"], harness._config)):
         return run, {"mode": "keep"}
     run = harness.get_run(run["run_id"])
     revision = run["state_revision"]
@@ -344,19 +348,43 @@ def _mode_decision(harness, run, problem, mode, marker, local):
                "root_budget": route_budget_snapshot(harness._state_store._connection, run["run_id"]),
                "instruction": "Choose mode serial, population, or keep from current progress, stagnation, unfinished goals and independent fronts. Keep useful parallel work; expand stalled serial work only when independent fronts justify cost. This is a runtime decision, not intervention scheduling.",
                "allowed_tools": [], "tool_policy": {"allow": []}}
+    from .calls import CallInterrupted, latest_retry_id
     from .storage import SolverRevisionConflictError
-    while True:
-        run = harness.get_run(run["run_id"])
-        try:
-            run = harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
-                event={"event_id": f"execution-mode-dispatched-{revision}", "type": "execution_mode_dispatched"},
-                state_updates={"counters": {**run["state"]["counters"],
-                               "model_calls": run["state"]["counters"]["model_calls"] + 1}})
-            break
-        except SolverRevisionConflictError:
-            continue
-    request["state_revision"] = run["state_revision"]
-    reply = dict(harness.dispatch(run, harness._meta_port.complete, harness.prepare_request(run, request)))
+
+    pending = run["state"].get("execution_mode_pending")
+    if pending:
+        calls = run["state"].get("calls", {})
+        call_id = latest_retry_id(calls, pending["call_id"])
+        record = calls.get(call_id)
+        retry = run["state"].get("authorized_retry")
+        if record and record["status"] == "completed":
+            reply = deepcopy(record["response"])
+        else:
+            if record and (not retry or retry["call_id"] != call_id):
+                raise CallInterrupted(run["run_id"], call_id)
+            request = {**deepcopy(record["request"] if record else pending["request"]), "problem": problem}
+            if record:
+                run = harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
+                    event={"event_id": f"execution-mode-retry-{retry['new_call_id']}", "type": "execution_mode_dispatched"},
+                    state_updates={"counters": {**run["state"]["counters"],
+                        "model_calls": run["state"]["counters"]["model_calls"] + 1}})
+            request["state_revision"] = run["state_revision"]
+            reply = dict(harness.dispatch(run, harness._meta_port.complete, harness.prepare_request(run, request)))
+    else:
+        while True:
+            run = harness.get_run(run["run_id"])
+            try:
+                run = harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
+                    event={"event_id": f"execution-mode-dispatched-{revision}", "type": "execution_mode_dispatched"},
+                    state_updates={"execution_mode_pending": {"marker": marker, "call_id": request["call_id"],
+                                                             "request": {k: deepcopy(v) for k, v in request.items() if k != "problem"}},
+                        "counters": {**run["state"]["counters"],
+                                     "model_calls": run["state"]["counters"]["model_calls"] + 1}})
+                break
+            except SolverRevisionConflictError:
+                continue
+        request["state_revision"] = run["state_revision"]
+        reply = dict(harness.dispatch(run, harness._meta_port.complete, harness.prepare_request(run, request)))
     if reply.get("mode") not in {"keep", "serial", "population"} or not isinstance(reply.get("reason"), str):
         raise ValueError("invalid_execution_mode_decision")
     run = harness.get_run(run["run_id"])
@@ -366,7 +394,7 @@ def _mode_decision(harness, run, problem, mode, marker, local):
             run = harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
                 event={"event_id": f"execution-mode-decided-{revision}", "type": "execution_mode_decided",
                        "mode": reply["mode"], "reason": redact(reply["reason"][:400])},
-                state_updates={"execution_mode_progress": marker})
+                state_updates={})
             break
         except SolverRevisionConflictError:
             continue
