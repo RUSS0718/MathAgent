@@ -13,22 +13,36 @@ from tests.test_star_population_runtime import CAPACITY, PROBLEM, ROOT_ID, SPEC
 
 class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
     def run_plain_submission(self, *, runtime=7200, timeout=15, capacity=CAPACITY,
-                             selection_mode="population"):
+                             selection_mode="population", multi_step=False, fault=None):
         entered = threading.Barrier(2)
         concurrent = []
 
         def provider(request):
             role = request["role"]
             if role == "problem_intake":
-                return deepcopy(SPEC)
+                spec = deepcopy(SPEC)
+                if multi_step:
+                    spec["root_obligations"] = [{**spec["root_obligations"][0],
+                        "obligation_id": f"root:result-{i}"} for i in range(3)]
+                return spec
             if role == "planner":
                 plan = {"version": 1, "steps": [{
                     "step_id": "direct", "title": "Direct", "objective": PROBLEM,
                     "method_id": "direct", "obligation_ids": [ROOT_ID],
                     "auxiliary_goal_ids": [],
                 }]}
+                if multi_step:
+                    plan["steps"] = [{**plan["steps"][0], "step_id": f"direct-{i}",
+                                      "depends_on": [f"direct-{i-1}"] if i else [],
+                                      "obligation_ids": [f"root:result-{i}"]}
+                                     for i in range(3)]
                 alternative = deepcopy(plan)
-                alternative["steps"][0].update(step_id="construction", method_id="construction")
+                if multi_step:
+                    alternative["steps"] = [{**step, "step_id": f"construction-{i}",
+                        "method_id": "construction", "depends_on": [f"construction-{i-1}"] if i else []}
+                        for i, step in enumerate(alternative["steps"])]
+                else:
+                    alternative["steps"][0].update(step_id="construction", method_id="construction")
                 return {**plan, "alternative_plans": [alternative],
                         "execution_selection": {"mode": selection_mode,
                                                 "reason": "Two independent methods cover the goal."}}
@@ -38,12 +52,28 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                     concurrent.append(request)
                 except threading.BrokenBarrierError:
                     pass
+                if fault and request["step"]["step_id"].endswith("construction-0"):
+                    import time
+                    from requests.exceptions import ConnectionError
+
+                    for _ in range(100):
+                        observed = self.job(request["run_id"]).get("result", {}).get("solver", {}).get("execution_switch", {})
+                        if observed.get("status") == "converging":
+                            break
+                        time.sleep(0.02)
+                    self.assertEqual("converging", observed.get("status"))
+                    if fault == "cancel":
+                        canceled = self.client.post(f"/api/agent/jobs/{request['run_id']}/cancel",
+                                                    json={}, headers=self.headers())
+                        self.assertEqual(200, canceled.status_code)
+                    else:
+                        raise ConnectionError("unknown response")
                 return {"argument": "1+1=2", "claims": [
                     {"statement": "1+1=2", "label": "verified"}], "blocked": False}
             if role == "step_verifier":
                 return {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
                         "objection": "", "obligation_evidence": [{
-                            "obligation_id": ROOT_ID, "evidence_category": "format_check",
+                            "obligation_id": request["step"]["obligation_ids"][0], "evidence_category": "format_check",
                             "claim_indexes": [0]}]}
             if role == "final_generator":
                 return {"final_response": "1+1=2"}
@@ -71,7 +101,8 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
             self.assertEqual(202, response.status_code, response.get_json())
             job_id = response.get_json()["job_id"]
             final = self.terminal(job_id, timeout=20)
-        self.assertEqual("succeeded", final["status"], final)
+        self.assertEqual("canceled" if fault == "cancel" else "failed" if fault else "succeeded",
+                         final["status"], final)
         return job_id, final, concurrent
 
     def test_plain_submission_selects_parallel_routes_and_reloads_bound_delivery(self):
@@ -153,3 +184,64 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                 before = len(self.outbound)
                 self.assertEqual(selection, self.job(job_id)["result"]["solver"]["execution_selection"])
                 self.assertEqual(before, len(self.outbound))
+
+    def test_midrun_switch_preserves_initial_selection_and_readonly_projection(self):
+        job_id, final, _ = self.run_plain_submission(selection_mode="serial", multi_step=True)
+        solver = final["result"]["solver"]
+        self.assertEqual("serial", solver["execution_selection"]["selected"])
+        switch = solver.get("execution_switch", {})
+        self.assertEqual("switched", switch.get("status"))
+        self.assertEqual("population", switch["source"])
+        self.assertEqual("serial", switch["target"])
+        self.assertIsInstance(switch["checkpoint_revision"], int)
+        history = solver["execution_switch_history"]
+        self.assertEqual([("serial", "population"), ("population", "serial")],
+                         [(item["source"], item["target"]) for item in history])
+        self.assertLess(history[0]["checkpoint_revision"], history[1]["checkpoint_revision"])
+        self.assertEqual(40, final["result"]["budget"]["limits"]["max_model_calls"])
+        self.assertEqual(solver["execution_selection"]["budget"]["deadline_at"],
+                         final["result"]["budget"]["deadline_at"])
+        self.assertEqual(len(self.outbound), final["result"]["budget"]["logical_calls"])
+        initial_work = [item for item in self.outbound if item["role"] == "reasoner"
+                        and item.get("step", {}).get("step_id") == "direct-0"]
+        self.assertEqual(1, len(initial_work))
+        self.assertEqual("serial", switch["current_mode"])
+        self.assertEqual(switch, solver["progress"]["execution_switch"])
+        before = len(self.outbound)
+        self.assertEqual(switch, self.job(job_id)["result"]["solver"]["execution_switch"])
+        self.assertEqual(before, len(self.outbound))
+
+    def test_initial_population_converges_to_actual_serial_continuation(self):
+        job_id, final, _ = self.run_plain_submission(multi_step=True)
+        solver = final["result"]["solver"]
+        self.assertEqual("population", solver["execution_selection"]["selected"])
+        self.assertEqual("serial", solver["execution_switch"]["current_mode"])
+        self.assertEqual(1, len(solver["execution_switch_history"]))
+        checkpoint = solver["serial_checkpoint"]
+        self.assertEqual(solver["execution_switch"]["checkpoint_revision"], checkpoint["revision"])
+        self.assertIsInstance(checkpoint["route_revision"], int)
+        before = len(self.outbound)
+        report = self.report(job_id)
+        self.assertEqual("same_artifact", report["semantics"]["binding"])
+        self.assertEqual(checkpoint, report["solver"]["solver"]["serial_checkpoint"])
+        self.assertEqual(before, len(self.outbound))
+
+    def test_unknown_blocks_switch_and_readonly_recovery_does_not_redispatch(self):
+        job_id, final, _ = self.run_plain_submission(multi_step=True, fault="unknown")
+        switch = final["result"]["solver"]["execution_switch"]
+        self.assertEqual("needs_review", switch["status"])
+        self.assertIsNone(switch["checkpoint_revision"])
+        self.assertEqual("population", switch["current_mode"])
+        self.assertGreater(final["result"]["budget"]["reserved_tokens"], 0)
+        before = len(self.outbound)
+        self.assertEqual(switch, self.job(job_id)["result"]["solver"]["execution_switch"])
+        self.report(job_id)
+        self.assertEqual(before, len(self.outbound))
+
+    def test_cancel_during_convergence_wins_over_checkpoint(self):
+        job_id, _, _ = self.run_plain_submission(multi_step=True, fault="cancel")
+        final = self.job(job_id)
+        switch = final["result"]["solver"]["execution_switch"]
+        self.assertEqual("canceled", switch["status"])
+        self.assertIsNone(switch["checkpoint_revision"])
+        self.assertEqual("population", switch["current_mode"])

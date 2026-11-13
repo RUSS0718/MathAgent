@@ -501,6 +501,9 @@ class WorkspaceStore:
                     if status != "canceled":
                         now = _utc_now()
                         freeze_budget(self._connection, job_id)
+                        from .solver_harness.autonomous_routes import cancel_switch
+
+                        cancel_switch(self._connection, job_id, now)
                         result_json = _loads(row["result_json"]) if row["result_json"] else {}
                         _mark_pair_config_not_applied(result_json)
                         self._connection.execute("UPDATE workspace_jobs SET status='canceled',result_json=?,updated_at=? WHERE job_id=?", (_json(result_json), now, job_id))

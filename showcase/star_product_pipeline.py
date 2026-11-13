@@ -557,6 +557,11 @@ def projection(run, *, answer=None, verification_mode="auto", include_prover_rou
                if isinstance(state.get('formal_verification'), Mapping) else {})}
     if state.get("execution_selection"):
         result["execution_selection"] = state["execution_selection"]
+    if state.get("execution_switch"):
+        result["execution_switch"] = state["execution_switch"]
+        result["execution_switch_history"] = state.get("execution_switch_history", [])
+    if state.get("serial_checkpoint"):
+        result["serial_checkpoint"] = state["serial_checkpoint"]
     if include_prover_routes:
         from .prover_routes import prover_route_projection
 

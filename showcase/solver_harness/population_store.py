@@ -204,6 +204,67 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             "population": population,
         }
 
+    if operation == "execution_intent":
+        if owner is None or owner_token != owner:
+            raise PopulationConflict("population_owner_epoch_mismatch")
+        return _event("execution_switch_intent", **args["projection"]), {
+            "execution_switch": deepcopy(args["projection"])}
+
+    if operation == "execution_checkpoint":
+        if owner is None or owner_token != owner:
+            raise PopulationConflict("population_owner_epoch_mismatch")
+        if state["state_revision"] != args["expected_revision"]:
+            return None, {}
+        switch = deepcopy(state["execution_switch"])
+        if switch["status"] == "switched":
+            return None, {}
+        actions = list(population["actions"].values())
+        calls = list(state.get("calls", {}).values())
+        unknown = (any(a.get("status") == "unknown" for a in actions)
+                   or any(c.get("status") == "unknown_outcome" for c in calls))
+        pending = (any(a.get("status") == "inflight" or a.get("settlement_status") == "pending"
+                       or (a.get("status") == "completed" and not a.get("accepted")) for a in actions)
+                   or any(c.get("status") in {"dispatched", "streaming"} for c in calls))
+        if unknown or pending:
+            switch["status"] = "needs_review" if unknown else "converging"
+            if switch == state["execution_switch"]:
+                return None, {}
+            return _event("execution_switch_blocked"), {"execution_switch": switch,
+                **({"status": "interrupted"} if unknown else {})}
+        from .population_evidence import validate_dependencies
+
+        candidates = [r for r in population["routes"].values()
+                      if r.get("status") in {"eligible", "active"}
+                      and r.get("snapshot", {}).get("phase") == "STEP_EXECUTE"
+                      and r["snapshot"].get("current_step")
+                      and r["snapshot"].get("specification_version") == state.get("specification_version")
+                      and validate_dependencies(state, r.get("dependencies", []))[0]]
+        if not candidates:
+            switch["status"] = "rejected"
+            switch["reason"] = "no_current_serial_checkpoint"
+            return _event("execution_switch_rejected"), {"execution_switch": switch}
+        from .population_schedule import round_schedule
+
+        ranking = round_schedule({**population, "round_members": [], "opportunities": []})["order"]
+        selected = next((rid for rid in ranking if rid in {r["route_id"] for r in candidates}),
+                        candidates[0]["route_id"])
+        switch.update(status="switched", current_mode=switch["target"],
+                      checkpoint_revision=state["state_revision"] + 1)
+        history = [*state.get("execution_switch_history", []), deepcopy(switch)]
+        checkpoint = {"revision": switch["checkpoint_revision"], "route_id": selected,
+                      "route_revision": population["routes"][selected]["revision"],
+                      "specification_version": state.get("specification_version"),
+                      "config_hash": state.get("config_hash"),
+                      "source_revision": state["state_revision"],
+                      "snapshot_hash": hashlib.sha256(_canonical(population["routes"][selected]["snapshot"]).encode()).hexdigest()}
+        return _event("execution_switched", **switch), {
+            "execution_switch": switch, "execution_switch_history": history,
+            "serial_checkpoint": checkpoint if switch["target"] == "serial" else None,
+            "serial_checkpoint_snapshot": deepcopy(population["routes"][selected]["snapshot"])
+                if switch["target"] == "serial" else None,
+            "execution_serial_route": selected if switch["target"] == "serial" else None,
+            "phase": "POPULATION", "status": "running"}
+
     if operation == "patch":
         if owner is None or owner_token != owner:
             raise PopulationConflict("population_owner_epoch_mismatch")
@@ -271,6 +332,10 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             raise PopulationConflict("population_owner_epoch_mismatch")
         if population.get("freeze") is not None or state.get("phase") == "TERMINAL":
             raise PopulationConflict("population_exploration_frozen")
+        if (state.get("execution_switch") or {}).get("status") in {"converging", "needs_review"}:
+            raise PopulationConflict("execution_switch_converging")
+        if state.get("execution_serial_route") not in {None, args["route_id"]}:
+            raise PopulationConflict("execution_serial_route_required")
         route_id, action_id = args["route_id"], args["action_id"]
         existing_action = population["actions"].get(action_id)
         if existing_action is not None:

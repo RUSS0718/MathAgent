@@ -51,6 +51,7 @@ def run_supplied_plan_or_explore(
         plan=plan,
         model_port=harness._model_port,
         verifier_port=harness._verifier_port,
+        one_work_unit=bool(run["state"].get("autonomous_routes")),
         max_rounds=min(5, _positive_config_int(harness._config, "max_challenge_rounds", 5)),
         max_model_calls=_non_negative_config_int(harness._config, "max_model_calls", 2),
         max_runtime_seconds=_non_negative_config_int(
@@ -96,6 +97,11 @@ def run_exploration_phase(harness, run: dict[str, Any], problem: str) -> dict[st
 
 
 def advance(harness, run, metadata, problem):
+    from .autonomous_routes import advance_switch
+
+    run = advance_switch(harness, run, problem)
+    if (run["state"].get("execution_switch") or {}).get("status") in {"converging", "needs_review"}:
+        return run
     if run["state"].get("population_policy", {}).get("enabled") is True:
         from .population_lifecycle import advance_population
 
@@ -257,5 +263,8 @@ def advance_product(harness, run, problem):
             terminated = protocol_failure_exit(harness, latest, exc)
             return latest if terminated is None else terminated
         if run["state_revision"] == revision:
+            if ((run["state"].get("execution_switch") or {}).get("status") == "converging"
+                    and harness._population_futures):
+                continue
             return run
     return run  # Explicitly incomplete; bridge never calls this a reviewed success.

@@ -253,7 +253,12 @@ def tick(harness, run, problem):
                    "type": "population_paused"},
             state_updates={"status": "interrupted"},
         )
-    schedule = round_schedule(pop)
+    serial_route = run["state"].get("execution_serial_route")
+    scheduling = ({**pop, "routes": {serial_route: pop["routes"][serial_route]},
+                   "round_members": [rid for rid in pop.get("round_members", []) if rid == serial_route],
+                   "opportunities": [rid for rid in pop.get("opportunities", []) if rid == serial_route]}
+                  if serial_route else pop)
+    schedule = round_schedule(scheduling)
     run = command(harness, run["run_id"], "patch", updates=schedule)
     for rid in schedule["order"]:
         route = run["state"]["population"]["routes"][rid]

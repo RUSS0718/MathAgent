@@ -81,6 +81,15 @@ def delivery_allowed(connection, state):
     for call_id in sources:
         call = calls.get(call_id, {})
         action = actions.get(call.get("action_id"), {})
+        from .population_store import _canonical
+        import hashlib
+
+        # Serial proof sources were already completed before the expansion intent.
+        # Preserve their exact immutable call identity rather than inventing an action.
+        if (call.get("status") == "completed" and not call.get("action_id")
+                and state.get("execution_serial_sources", {}).get(call_id)
+                == hashlib.sha256(_canonical(call).encode()).hexdigest()):
+            continue
         if (
             call.get("status") != "completed"
             or action.get("status") != "completed"

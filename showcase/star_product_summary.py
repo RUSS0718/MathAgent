@@ -38,6 +38,11 @@ def progress_summary(state):
         "meta_decision": (state.get("meta_decision") or {}).get("decision")}
     if state.get("execution_selection"):
         summary["execution_selection"] = state["execution_selection"]
+    if state.get("execution_switch"):
+        summary["execution_switch"] = state["execution_switch"]
+        summary["execution_switch_history"] = state.get("execution_switch_history", [])
+    if state.get("serial_checkpoint"):
+        summary["serial_checkpoint"] = state["serial_checkpoint"]
     if autonomous:
         summary["partial"] = partial_progress(state, steps)
     if state.get("problem_spec_policy", {}).get("enabled") is True:
