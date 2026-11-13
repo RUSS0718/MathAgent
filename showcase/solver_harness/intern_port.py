@@ -16,7 +16,7 @@ from ..tool_schemas import POLYNOMIAL_CHECK_SCHEMA, PYTHON_MATH_SCHEMA, schema_e
 from .faithful_memory_injection import has_population_memory
 from .intern_instructions import objective_dependencies, response_instructions, step_review_scope
 from .intern_schemas import response_schema
-from .problem_intake_schema import ungrounded_clarification_condition
+from .problem_intake_schema import invalid_intake_phase_reply
 
 
 class InternPortError(RuntimeError):
@@ -315,7 +315,7 @@ class InternModelPort:
             if _invalid_meta_action_enum(parsed, schema, request["role"]):
                 raise _protocol_failure("invalid_role_enum", record, response.text)
             if (not isinstance(parsed, Mapping) or schema_error(parsed, schema)
-                    or ungrounded_clarification_condition(parsed, request)):
+                    or invalid_intake_phase_reply(parsed, request)):
                 raise _protocol_failure("invalid_role_schema", record, response.text)
             record["status"] = "success"
             return dict(parsed)
@@ -390,7 +390,7 @@ class InternModelPort:
             if _invalid_meta_action_enum(parsed, schema, request["role"]):
                 raise _protocol_failure("invalid_role_enum", record, text)
             if (not isinstance(parsed, Mapping) or schema_error(parsed, schema)
-                    or ungrounded_clarification_condition(parsed, request)):
+                    or invalid_intake_phase_reply(parsed, request)):
                 raise _protocol_failure("invalid_role_schema", record, text)
             record["status"] = "success"
             metrics["status"] = "completed"

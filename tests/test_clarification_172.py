@@ -38,8 +38,8 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
     def open_star(self, replies, **config):
         super().open_star(replies, SHOWCASE_PRESENTATION_ENABLED=True, **config)
 
-    def waiting(self, spec=SPEC):
-        self.open_faithful([spec])
+    def waiting(self, *replies):
+        self.open_faithful(list(replies) or [SPEC])
         created = self.client.post("/api/agent/jobs", headers=self.headers(),
             json={"session_id": self.session, "message": PROBLEM, "presentation_mode": "teach"})
         self.assertEqual(202, created.status_code, created.get_json())
@@ -96,31 +96,45 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
 
     def test_live_reply_shapes_require_one_budgeted_repair_before_solving(self):
         generic = "三角形的几何参数已明确给出，可直接计算其数值面积。"
-        for clarification in ({"question": "", "reason": ""}, None):
-            with self.subTest(clarification=clarification):
-                job_id, before = self.waiting({**SPEC, "applicable_condition": generic})
+        base = {key: value for key, value in REASSESSED.items() if key != "applicable_condition"}
+        shapes = (
+            {"clarification": {"question": "", "reason": ""}, "applicable_condition": generic},
+            {"clarification": None, "applicable_condition": generic},
+            {"clarification": None, "applicable_condition": None},
+            {},
+        )
+        for index, shape in enumerate(shapes):
+            with self.subTest(shape=shape):
+                def repair_initial(context):
+                    self.assertIn("repair_instruction", context)
+                    self.assertNotIn("clarification_input", context)
+                    return SPEC
+
+                initial = index == 0
+                job_id, before = (self.waiting({**SPEC, "applicable_condition": generic}, repair_initial)
+                                  if initial else self.waiting())
+                self.assertEqual(2 if initial else 1, len(self.outbound))
                 question = before["result"]["faithful"]["clarification"]
 
                 def repair(context):
                     self.assertIn("repair_instruction", context)
                     self.assertEqual(ANSWER, context["clarification_input"]["answer"])
-                    return {**REASSESSED, "clarification": None}
+                    return {**REASSESSED, "clarification": None} if initial else REASSESSED
 
                 def solve(context):
                     self.assertIn(ANSWER, context["problem_spec"]["assumptions"][-1])
                     return SOLVED_AREA
 
-                self.replies.extend([{**REASSESSED, "clarification": clarification,
-                                      "applicable_condition": generic},
-                                     repair, solve, POLISHED_AREA, ACCEPT])
+                self.replies.extend([{**base, **shape}, repair, solve, POLISHED_AREA, ACCEPT])
                 self.assertEqual(202, self.answer(job_id, question).status_code)
-                final = self.terminal(job_id)
+                final = self.wait_for(lambda: value if (value := self.job(job_id))["status"]
+                                      in {"succeeded", "failed", "waiting_input"} else None)
                 self.assertEqual("succeeded", final["status"],
                                  final["result"]["solver"].get("result_reason"))
-                self.assertEqual(["problem_intake"] * 3 + ["explore", "explore_polish",
+                self.assertEqual(["problem_intake"] * (4 if initial else 3) + ["explore", "explore_polish",
                                                            "whole_solution_verifier"],
                                  [request["role"] for request in self.outbound])
-                self.assertEqual(6, final["result"]["budget"]["logical_calls"])
+                self.assertEqual(7 if initial else 6, final["result"]["budget"]["logical_calls"])
                 self.assertEqual(before["result"]["budget"]["deadline_at"],
                                  final["result"]["budget"]["deadline_at"])
 

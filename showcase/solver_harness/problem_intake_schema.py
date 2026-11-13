@@ -41,11 +41,15 @@ PROBLEM_SPEC_SCHEMA["properties"]["applicable_condition"] = {"oneOf": [
 ]}
 
 
-def ungrounded_clarification_condition(reply, request):
-    """A model's sufficiency verdict must carry a literal excerpt of the reply."""
+def invalid_intake_phase_reply(reply, request):
+    """Check the phase-specific combination after structural schema validation."""
+    if request["role"] != "problem_intake":
+        return False
     submitted = request.get("clarification_input")
     condition = reply.get("applicable_condition")
-    return (request["role"] == "problem_intake" and submitted is not None
-            and condition is not None
-            and (reply.get("clarification") is not None
-                 or condition.strip() not in submitted["answer"]))
+    followup = reply.get("clarification")
+    if submitted is None:
+        return condition is not None
+    if condition is None:
+        return followup is None
+    return followup is not None or condition.strip() not in submitted["answer"]
