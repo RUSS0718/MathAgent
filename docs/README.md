@@ -1,5 +1,7 @@
 # MathAgent 文档索引
 
+- [#171 提交响应丢失恢复验收](evals/faithful-service-171-20261113.md)：B1 已完成持久身份、只读找回、多标签防重和明确再次求解；双轴复查清零，冻结源码 `c87c33f` 门禁 6/6 通过（2008 项、49 skip、源码无漂移）。真实旧 Run 刷新及第二标签 0 POST、Attempt 不变；#168 完整服务仍未交付。
+
 - [Faithful 自主 Agent 完整本机服务实施规格](https://github.com/RUSS0718/MathAgent/issues/168)：已拆分 #169–#183，按 A–H 端到端切片推进。[首票 #169 验收记录](evals/faithful-service-169-20261113.md)包含普通输入、真实 2+3 整题检查与刷新证据。[#170 验收记录](evals/faithful-service-170-20261113.md)已完成简单题真实 Planner→三个串行工作块→Python→整题绑定与只读恢复；最终 gate-03 六阶段通过（2007 项、0 failure/error、49 skip、源码无漂移），达到本票工程退出，交付 SHA 见 #170 完成评论。完整服务仍未交付，后续票按真实依赖领取。验收以少量真实模型、工具和浏览器场景跑通为主，不新增准确率、性能或大样本门槛。
 - [Faithful 自主能力调度与前端闭环决策地图](https://github.com/RUSS0718/MathAgent/issues/160)：2026-11-12 七项决策完成，规划退出；实施要求已汇总到 #168，完整服务尚未交付。能力准入、普通输入、动态调度、形式化、记忆及前端合同见地图的已决事项。
 - [自主服务实施交接与验收决议](https://github.com/RUSS0718/MathAgent/issues/167#issuecomment-6828389803)：首次交付在当前机器完成；按端到端切片接通真实服务，减少无关或重复离线测试，保留关键故障检查、阶段门禁与真实模型、工具、浏览器验收。既有未提交草稿须按决议核对，不算已验收实现；官方路径与独立 F8 数学评测保持各自边界。
@@ -263,3 +265,4 @@ v0.2 文档已归档为历史合同；v1.1 规格不覆盖这些 accepted ADR，
 最新 [readiness-05 执行观察器异常记录](evals/provider-live-natural-20261105-readiness-05.md) 区分 runner 写状态失败与服务端仍在运行的自然多步 Job；未获得 readiness PASS，#128 两臂仍 NOT_RUN。
 
 历史批次 [readiness-06](evals/provider-live-natural-20261105-readiness-06.md) 已终态 FAIL：有界 Meta 继续处理后仍未完成整题交付。后续零索引核验与重复历史读取修复不追溯升级旧 Run；当前实验状态见顶部归档入口。
+
