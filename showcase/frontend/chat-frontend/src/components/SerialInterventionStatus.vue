@@ -27,6 +27,7 @@ const reasons: Record<string, string> = {
   source_version_changed: '来源版本已变化', premise_or_version_changed: '题意或版本已变化',
   scope_changed: '适用范围已变化', premises_changed: '前提已变化', dependencies_changed: '依赖已变化',
   source_review_not_verified: '来源核验未通过', result_source_missing: '来源不可用',
+  source_proof_not_applicable: '来源证明已失效或不适用',
 }
 </script>
 
