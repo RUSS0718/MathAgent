@@ -70,6 +70,7 @@ class SolverHarness:
         meta_port: MetaPort | None = None,
         tool_port=None,
         event_observer=None,
+        intervention_enabled=False,
     ) -> None:
         if store is not None and database_path is not None:
             raise SolverValidationError("provide either store or database_path")
@@ -77,6 +78,7 @@ class SolverHarness:
         self._product_recovery = False
         self._population_owner = None
         self._population_futures = {}
+        self._intervention_enabled = intervention_enabled is True
         self._event_observer = event_observer
         self._config = _normalize_config(config)
         if self._config.get("features", {}).get("auto_problem_spec") is True and any(
@@ -276,6 +278,10 @@ class SolverHarness:
             from .problem_intake import POLICY
 
             state["problem_intake"] = dict(POLICY)
+            if self._intervention_enabled:
+                state["serial_intervention_permission"] = {
+                    "enabled": True, "version": "serial-intervention-v1"
+                }
             state["autonomous_routes"] = initial_permission(
                 self._config, (effective_metadata or {}).get("population_unavailable_reason"))
         if serial_routes and supplied_spec is None and not pending_intake:

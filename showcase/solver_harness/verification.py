@@ -75,6 +75,9 @@ def verify_step(
         return stop(harness, run, reason)
     state = run["state"]
     suffix = f"-challenge-{round_number}" if round_number else ""
+    adoption_review = (state.get("serial_intervention") or {}).get("review_id")
+    if adoption_review:
+        suffix += f"-adoption-{adoption_review}"
     attempt = state["attempt_index"]
     suffix += f"-attempt-{attempt}" if attempt else ""
     step_id = state["current_step"]
@@ -121,7 +124,11 @@ def verify_step(
     from .counterexample import pending_review
 
     pending = pending_review(run) if getattr(harness, "_product_recovery", False) else None
-    reserved = run if pending else harness.commit_event(
+    call_id = getattr(harness, "namespace_call_id", lambda value: value)(
+        f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
+    )
+    adoption_receipt = adoption_review and call_id in state.get("calls", {})
+    reserved = run if pending or adoption_receipt else harness.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],
         event={
@@ -132,9 +139,6 @@ def verify_step(
         state_updates={"counters": counters},
     )
     report = state["steps"][step_id]["report"]
-    call_id = getattr(harness, "namespace_call_id", lambda value: value)(
-        f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
-    )
     request = {
         "run_id": run["run_id"],
         "call_id": call_id,

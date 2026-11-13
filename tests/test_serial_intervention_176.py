@@ -34,6 +34,18 @@ class SerialAdoptionTest(unittest.TestCase):
             },
         ) as harness:
             parent = harness.get_run("native-parent")
+            # Enabling the service later must not authorize an existing Run or
+            # change its identity hash on resume.
+            from tests.test_faithful_s03_job import SPEC
+            from showcase.solver_harness.serial_intervention import advance
+            with SolverHarness(store=self.store, config=harness._config,
+                               intervention_enabled=True) as reopened:
+                resumed = reopened.solve(SPEC["original_problem"], {
+                    "run_id": "native-parent", "problem_spec": SPEC,
+                    "plan": parent["state"]["plan"]})
+                self.assertEqual(parent["state"]["config_hash"], resumed["state"]["config_hash"])
+                self.assertNotIn("serial_intervention_permission", resumed["state"])
+                self.assertEqual(resumed, advance(reopened, resumed, SPEC["original_problem"]))
             reference = result_reference(self.engine, "native-pair", "intervention")
             before = parent["state"].get("verified_results_ledger", [])
             adopted = adopt_result(harness, parent, self.engine, reference)
@@ -45,6 +57,24 @@ class SerialAdoptionTest(unittest.TestCase):
                 "llm_reviewed",
                 adopted["state"]["serial_intervention"]["adoptions"][-1]["evidence_grade"],
             )
+            from copy import deepcopy
+            from showcase.solver_harness.serial_intervention import applicable_results
+
+            from tests.test_faithful_s03_job import SPEC
+            foreign = harness.solve(SPEC["original_problem"], {
+                "run_id": "foreign-parent", "problem_spec": SPEC,
+                "plan": parent["state"]["plan"]})
+            foreign = harness.commit_event("foreign-parent",
+                expected_revision=foreign["state_revision"],
+                event={"event_id": "seed-adopted-reference", "type": "test_seed"},
+                state_updates={key: deepcopy(adopted["state"][key]) for key in (
+                    "serial_intervention", "steps", "current_step", "plan", "plan_version",
+                    "problem_spec", "specification_version", "accepted_results")
+                    if key in adopted["state"]})
+            rejected_foreign = adopt_result(harness, foreign, self.engine, reference)
+            self.assertEqual("scope_changed", rejected_foreign["state"]["serial_intervention"]["adoptions"][-1]["reason"])
+            self.assertEqual([], applicable_results(harness, rejected_foreign))
+
             from showcase.solver_harness.serial_intervention import public_projection
 
             public = public_projection(adopted["state"]["serial_intervention"])
@@ -80,7 +110,35 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
     def test_two_jobs_share_store_without_sharing_experiment(self):
         self.run_intervention(shared=True)
 
-    def run_intervention(self, fault=None, shared=False):
+    def test_adoption_after_two_rejected_challenges_gets_fresh_review(self):
+        from unittest.mock import patch
+        from showcase.solver_harness import SolverHarness
+
+        dispatch = SolverHarness.dispatch
+        replayed = []
+
+        def replay_receipt(harness, run, port, request):
+            reply = dispatch(harness, run, port, request)
+            if "-adoption-" in request["call_id"] and not harness._product_recovery:
+                before = len(self.outbound)
+                latest = harness.get_run(run["run_id"])
+                self.assertEqual(reply, dispatch(harness, latest, port, request))
+                self.assertEqual(before, len(self.outbound))
+                run.update(harness.get_run(run["run_id"]))
+                replayed.append(request["call_id"])
+            return reply
+
+        self.enterContext(patch.object(SolverHarness, "dispatch", replay_receipt))
+        # Isolate the challenge-limit obstacle from the independent progress
+        # policy, which normally escalates after the first failed challenge.
+        with patch("showcase.solver_harness.progress.review_progress", return_value={}):
+            self.run_intervention(rounds=2)
+        self.assertEqual(1, len(replayed))
+
+    def test_disabled_intervention_permission_keeps_ordinary_calls(self):
+        self.run_intervention(enabled=False)
+
+    def run_intervention(self, fault=None, shared=False, rounds=1, enabled=True):
         from copy import deepcopy
 
         from tests.test_faithful_service_population import FaithfulPopulationJobTest
@@ -130,22 +188,37 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
                     )
                     self.assertEqual(200, canceled.status_code)
                 reply = deepcopy(replies[0](request))
+                if rounds == 2 and request["role"] == "reasoner":
+                    reply["argument"] = f"Attempt {request.get('round', 0)}: direct addition gives 2"
                 if request["run_id"] in proposal_runs and request["role"] == "reasoner":
                     reply["argument"] = "Construction proves 1+1=2"
                 if request["role"] == "planner":
                     reply["alternative_plans"] = []
                 return reply
 
-            self.serial_provider = provider
-            original_open([provider] * 80, **config)
+            original_open([provider] * 80, SHOWCASE_FAITHFUL_INTERVENTION_ENABLED=enabled, **config)
+            pipeline = self.app.extensions["showcase_workspace_service"].star_pipeline
+            pipeline.full_config["max_challenge_rounds"] = rounds
+            pipeline.population_config["max_challenge_rounds"] = rounds
+            pipeline.full_config["population_policy"]["max_challenge_rounds"] = rounds
 
         self.open_star = opened
         job_id, final, _ = FaithfulPopulationJobTest.run_plain_submission(
             self,
             selection_mode="serial",
-            fault="cancel" if fault == "cancel" else "mode_unknown" if fault else None,
+            fault="cancel" if fault == "cancel" else "mode_unknown" if fault or not enabled else None,
         )
         solver = final["result"]["solver"]
+        if not enabled:
+            self.assertFalse(any(r.get("serial_intervention_decision") or ":pair:" in r["call_id"]
+                                 for r in self.outbound))
+            self.assertFalse(solver.get("serial_intervention"))
+            self.assertEqual(40, final["result"]["budget"]["limits"]["max_model_calls"])
+            before = len(self.outbound)
+            self.job(job_id)
+            self.report(job_id)
+            self.assertEqual(before, len(self.outbound))
+            return
         if fault:
             arms = [
                 r["call_id"]
@@ -168,6 +241,14 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
         self.job(job_id)
         self.report(job_id)
         self.assertEqual(before, len(self.outbound))
+
+        if rounds == 2:
+            parent_reviews = [r for r in self.outbound if r["role"] == "step_verifier"
+                              and ":pair:" not in r["call_id"]]
+            self.assertEqual([0, 1, 2], [r["round"] for r in parent_reviews[:3]])
+            self.assertEqual(4, len(parent_reviews))
+            self.assertNotEqual(parent_reviews[2]["report"], parent_reviews[3]["report"])
+            self.assertEqual(len(parent_reviews), len({r["call_id"] for r in parent_reviews}))
 
         if shared:
             from unittest.mock import patch

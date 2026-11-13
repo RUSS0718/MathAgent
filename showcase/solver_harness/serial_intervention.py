@@ -77,11 +77,8 @@ def result_reference(engine, pair_id, arm, result_id=None):
     }
 
 
-def adopt_result(harness, run, engine, reference):
-    """Persist an adoption/rejection; branch authority is never copied to the parent."""
-    from ..run_control import check_control
-
-    check_control()
+def _applicability(run, engine, reference):
+    """Revalidate the same provenance and Run boundary at adoption and consumption."""
     state = run["state"]
     reason = "applicable_reviewed_result"
     try:
@@ -111,12 +108,22 @@ def adopt_result(harness, run, engine, reference):
         reason = "source_proof_not_applicable"
     except (KeyError, TypeError):
         reason = "result_source_missing"
+    return reason
+
+
+def adopt_result(harness, run, engine, reference):
+    """Persist an adoption/rejection; branch authority is never copied to the parent."""
+    from ..run_control import check_control
+
+    check_control()
+    state = run["state"]
+    reason = _applicability(run, engine, reference)
     accepted = reason == "applicable_reviewed_result"
     record = {
         "reference": deepcopy(reference),
         "status": "adopted" if accepted else "rejected",
         "reason": reason,
-        "evidence_grade": actual["evidence_grade"] if accepted else None,
+        "evidence_grade": reference["evidence_grade"] if accepted else None,
     }
     projection = deepcopy(state.get("serial_intervention") or {})
     projection["adoptions"] = [*projection.get("adoptions", []), record]
@@ -144,26 +151,7 @@ def applicable_results(harness, run):
             continue
         ref = item["reference"]
         try:
-            if result_reference(engine, ref["pair_id"], ref["arm"], ref.get("result_id")) != ref:
-                continue
-            state = run["state"]
-            if (
-                any(
-                    ref[k] != state.get(k)
-                    for k in (
-                        "problem_hash",
-                        "config_hash",
-                        "specification_version",
-                        "plan_version",
-                    )
-                )
-                or ref["scope"] != state.get("current_step")
-                or ref["dependencies"] != state["plan"]["steps"]
-                or ref["dependency_versions"] != _dependency_versions(state, ref["scope"])
-                or ref["premises"] != state["problem_spec"].get("assumptions", [])
-                or engine.get_pair(ref["pair_id"])["arms"][ref["arm"]].get("evidence_integrity")
-                != "verified"
-            ):
+            if _applicability(run, engine, ref) != "applicable_reviewed_result":
                 continue
             row = engine._connection.execute(
                 "SELECT state_json FROM faithful_intervention_children WHERE pair_id=? AND arm=?",
@@ -231,7 +219,9 @@ def advance(harness, run, problem):
     projection = state.get("serial_intervention")
     # One bounded experiment per ordinary serial task. Population composition is #177.
     if (
-        not state.get("autonomous_routes")
+        not getattr(harness, "_intervention_enabled", False)
+        or state.get("serial_intervention_permission") != {"enabled": True, "version": "serial-intervention-v1"}
+        or not state.get("autonomous_routes")
         or state.get("population_policy", {}).get("enabled")
         or state.get("execution_serial_route")
         or harness._meta_port is None
@@ -461,6 +451,7 @@ def advance(harness, run, problem):
         # Reuse the referenced argument as a main-task report. The parent Verifier
         # establishes its own authority; neither child ledger nor its verdict is copied.
         step_id = run["state"]["current_step"]
+        projection["review_id"] = _digest(reusable[-1]["reference"])
         run = _commit(
             harness,
             run,
@@ -484,7 +475,6 @@ def advance(harness, run, problem):
             verifier_port=harness._verifier_port,
             max_model_calls=harness._config.get("max_model_calls", 2),
             max_runtime_seconds=harness._config.get("max_total_duration_seconds", 3600),
-            round_number=2,
         )
     return _commit(harness, run, projection, phase="META_DECIDE")
 

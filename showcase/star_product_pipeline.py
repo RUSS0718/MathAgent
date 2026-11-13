@@ -306,6 +306,7 @@ class StarProductPipeline:
 
         def solve():
             with SolverHarness(database_path=self.database_path, config=config,
+                               intervention_enabled=self.intervention_enabled,
                                model_port=port, verifier_port=port,
                                meta_port=port,
                                tool_port=RegistryToolPort(self.registry) if self.registry else None,
