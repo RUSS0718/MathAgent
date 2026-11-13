@@ -77,7 +77,10 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
     def test_cancel_in_first_arm_stops_all_further_dispatch(self):
         self.run_intervention("cancel")
 
-    def run_intervention(self, fault=None):
+    def test_two_jobs_share_store_without_sharing_experiment(self):
+        self.run_intervention(shared=True)
+
+    def run_intervention(self, fault=None, shared=False):
         from copy import deepcopy
 
         from tests.test_faithful_service_population import FaithfulPopulationJobTest
@@ -85,12 +88,11 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
         original_open = self.open_star
 
         def opened(replies, **config):
-            proposal_seen = False
+            proposal_runs = set()
 
             def provider(request):
-                nonlocal proposal_seen
                 if request.get("serial_intervention_decision"):
-                    proposal_seen = True
+                    proposal_runs.add(request["run_id"])
                     return {
                         "decision": "intervene",
                         "reason": "Direct approach stalled",
@@ -108,7 +110,7 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
                         "reusable_results": [],
                         "trace_back_to": None,
                     }
-                if request["role"] == "step_verifier" and not proposal_seen:
+                if request["role"] == "step_verifier" and request["run_id"] not in proposal_runs:
                     return {
                         "goal_gate": "NO",
                         "logic_gate": "FAIL",
@@ -116,7 +118,7 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
                         "objection": "The direct argument does not establish the value",
                         "obligation_evidence": [],
                     }
-                if proposal_seen and request["role"] == "reasoner" and fault:
+                if request["run_id"] in proposal_runs and request["role"] == "reasoner" and fault:
                     if fault == "unknown":
                         from requests.exceptions import ConnectionError
 
@@ -128,13 +130,14 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
                     )
                     self.assertEqual(200, canceled.status_code)
                 reply = deepcopy(replies[0](request))
-                if proposal_seen and request["role"] == "reasoner":
+                if request["run_id"] in proposal_runs and request["role"] == "reasoner":
                     reply["argument"] = "Construction proves 1+1=2"
                 if request["role"] == "planner":
                     reply["alternative_plans"] = []
                 return reply
 
-            original_open([provider] * 40, **config)
+            self.serial_provider = provider
+            original_open([provider] * 80, **config)
 
         self.open_star = opened
         job_id, final, _ = FaithfulPopulationJobTest.run_plain_submission(
@@ -165,3 +168,25 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
         self.job(job_id)
         self.report(job_id)
         self.assertEqual(before, len(self.outbound))
+
+        if shared:
+            from unittest.mock import patch
+            from tests.test_star_population_runtime import PROBLEM
+
+            pipeline = self.app.extensions["showcase_workspace_service"].star_pipeline
+            with patch.object(pipeline, "full_gaps", return_value=[]):
+                response = self.client.post("/api/agent/jobs", headers=self.headers(),
+                    json={"message": PROBLEM, "session_id": self.session})
+                self.assertEqual(202, response.status_code)
+                second_id = response.get_json()["job_id"]
+                second = self.terminal(second_id, timeout=20)
+            second_solver = second["result"]["solver"]
+            self.assertEqual("completed", second_solver["serial_intervention"]["status"])
+            self.assertEqual("adopted", second_solver["serial_intervention"]["adoptions"][0]["status"])
+            self.assertNotEqual(solver["serial_intervention"]["pair_id"],
+                                second_solver["serial_intervention"]["pair_id"])
+            for identity in (job_id, second_id):
+                arms = [r for r in self.outbound if r["run_id"] == identity
+                        and r["role"] == "reasoner" and ":pair:" in r["call_id"]]
+                self.assertEqual(2, len(arms))
+                self.assertEqual(40, self.job(identity)["result"]["budget"]["limits"]["max_model_calls"])

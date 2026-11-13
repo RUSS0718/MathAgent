@@ -253,7 +253,7 @@ def advance(harness, run, problem):
             "pair_id": None,
             "adoptions": [],
             "continuation": "pending",
-            "call_id": f"serial-intervention:{run['state_revision']}",
+            "call_id": f"serial-intervention:{run['run_id']}:{run['state_revision']}",
         }
         run = _commit(harness, run, projection)
     if projection["status"] == "deciding":
@@ -353,6 +353,8 @@ def advance(harness, run, problem):
     try:
         try:
             report = engine.get_pair(pair_id)
+            if report["run_id"] != run["run_id"] or report["job_id"] != run["run_id"]:
+                raise FaithfulInterventionError("serial_intervention_pair_owner_changed")
         except KeyError:
             step = next(
                 s
