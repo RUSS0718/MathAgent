@@ -26,4 +26,3 @@
 - 本票没有活动服务、测试进程或临时检查；gate-01/02/03已终态且自删计划任务。服务PID4416/34952及门禁wrapper42632、runner9884已不存在；不重复启动旧运行。此前#174 unknown及旧#171工作树不属本票清理范围。
 - 实现工作树 `C:/Users/CQX/.codex/worktrees/faithful-switch-175/Challenge-Cup-2026` 的53份ignored产物及SHA256清单、各审查报告已保留在 `artifacts/issue-175/worktree-archives/`。managed归档工具拒绝移除它，明确原因是任务primary checkout；因此保留、不绕过手工删除，归档状态见archive-status.json。该工作树的两个未跟踪崩溃见证与主树已集成文件相同，不是待合改动；所有实现/审查代理均已关闭。
 - 新session创建结果将记录于 `artifacts/issue-175/handoff-session.json`。创建结果未知先查询，不重复创建接班session；确认已启动后本session停止工作。
-
