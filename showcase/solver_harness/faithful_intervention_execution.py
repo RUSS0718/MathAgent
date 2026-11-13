@@ -288,7 +288,12 @@ def _check_parent(engine, report, checkpoint, gate):
     ).fetchone()
     if row is None or row[1] != report["checkpoint_revision"]:
         raise FaithfulInterventionError("checkpoint_revision_conflict")
-    actual = {**checkpoint, "state": json.loads(row[0])}
+    state = json.loads(row[0])
+    if checkpoint["state"].get("serial_checkpoint_source"):
+        from .autonomous_routes import serial_checkpoint_view
+
+        state = serial_checkpoint_view(state, expected_revision=row[1])
+    actual = {**checkpoint, "state": state}
     digest = hashlib.sha256(_encode(actual).encode("utf-8")).hexdigest()
     if digest != report["checkpoint_hash"]:
         raise FaithfulInterventionError("checkpoint_drift")

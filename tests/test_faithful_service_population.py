@@ -13,9 +13,12 @@ from tests.test_star_population_runtime import CAPACITY, PROBLEM, ROOT_ID, SPEC
 
 class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
     def run_plain_submission(self, *, runtime=7200, timeout=15, capacity=CAPACITY,
-                             selection_mode="population", multi_step=False, fault=None):
+                             selection_mode="population", multi_step=False, fault=None, modes=None, step_count=3):
         entered = threading.Barrier(2)
         concurrent = []
+        failed_once = set()
+
+        decisions = iter(modes or ["population", "serial"] if selection_mode == "serial" else modes or ["serial"])
 
         def provider(request):
             role = request["role"]
@@ -23,7 +26,7 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                 spec = deepcopy(SPEC)
                 if multi_step:
                     spec["root_obligations"] = [{**spec["root_obligations"][0],
-                        "obligation_id": f"root:result-{i}"} for i in range(3)]
+                        "obligation_id": f"root:result-{i}"} for i in range(step_count)]
                 return spec
             if role == "planner":
                 plan = {"version": 1, "steps": [{
@@ -35,7 +38,7 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                     plan["steps"] = [{**plan["steps"][0], "step_id": f"direct-{i}",
                                       "depends_on": [f"direct-{i-1}"] if i else [],
                                       "obligation_ids": [f"root:result-{i}"]}
-                                     for i in range(3)]
+                                     for i in range(step_count)]
                 alternative = deepcopy(plan)
                 if multi_step:
                     alternative["steps"] = [{**step, "step_id": f"construction-{i}",
@@ -46,13 +49,15 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                 return {**plan, "alternative_plans": [alternative],
                         "execution_selection": {"mode": selection_mode,
                                                 "reason": "Two independent methods cover the goal."}}
+            if request.get("execution_mode_decision"):
+                return {"mode": next(decisions, "keep"), "reason": "Current fronts and progress justify this mode."}
             if role == "reasoner":
                 try:
                     entered.wait(timeout=2)
                     concurrent.append(request)
                 except threading.BrokenBarrierError:
                     pass
-                if fault and request["step"]["step_id"].endswith("construction-0"):
+                if fault in {"cancel", "unknown"} and request["step"]["step_id"].endswith("construction-0") and not failed_once:
                     import time
                     from requests.exceptions import ConnectionError
 
@@ -67,10 +72,15 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                                                     json={}, headers=self.headers())
                         self.assertEqual(200, canceled.status_code)
                     else:
+                        failed_once.add("unknown")
                         raise ConnectionError("unknown response")
                 return {"argument": "1+1=2", "claims": [
                     {"statement": "1+1=2", "label": "verified"}], "blocked": False}
             if role == "step_verifier":
+                if fault == "stagnation" and not failed_once:
+                    failed_once.add("blocked")
+                    return {"goal_gate": "NO", "logic_gate": "FAIL", "verdict": "REJECT",
+                            "objection": "This method did not establish the goal."}
                 return {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
                         "objection": "", "obligation_evidence": [{
                             "obligation_id": request["step"]["obligation_ids"][0], "evidence_category": "format_check",
@@ -101,7 +111,7 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
             self.assertEqual(202, response.status_code, response.get_json())
             job_id = response.get_json()["job_id"]
             final = self.terminal(job_id, timeout=20)
-        self.assertEqual("canceled" if fault == "cancel" else "failed" if fault else "succeeded",
+        self.assertEqual("canceled" if fault == "cancel" else "failed" if fault == "unknown" else "succeeded",
                          final["status"], final)
         return job_id, final, concurrent
 
@@ -245,3 +255,68 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
         self.assertEqual("canceled", switch["status"])
         self.assertIsNone(switch["checkpoint_revision"])
         self.assertEqual("population", switch["current_mode"])
+
+    def test_runtime_model_can_keep_population_after_progress(self):
+        _, final, _ = self.run_plain_submission(multi_step=True, modes=["keep"])
+        decisions = [r for r in self.outbound if r.get("execution_mode_decision")]
+        self.assertTrue(decisions)
+        self.assertNotIn("execution_switch_history", final["result"]["solver"])
+
+    def test_explicit_unknown_retry_dispatches_new_identity_during_switch(self):
+        import uuid
+
+        job_id, failed, _ = self.run_plain_submission(multi_step=True, fault="unknown")
+        pipeline = self.app.extensions["showcase_workspace_service"].star_pipeline
+        self.enterContext(patch.object(pipeline, "full_gaps", return_value=[]))
+        old = failed["result"]["solver"]["recovery"]["unknown_calls"][0]["call_id"]
+        before = len(self.outbound)
+        response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={}, headers=self.headers())
+        self.assertEqual(202, response.status_code)
+        self.terminal(job_id)
+        self.assertEqual(before, len(self.outbound))
+        replacement = str(uuid.uuid4())
+        response = self.client.post(f"/api/agent/jobs/{job_id}/resume",
+            json={"retry_call": {"call_id": old, "new_call_id": replacement}}, headers=self.headers())
+        self.assertEqual(202, response.status_code, response.get_json())
+        final = self.terminal(job_id, timeout=20)
+        self.assertEqual(1, sum(r.get("call_id") == replacement for r in self.outbound), final.get("error"))
+        self.assertGreater(final["result"]["budget"]["reserved_tokens"], 0)
+        self.assertEqual("switched", final["result"]["solver"]["execution_switch"]["status"])
+
+    def test_population_can_contract_expand_and_contract_on_new_receipts(self):
+        _, final, _ = self.run_plain_submission(multi_step=True, step_count=6,
+                                               modes=["serial", "population", "serial"])
+        history = final["result"]["solver"]["execution_switch_history"]
+        self.assertEqual(["serial", "population", "serial"], [s["target"] for s in history])
+
+    def test_checkpoint_export_is_legal_for_native_serial_validator(self):
+        from showcase.solver_harness.autonomous_routes import serial_checkpoint_view
+        from showcase.solver_harness.faithful_intervention_native import NativeCheckpointExecutor
+        from types import SimpleNamespace
+
+        observed = []
+        original = NativeCheckpointExecutor.validate_checkpoint
+        from showcase.solver_harness.population_store import command
+        def capture(*args, **kwargs):
+            parent = command(*args, **kwargs)
+            if args[2] != "execution_checkpoint" or not parent["state"].get("serial_checkpoint"):
+                return parent
+            state = serial_checkpoint_view(parent["state"], expected_revision=parent["state_revision"])
+            step = next(s for s in state["plan"]["steps"] if s["step_id"] == state["current_step"])
+            action = SimpleNamespace(target=step["step_id"], action_type="reasoning_method",
+                                     parameters={"method_id": step["method_id"]})
+            original(SimpleNamespace(config={"features": {"stream_recovery": True}}), state, action)
+            observed.append(state)
+            return parent
+        with patch("showcase.solver_harness.population_store.command", capture):
+            self.run_plain_submission(multi_step=True)
+        self.assertTrue(observed)
+
+    def test_serial_can_expand_before_first_accepted_step(self):
+        _, final, _ = self.run_plain_submission(selection_mode="serial", multi_step=True,
+                                               fault="stagnation")
+        requests = [r for r in self.outbound if r.get("execution_mode_decision")]
+        self.assertTrue(requests)
+        self.assertEqual("serial", requests[0]["current_mode"])
+        history = final["result"]["solver"]["execution_switch_history"]
+        self.assertEqual("population", history[0]["target"])

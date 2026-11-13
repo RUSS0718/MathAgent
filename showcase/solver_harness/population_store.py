@@ -78,7 +78,7 @@ def command(harness, run_id, operation, **args):
             state.update(updates)
             state.update(state_revision=next_revision, updated_at=now)
             stored = dict(event or {})
-            if operation == "patch":
+            if operation in {"patch", "execution_intent", "execution_checkpoint"}:
                 stored["event_id"] = f"{stored['event_id']}-{next_revision}"
             elif operation == "route_commit":
                 stored["event_id"] = f"population-{stored['action_id']}-{stored['event_id']}"
@@ -220,9 +220,19 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             return None, {}
         actions = list(population["actions"].values())
         calls = list(state.get("calls", {}).values())
-        unknown = (any(a.get("status") == "unknown" for a in actions)
-                   or any(c.get("status") == "unknown_outcome" for c in calls))
-        pending = (any(a.get("status") == "inflight" or a.get("settlement_status") == "pending"
+        from .calls import latest_retry_id
+
+        calls_by_id = state.get("calls", {})
+        resolved_actions = {c.get("action_id") for c in calls
+                            if c.get("status") == "unknown_outcome"
+                            and latest_retry_id(calls_by_id, c["call_id"]) != c["call_id"]
+                            and calls_by_id[latest_retry_id(calls_by_id, c["call_id"])].get("status") == "completed"}
+        unresolved = {c["call_id"] for c in calls if c.get("status") == "unknown_outcome"
+                      and c.get("action_id") not in resolved_actions}
+        unknown = (any(a.get("status") == "unknown" and a["action_id"] not in resolved_actions
+                       for a in actions) or bool(unresolved))
+        pending = (any(a.get("status") == "inflight"
+                       or (a.get("settlement_status") == "pending" and a["action_id"] not in resolved_actions)
                        or (a.get("status") == "completed" and not a.get("accepted")) for a in actions)
                    or any(c.get("status") in {"dispatched", "streaming"} for c in calls))
         if unknown or pending:
@@ -332,7 +342,8 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             raise PopulationConflict("population_owner_epoch_mismatch")
         if population.get("freeze") is not None or state.get("phase") == "TERMINAL":
             raise PopulationConflict("population_exploration_frozen")
-        if (state.get("execution_switch") or {}).get("status") in {"converging", "needs_review"}:
+        recovering = bool(population["routes"].get(args["route_id"], {}).get("snapshot", {}).get("authorized_retry"))
+        if (state.get("execution_switch") or {}).get("status") in {"converging", "needs_review"} and not recovering:
             raise PopulationConflict("execution_switch_converging")
         if state.get("execution_serial_route") not in {None, args["route_id"]}:
             raise PopulationConflict("execution_serial_route_required")

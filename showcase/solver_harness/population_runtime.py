@@ -253,6 +253,9 @@ def tick(harness, run, problem):
                    "type": "population_paused"},
             state_updates={"status": "interrupted"},
         )
+    recovery_routes = {rid: r for rid, r in pop["routes"].items() if r.get("snapshot", {}).get("authorized_retry")}
+    if (run["state"].get("execution_switch") or {}).get("status") in {"converging", "needs_review"}:
+        pop = {**pop, "routes": recovery_routes, "round_members": [], "opportunities": []}
     serial_route = run["state"].get("execution_serial_route")
     scheduling = ({**pop, "routes": {serial_route: pop["routes"][serial_route]},
                    "round_members": [rid for rid in pop.get("round_members", []) if rid == serial_route],

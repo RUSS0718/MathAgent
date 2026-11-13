@@ -82,7 +82,8 @@ def _save(harness, run, record, *, status=None, event_type="call_audit", event_f
                 state_updates=updates,
             )
         except SolverRevisionConflictError:
-            if harness._config.get("features", {}).get("concurrent_routes") is not True:
+            if (harness._config.get("features", {}).get("concurrent_routes") is not True
+                    and latest["state"].get("population_policy", {}).get("enabled") is not True):
                 raise
             from ..run_control import check_control
 

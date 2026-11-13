@@ -243,6 +243,8 @@ SCHEMAS["planner_checkpoint"] = obj(
 
 
 def response_schema(request):
+    if request.get("execution_mode_decision") is True and request.get("role") == "meta":
+        return obj({"mode": {"enum": ["serial", "population", "keep"]}, "reason": TEXT})
     role = request["role"]
     if role == "reasoner" and request.get("checkpoint_protocol"):
         schema = deepcopy(SCHEMAS["reasoner_checkpoint"])
