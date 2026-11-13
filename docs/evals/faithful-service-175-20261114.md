@@ -49,3 +49,13 @@
 冻结 `3ccd1e5`，普通6×10棋盘可任选独立完整方法。Job `run_d79f2812f014e876b2e576ef78c0ebea`，6 Attempt 全部success并结算；最终 `failed / partial_aborted / invalid_problem_spec_work_units`，Planner有界修复后仍未进入路线选择，未热切换、无完整答案。参考值4213133未发送模型。输入、提交、报告、刷新和持久记录在 `artifacts/issue-175/live02/`；服务按PID/创建时间停止，检查已删除。两个真实失败不因调整而升级。
 
 依已授权接续合同，将本票改为开发接线验收，自然真实切换、完整交付和真实UI正向闭环交给#183。原要求、障碍、替代证据与限制见[更新合同](../engineering/faithful-service-175-contract.md)；尚未取得最终工程门禁结果。产品仅随后 `7d9d59e` 修正本票7处局部导入排序，未改运行行为；最终冻结SHA及门禁将另记。
+
+## gate-01 失败与责任范围修复
+
+冻结 `75c1eab63dbc66fe1b12609b499d427d3a5dfac7`，`uv run python scripts/run_final_gate.py --root . --output-dir artifacts/issue-175/gates --run-id gate-01`：快速通过，完整离线 2061 项、2 failure、2 error、49 skip，停止在第二阶段；`source_changed=false`。失败原件保留于 `artifacts/issue-175/gates/gate-01/`，临时检查已删除。
+
+- 旧 native checkpoint 脚本未响应新增运行中 Meta；补充 `keep` 回复后，公共入口继续复现真实版本竞态：模式回执完成后，路线提交可使消费 marker 的 CAS 失败。确定性故障见证 `gate-fix/consume-red` 稳定失败；修复只重读版本重试持久消费，复用原回执、不重新调用模型。
+- 后续持久诊断发现在途调用 dispatch 与 transport 审计之间，另一条路线进入收尾冻结；原规则拒绝 `transport_selected`，造成调用被记为 unknown 且缺物理账本。确定性公共见证 `gate-fix/transport-red` 失败。修复只允许 `transport_selected/rejected` 的调用审计落盘；终态仍只允许 calls，数学写入继续冻结。
+- checkpoint 刷新测试原探针 patch 定义处，实际 accept 使用 runtime 中已导入别名；改为 patch 使用处，不删除原来源/实际 reserve_pair 断言。取消测试先检查公开 canceled，再等待实际 worker 退出以释放临时 SQLite，不改变产品停止语义。
+- 两竞态修复后 `gate-fix/race-green` 2/2；native checkpoint 模块 `gate-fix/native-final` 6/6、0 skip，原根预算与完整交付断言保留。`fence-final` 因命名类选择错误执行 0 项，不计通过；修正后的 `fence-final02` 4/4、0 skip，覆盖实际 checkpoint 刷新/消费、切换取消及既有迟到交付/取消隔离。所有路径前缀均为 `artifacts/issue-175/`。
+- 四文件增量 Standards/Spec 复审均 PASS，仅为静态结论，报告 `C:/Users/CQX/.codex/175-gatefix-{standards,spec}-review2.md`；11 个 baseline 文件逐份 SHA256 无变化，受影响四个 Python 文件 Ruff 与 diff 格式检查通过。新冻结最终门禁尚待完成。
