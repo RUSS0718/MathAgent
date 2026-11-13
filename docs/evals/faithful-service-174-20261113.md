@@ -2,7 +2,7 @@
 
 状态：**实现已提交，真实自然并发验收未完成，未达到工程退出**。集成分支 `faithful-autonomous-population`，最近真实运行源码 `77696377f9a1468fa8dbe8872ddddb5381830893`。live18 已自然选择并准入两条路线，但请求在 HTTP 派发前被预算检查拒绝；不能作为真实模型并发或合格交付的通过证据。#174 保持开放，#168 完整服务仍未交付；进行中热切换属于 #175。下方首次交接材料适用于 `c14ff82`，不能替代本节接续结果。
 
-## 接续修正与真实结果（截至北京时间 23:32）
+## 接续修正与真实结果（截至北京时间 23:53）
 
 本轮阻止只有数字的候选绕过证明及完备性义务；原始整题裁决保留，运行时资格否决单独记录并约束最终绑定和 Best-Effort。常见数学包装、润色前后同源候选一并覆盖。Planner 使用严格 schema 的精简说明与等价串行/并发示例，澄清可选辅助目标与根义务必需的辅助依赖，保持既有修复轮数、预算和冻结规格。
 
@@ -20,6 +20,10 @@
 | live18 数位计数 | 源码 `7769637`，Run `run_73484a2738f8b8ec14fb74cbf9d93314`；自然选择 `population / independent_routes_admitted`，准入两条独立动作。两条 Reasoner 均为 `budget_rejected / run_budget_exhausted`、零 HTTP 派发；原根账本、限额与 deadline 未重置。Job 最终 `failed / star_needs_review`，两动作已结算，无并发答案 |
 
 `331edf1` 明确主计划本身是一条完整证明路线，而不是多个方向的汇总；`7769637` 为根义务归属造成的自依赖提供定向修复反馈，不增加修复轮数或放宽解析和准入。失败见证及聚焦通过记录分别在 `artifacts/issue-174-resume/primary-route-fix/`、`root-owner-feedback/`。live18 原观察器将 JSON 字段顺序误判为预算变化；父任务以只读数据库及已初始化 dashboard 会话核对并保存 `live18-preparation/live-18-digits/parent-readonly-after-interruption.json` 与 `parent-public-job-after-interruption.json`，原失败状态不改写。
+
+后续源码 `4c79085d8f67078969d43a4c92136f0e51f5ed30` 补齐 Reasoner checkpoint 的协议及现有上下文估算。普通公共 Job 的受控传输见证确认旧实现因 `finalization_reservation_too_small` 在 HTTP 前拒绝；这些精确输入字节数来自离线见证，不能冒充 live18 未保存的 wire 数据。最终失败见证 1 项失败，修复后 20 项聚焦检查通过，包括两路线实际进入受控 HTTP 及根预算下的两次工具预检。证据在 `artifacts/issue-174-resume/native-population-budget-fix/`；没有重跑全仓门禁或真实模型。
+
+该修复还未达到真实重跑条件：受控 YIELD→步骤 ACCEPT 探针的两条路线均停在 `stalled`，未执行下一 checkpoint；可执行探针与原失败记录保留。新鲜规格审查另发现 Verifier 估算使用旧 checkpoint，实际接收本轮新 checkpoint 与报告，长输出有超额风险；请求差异已静态确认，尚未执行长输出复现。标准轴无硬性违规，只有请求组装重复这一 P3 维护建议；规格轴 P2 和续接问题由下一修复负责。审查报告分别为仓库外 `C:/Users/CQX/.codex/174-native-budget-standards.md`、`174-native-budget-spec.md`。live19 仅完成静态准备，未绑定未来源码、未启动服务或提交 Job。
 
 live08 起的新 Run 初始配置将根时限与 Population 根时限设为 2400 秒、动作请求上界设为 180 秒，其余预算保持模型/HTTP 各 48 次、工具 8 次、2,097,152 tokens。配置 SHA256 `9170fa5f39e8262e2ea780a54478bdd14d10e4c6da6531381d3f9a055cf97364`，不是运行中重置预算，也不是容量或 SLA 承诺。旧 1100 秒/30 秒配置的历史证据保持原样。
 
