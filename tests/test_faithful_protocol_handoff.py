@@ -130,7 +130,12 @@ class PlannerHandoffMessagesTest(unittest.TestCase):
     def test_planner_and_reviewer_distinguish_preparation_from_proof(self):
         request = self.request()
         system = InternModelPort()._messages(request, response_schema(request))[0]["content"]
-        self.assertIn("Pure preparation", system)
+        self.assertIn("A root obligation's owner step must establish its proof, "
+                      "not merely prepare or choose a method", system)
+        self.assertIn("Auxiliary goals outside the frozen root prerequisite closure are optional; "
+                      "keep required auxiliary owners", system)
+        self.assertIn("Use auxiliary_goal_ids for needed non-root preparation, "
+                      "leaving obligation_ids empty and respecting those dependencies", system)
         request = {"role": "step_verifier", "problem": "1+1", "problem_spec": SPEC,
                    "step_goal": "Choose a method before deriving the proof"}
         system = InternModelPort()._messages(request, response_schema(request))[0]["content"]
