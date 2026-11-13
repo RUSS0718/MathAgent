@@ -1,5 +1,17 @@
 # #173 B3 实现与聚焦证据（2026-11-13）
 
+## 最终验收与交接
+
+本票达到工程退出，集成分支为 `faithful-task-revision`；仅交付 #173，父规格 #168 完整服务仍未完成。以下为最终状态，下方实现窗口的 not_run 保留为历史快照。
+
+真实浏览器场景在源码 `f9061ff` 执行一次：普通提交“计算 17×19，并给出计算过程。”后，在途改为“计算 2+3，并给出结果。”。旧 Job/Run `run_3e15e732090c6c8b3a0195bf89ca5caa` 停止新派发，新 Job/Run `run_ab309fd6fe6b2b3aed7dec45b04ee4c3` 独立交付 5；双向来源、原预留保留或合法结算、旧迟到结果隔离及刷新零新增调用均通过。真实报告、Evidence、Attempt、预算和截图见 `artifacts/issue-173-work/live-01-change/`。配置沿用 #170 的 intern-s2、48 次模型/HTTP、8 次工具和 1100 秒预算；配置 SHA256 为 `452f73629e4368b22622be53241c99ddcc2a498895acd283b54a9c4706411f57`。未运行独立数学效果评测，不声称能力提升。
+
+审查原件为仓库外 `C:/Users/CQX/.codex/173-standards.md`、`173-spec.md`；四项发现修复后，两轴 `173-standards-final.md`、`173-spec-final.md` 定点复查无剩余问题。必要反例和原失败证据已复制至主工作树 `artifacts/issue-173-work/implementation/`。最终源码 `9978157` 使用真实数据库的隔离备份进行公共 GET 恢复复核，worker 关闭、零 POST、零新增模型 Attempt、持久求解记录不变；见 `readonly-9978157-01/summary.json`。这项复核不是最终源码的真实求解重跑。
+
+冻结门禁源码 `9978157e6bf1992e9cdbb8044e22dc47c6625b18`，命令 `uv run --no-sync python scripts/run_final_gate.py --root . --output-dir artifacts/issue-173-work/gates --run-id gate-01`，仅执行一次。六阶段全部通过，`source_changed=false`，耗时 1841.078 秒；完整测试 2020 项、0 failure/error、49 skip（不计通过）。baseline/官方导入边界、发布检查及前端安装、审计和检查通过。门禁后只更新文档，不重复产品测试。
+
+本票临时服务、定时检查和实现工作树均已清理；日志与运行证据保留。官方 baseline 差异为空；`tests/test.md` 未读取或修改。后续继续使用当前选择的同一模型；具体继承型号无法确认，不猜测。
+
 ## 审查修复增量（2026-11-13）
 
 隔离工作树 `D:/project/mathagent-173-fix`，基点 `f9061ff`，分支 `fix/showcase-task-revision-review`；后端修复提交 `edb4125`，最终产品源码 `314951ccd89f71bf31058f31c4ddd3ab5ac1ca52`。四项审查意见均已处理：已提交迟到结算触发既有队列准入重查；刷新恢复改题输入及原始提交参数；重复改题的第二个 UUID 以动作回执持久保存且可只读找回；容量与预算共用 HTTP／工具 unknown 判定，保留缺 usage、已知拒绝和未发送的不同处理。
