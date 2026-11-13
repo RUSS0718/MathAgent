@@ -208,7 +208,8 @@ def _transition(connection, state, population, operation, args, *, owner_token):
         if owner is None or owner_token != owner:
             raise PopulationConflict("population_owner_epoch_mismatch")
         return _event("execution_switch_intent", **args["projection"]), {
-            "execution_switch": deepcopy(args["projection"])}
+            "execution_switch": deepcopy(args["projection"]),
+            "execution_mode_progress": deepcopy(args["mode_progress"]), "execution_mode_pending": None}
 
     if operation == "execution_checkpoint":
         if owner is None or owner_token != owner:
@@ -224,11 +225,11 @@ def _transition(connection, state, population, operation, args, *, owner_token):
 
         calls_by_id = state.get("calls", {})
         resolved_actions = {c.get("action_id") for c in calls
-                            if c.get("status") == "unknown_outcome"
+                            if c.get("status") == "unknown_outcome" and c.get("action_id") is not None
                             and latest_retry_id(calls_by_id, c["call_id"]) != c["call_id"]
                             and calls_by_id[latest_retry_id(calls_by_id, c["call_id"])].get("status") == "completed"}
         unresolved = {c["call_id"] for c in calls if c.get("status") == "unknown_outcome"
-                      and c.get("action_id") not in resolved_actions}
+                      and latest_retry_id(calls_by_id, c["call_id"]) == c["call_id"]}
         unknown = (any(a.get("status") == "unknown" and a["action_id"] not in resolved_actions
                        for a in actions) or bool(unresolved))
         pending = (any(a.get("status") == "inflight"
@@ -594,6 +595,21 @@ def _transition(connection, state, population, operation, args, *, owner_token):
         population["actions"][action["action_id"]] = action
         population["routes"][route["route_id"]] = route
         updates["population"] = population
+        switch = state.get("execution_switch") or {}
+        if (switch.get("status") == "switched" and switch.get("current_mode") == "serial"
+                and state.get("execution_serial_route") == route["route_id"]
+                and route["snapshot"].get("phase") == "STEP_EXECUTE"
+                and route["snapshot"].get("specification_version") == state.get("specification_version")):
+            from .population_evidence import validate_dependencies
+
+            if validate_dependencies({**state, **updates}, route.get("dependencies", []))[0]:
+                updates["serial_checkpoint"] = {
+                    "revision": state["state_revision"] + 1, "route_id": route["route_id"],
+                    "route_revision": route["revision"], "source_revision": state["state_revision"],
+                    "specification_version": state.get("specification_version"),
+                    "config_hash": state.get("config_hash"),
+                    "snapshot_hash": hashlib.sha256(_canonical(route["snapshot"]).encode()).hexdigest()}
+                updates["serial_checkpoint_snapshot"] = deepcopy(route["snapshot"])
         source_event = next((item for item in reversed(route["events"])
                              if item.get("event_id") in audit["source_event_ids"]), {})
         event = {**deepcopy(source_event),
