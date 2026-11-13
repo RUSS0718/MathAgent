@@ -79,7 +79,7 @@ onUnmounted(() => { generation += 1; clearTimeout(pairPoll) })
 <template>
   <section v-if="view.status !== 'unavailable'" class="evidence-section intervention-section" aria-label="同源干预实验" :aria-busy="pending ? 'true' : undefined">
     <h2>同源干预</h2>
-    <p>仅在显式暂停的串行步骤 checkpoint 上比较一个登记方法变化。每个分支先由 Verifier 审查，随后用新调用身份对同一报告再审查一次；父 Run 不自动合并分支证据，仍从原 checkpoint 继续。</p>
+    <p>在合法串行步骤 checkpoint 上比较一个登记方法变化。每个分支先由 Verifier 审查，随后用新调用身份对同一报告再审查一次；主任务通过显式成果引用核对适用性后继续，保留来源和原证据等级。</p>
     <p v-if="view.status === 'loading'" role="status" aria-busy="true">正在读取干预状态…</p>
     <div v-else-if="view.status === 'error'" class="notice notice--warning" role="alert">{{ error }} <UiButton @click="load">重试读取</UiButton></div>
     <template v-else-if="view.status === 'available'">
