@@ -10,7 +10,9 @@
 
 live19 使用 live18 的普通输入、配置和独立保留参考，源码 `0fb3b6d47a963dc015c21a733d763ccafae156cb`、产品源码 `92bfe54`。Job `run_3dcc4eb8d468da4a3e5b30707b9bd16d` 合法选择串行（单个数位 DP 路线足以求解），最终 Reasoner 超时，Job 为 `failed/star_needs_review`，没有完整答案。9 HTTP、2 工具；迟到 HTTP 已物理结算，原 unknown 数学状态与用量未知均保留，零自动重发。证据在 `artifacts/issue-174-resume/live19-preparation/`；旧驱动保持 `natural_population_not_selected_no_retry` 失败，不算并发或刷新通过。父观察的 dashboard 空会话初始化使额外的全零 mutation 断言失败，单独记录为观察问题：`/api/new_chat` 没有创建求解任务；不据此追改原结果。
 
-所属服务在原 PID/创建时间及物理结算核对后停止；验收调整见合同的“2026-11-14 代表场景调整”。准备中的 live20 采用骨牌计数较小代表题，独立保留参考不进入 provider 输入。真实自然并发、合格答案、UI 与只读刷新及最终工程门禁仍未通过。用户授权的无人值守接续规则见 [接续合同](../engineering/unattended-ticket-loop.md)。
+所属服务在原 PID/创建时间及物理结算核对后停止；验收调整见合同的“2026-11-14 代表场景调整”。live20 采用骨牌计数较小代表题，独立保留参考不进入 provider 输入，源码 `72930e531124d65c3e538e99950030e9ee7d7aca`。Job `run_a515825f32f063d34b106990204f7ce3` 的真实 Planner 提出 Population，但主计划重复分配计数义务，输出步骤引用尚在后面的另一计数步骤，且要求两个方向先交叉核对。一次修复仍返回相同非法绑定，最终 `invalid_problem_spec_work_units`；4 HTTP 成功、没有路线执行，不算真实并发通过。原始回复、ProblemSpec 和反馈在 `live20-preparation/planner-diagnostic.json`，终态与物理结算封存在 `parent-closure-seal.json`；所属服务已按 PID/创建时间核对后停止。
+
+真实自然并发、合格答案、UI 与只读刷新及最终工程门禁仍未通过。用户授权的无人值守接续规则见 [接续合同](../engineering/unattended-ticket-loop.md)。
 
 ## 接续修正与真实结果（2026-11-13，截至北京时间 23:53）
 
