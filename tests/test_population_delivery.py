@@ -33,7 +33,15 @@ class PopulationDeliveryTests(unittest.TestCase):
                      steps={"step": {"report": {"claims": [{"statement": "Claim"}]}}},
                      obligation_evidence_ledger=[{"source": "step", "claim_indexes": [0],
                                                  "valid": True}])
-        prop_id = proposition_id(state, "Claim", "problem")
+        state["verified_results_ledger"] = [{
+            "source": "step", "statement": "Claim", "scope": "step-specific domain",
+            "claim_indexes": [0],
+        }]
+        graph["snapshots"][-1]["propositions"][proposition_id(state, "Claim", "problem")] = {
+            "status": "refuted", "conflict": False,
+        }
+        self.assertEqual((True, None), delivery_allowed(connection, state))
+        prop_id = proposition_id(state, "Claim", "step-specific domain")
         graph["snapshots"][-1]["propositions"][prop_id] = {
             "status": "refuted", "conflict": False,
         }

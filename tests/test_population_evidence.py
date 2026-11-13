@@ -162,7 +162,14 @@ class PopulationEvidenceTests(unittest.TestCase):
         parent["problem_spec"] = {**copy.deepcopy(SPEC), "specification_version": 2}
         branch = copy.deepcopy(parent)
         record = _accepted_record(branch, "route-1:step", "route-result", "route", "Route lemma")
+        record["scope"] = "route-specific domain"
+        branch["calls"]["route-verifier"]["response"]["classified_outcomes"][0]["scope"] = record["scope"]
         prop_id = _graph_with_result(branch, record)
+        unrelated_id = proposition_id(branch, "Route lemma", "problem")
+        branch["proof_graph"]["snapshots"][-1]["propositions"][unrelated_id] = {
+            "id": unrelated_id, "statement": "Route lemma", "scope": "problem",
+            "status": "refuted", "conflict": False,
+        }
         declaration = {"obligation_id": ROOT_ID, "evidence_category": "format_check",
                        "claim_indexes": [0]}
         branch["calls"]["route-verifier"]["response"]["obligation_evidence"] = [declaration]
@@ -190,7 +197,7 @@ class PopulationEvidenceTests(unittest.TestCase):
                     current, candidate = copy.deepcopy(parent), copy.deepcopy(snapshot)
                     target = candidate["state"] if origin == "branch" else current
                     target["proof_graph"]["snapshots"][-1]["propositions"][prop_id] = {
-                        "id": prop_id, "statement": "Route lemma", "scope": "problem",
+                        "id": prop_id, "statement": "Route lemma", "scope": record["scope"],
                         "status": status, "conflict": conflict,
                     }
                     updates, audit = merge_route_evidence(current, route, action, candidate)

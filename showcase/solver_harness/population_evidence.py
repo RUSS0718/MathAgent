@@ -358,15 +358,44 @@ def _valid_result(state, result, current, route=None, action=None):
 
 def obligation_claims_eligible(state, evidence, graph_state=None):
     """Exclude obligation source claims contradicted by the current proof graph."""
+    from .proof_graph import proposition_id
+
     claims = state.get("steps", {}).get(evidence.get("source"), {}).get("report", {}).get("claims", [])
     indexes = evidence.get("claim_indexes", [])
     if not indexes or any(type(index) is not int or not 0 <= index < len(claims)
                           for index in indexes):
         return False
     current = _current_propositions(state if graph_state is None else graph_state)
+    identity = {key: evidence.get(key) for key in (
+        "source", "review_call_id", "plan_version", "attempt_index")}
+    report_id = _report_call_for(state, identity)
+    source_props = {}
+    if report_id is not None:
+        for source in (state, graph_state or state):
+            graph = source.get("proof_graph") or {}
+            for snapshot in graph.get("snapshots", []):
+                if snapshot.get("graph_version") != graph.get("current_version"):
+                    continue
+                for attempt in snapshot.get("attempts", {}).values():
+                    prop_id = attempt.get("conclusion")
+                    if f"report:{report_id}" in attempt.get("source_refs", []):
+                        prop = snapshot.get("propositions", {}).get(prop_id)
+                        if prop is not None:
+                            source_props[prop_id] = prop
     for index in indexes:
-        prop = current.get(_proposition_for_result(state, claims[index]), {})
-        if prop.get("conflict") is True or prop.get("status") == "refuted":
+        claim = claims[index]
+        ids = {_proposition_for_result(state, item)
+               for item in state.get("verified_results_ledger", [])
+               if all(item.get(key) == value for key, value in identity.items())
+               and index in item.get("claim_indexes", [])
+               and item.get("statement") == claim.get("statement")}
+        ids.update(prop_id for prop_id, prop in source_props.items()
+                   if isinstance(prop.get("scope"), str)
+                   and proposition_id(state, claim["statement"], prop["scope"]) == prop_id)
+        if not ids:
+            ids.add(_proposition_for_result(state, claim))
+        if any(current.get(prop_id, {}).get("conflict") is True
+               or current.get(prop_id, {}).get("status") == "refuted" for prop_id in ids):
             return False
     return True
 
