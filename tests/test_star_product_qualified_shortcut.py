@@ -12,6 +12,48 @@ from tests.test_star_population_runtime import PROBLEM, SPEC
 
 
 class QualifiedShortcutJobTest(StarJobFixture, unittest.TestCase):
+    def test_scalar_presentations_cannot_bypass_proof_qualification(self):
+        problem = "Count the positive divisors of 6 and prove the list is complete."
+        spec = {**SPEC, "original_problem": problem, "root_obligations": [{
+            "obligation_id": "proof", "obligation_type": "completeness",
+            "statement": "Prove every positive divisor is listed.",
+        }]}
+        cases = [(text, True) for text in (
+            "$4$", r"\boxed{4}", "4。", "4/2.0", "4.", "$$4$$",
+            r"\(4\)", r"\[4\]", r"$\boxed{4}$。", " -4.5e+1 / +2.0 ",
+        )] + [(text, False) for text in (
+            "6=2×3, so its divisors are exactly 1, 2, 3, 6. There are 4.",
+            r"\boxed{4} divisors, since 6=2×3 and each prime exponent is 0 or 1.",
+        )]
+        self.open_star([reply for text, _ in cases for reply in (
+            spec, {**SOLVED, "solution_candidate": text}, {"solution_candidate": text}, ACCEPT,
+        )], SHOWCASE_STAR_FEATURES={"auto_problem_spec": True, "problem_spec": True,
+                                   "final_generation": True, "final_solution_review": True},
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=4, max_http_attempts=4))
+        for index, (text, scalar) in enumerate(cases, 1):
+            with self.subTest(candidate=text):
+                response = self.client.post("/api/agent/jobs", headers=self.headers(), json={
+                    "message": problem, "session_id": self.session,
+                    "solver_mode": "star_limited_best_effort"})
+                self.assertEqual(202, response.status_code, response.get_json())
+                job_id = response.get_json()["job_id"]
+                job = self.terminal(job_id)
+                report = self.report(job_id)
+                self.assertEqual("rejected" if scalar else "accepted",
+                                 report["semantics"]["whole_review"])
+                self.assertEqual("failed" if scalar else "succeeded", job["status"])
+                if scalar:
+                    self.assertEqual("no_eligible_candidate", job["result"]["solver"]["best_effort"]["status"])
+                    self.assertNotEqual(text, job["result"]["final_response"])
+                    whole_check = next(check for check in report["checks"]["history"]
+                                       if check["scope"] == "whole_solution_llm_review")
+                    self.assertEqual("REJECT", whole_check["runtime_qualification"]["verdict"])
+                else:
+                    self.assertEqual(text, job["result"]["final_response"])
+                self.assertEqual(4, report["budget"]["logical_calls"])
+                self.assertEqual(4, report["budget"]["http_attempts"])
+                self.assertEqual(index * 4, len(self.outbound))
+
     def test_scalar_veto_remains_auditable_and_ineligible_at_exact_budget(self):
         problem = "Count the positive divisors of 6 and prove the list is complete."
         spec = {**SPEC, "original_problem": problem, "root_obligations": [{

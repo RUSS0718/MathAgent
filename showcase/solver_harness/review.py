@@ -10,6 +10,25 @@ from .explore import _HarnessOperations
 from .final_binding import review_record
 
 
+def _is_plain_scalar(candidate: str) -> bool:
+    """Recognize numeric spellings only, never proof sufficiency or general LaTeX.
+
+    Support signed decimals/scientific notation, slash fractions, terminal
+    punctuation and the listed math wrappers (including nested wrappers).
+    """
+    number = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+    text = candidate.strip()
+    while True:
+        text = text.rstrip("。.!！?？;；").strip()
+        for opening, closing in (("$$", "$$"), ("$", "$"), (r"\(", r"\)"),
+                                 (r"\[", r"\]"), (r"\boxed{", "}")):
+            if text.startswith(opening) and text.endswith(closing):
+                text = text[len(opening):-len(closing)].strip()
+                break
+        else:
+            return re.fullmatch(rf"{number}(?:\s*/\s*{number})?", text) is not None
+
+
 class VerifierPort(Protocol):
     """Whole-solution review boundary; replies contain an ACCEPT/REJECT verdict."""
 
@@ -172,12 +191,11 @@ def review_solution(
         reply = {"verdict": "REJECT", "reason": "verifier_tool_request_unfulfilled"}
     specification = state.get("problem_spec") or {}
     qualification = None
-    # A scalar can be a result or witness, but cannot supply a required proof.
+    # Limited scalar spellings cannot supply a required proof; this is not a proof checker.
     if (isinstance(reply, Mapping) and reply.get("verdict") == "ACCEPT"
         and any(root["obligation_type"] in {"universal", "completeness", "extremum_bound", "filtering"}
                 for root in specification.get("root_obligations", []))
-        and re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?(?:/[+-]?\d+)?",
-                         candidate.strip())):
+        and _is_plain_scalar(candidate)):
         qualification = {"event_id": "review-qualified", "verdict": "REJECT",
                          "reason": "scalar_candidate_cannot_discharge_proof_obligations"}
     accepted = (
