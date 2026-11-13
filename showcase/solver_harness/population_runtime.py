@@ -1,6 +1,7 @@
 """WorkUnit scheduling transitions inside the existing product controller."""
 
 import time
+from collections.abc import Mapping
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextvars import copy_context
 from copy import deepcopy
@@ -82,6 +83,12 @@ def _estimates(harness, run, route, problem):
     local = {"run_id": run["run_id"], "state": route["snapshot"], "state_revision": route.get("revision", 0)}
     state = local["state"]
     step = next(s for s in state["plan"]["steps"] if s["step_id"] == state["current_step"])
+    from . import reasoner_checkpoint
+
+    checkpoint_mode = reasoner_checkpoint.enabled(harness._config)
+    checkpoints = reasoner_checkpoint.current_checkpoints(state) if checkpoint_mode else []
+    parent_checkpoint = checkpoints[-1] if checkpoints else None
+    previous = state.get("steps", {}).get(step["step_id"], {})
     cap = port.adapter.max_tokens
     report_bound = {"argument": "x" * (cap * 4), "claims": [], "blocked": False}
     policy = run["state"]["population_policy"]
@@ -99,7 +106,37 @@ def _estimates(harness, run, route, problem):
                    if role == "reasoner" else
                    {"role": role, "step": step, "problem": problem,
                     "report": report_bound, "original_problem": problem,
-                    "challenge_history": [{"objection": "x" * 2048}] * challenges})
+                    "challenge_history": [*previous.get("challenge_history", []),
+                                          *[{"objection": "x" * 2048}] * challenges]})
+        # Checkpoint fields select a different wire schema and carry variable context.
+        if role == "reasoner" and checkpoint_mode:
+            request = reasoner_checkpoint.request(
+                request, call_id=f"population-estimate:{role}:{step['step_id']}",
+                round_number=len(checkpoints) + 1, parent=parent_checkpoint,
+                objection=previous.get("verification", {}).get("objection"),
+                guidance=state.get("meta_guidance_decision"),
+            )
+            request.update(
+                current_goal=step["objective"],
+                valid_sources=[item for item in [*state.get("accepted_results", []),
+                                                *state.get("verified_results_ledger", [])]
+                               if isinstance(item, Mapping) and item.get("invalidated") is not True
+                               and item.get("status") not in {"INVALIDATED", "invalidated"}],
+                open_obligations=list(parent_checkpoint.get("gaps", [])) if parent_checkpoint else [],
+            )
+        if role == "reasoner":
+            task = state.get("pending_guidance_task")
+            if isinstance(task, str) and task.strip():
+                request["specific_task"] = task
+            if previous.get("challenge_history"):
+                request.update(challenge_history=previous["challenge_history"],
+                               objection=previous.get("verification", {}).get("objection", ""))
+            if state.get("phase") == "CHALLENGE":
+                request.update(report=previous.get("report", {}),
+                               objection=previous.get("verification", {}).get("objection", ""),
+                               suspected_false_claim=harness._config.get("features", {}).get("skills") is True)
+        elif parent_checkpoint is not None:
+            request.update(step_goal=step["objective"], checkpoint=parent_checkpoint)
         from .sessions import prepare_session
 
         _, request = prepare_session(local, {
