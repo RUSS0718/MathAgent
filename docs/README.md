@@ -265,4 +265,3 @@ v0.2 文档已归档为历史合同；v1.1 规格不覆盖这些 accepted ADR，
 最新 [readiness-05 执行观察器异常记录](evals/provider-live-natural-20261105-readiness-05.md) 区分 runner 写状态失败与服务端仍在运行的自然多步 Job；未获得 readiness PASS，#128 两臂仍 NOT_RUN。
 
 历史批次 [readiness-06](evals/provider-live-natural-20261105-readiness-06.md) 已终态 FAIL：有界 Meta 继续处理后仍未完成整题交付。后续零索引核验与重复历史读取修复不追溯升级旧 Run；当前实验状态见顶部归档入口。
-
