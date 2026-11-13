@@ -1,5 +1,11 @@
 # #174 自主并发接线与未完成验收（2026-11-13）
 
+2026-11-14 当前状态：用户授权降低验收标准后，#174 改为**开发接线验收**；已有真实自主提案/准入与合法替代、受控公共入口/原生 HTTP 执行器和 UI/恢复检查及两轴审查，最终工程门禁待执行。普通入口真实自然并发并完整交付仍未通过，保留为 #183 的最终服务要求。下文失败记录保持原判，不能因开发退出调整升级为真实能力证据。
+
+最近补丁：产品提交 `230cd59fefa090d02a5ae1e1c1164d8d87c2f04d`，交付源码 `121b21ab7dcdb4c6e4e3de97e63772b6fc4266e0`，仅澄清独立完整路线和前向依赖修复反馈。原始非法回复 replay 仍被拒绝；7 项聚焦检查通过，双轴审查无剩余具体问题。证据 `artifacts/issue-174-resume/planner-live20-fix/`，仓库外 `174-planner-live20-{merge,standards,spec}.md`；未重跑全仓。
+
+live21（同题、同配置验证上述提示修正）Job `run_0fdeeb9c4ca3b4622ad968c71878a288`，源码 `121b21a`、产品 `230cd59`：Explore 协议失败后继续规划，最终合法选择串行；Reasoner 超时，Job `failed/star_needs_review`，Solver `STEP_EXECUTE/interrupted`。7 次 HTTP，原 unknown 不重发；没有完整答案。原驱动 `natural_population_not_selected_no_retry` 失败不变。证据在 `artifacts/issue-174-resume/live21-preparation/`。不再为取得单次自然并发成功重复抽样。
+
 状态：**实现已提交，真实自然并发验收未完成，未达到工程退出**。集成分支 `faithful-autonomous-population`，最近真实运行源码 `77696377f9a1468fa8dbe8872ddddb5381830893`。live18 已自然选择并准入两条路线，但请求在 HTTP 派发前被预算检查拒绝；不能作为真实模型并发或合格交付的通过证据。#174 保持开放，#168 完整服务仍未交付；进行中热切换属于 #175。下方首次交接材料适用于 `c14ff82`，不能替代本节接续结果。
 
 ## 2026-11-14 接续修复
