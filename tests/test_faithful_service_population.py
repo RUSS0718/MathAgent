@@ -254,12 +254,29 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(before, len(self.outbound))
 
     def test_cancel_during_convergence_wins_over_checkpoint(self):
-        job_id, _, _ = self.run_plain_submission(multi_step=True, fault="cancel")
-        final = self.job(job_id)
-        switch = final["result"]["solver"]["execution_switch"]
-        self.assertEqual("canceled", switch["status"])
-        self.assertIsNone(switch["checkpoint_revision"])
-        self.assertEqual("population", switch["current_mode"])
+        from showcase.solver_harness.population_runtime import _work
+
+        settled = []
+        def work(*args, **kwargs):
+            done = threading.Event()
+            settled.append(done)
+            try:
+                return _work(*args, **kwargs)
+            finally:
+                done.set()
+
+        with patch("showcase.solver_harness.population_runtime._work", work):
+            try:
+                job_id, _, _ = self.run_plain_submission(multi_step=True, fault="cancel")
+                final = self.job(job_id)
+                switch = final["result"]["solver"]["execution_switch"]
+                self.assertEqual("canceled", switch["status"])
+                self.assertIsNone(switch["checkpoint_revision"])
+                self.assertEqual("population", switch["current_mode"])
+            finally:
+                # Cancellation is observable before physical workers close SQLite.
+                for done in settled:
+                    self.assertTrue(done.wait(10), "canceled route worker did not settle")
 
     def test_runtime_model_can_keep_population_after_progress(self):
         _, final, _ = self.run_plain_submission(multi_step=True, modes=["keep"])
@@ -411,7 +428,7 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                         self.assertEqual("reserved", pair["status"])
                         self.assertEqual(state, harness.get_run(run["run_id"])["state"])
             return run
-        with patch("showcase.solver_harness.population_store.command", capture):
+        with patch("showcase.solver_harness.population_runtime.command", capture):
             self.run_plain_submission(multi_step=True, step_count=8, job_timeout=40)
         self.assertTrue(observed)
 

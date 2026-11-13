@@ -27,6 +27,50 @@ class NativePopulationBudgetTest(StarJobFixture, unittest.TestCase):
     def test_accepted_yield_continues_with_parent_gaps_and_original_budget(self):
         self.run_checkpoint_routes(continuation=True)
 
+    def test_completed_keep_decision_survives_a_concurrent_route_revision(self):
+        from showcase.solver_harness.harness import SolverHarness
+
+        original_commit = SolverHarness.commit_event
+        conflicted = []
+        def commit(harness, run_id, **kwargs):
+            if kwargs.get("event", {}).get("type") == "execution_mode_consumed" and not conflicted:
+                pending = harness.get_run(run_id)["state"]["execution_mode_pending"]
+                conflicted.append(pending["call_id"])
+                original_commit(harness, run_id, expected_revision=kwargs["expected_revision"],
+                    event={"event_id": "concurrent-route-revision", "type": "test_route_revision"},
+                    state_updates={})
+            return original_commit(harness, run_id, **kwargs)
+
+        with patch.object(SolverHarness, "commit_event", commit):
+            self.run_checkpoint_routes(continuation=True)
+        self.assertEqual(1, len(conflicted))
+        self.assertEqual(1, sum(request["call_id"] == conflicted[0] for request in self.outbound))
+
+    def test_inflight_transport_audit_can_settle_after_another_route_freezes(self):
+        from showcase.solver_harness.calls import _save
+        from showcase.solver_harness.population_store import command
+
+        frozen = threading.Event()
+        held = []
+        def save(harness, run, record, **kwargs):
+            if (kwargs.get("event_type") == "transport_selected" and not held
+                    and record["role"] == "step_verifier"
+                    and record["request"].get("checkpoint", {}).get("status") == "FINAL"):
+                held.append(record["call_id"])
+                self.assertTrue(frozen.wait(10), "independent route did not reach finalization")
+            return _save(harness, run, record, **kwargs)
+
+        def freeze(*args, **kwargs):
+            run = command(*args, **kwargs)
+            if args[2] == "freeze":
+                frozen.set()
+            return run
+
+        with patch("showcase.solver_harness.calls._save", save), patch(
+                "showcase.solver_harness.population_runtime.command", freeze):
+            self.run_checkpoint_routes(continuation=True)
+        self.assertEqual(1, len(held))
+
     def test_long_checkpoint_reaches_verifier_and_delivers_under_original_budget(self):
         self.run_checkpoint_routes(long_checkpoint=True)
 
@@ -40,6 +84,8 @@ class NativePopulationBudgetTest(StarJobFixture, unittest.TestCase):
 
         def provider(request):
             role = request["role"]
+            if request.get("execution_mode_decision"):
+                return {"mode": "keep", "reason": "Continue the checkpoint routes."}
             if role == "problem_intake":
                 return deepcopy(SPEC)
             if role == "explore":
@@ -127,7 +173,7 @@ class NativePopulationBudgetTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(len(concurrent), len({item["call_id"] for item in concurrent}))
         self.assertGreaterEqual(sum(item["role"] == "step_verifier" for item in self.outbound), minimum,
                          {"outbound_roles": [item["role"] for item in self.outbound]})
-        self.assertEqual("succeeded", final["status"])
+        self.assertEqual("succeeded", final["status"], final.get("error"))
         self.assertEqual("1+1=2", final["result"]["final_response"])
         budget = final["result"]["budget"]
         self.assertEqual(48, budget["limits"]["max_model_calls"])

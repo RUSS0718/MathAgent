@@ -451,7 +451,8 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             raise PopulationConflict("population_action_route_mismatch")
         event = deepcopy(args["event"])
         updates = deepcopy(args.get("updates", {}))
-        audit_only = (event.get("type") in {"call_audit", "call_activity"}
+        audit_events = {"call_audit", "call_activity", "transport_selected", "transport_rejected"}
+        audit_only = (event.get("type") in audit_events
                       and set(updates) <= {"calls", "status"})
         current_epoch_action = (owner is not None and owner_token == owner
                                 and action.get("owner") == owner
@@ -477,7 +478,7 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             raise PopulationConflict("population_route_patch_forbidden")
         local_state = deepcopy(route["snapshot"])
         if state.get("phase") == "TERMINAL":
-            if event.get("type") not in {"call_audit", "call_activity"} or set(updates) - {"calls"}:
+            if event.get("type") not in audit_events or set(updates) - {"calls"}:
                 raise PopulationConflict("population_terminal_frozen")
         if not audit_only:
             from ..run_control import RunStopped

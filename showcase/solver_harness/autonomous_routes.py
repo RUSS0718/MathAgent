@@ -222,9 +222,16 @@ def advance_switch(harness, run, problem):
     state = run["state"]
     target = proposal.get("mode", "keep")
     if target in {"keep", mode} or (target == "population" and not _switch_budget_available(harness, run, plans, problem)):
-        return harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
-            event={"event_id": f"execution-mode-consumed-{run['state_revision']}", "type": "execution_mode_consumed"},
-            state_updates={"execution_mode_progress": marker, "execution_mode_pending": None})
+        from .storage import SolverRevisionConflictError
+
+        while True:
+            run = harness.get_run(run["run_id"])
+            try:
+                return harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
+                    event={"event_id": f"execution-mode-consumed-{run['state_revision']}", "type": "execution_mode_consumed"},
+                    state_updates={"execution_mode_progress": marker, "execution_mode_pending": None})
+            except SolverRevisionConflictError:
+                continue
     reason = ("reviewed_serial_progress_with_independent_frontiers" if target == "population"
               else "population_progress_converge_to_ranked_route")
     projection = {"status": "converging", "source": mode, "target": target,
