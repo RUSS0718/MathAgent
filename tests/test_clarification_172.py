@@ -151,7 +151,8 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
         question = before["result"]["faithful"]["clarification"]
         service = self.app.extensions["showcase_workspace_service"]
         with patch.object(service, "_submit"):
-            self.assertEqual(202, self.answer(job_id, question).status_code)
+            headers = self.headers()
+            self.assertEqual(202, self.answer(job_id, question, headers=headers).status_code)
             with service.store._lock, service.store._connection as connection:
                 connection.execute("UPDATE run_budgets SET ledger_json=json_set(ledger_json, '$.deadline_at', 0) WHERE run_id=?", (job_id,))
             service._execute(job_id)
@@ -159,6 +160,14 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
             self.assertEqual("expired", faithful["clarification"]["status"])
             self.assertEqual("底边为 6 cm，对应高为 4 cm。", faithful["clarification"]["answer"])
             self.assertEqual(["create_new_task"], faithful["allowed_actions"])
+            replay = self.answer(job_id, question, headers=headers)
+            self.assertEqual(200, replay.status_code, replay.get_json())
+            self.assertEqual("same_task", replay.get_json()["continuation"])
+            expired = self.answer(job_id, question)
+            self.assertEqual(409, expired.status_code, expired.get_json())
+            self.assertEqual("clarification_expired", expired.get_json()["code"])
+            self.assertEqual("new_task_required", expired.get_json()["continuation"])
+            self.assertTrue(expired.get_json()["answer_saved"])
             response = self.client.post(f"/api/agent/jobs/{job_id}/clarifications/{question['request_id']}/new-task",
                                         json={}, headers=self.headers())
             self.assertEqual(202, response.status_code, response.get_json())

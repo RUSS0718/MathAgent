@@ -86,7 +86,10 @@ def save_answer(service, *, user_id, job_id, request_id, payload, key):
         if question["status"] in {"evaluating", "answered"} or reply:
             if (reply or question).get("answer") != answer:
                 raise WorkspaceError("clarification_answer_conflict", status=409)
-            return (reply or question)["receipt"], True
+            receipt = (reply or question)["receipt"]
+            if reply:
+                receipt = {**receipt, "status": "failed", "continuation": "new_task_required"}
+            return receipt, True
         if row["status"] != "waiting_input":
             raise WorkspaceError("clarification_not_waiting", status=409)
         deadline = _deadline(connection, job_id)
