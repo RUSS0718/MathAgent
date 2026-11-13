@@ -246,6 +246,10 @@ class RunService:
         """Continue a recoverable graph state from the latest SQLite checkpoint."""
 
         snapshot = self._require_run(run_id)
+        from .faithful_task import public_run_result
+
+        if snapshot.get("result"):
+            snapshot["result"] = public_run_result(snapshot["result"])
         result = snapshot.get("result") or {}
         if result.get("solver_mode") in STAR_MODES:
             raise RunResumeUnavailable()

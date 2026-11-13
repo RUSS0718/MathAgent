@@ -29,3 +29,7 @@ PROBLEM_SPEC_SCHEMA["properties"]["clarification"] = _object({
     "question": {"type": "string", "minLength": 1, "maxLength": 1000},
     "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
 })
+
+PROBLEM_SPEC_SCHEMA["properties"]["applicable_condition"] = {
+    "type": "string", "minLength": 1, "maxLength": 8000,
+}

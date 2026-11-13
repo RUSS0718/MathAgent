@@ -5,6 +5,8 @@ import time
 
 from flask import g, jsonify, request
 
+from .faithful_task import public_run_result
+from .run_budget import freeze_budget
 from .run_control import RunStopped
 from .solver_harness.storage import SolverRevisionConflictError, SolverStateStore
 from .workspace import WorkspaceError, _is_uuid_v4, _json, _request_digest, _utc_now
@@ -18,26 +20,42 @@ def pending_question(connection, job_id):
     return json.loads(row[0]).get("clarification") if row else None
 
 
+def _deadline(connection, job_id):
+    return connection.execute(
+        "SELECT json_extract(ledger_json,'$.deadline_at') FROM run_budgets WHERE run_id=?",
+        (job_id,)).fetchone()
+
+
+def expired_reply(connection, row, question):
+    saved = json.loads(row["result_json"] or "{}").get("faithful", {}).get("clarification_reply")
+    if saved:
+        return saved
+    if row["status"] != "failed" or not question or "answer" not in question:
+        return None
+    deadline = _deadline(connection, row["job_id"])
+    if (row["error_code"] == "run_deadline_exhausted"
+            or (question["status"] == "evaluating" and deadline and time.time() >= deadline[0])):
+        return {**question, "status": "expired"}
+    return None
+
+
 def clarification_actions(connection, row):
     """Advertise question-specific operations without admitting generic resume."""
     question = pending_question(connection, row["job_id"])
+    if expired_reply(connection, row, question):
+        return ["create_new_task"]
     if not question or question["status"] != "waiting":
         return None
-    reply = json.loads(row["result_json"] or "{}").get("faithful", {}).get("clarification_reply")
-    if reply:
-        return ["create_new_task"]
     if row["status"] != "waiting_input":
         return []
-    deadline = connection.execute(
-        "SELECT json_extract(ledger_json,'$.deadline_at') FROM run_budgets WHERE run_id=?",
-        (row["job_id"],)).fetchone()
+    deadline = _deadline(connection, row["job_id"])
     if deadline is None:
         return ["cancel"]
     return ["cancel", "save_clarification" if time.time() >= deadline[0] else "answer_clarification"]
 
 
 def save_answer(service, *, user_id, job_id, request_id, payload, key):
-    """Claim an answer once, version effective inputs and queue within the old budget."""
+    """Claim an answer once and queue semantic intake within the old budget."""
     if not _is_uuid_v4(key):
         raise WorkspaceError("idempotency_key_invalid")
     answer = payload.get("answer")
@@ -64,17 +82,17 @@ def save_answer(service, *, user_id, job_id, request_id, payload, key):
                 or question["input_version"] != payload["input_version"]):
             raise WorkspaceError("clarification_version_conflict", status=409)
         identity = json.loads(row["result_json"] or "{}")
-        reply = identity.get("faithful", {}).get("clarification_reply")
-        if question["status"] == "answered" or reply:
+        reply = expired_reply(connection, row, question)
+        if question["status"] in {"evaluating", "answered"} or reply:
             if (reply or question).get("answer") != answer:
                 raise WorkspaceError("clarification_answer_conflict", status=409)
             return (reply or question)["receipt"], True
         if row["status"] != "waiting_input":
             raise WorkspaceError("clarification_not_waiting", status=409)
-        ledger = connection.execute("SELECT ledger_json FROM run_budgets WHERE run_id=?", (job_id,)).fetchone()
-        if ledger is None:
+        deadline = _deadline(connection, job_id)
+        if deadline is None:
             raise WorkspaceError("run_budget_unavailable", status=409)
-        expired = time.time() >= json.loads(ledger[0])["deadline_at"]
+        expired = time.time() >= deadline[0]
         receipt = {"success": True, "job_id": job_id,
                    "status": "failed" if expired else "queued",
                    "answer_saved": True, "continuation": "new_task_required" if expired else "same_task"}
@@ -89,13 +107,12 @@ def save_answer(service, *, user_id, job_id, request_id, payload, key):
             if expired:
                 identity["faithful"]["clarification_reply"] = {
                     **question, "status": "expired", "answer": answer, "receipt": receipt}
-            else:
-                identity["faithful"]["input_version"] = question["input_version"] + 1
+                freeze_budget(control_connection, job_id)
             error = "run_deadline_exhausted" if expired else None
             control_connection.execute("UPDATE workspace_jobs SET status=?,result_json=?,error_code=?,updated_at=? WHERE job_id=?",
                 (receipt["status"], _json(identity), error, now, job_id))
             snapshot = json.loads(control_connection.execute("SELECT snapshot_json FROM runs WHERE run_id=?", (job_id,)).fetchone()[0])
-            snapshot.update(status="FAILED" if expired else "QUEUED", result=identity,
+            snapshot.update(status="FAILED" if expired else "QUEUED", result=public_run_result(identity),
                             final_response="", updated_at=now)
             control_connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?",
                                        (_json(snapshot), now, job_id))
@@ -115,20 +132,21 @@ def save_answer(service, *, user_id, job_id, request_id, payload, key):
                 connection.rollback()
                 raise
         else:
-            from .solver_harness.clarification import answer_change
-
             state_store = SolverStateStore(connection)
             run = state_store.get_run(job_id)
-            change = answer_change(run["state"], answer)
-            change["event"]["clarification_request_id"] = request_id
-            change["updates"]["clarification"]["receipt"] = receipt
+            event = {"event_id": f"{request_id}:received", "type": "clarification_received",
+                     "clarification_request_id": request_id}
+            updates = {"clarification": {**question, "status": "evaluating", "answer": answer, "receipt": receipt},
+                       "status": "running", "final_response": ""}
             try:
                 state_store.commit_event(job_id, expected_revision=run["state_revision"],
-                    event=change["event"], state_updates=change["updates"], request_hash=digest,
+                    event=event, state_updates=updates, request_hash=digest,
                     transaction_hook=persist)
             except SolverRevisionConflictError as exc:
                 updated = pending_question(connection, job_id)
-                if updated and updated.get("status") == "answered" and updated.get("answer") == answer:
+                if (updated and updated.get("request_id") == request_id
+                        and updated.get("status") in {"evaluating", "answered"}
+                        and updated.get("answer") == answer):
                     return updated["receipt"], True
                 raise WorkspaceError("clarification_version_conflict", status=409) from exc
             except RunStopped as exc:
@@ -137,9 +155,7 @@ def save_answer(service, *, user_id, job_id, request_id, payload, key):
                                        request_id=request_id, payload=payload, key=key)
                 raise WorkspaceError("clarification_not_waiting", status=409) from exc
     if not expired:
-        with service._submit_lock:
-            service._submitted.discard(job_id)
-        service._submit(job_id)
+        service.resubmit(job_id)
     return receipt, False
 
 
@@ -151,7 +167,8 @@ def create_related_task(service, *, user_id, job_id, request_id, key):
         if row is None:
             raise WorkspaceError("job_not_found", status=404)
         identity = json.loads(row["result_json"] or "{}")
-        reply = identity.get("faithful", {}).get("clarification_reply")
+        connection = service.store._connection
+        reply = expired_reply(connection, row, pending_question(connection, job_id))
         if not reply or reply["request_id"] != request_id:
             raise WorkspaceError("clarification_new_task_unavailable", status=409)
     return service.create_job(user_id=user_id, session_id=row["session_id"], idempotency_key=key,

@@ -18,6 +18,25 @@ def task_identity(pipeline, mode):
     }}
 
 
+def _public_question(question, *, include_answer=True):
+    from .redaction import redact
+
+    fields = ("request_id", "task_id", "input_version", "question", "reason", "status")
+    if include_answer:
+        fields += ("answer",)
+    return redact({key: question[key] for key in fields if key in question})
+
+
+def public_run_result(result):
+    """Do not copy internal clarification persistence into a Run snapshot."""
+    public = dict(result)
+    identity = public.get("faithful")
+    if isinstance(identity, dict) and (reply := identity.get("clarification_reply")):
+        public["faithful"] = {key: value for key, value in identity.items() if key != "clarification_reply"}
+        public["faithful"]["clarification"] = _public_question(reply, include_answer=False)
+    return public
+
+
 def attach_task_state(payload, *, allowed_actions=None, question=None):
     """Project committed Job/Solver state without creating another controller."""
     result = payload.get("result") or {}
@@ -49,10 +68,8 @@ def attach_task_state(payload, *, allowed_actions=None, question=None):
     }
     question = identity.get("clarification_reply") or question
     if question:
-        from .redaction import redact
-
         result["faithful"].pop("clarification_reply", None)
-        result["faithful"]["clarification"] = redact({key: value for key, value in question.items()
-                                                     if key != "receipt"})
+        result["faithful"]["clarification"] = _public_question(question)
+        result["faithful"]["input_version"] = question["input_version"] + int(question["status"] == "answered")
     payload["result"] = result
     return payload

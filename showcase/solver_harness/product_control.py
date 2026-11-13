@@ -27,8 +27,8 @@ def controlled_patch(connection, run_id, event, updates):
         question = state.get("clarification", {})
         if (question.get("status") == "waiting"
                 and question.get("request_id") == event["clarification_request_id"]
-                and event["type"] == "problem_spec_revised"
-                and updates.get("clarification", {}).get("status") == "answered"):
+                and event["type"] == "clarification_received"
+                and updates.get("clarification", {}).get("status") == "evaluating"):
             return updates
     if not stopped and not expired:
         return updates

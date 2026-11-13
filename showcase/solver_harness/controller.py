@@ -228,9 +228,11 @@ def protocol_failure_exit(harness, run, exc):
 def advance_product(harness, run, problem):
     """Continue the existing phases under S3; never replay an interrupted action."""
     from ..run_control import check_control
+    from .clarification import waiting_for_clarification
+    from .problem_intake import intake_pending
 
     for _ in range(64):
-        if run["state"].get("clarification", {}).get("status") == "waiting":
+        if waiting_for_clarification(run["state"]) or intake_pending(run):
             return run
         if run["state"]["phase"] == "TERMINAL" or run["state"]["status"] in {
             "interrupted", "recovered_pending_validation"

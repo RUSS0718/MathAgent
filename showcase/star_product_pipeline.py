@@ -306,6 +306,7 @@ class StarProductPipeline:
                     )
                 from .solver_harness.budget import HardBudgetStop
                 from .solver_harness.calls import CallInterrupted
+                from .solver_harness.clarification import waiting_for_clarification
 
                 try:
                     if existing:
@@ -338,7 +339,7 @@ class StarProductPipeline:
                     if solver_mode not in BEST_EFFORT_MODES or exc.category != "run_deadline_exhausted":
                         raise
                     run = harness.get_run(run_id)
-                if run["state"].get("clarification", {}).get("status") == "waiting":
+                if waiting_for_clarification(run["state"]):
                     return {"status": "WAITING_INPUT"}
                 try:
                     if solver_mode == "star_population":

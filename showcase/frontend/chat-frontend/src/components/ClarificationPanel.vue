@@ -6,10 +6,11 @@ import type { ClarificationState } from '../api/jobs.schemas'
 import { createIdempotencyKey } from '../runtime/jobs/idempotency'
 import UiButton from './ui/UiButton.vue'
 
-const props = defineProps<{ state: ClarificationState }>()
+const props = defineProps<{ state: ClarificationState; resuming: boolean }>()
 const emit = defineEmits<{
   changed: [jobId: string, nextJobId?: string]
   cancel: []
+  resume: []
 }>()
 const answer = ref('')
 const pending = ref(false)
@@ -58,7 +59,7 @@ async function newTask(): Promise<void> {
 
 <template>
   <section class="clarification-panel" aria-labelledby="clarification-heading">
-    <h2 id="clarification-heading">{{ state.clarification.status === 'answered' ? '已补充条件' : '需要补充条件' }}</h2>
+    <h2 id="clarification-heading">{{ state.clarification.status === 'answered' ? '已补充条件' : state.clarification.status === 'evaluating' ? '已收到回答，待判断条件是否充分' : '需要补充条件' }}</h2>
     <p>{{ state.clarification.question }}</p>
     <p v-if="state.clarification.status === 'waiting'">{{ state.clarification.reason }}</p>
     <p v-if="state.clarification.answer">你的回答：{{ state.clarification.answer }}</p>
@@ -73,6 +74,7 @@ async function newTask(): Promise<void> {
       </div>
     </form>
     <UiButton v-if="state.allowed_actions.includes('create_new_task')" variant="primary" :busy="pending" @click="newTask">带着回答开始新任务</UiButton>
+    <UiButton v-if="state.allowed_actions.includes('resume')" variant="primary" :busy="resuming" @click="emit('resume')">恢复执行</UiButton>
     <p v-if="error" role="alert">{{ error }}</p>
   </section>
 </template>

@@ -13,7 +13,7 @@ export const clarificationStateSchema = z.object({
   allowed_actions: z.array(z.string()),
   clarification: z.object({
     request_id: z.string(), task_id: z.string(), input_version: z.number().int().positive(),
-    question: z.string(), reason: z.string(), status: z.enum(['waiting', 'answered', 'expired']),
+    question: z.string(), reason: z.string(), status: z.enum(['waiting', 'evaluating', 'answered', 'expired']),
     answer: z.string().optional(),
   }),
 })

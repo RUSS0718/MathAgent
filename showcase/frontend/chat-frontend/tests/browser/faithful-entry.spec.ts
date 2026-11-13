@@ -64,6 +64,27 @@ test('necessary clarification continues the same task and refreshes read-only', 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 
+test('a saved clarification can resume after restart', async ({ page }) => {
+  await mockWorkspace(page, true)
+  let resumes = 0
+  await page.route('**/api/agent/jobs/run-demo', route => route.fulfill({ json: {
+    success: true, job_id: 'run-demo', session_id: 'session-demo', status: resumes ? 'queued' : 'failed',
+    result: { faithful: { allowed_actions: resumes ? [] : ['resume'],
+      clarification: { request_id: 'clarification:run-demo:1', task_id: 'run-demo', input_version: 1,
+        question: '三角形底边和对应高是多少？', reason: '数值面积需要实际尺寸。',
+        status: 'evaluating', answer: '6 cm 和 4 cm' } } },
+  } }))
+  await page.route('**/api/agent/jobs/run-demo/resume', route => {
+    resumes += 1
+    return route.fulfill({ status: 202, json: { success: true, job_id: 'run-demo', status: 'queued' } })
+  })
+  await page.goto('/dashboard-assets/session/session-demo')
+  await expect(page.getByText('你的回答：6 cm 和 4 cm')).toBeVisible()
+  await page.getByRole('button', { name: '恢复执行' }).click()
+  await expect.poll(() => resumes).toBe(1)
+  await expect(page.getByRole('button', { name: '恢复执行' })).toHaveCount(0)
+})
+
 test('ready service defaults ordinary submit to Faithful and preserves failed form', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 900 })
   const requests = await setup(page, faithful)

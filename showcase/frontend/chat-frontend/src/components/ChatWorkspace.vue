@@ -115,12 +115,13 @@ async function cancelCurrent(): Promise<void> {
   } catch (error) { notice.value = error instanceof Error ? error.message : '取消失败。' }
 }
 async function resumeCurrent(): Promise<void> {
-  if (!current.value || submitting.value) return
+  const target = selectedJob.value
+  if (!target || submitting.value) return
   submitting.value = true
   try {
-    const result = await api.resumeJob(current.value.jobId, '', createIdempotencyKey())
-    jobs.start(current.value.jobId, current.value.sessionId, result.status ?? 'queued')
-    observeJob(current.value.jobId)
+    const result = await api.resumeJob(target.jobId, '', createIdempotencyKey())
+    jobs.start(target.jobId, target.sessionId, result.status ?? 'queued')
+    observeJob(target.jobId)
     draft.value = ''
     notice.value = result.existing ? '已重放恢复结果。' : '已请求恢复执行；没有追加文本约束。'
   } catch (error) { notice.value = error instanceof Error ? error.message : '恢复失败。' }
@@ -305,7 +306,7 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
       </section>
       <section v-else class="active-workbench">
         <article class="workbench-problem"><small>当前题干</small><p>{{ selectedProblem }}</p></article>
-        <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" @changed="clarificationChanged" @cancel="cancelCurrent" />
+        <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" :resuming="submitting" @resume="resumeCurrent" @changed="clarificationChanged" @cancel="cancelCurrent" />
         <ConversationWorkbench :key="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" />
         <PresentationSection :source-version="showReport" v-if="showReport && presentationMode" :job-id="selectedJob.jobId" :mode="presentationMode" :job-status="selectedJob.status" :problem="selectedProblem" :fallback-answer="showReport.report.answer" />
         <ReportSection v-else-if="showReport" :mode="showReport.mode" :status="showReport.status" :report="showReport.report" />

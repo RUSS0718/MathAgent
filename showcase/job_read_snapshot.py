@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from contextlib import closing
 from pathlib import Path
 
-from .clarification_api import pending_question
+from .clarification_api import expired_reply, pending_question
 from .job_observation import observe_deadline
 from .run_budget import _summary
 from .star_product_modes import STAR_MODES
@@ -41,6 +41,7 @@ def read_job(service, job_id, user_id):
         row = store._connection.execute("SELECT * FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
         actions = allowed_job_actions(store._connection, row)
         question = pending_question(store._connection, job_id) if star else None
+        question = expired_reply(store._connection, row, question) or question
     return _with_accounting(payload, attempts, budget, ledger_attempts, star, actions, question)
 
 
@@ -109,6 +110,7 @@ def read_job_snapshot(store, job_id, user_id):
         ledger = connection.execute("SELECT ledger_json FROM run_budgets WHERE run_id=?", (job_id,)).fetchone()
         actions = allowed_job_actions(connection, row)
         question = (solver_snapshot[0]["state"].get("clarification") if solver_snapshot else None)
+        question = expired_reply(connection, row, question) or question
         # Projection only uses the fetched snapshot. Release its SQLite read
         # lock before computing it so stream progress writers can commit.
         connection.commit()

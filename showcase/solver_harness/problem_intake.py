@@ -4,8 +4,10 @@ import hashlib
 from collections.abc import Mapping
 from copy import deepcopy
 
+from ..redaction import redact
 from .budget import budget_reason, stop
 from .calls import CallInterrupted
+from .clarification import answer_change, necessary_question, waiting_for_clarification
 from .initial_state import problem_spec_state
 from .protocol_repair import (
     completed_call_id,
@@ -68,11 +70,14 @@ def ensure_problem_spec(harness, run, problem):
     """
     if not intake_pending(run):
         return run
-    if run["state"].get("clarification", {}).get("status") == "waiting":
+    if waiting_for_clarification(run["state"]):
         return run
     harness._validate_identity(run, run["run_id"], hashlib.sha256(problem.encode("utf-8")).hexdigest())
     state = run["state"]
-    call_id = f"{run['run_id']}:problem-intake:1"
+    question = state.get("clarification", {})
+    evaluating = question.get("status") == "evaluating"
+    version = question["input_version"] + 1 if evaluating else 1
+    call_id = f"{run['run_id']}:problem-intake:{version}"
     calls = state.get("calls", {})
     current_id = completed_call_id(calls, call_id)
     record = calls.get(current_id)
@@ -93,8 +98,11 @@ def ensure_problem_spec(harness, run, problem):
             return reject_intake(harness, run, "problem_intake_port_unavailable")
         request = {
             "run_id": run["run_id"], "call_id": current_id, "role": "problem_intake",
-            "session_key": f"problem-intake:{run['run_id']}", "problem": problem,
+            "session_key": call_id if evaluating else f"problem-intake:{run['run_id']}",
+            "problem": problem,
         }
+        if evaluating:
+            request["clarification_input"] = redact({key: question[key] for key in ("question", "answer")})
         if pending_repair:
             request = repair_request(request, failed_call=record)
         reservation = retry["new_call_id"] if authorized else request["call_id"]
@@ -127,14 +135,14 @@ def ensure_problem_spec(harness, run, problem):
         return reject_intake(harness, run, "problem_spec_original_problem_mismatch")
     if spec["specification_version"] != 1:
         return reject_intake(harness, run, "problem_intake_initial_version_invalid")
+    if evaluating:
+        return _apply_clarification(harness, run, reply, current_id, version)
     updates = {
         **problem_spec_state(spec), "status": "running",
         "problem_intake": {**run["state"]["problem_intake"], "status": "completed",
                            "call_id": current_id, "authority": "generated_task_spec_not_proof"},
     }
     if reply.get("clarification"):
-        from .clarification import necessary_question
-
         try:
             updates.update(necessary_question(run, updates["problem_intake"], reply["clarification"]))
         except (TypeError, ValueError):
@@ -149,3 +157,22 @@ def ensure_problem_spec(harness, run, problem):
         event={"event_id": "problem-intake-accepted", "type": "problem_intake_accepted",
                "call_id": current_id, "specification_version": 1}, state_updates=updates,
     )
+
+
+def _apply_clarification(harness, run, reply, call_id, version):
+    state = run["state"]
+    question = state["clarification"]
+    intake = {**state["problem_intake"], "call_id": call_id}
+    followup = reply.get("clarification")
+    condition = reply.get("applicable_condition")
+    if followup or not isinstance(condition, str) or not condition.strip():
+        try:
+            updates = necessary_question(run, intake, followup or question, version=version)
+        except (TypeError, ValueError):
+            return reject_intake(harness, run, "problem_intake_invalid_clarification")
+        event = {"event_id": f"clarification-followup:{version}", "type": "clarification_followup"}
+    else:
+        change = answer_change(state, condition.strip(), {**intake, "status": "completed"})
+        updates, event = change["updates"], change["event"]
+    return harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
+                                event={**event, "call_id": call_id}, state_updates=updates)

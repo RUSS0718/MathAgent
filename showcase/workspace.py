@@ -1210,9 +1210,7 @@ class WorkspaceService:
             user_id=user_id, job_id=job_id, operation="resume", idempotency_key=idempotency_key, request_digest=digest, retry_call=retry_call
         )
         if not existing:
-            with self._submit_lock:
-                self._submitted.discard(job_id)
-            self._submit(job_id)
+            self.resubmit(job_id)
         return result, existing
 
     def formal_attempt(
@@ -1425,6 +1423,12 @@ class WorkspaceService:
         if self.checkpointer is not None:
             self.checkpointer.stop(job_id, "CANCELED", "run_canceled")
         return result, existing
+
+    def resubmit(self, job_id: str) -> None:
+        """Schedule a committed continuation using the worker submission guard."""
+        with self._submit_lock:
+            self._submitted.discard(job_id)
+        self._submit(job_id)
 
     def _submit(self, job_id: str) -> None:
         with self._submit_lock:
@@ -1740,6 +1744,8 @@ def _run_snapshot(
     execution_mode: str = "fake",
     stage: str | None = None,
 ) -> dict[str, Any]:
+    from .faithful_task import public_run_result
+
     snapshot: dict[str, Any] = {
         "run_id": job_id,
         "profile": "showcase_mvp",
@@ -1749,7 +1755,7 @@ def _run_snapshot(
         "input_ref": {"kind": "text", "length": len(input_text)} if input_text else {"kind": "text"},
         "asset_refs": list(asset_refs or []),
         "vision_status": "unavailable" if asset_refs else None,
-        "result": dict(result) if result else None,
+        "result": public_run_result(result) if result else None,
         "final_response": result.get("final_response") if result else None,
         "error": dict(error) if error else None,
         "created_at": now,

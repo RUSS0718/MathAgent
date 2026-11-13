@@ -128,7 +128,7 @@ def prepare_candidates(run, event, updates):
         if kind == "problem_spec_revised":
             invalid.update(
                 record["candidate_id"] for record in latest_records(registry)
-                if record.get("source_phase") == "FINAL_GENERATE"
+                if event.get("clarification_request_id") or record.get("source_phase") == "FINAL_GENERATE"
             )
         plan_steps = state.get("plan", {}).get("steps", [])
         changed = True
@@ -149,7 +149,7 @@ def prepare_candidates(run, event, updates):
                     invalid.add(record["candidate_id"])
                     changed = True
         for record in latest:
-            if record["candidate_id"] in invalid:
+            if record["candidate_id"] in invalid and record["review_state"] != "invalidated":
                 _version(
                     registry,
                     actions,

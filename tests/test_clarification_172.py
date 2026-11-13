@@ -2,7 +2,10 @@
 
 import json
 import unittest
+import uuid
 from unittest.mock import patch
+
+import requests
 
 from tests import test_faithful_service_job as service_tests
 from tests.star_product_support import ACCEPT, StarJobFixture
@@ -17,6 +20,15 @@ SPEC = {
     "auxiliary_goals": [],
     "clarification": {"question": "请提供底边长度和对应的高（含单位）。",
                       "reason": "数值面积取决于尚未给出的尺寸，不能从当前条件确定。"},
+}
+
+
+ANSWER = "底边为 6 cm，对应高为 4 cm。"
+SOLVED_AREA = {"assessment": "SOLVED", "worked": [], "failed": [],
+               "candidates": [], "solution_candidate": "面积为 12 cm²"}
+POLISHED_AREA = {"solution_candidate": "面积 = 6 × 4 / 2 = 12 cm²。"}
+REASSESSED = {key: value for key, value in SPEC.items() if key != "clarification"} | {
+    "applicable_condition": ANSWER,
 }
 
 
@@ -57,10 +69,15 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
         def solve(context):
             self.assertEqual(2, context["problem_spec"]["specification_version"])
             self.assertIn("底边为 6 cm，对应高为 4 cm。", context["problem_spec"]["assumptions"][-1])
-            return {"assessment": "SOLVED", "worked": [], "failed": [], "candidates": [],
-                    "solution_candidate": "面积为 12 cm²"}
+            return SOLVED_AREA
 
-        self.replies.extend([solve, {"solution_candidate": "面积 = 6 × 4 / 2 = 12 cm²。"}, ACCEPT])
+        def assess(context):
+            self.assertEqual(PROBLEM, context["original_problem"])
+            self.assertEqual(ANSWER, context["clarification_input"]["answer"])
+            self.assertEqual(question["question"], context["clarification_input"]["question"])
+            return REASSESSED
+
+        self.replies.extend([assess, solve, POLISHED_AREA, ACCEPT])
         headers = self.headers()
         accepted = self.answer(job_id, question, headers=headers)
         self.assertEqual(202, accepted.status_code, accepted.get_json())
@@ -74,8 +91,79 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(200, self.answer(job_id, question, headers=headers).status_code)
         self.assertEqual(409, self.answer(job_id, question, answer="改为 100", headers=headers).status_code)
         self.assertIn("12", self.report(job_id)["answer"])
-        self.assertEqual(4, len(self.outbound))
+        self.assertEqual(5, len(self.outbound))
         self.assertEqual(final["result"]["faithful"], self.job(job_id)["result"]["faithful"])
+
+    def test_non_answer_reopens_versioned_question_without_solving(self):
+        job_id, before = self.waiting()
+        question = before["result"]["faithful"]["clarification"]
+        self.replies.append(SPEC)
+        headers = self.headers()
+        self.assertEqual(202, self.answer(job_id, question, answer="我不知道高。", headers=headers).status_code)
+        latest = self.wait_for(lambda: value if (value := self.job(job_id))["status"]
+                               in {"waiting_input", "failed", "succeeded"} else None)
+        self.assertEqual("waiting_input", latest["status"], latest)
+        faithful = latest["result"]["faithful"]
+        followup = faithful["clarification"]
+        self.assertEqual(job_id, followup["task_id"])
+        self.assertEqual(2, followup["input_version"])
+        self.assertNotEqual(question["request_id"], followup["request_id"])
+        self.assertEqual(1, faithful["specification_version"])
+        self.assertEqual(["cancel", "answer_clarification"], faithful["allowed_actions"])
+        self.assertEqual(200, self.answer(job_id, question, answer="我不知道高。", headers=headers).status_code)
+        self.assertEqual(409, self.answer(job_id, question).status_code)
+        self.assertEqual(before["result"]["budget"]["deadline_at"], latest["result"]["budget"]["deadline_at"])
+        self.assertEqual(2, len(self.outbound))
+        self.replies.extend([REASSESSED, SOLVED_AREA, POLISHED_AREA, ACCEPT])
+        self.assertEqual(202, self.answer(job_id, followup).status_code)
+        final = self.terminal(job_id)
+        self.assertEqual("succeeded", final["status"])
+        self.assertEqual(3, final["result"]["faithful"]["input_version"])
+        self.assertEqual(2, final["result"]["faithful"]["specification_version"])
+        self.assertEqual(6, len(self.outbound))
+
+    def test_unknown_clarification_requires_explicit_retry_on_same_run(self):
+        job_id, before = self.waiting()
+        question = before["result"]["faithful"]["clarification"]
+        self.replies.extend([requests.ReadTimeout("clarification outcome unknown"), SPEC])
+        self.assertEqual(202, self.answer(job_id, question).status_code)
+        failed = self.terminal(job_id)
+        faithful = failed["result"]["faithful"]
+        self.assertEqual("evaluating", faithful["clarification"]["status"])
+        self.assertEqual(1, faithful["specification_version"])
+        self.assertEqual(["retry_unknown_call"], faithful["allowed_actions"])
+        recovery = failed["result"]["solver"]["recovery"]
+        self.assertEqual("problem_intake", recovery["unknown_calls"][0]["role"])
+        resume = f"/api/agent/jobs/{job_id}/resume"
+        self.assertEqual(409, self.client.post(resume, json={}, headers=self.headers()).status_code)
+        self.assertEqual(2, len(self.outbound))
+        response = self.client.post(resume, headers=self.headers(), json={"retry_call": {
+            "call_id": recovery["unknown_calls"][0]["call_id"], "new_call_id": str(uuid.uuid4())}})
+        self.assertEqual(202, response.status_code, response.get_json())
+        latest = self.wait_for(lambda: value if (value := self.job(job_id))["status"] == "waiting_input" else None)
+        self.assertEqual(3, len(self.outbound))
+        self.assertEqual(ANSWER, self.outbound[-1]["clarification_input"]["answer"])
+        self.assertEqual(before["result"]["budget"]["deadline_at"], latest["result"]["budget"]["deadline_at"])
+        self.assertEqual(1, latest["result"]["budget"]["unknown_attempts"])
+
+    def test_deadline_after_queue_keeps_answer_and_linked_task(self):
+        job_id, before = self.waiting()
+        question = before["result"]["faithful"]["clarification"]
+        service = self.app.extensions["showcase_workspace_service"]
+        with patch.object(service, "_submit"):
+            self.assertEqual(202, self.answer(job_id, question).status_code)
+            with service.store._lock, service.store._connection as connection:
+                connection.execute("UPDATE run_budgets SET ledger_json=json_set(ledger_json, '$.deadline_at', 0) WHERE run_id=?", (job_id,))
+            service._execute(job_id)
+            faithful = self.job(job_id)["result"]["faithful"]
+            self.assertEqual("expired", faithful["clarification"]["status"])
+            self.assertEqual("底边为 6 cm，对应高为 4 cm。", faithful["clarification"]["answer"])
+            self.assertEqual(["create_new_task"], faithful["allowed_actions"])
+            response = self.client.post(f"/api/agent/jobs/{job_id}/clarifications/{question['request_id']}/new-task",
+                                        json={}, headers=self.headers())
+            self.assertEqual(202, response.status_code, response.get_json())
+            self.assertEqual(job_id, self.job(response.get_json()["job_id"])["result"]["faithful"]["clarification_source"]["task_id"])
+        self.assertEqual(1, len(self.outbound))
 
     def test_stale_answer_rejected_and_expiry_saves_without_dispatch(self):
         job_id, before = self.waiting()
@@ -92,14 +180,23 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
             service.store._connection.execute("UPDATE run_budgets SET ledger_json=json_set(ledger_json, '$.deadline_at', 0) WHERE run_id=?", (job_id,))
             service.store._connection.commit()
         headers = self.headers()
-        saved = self.answer(job_id, question, headers=headers)
+        secret_answer = f"{ANSWER} token=private-clarification-secret"
+        saved = self.answer(job_id, question, headers=headers, answer=secret_answer)
         self.assertEqual(409, saved.status_code, saved.get_json())
         self.assertEqual("new_task_required", saved.get_json()["continuation"])
         restored = self.job(job_id)["result"]["faithful"]
         self.assertEqual("expired", restored["clarification"]["status"])
-        self.assertEqual("底边为 6 cm，对应高为 4 cm。", restored["clarification"]["answer"])
+        self.assertNotIn("private-clarification-secret", restored["clarification"]["answer"])
+        run = self.client.get(f"/api/runs/{job_id}")
+        self.assertEqual(200, run.status_code, run.get_json())
+        self.assertNotIn("private-clarification-secret", run.get_data(as_text=True))
+        run_question = run.get_json()["result"]["faithful"]["clarification"]
+        self.assertEqual("expired", run_question["status"])
+        self.assertNotIn("answer", run_question)
+        self.assertNotIn("receipt", run_question)
+        self.assertNotIn("clarification_reply", run.get_json()["result"]["faithful"])
         self.assertEqual(["create_new_task"], restored["allowed_actions"])
-        self.assertEqual(409, self.answer(job_id, question, headers=headers).status_code)
+        self.assertEqual(409, self.answer(job_id, question, headers=headers, answer=secret_answer).status_code)
         self.assertEqual(409, self.answer(job_id, question, answer="冲突回答").status_code)
         self.assertEqual(1, len(self.outbound))
         with patch.object(service, "_submit"):
@@ -139,12 +236,19 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
             connection.commit()
         old = self.client.post(f"/api/agent/jobs/{job_id}/teach", json={}, headers=self.headers())
         self.assertEqual(200, old.status_code, old.get_json())
+        self.replies.extend([REASSESSED, SOLVED_AREA, POLISHED_AREA, ACCEPT])
         with patch.object(service, "_submit"):
             response = self.answer(job_id, question)
-        self.assertEqual(202, response.status_code, response.get_json())
-        projected = self.job(job_id)
-        self.assertEqual("", projected["result"]["final_response"])
-        candidate = projected["result"]["solver"]["candidate_history"][-1]
+            self.assertEqual(202, response.status_code, response.get_json())
+            self.assertEqual("", self.job(job_id)["result"]["final_response"])
+            service.store.recover_incomplete_jobs(service.checkpointer)
+        self.assertIn("resume", self.job(job_id)["result"]["faithful"]["allowed_actions"])
+        resumed = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={}, headers=self.headers())
+        self.assertEqual(202, resumed.status_code, resumed.get_json())
+        projected = self.terminal(job_id)
+        self.assertEqual("succeeded", projected["status"])
+        candidate = [item for item in projected["result"]["solver"]["candidate_history"]
+                     if item["answer_text"] == "旧错误面积 999"][-1]
         self.assertEqual("invalidated", candidate["review_state"])
         self.assertFalse(candidate["selection_eligible"])
         self.assertNotIn("999", self.report(job_id)["answer"])
@@ -152,4 +256,4 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(200, presentation.status_code, presentation.get_json())
         history = presentation.get_json()["presentation_history"]
         self.assertTrue(history)
-        self.assertTrue(all(item["status"] == "needs_review" for item in history))
+        self.assertTrue(any(item["status"] == "needs_review" for item in history))
