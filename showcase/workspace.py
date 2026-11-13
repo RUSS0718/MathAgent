@@ -265,10 +265,10 @@ class WorkspaceStore:
             self._assert_session(session_id, user_id)
             self._connection.execute("BEGIN IMMEDIATE")
             try:
-                existing = self._connection.execute(
-                    "SELECT * FROM workspace_jobs WHERE user_id=? AND idempotency_key=?",
-                    (user_id, idempotency_key),
-                ).fetchone()
+                from .task_revision import submission_rows
+
+                rows = submission_rows(self._connection, user_id, idempotency_key)
+                existing = rows[0] if rows else None
                 if existing is not None:
                     if existing["request_digest"] != request_digest:
                         raise WorkspaceError("idempotency_conflict", status=409)
@@ -280,7 +280,8 @@ class WorkspaceStore:
                     from .task_revision import prepare_revision
 
                     prior = prepare_revision(self, revision_source, user_id=user_id,
-                                             session_id=session_id, digest=request_digest)
+                                             session_id=session_id, digest=request_digest,
+                                             idempotency_key=idempotency_key)
                     if prior is not None:
                         self._connection.commit()
                         return self._job_payload(prior), True
@@ -816,12 +817,10 @@ class WorkspaceStore:
         self, *, user_id: str, idempotency_key: str, request_digest: str | None = None
     ) -> dict[str, Any]:
         from .experiment_transport_projection import project_transport_identity
+        from .task_revision import submission_rows
 
         with self._lock:
-            rows = self._connection.execute(
-                "SELECT * FROM workspace_jobs WHERE user_id=? AND idempotency_key=?",
-                (user_id, idempotency_key),
-            ).fetchall()
+            rows = submission_rows(self._connection, user_id, idempotency_key)
         if not rows:
             raise WorkspaceError("job_not_found", status=404)
         if len(rows) != 1:
@@ -1049,6 +1048,9 @@ class WorkspaceService:
         self._executor = ThreadPoolExecutor(max_workers=self.worker_capacity, thread_name_prefix="showcase-job")
         self._submitted: set[str] = set()
         self._submit_lock = threading.Lock()
+        from .task_revision import wake_revision_jobs
+
+        self.budget_ledger.on_settled = lambda: wake_revision_jobs(self)
 
     def create_session(self, user_id: str) -> str:
         return self.store.create_session(user_id)

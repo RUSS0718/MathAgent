@@ -84,6 +84,7 @@ class RunBudgetLedger:
         self._closed = False
         self.database_path = self.connection.execute("PRAGMA database_list").fetchone()[2]
         self.late_usage_evidence_dir = None
+        self.on_settled = None
         with self.lock, self.connection_lock:
             self.connection.execute(
                 "CREATE TABLE IF NOT EXISTS run_budgets (run_id TEXT PRIMARY KEY, ledger_json TEXT NOT NULL)"
@@ -466,6 +467,8 @@ class RunBudgetLedger:
             settled = self._settle_open(run_id, action_id, event)
         if settled:
             self._settle_population_resource(run_id, action_id)
+            if self.on_settled is not None:
+                self.on_settled()
         return settled
 
     def _settle_population_resource(self, run_id, attempt_id):
@@ -678,6 +681,25 @@ class ModelCallBudget(RunBudget):
         return super().before_attempt(event, input_estimate)
 
 
+def http_outcome_unknown(action):
+    """Classify unresolved remote outcomes independently of missing usage."""
+    attempt = action.get("public_attempt") or {}
+    return (action["status"] == "unknown" or (action["status"] == "error"
+            and (attempt.get("error_category") in {
+                "timeout", "connectivity", "missing_finish_reason", "missing_stream_terminal"}
+                or (attempt.get("error_category") == "http_status"
+                    and 500 <= (attempt.get("http_status") or 0) < 600))))
+
+
+def tool_outcome_unknown(action):
+    """Retain tool occupancy until its outcome and cleanup are confirmed."""
+    evidence = action.get("execution_evidence") or {}
+    return (action["status"] in {"reserved", "unknown"}
+            or evidence.get("unknown_outcome") is True
+            or (action["status"] == "timeout" and not (
+                evidence.get("unknown_outcome") is False and evidence.get("cleanup_verified") is True)))
+
+
 def _summary(state):
     # Known counters sum only fields actually returned by the provider. Missing
     # fields retain their reservation even when a total-only usage is available.
@@ -692,11 +714,7 @@ def _summary(state):
         held = (action["input_estimate"] if usage["prompt_tokens"] is None else 0) + (
             action["output_cap"] if usage["completion_tokens"] is None else 0
         )
-        attempt = action.get("public_attempt") or {}
-        if (action["status"] == "unknown" or (action["status"] == "error"
-                and (attempt.get("error_category") in {"timeout", "connectivity", "missing_finish_reason", "missing_stream_terminal"}
-                     or (attempt.get("error_category") == "http_status"
-                         and 500 <= (attempt.get("http_status") or 0) < 600)))):
+        if http_outcome_unknown(action):
             held = action["input_estimate"] + action["output_cap"]
             # The known counts are already inside the full original reservation.
             accounted = max(action["input_estimate"], usage["prompt_tokens"] or 0) + max(
@@ -733,18 +751,7 @@ def _summary(state):
             a.get("duration_seconds") or 0 for a in state["actions"] if a["kind"] == "tool"
         ),
         "unknown_tool_calls": sum(
-            a["kind"] == "tool"
-            and (
-                a["status"] in {"reserved", "unknown"}
-                or (a.get("execution_evidence") or {}).get("unknown_outcome") is True
-                or (
-                    a["status"] == "timeout"
-                    and not (
-                        (a.get("execution_evidence") or {}).get("unknown_outcome") is False
-                        and (a.get("execution_evidence") or {}).get("cleanup_verified") is True
-                    )
-                )
-            )
+            a["kind"] == "tool" and tool_outcome_unknown(a)
             for a in state["actions"]
         ),
         "started_at": state["started_at"],

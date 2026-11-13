@@ -4,11 +4,19 @@ import json
 
 from flask import g, jsonify, request
 
-from .run_budget import freeze_budget
-from .workspace import WorkspaceError, _json, _utc_now, _run_snapshot
+from .run_budget import freeze_budget, http_outcome_unknown, tool_outcome_unknown
+from .workspace import WorkspaceError, _json, _run_snapshot, _utc_now
 
 
-def prepare_revision(store, source, *, user_id, session_id, digest):
+def submission_rows(connection, user_id, key):
+    """Resolve canonical submissions and committed revision replay receipts."""
+    return connection.execute(
+        "SELECT j.* FROM workspace_jobs j WHERE j.user_id=? AND (j.idempotency_key=? OR j.job_id IN "
+        "(SELECT job_id FROM workspace_actions WHERE user_id=? AND idempotency_key=? "
+        "AND operation='revision_submission'))", (user_id, key, user_id, key)).fetchall()
+
+
+def prepare_revision(store, source, *, user_id, session_id, digest, idempotency_key):
     """Fence the parent inside the same transaction that accepts its successor."""
     connection = store._connection
     row = connection.execute("SELECT * FROM workspace_jobs WHERE job_id=? AND user_id=?",
@@ -23,6 +31,13 @@ def prepare_revision(store, source, *, user_id, session_id, digest):
     if prior:
         if prior["request_digest"] != digest:
             raise WorkspaceError("task_revision_conflict", status=409)
+        if connection.execute("SELECT 1 FROM workspace_actions WHERE user_id=? AND idempotency_key=?",
+                              (user_id, idempotency_key)).fetchone():
+            raise WorkspaceError("idempotency_conflict", status=409)
+        connection.execute(
+            "INSERT INTO workspace_actions(user_id,idempotency_key,operation,job_id,request_digest,response_json,created_at) "
+            "VALUES(?,?,'revision_submission',?,?,?,?)",
+            (user_id, idempotency_key, prior["task_id"], digest, "{}", _utc_now()))
         return connection.execute("SELECT * FROM workspace_jobs WHERE job_id=?",
                                   (prior["task_id"],)).fetchone()
     from .clarification_api import pending_question
@@ -68,18 +83,9 @@ def _remote_slots(ledger):
     for action in ledger["actions"]:
         attempt = action.get("public_attempt") or {}
         if action["kind"] == "http" and attempt.get("dispatch_status") != "not_submitted":
-            unknown_error = (attempt.get("error_category") in {
-                "timeout", "connectivity", "missing_finish_reason", "missing_stream_terminal"}
-                or (attempt.get("error_category") == "http_status"
-                    and 500 <= (attempt.get("http_status") or 0) < 600))
-            count += (action["status"] in {"reserved", "pending", "unknown"}
-                      or (action["status"] == "error" and unknown_error))
+            count += (action["status"] in {"reserved", "pending"} or http_outcome_unknown(action))
         elif action["kind"] == "tool":
-            evidence = action.get("execution_evidence") or {}
-            count += (action["status"] in {"reserved", "unknown"}
-                      or evidence.get("unknown_outcome") is True
-                      or (action["status"] == "timeout" and not (
-                          evidence.get("unknown_outcome") is False and evidence.get("cleanup_verified") is True)))
+            count += tool_outcome_unknown(action)
     return count
 
 

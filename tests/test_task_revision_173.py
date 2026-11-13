@@ -1,12 +1,14 @@
 """Changed input owns a new public task while old requests settle in place."""
 
+import json
 import threading
 import unittest
+from unittest.mock import patch
 
 import requests
 
-from tests.star_product_support import ACCEPT, POLISH, SOLVED, StarJobFixture
 from tests import test_faithful_service_job as service_tests
+from tests.star_product_support import ACCEPT, POLISH, SOLVED, StarJobFixture
 from tests.test_faithful_s03_job import SPEC
 
 
@@ -16,6 +18,50 @@ class TaskRevisionTest(StarJobFixture, unittest.TestCase):
     def revise(self, job_id, headers=None, message="计算 2+3", version=1):
         return self.client.post(f"/api/agent/jobs/{job_id}/revisions",
             headers=headers or self.headers(), json={"input_version": version, "message": message})
+
+    def test_late_committed_settlement_wakes_queued_revision_after_workers_exit(self):
+        self.open_faithful([{**SPEC, "original_problem": "计算 2+3"},
+            {**SOLVED, "solution_candidate": "5"}, {**POLISH, "solution_candidate": "2+3=5"}, ACCEPT])
+        from showcase.request_transport import response_events as real_events
+
+        callbacks = []
+
+        def transport(url, *, on_late_response, **kwargs):
+            if len(callbacks) < 2:
+                callbacks.append(on_late_response)
+                raise requests.ReadTimeout("late response pending")
+            yield from real_events(url, on_late_response=on_late_response, **kwargs)
+
+        with patch("showcase.request_transport.response_events", side_effect=transport):
+            old_ids = []
+            for _ in range(2):
+                old = self.client.post("/api/agent/jobs", headers=self.headers(),
+                    json={"session_id": self.session, "message": "1+1"}).get_json()["job_id"]
+                self.assertEqual("failed", self.terminal(old)["status"])
+                old_ids.append(old)
+                if len(old_ids) == 1:
+                    self.session = self.client.post("/api/new_chat", headers=self.headers()).get_json()["new_session_id"]
+            new = self.revise(old_ids[-1]).get_json()["job_id"]
+            service = self.app.extensions["showcase_workspace_service"]
+            # Both executor threads must reach the barrier: no old worker remains to wake the queue.
+            barrier = threading.Barrier(3, timeout=5)
+            workers = [service._executor.submit(barrier.wait) for _ in range(2)]
+            barrier.wait()
+            for worker in workers:
+                worker.result(timeout=5)
+            self.assertEqual("queued", self.job(new)["status"])
+            self.assertEqual(0, len(self.outbound))
+            reply = requests.Response()
+            reply.status_code = 200
+            body = json.dumps({"choices": [{"finish_reason": "stop", "message": {"content": "2"}}],
+                "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}}).encode()
+            callbacks[0](reply, body, .01, .2, True)
+            self.assertEqual("succeeded", self.terminal(new)["status"])
+            self.assertIn("5", self.report(new)["answer"])
+            self.assertEqual(4, len(self.outbound))
+            self.assertEqual("failed", self.job(old_ids[0])["status"])
+            self.assertEqual(0, self.job(old_ids[0])["result"]["budget"]["unresolved_attempts"])
+            self.assertEqual(1, self.job(old_ids[1])["result"]["budget"]["unresolved_attempts"])
 
     def test_revision_fences_old_dispatch_and_late_result_without_crosswrite(self):
         entered, release = threading.Event(), threading.Event()
@@ -51,6 +97,10 @@ class TaskRevisionTest(StarJobFixture, unittest.TestCase):
             replay = self.revise(old, repeated)
             self.assertEqual(200, replay.status_code, replay.get_json())
             self.assertEqual(new, replay.get_json()["job_id"])
+            receipt = self.client.get(f"/api/agent/submissions/{repeated['Idempotency-Key']}")
+            self.assertEqual(200, receipt.status_code, receipt.get_json())
+            self.assertEqual(new, receipt.get_json()["job_id"])
+            self.assertEqual(409, self.revise(old, repeated, message="别的题").status_code)
         self.assertEqual(409, self.revise(old, headers, message="别的题").status_code)
         self.assertEqual(409, self.revise(old, version=2).status_code)
         release.set()
