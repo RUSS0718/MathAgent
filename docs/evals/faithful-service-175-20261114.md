@@ -37,3 +37,15 @@
 固定目标 `010befd` 的增量审查确认原路线 unknown 重试与再次扩展已有修复，但新增模式 Meta 的持久身份/回执消费、模式 unknown 显式重试及串行 checkpoint 后续刷新仍有缺陷。审查原件为仓库外 `175-standards-review-final.md` 与 `175-spec-review-final.md`，当前仍未通过。
 
 新增公共进程见证在真实子进程的 completed call_audit 提交后执行 `os._exit(75)`，随后新进程在同一数据库/Job 通过公开 resume 继续。两次红测稳定发现已完成 `execution-mode:116` 被重发为 `execution-mode:122`，预期一次、实际两次；只读 GET 不派发，配置、根预算起点/deadline/limits/预留保持。证据 `artifacts/switch-mode-receipt-witness-{01,02}/`（第二次约14.5秒）。该红测尚未在修复源码上通过，不宣称崩溃恢复已完成。
+
+## 修复后的实际恢复与复审
+
+`7857e6e` 修复父级模式 pending 身份、完成回执复用、marker 与 intent 原子消费、模式 unknown 的显式新身份路径和串行 checkpoint 结算后刷新。集成为 `ce46d0b`。同一个真实子进程退出见证在集成树运行：`uv run python scripts/run_unittest_report.py --expect-count 1 --summary-json artifacts/issue-175/crash-green.json --diagnostics artifacts/issue-175/crash-green.log tests.test_faithful_execution_switch_crash.ExecutionSwitchCrashTest.test_completed_mode_reply_before_marker_is_not_resent_on_public_resume`，1/1 通过，14.259秒、0 skip；旧两次红记录原判保留。测试提交 `3ccd1e5`。
+
+固定修复范围 `010befd...7857e6e` 的两轴复审均无剩余确切缺陷，报告在仓库外 `175-{standards,spec}-review-final2.md`。静态结论不代替真实自然切换或最终门禁。第二轮 live02 已在 `3ccd1e5` 启动，Run/Job `run_d79f2812f014e876b2e576ef78c0ebea`，仍待终态。
+
+## live02 与开发退出口径
+
+冻结 `3ccd1e5`，普通6×10棋盘可任选独立完整方法。Job `run_d79f2812f014e876b2e576ef78c0ebea`，6 Attempt 全部success并结算；最终 `failed / partial_aborted / invalid_problem_spec_work_units`，Planner有界修复后仍未进入路线选择，未热切换、无完整答案。参考值4213133未发送模型。输入、提交、报告、刷新和持久记录在 `artifacts/issue-175/live02/`；服务按PID/创建时间停止，检查已删除。两个真实失败不因调整而升级。
+
+依已授权接续合同，将本票改为开发接线验收，自然真实切换、完整交付和真实UI正向闭环交给#183。原要求、障碍、替代证据与限制见[更新合同](../engineering/faithful-service-175-contract.md)；尚未取得最终工程门禁结果。产品仅随后 `7d9d59e` 修正本票7处局部导入排序，未改运行行为；最终冻结SHA及门禁将另记。
