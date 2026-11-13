@@ -59,3 +59,9 @@
 - checkpoint 刷新测试原探针 patch 定义处，实际 accept 使用 runtime 中已导入别名；改为 patch 使用处，不删除原来源/实际 reserve_pair 断言。取消测试先检查公开 canceled，再等待实际 worker 退出以释放临时 SQLite，不改变产品停止语义。
 - 两竞态修复后 `gate-fix/race-green` 2/2；native checkpoint 模块 `gate-fix/native-final` 6/6、0 skip，原根预算与完整交付断言保留。`fence-final` 因命名类选择错误执行 0 项，不计通过；修正后的 `fence-final02` 4/4、0 skip，覆盖实际 checkpoint 刷新/消费、切换取消及既有迟到交付/取消隔离。所有路径前缀均为 `artifacts/issue-175/`。
 - 四文件增量 Standards/Spec 复审均 PASS，仅为静态结论，报告 `C:/Users/CQX/.codex/175-gatefix-{standards,spec}-review2.md`；11 个 baseline 文件逐份 SHA256 无变化，受影响四个 Python 文件 Ruff 与 diff 格式检查通过。新冻结最终门禁尚待完成。
+
+## gate-02：旧双路审查测试时序失败
+
+冻结 `fac899bf081d0071377957a08f301d6d67b5204b`，同一最终入口使用新 run-id `gate-02`。快速通过，完整离线 2063 项、2 failure、0 error、49 skip；`source_changed=false`，临时检查自删除。失败为 native 普通 checkpoint 与工具预算用例各仅观察到一次 step_verifier HTTP；首路合格后冻结其余新工作符合产品合同，旧测试没有同步“两路已进入 HTTP”的初态，不能要求随机调度保证两次调用。
+
+只在受控 provider 为非 continuation 审查增加双路 barrier，确保两条审查实际发出后才允许任一路取得合格裁决。原双路序列化、完整交付、工具次数与根预算断言全部保留，产品源码未变；竞态专项 continuation 不受同步影响。`artifacts/issue-175/gate-fix/native-sync-final.{json,log}` 6/6、0 skip、36.214秒通过。门禁失败原判保留，新冻结最终门禁仍待完成。
