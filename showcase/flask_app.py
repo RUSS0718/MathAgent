@@ -686,9 +686,12 @@ def create_app(
             return _workspace_error(exc)
 
     from .clarification_api import register_clarification_api
+    from .task_revision import register_revision_api
 
     register_clarification_api(app, workspace_service, require_auth=_require_auth,
                                request_object=_request_object, error_response=_workspace_error)
+    register_revision_api(app, workspace_service, require_auth=_require_auth,
+                          request_object=_request_object, error_response=_workspace_error)
 
     @app.post("/api/agent/jobs/<job_id>/formal-attempts")
     def create_formal_attempt(job_id: str) -> tuple[Response, int]:

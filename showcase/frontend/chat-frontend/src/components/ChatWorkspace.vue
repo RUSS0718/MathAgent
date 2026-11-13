@@ -24,6 +24,7 @@ import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
 import ConversationWorkbench from './ConversationWorkbench.vue'
 import ClarificationPanel from './ClarificationPanel.vue'
+import TaskRevisionPanel from './TaskRevisionPanel.vue'
 
 const auth = useAuthStore()
 const sessions = useSessionsStore()
@@ -143,6 +144,7 @@ async function clarificationChanged(jobId: string, nextJobId?: string): Promise<
   report.value = null
   try {
     if (nextJobId) await sessions.select(sessionId)
+    if (nextJobId) jobs.observe(await api.getJob(jobId))
     const target = nextJobId ?? jobId
     const observed = await api.getJob(target)
     if (sessions.currentId !== sessionId || reportDisposed) return
@@ -176,7 +178,7 @@ function observeJob(jobId: string): void {
   void jobController.subscribe(jobId).then(async () => {
     await loadReport(jobId)
     const record = jobs.byId(jobId)
-    if (record?.error) notice.value = record.error
+    if (record?.error && selectedJob.value?.jobId === jobId) notice.value = record.error
   })
 }
 async function refreshActive(): Promise<void> {
@@ -317,6 +319,7 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
       <section v-else class="active-workbench">
         <article class="workbench-problem"><small>当前题干</small><p>{{ selectedProblem }}</p></article>
         <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" :resuming="submitting" @resume="resumeCurrent" @changed="clarificationChanged" @cancel="cancelCurrent" />
+        <TaskRevisionPanel :key="selectedJob.jobId + ':revision'" :job-id="selectedJob.jobId" :session-id="selectedJob.sessionId" :owner="auth.username" :mode="solverMode" :state="selectedJob.result?.faithful" :disabled="submitting || checkingSubmission" @changed="clarificationChanged" />
         <ConversationWorkbench :key="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" />
         <PresentationSection :source-version="showReport" v-if="showReport && presentationMode" :job-id="selectedJob.jobId" :mode="presentationMode" :job-status="selectedJob.status" :problem="selectedProblem" :fallback-answer="showReport.report.answer" />
         <ReportSection v-else-if="showReport" :mode="showReport.mode" :status="showReport.status" :report="showReport.report" />

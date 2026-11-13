@@ -1,6 +1,73 @@
 import { expect, test, type Page } from '@playwright/test'
 import { mockWorkspace, report } from './fixtures'
 
+test('task revision navigates linked records and ignores late old results', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 375, height: 850 })
+  await mockWorkspace(page, true)
+  // Production Flask serves the SPA shell here; the isolated Vite server only serves its assets base.
+  await page.route('**/dashboard/run/*', async route => route.fulfill({
+    response: await page.request.get('/dashboard-assets/'),
+  }))
+  let changed = false
+  let posts = 0
+  let releaseOld!: () => void
+  const oldEvent = new Promise<void>(resolve => { releaseOld = resolve })
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  const snapshot = (old: boolean) => ({
+    success: true, job_id: old ? 'run-demo' : 'run-new', session_id: 'session-demo',
+    status: old ? changed ? 'canceled' : 'running' : 'succeeded', last_event_id: 0,
+    result: { faithful: { input_version: 1, revision_allowed: !old || !changed,
+      allowed_actions: old && !changed ? ['cancel'] : [],
+      ...(old ? changed ? { revision_to: { task_id: 'run-new' } } : {}
+        : { revision_source: { task_id: 'run-demo' } }),
+    } },
+  })
+  await page.route('**/api/load_session?*', route => route.fulfill({ json: { success: true,
+    messages: [{ sender: 'user', text: '计算 17×19。', analysis_job_id: 'run-demo' },
+      ...(changed ? [{ sender: 'user', text: '计算 2+3。', analysis_job_id: 'run-new' }] : [])],
+  } }))
+  await page.route('**/api/agent/jobs/run-demo', route => route.fulfill({ json: snapshot(true) }))
+  await page.route('**/api/agent/jobs/run-new', route => route.fulfill({ json: snapshot(false) }))
+  await page.route('**/api/agent/submissions/*', route => route.fulfill({ json: snapshot(false) }))
+  await page.route('**/api/agent/jobs/run-demo/events*', async route => {
+    await oldEvent
+    await route.fulfill({ contentType: 'text/event-stream',
+      body: 'id: 2\nevent: final_result\ndata: {"type":"final_result","status":"succeeded"}\n\n' }).catch(() => {})
+  })
+  for (const id of ['run-demo', 'run-new']) {
+    await page.route(`**/api/agent/jobs/${id}/report`, route => route.fulfill({ json: {
+      ...report, evidence_id: id, report: { ...report.report, answer: id === 'run-new' ? '新题答案为 5。' : '旧题结果 999。' },
+    } }))
+  }
+  await page.route('**/api/agent/jobs/run-demo/revisions', async route => {
+    posts += 1
+    expect(route.request().postDataJSON()).toEqual({ message: '计算 2+3。', input_version: 1 })
+    expect(route.request().headers()['x-csrf-token']).toBe('synthetic')
+    expect(route.request().headers()['idempotency-key']).toMatch(/^[0-9a-f-]{36}$/)
+    changed = true
+    await route.fulfill({ status: 202, json: { success: true, job_id: 'run-new', status: 'queued' } })
+    releaseOld()
+  })
+  await page.goto('/dashboard-assets/session/session-demo')
+  const revision = page.getByRole('region', { name: '关联任务与改题' })
+  await revision.locator('#math-question').fill('计算 2+3。')
+  await revision.getByRole('button', { name: '改题并创建新任务', exact: true }).click()
+  await expect(page.getByText('新题答案为 5。', { exact: true })).toBeVisible()
+  await expect(page.getByText('旧题结果 999。', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: '查看原任务', exact: true })).toHaveAttribute('href', '/dashboard/run/run-demo')
+  await page.reload()
+  await expect(page.getByText('新题答案为 5。', { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('revision-mobile.png'), fullPage: true })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.getByRole('link', { name: '查看原任务', exact: true }).click()
+  await expect(page.getByRole('link', { name: '查看改题后的任务', exact: true })).toHaveAttribute('href', '/dashboard/run/run-new')
+  await page.getByRole('link', { name: '查看改题后的任务', exact: true }).click()
+  await expect(page.getByText('新题答案为 5。', { exact: true })).toBeVisible()
+  expect(posts).toBe(1)
+  expect(errors).toEqual([])
+})
+
 const faithful = { enabled: true, ready: true, solver_mode: 'star_reference', input_mode: 'automatic', unavailable_reasons: [] as string[] }
 const capabilities = {
   profile: 'showcase', jobs: { enabled: true, status: 'available' }, sse: { enabled: true, status: 'available' },

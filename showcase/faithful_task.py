@@ -66,6 +66,10 @@ def attach_task_state(payload, *, allowed_actions=None, question=None):
         "allowed_actions": (allowed_actions if allowed_actions is not None else
                             ["cancel"] if status in {"queued", "running", "waiting_input"} else []),
     }
+    if identity.get("revision_to"):
+        result["faithful"]["revision_to"] = {"task_id": identity["revision_to"]["task_id"]}
+        result["faithful"]["allowed_actions"] = []
+    result["faithful"]["revision_allowed"] = not bool(identity.get("revision_to"))
     question = identity.get("clarification_reply") or question
     if question:
         result["faithful"].pop("clarification_reply", None)

@@ -22,10 +22,13 @@ import PageFrame from './ui/PageFrame.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
 import StatusBadge from './ui/StatusBadge.vue'
+import TaskRevisionPanel from './TaskRevisionPanel.vue'
+import { taskRevisionStateSchema } from '../api/jobs.schemas'
 const props = defineProps<{ jobId: string }>()
 const jobs = useJobsStore()
 const controller = new JobController(jobs)
 const job = computed(() => jobs.byId(props.jobId))
+const revision = computed(() => taskRevisionStateSchema.safeParse(job.value?.result?.faithful).data)
 const report = ref<JobReport | null>(null)
 type MemoryResult<T> = { status: 'loading' | 'unavailable' | 'error' } | { status: 'available'; data: T }
 const runMemory = ref<MemoryResult<RunMemoryResponse>>({ status: 'unavailable' })
@@ -109,6 +112,7 @@ onUnmounted(() => { disposed = true; memoryGeneration += 1; clearTimeout(reportT
   <PageFrame title="子 Run 审阅" description="查看公开答案、最终验证范围与脱敏执行记录。" active="run">
     <template #actions><UiButton @click="exportEvidence"><UiIcon name="download" />导出公开 Evidence JSON</UiButton></template>
     <p class="record-id">{{ jobId }}</p>
+    <TaskRevisionPanel v-if="job" :job-id="jobId" :session-id="job.sessionId" owner="" mode="" :state="job.result?.faithful" :disabled="true" readonly />
     <div class="review-meta"><StatusBadge :value="report?.mode ?? 'unavailable'" /><StatusBadge :value="job?.status ?? 'unknown'" /><span class="muted">事件流：{{ connected ? '已连接 / 读取中' : '已结束或断开，可重连' }}</span></div>
     <p class="notice notice--warning">fake / replay 只证明工程演示。planned 表示尚未实现；unavailable 表示当前不可用。</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p><p v-if="job?.error" class="notice notice--error" role="alert">运行类别：{{ job.error }}</p>
@@ -116,7 +120,7 @@ onUnmounted(() => { disposed = true; memoryGeneration += 1; clearTimeout(reportT
     <PresentationSection :source-version="report" v-if="report && job?.presentationMode" :job-id="props.jobId" :mode="job.presentationMode" :job-status="job.status" :fallback-answer="report.report.answer" />
     <ReportSection v-else-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
     <FormalVerificationSection v-if="report?.solver?.solver?.formal_verification" :verification="report.solver.solver.formal_verification" />
-    <section v-if="recovery && job?.status === 'failed' && report?.solver?.solver?.phase !== 'TERMINAL'" class="evidence-section" aria-label="安全续算">
+    <section v-if="recovery && job?.status === 'failed' && !revision?.revision_to && report?.solver?.solver?.phase !== 'TERMINAL'" class="evidence-section" aria-label="安全续算">
       <h2>{{ recovery.status === 'needs_review' ? '未知请求需要人工决定' : '从安全边界继续' }}</h2>
       <dl v-if="report?.report.budget" class="data-list"><template v-for="field in Object.keys(budgetLabels)" :key="field"><dt>{{ budgetLabels[field] }}</dt><dd>{{ field === 'deadline_at' && typeof report.report.budget[field] === 'number' ? new Date(Number(report.report.budget[field]) * 1000).toLocaleString() : display(report.report.budget[field]) }}</dd></template></dl>
       <p v-if="recovery.status === 'needs_review'">以下请求结果与消耗未知。选择重试会产生新的调用身份，保留旧请求预留，继续使用原预算和截止时间。</p>

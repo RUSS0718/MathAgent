@@ -9,6 +9,7 @@ export interface SubmissionInput {
   fileId?: string
   mode: string
   presentationMode?: PresentationMode
+  revision?: { taskId: string; inputVersion: number }
 }
 interface Submission { key: string; digest: string; input: SubmissionInput }
 const storageKey = (owner: string, sessionId: string) => `mathagent:submission:${encodeURIComponent(owner)}:${sessionId}`
@@ -29,6 +30,7 @@ export async function submitOnce(owner: string, input: SubmissionInput) {
     const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(input)))
     const digest = Array.from(new Uint8Array(bytes), value => value.toString(16).padStart(2, '0')).join('')
     let record = readSubmission(owner, input.sessionId)
+    if (input.revision && record?.input.revision?.taskId !== input.revision.taskId) record = null
     if (record && record.digest !== digest) throw new Error('提交身份与输入冲突；请先核对原提交，或明确再次求解。')
     if (!record) {
       record = { key: createIdempotencyKey(), digest, input }
@@ -37,6 +39,8 @@ export async function submitOnce(owner: string, input: SubmissionInput) {
       const found = await lookupSubmission(record)
       if (found) return found
     }
-    return api.createJob(input.message, input.sessionId, record.key, input.fileId, input.mode, input.presentationMode)
+    return input.revision
+      ? api.reviseJob(input.revision.taskId, input.message, input.revision.inputVersion, record.key)
+      : api.createJob(input.message, input.sessionId, record.key, input.fileId, input.mode, input.presentationMode)
   })
 }

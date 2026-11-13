@@ -275,6 +275,16 @@ class WorkspaceStore:
                     self._connection.commit()
                     return self._job_payload(existing), True
 
+                revision_source = (solver_identity or {}).get("faithful", {}).get("revision_source")
+                if revision_source:
+                    from .task_revision import prepare_revision
+
+                    prior = prepare_revision(self, revision_source, user_id=user_id,
+                                             session_id=session_id, digest=request_digest)
+                    if prior is not None:
+                        self._connection.commit()
+                        return self._job_payload(prior), True
+
                 active = self._connection.execute(
                     "SELECT 1 FROM workspace_jobs WHERE session_id=? AND status IN ('queued','running','waiting_input') LIMIT 1",
                     (session_id,),
@@ -296,6 +306,10 @@ class WorkspaceStore:
                 if solver_hint is not None:
                     self._connection.execute("UPDATE workspace_jobs SET solver_hint=? WHERE job_id=?", (solver_hint, job_id))
                 self._insert_run(job_id, problem, now, execution_mode)
+                if revision_source:
+                    from .task_revision import link_revision
+
+                    link_revision(self, revision_source, job_id, request_digest)
                 self._insert_event(
                     job_id,
                     "queued",
@@ -358,12 +372,17 @@ class WorkspaceStore:
                 self._connection.rollback()
                 raise
 
-    def start_job(self, job_id: str, *, execution_mode: str = "fake") -> bool:
+    def start_job(self, job_id: str, *, execution_mode: str = "fake", worker_capacity: int = 2) -> bool:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
                 row = self._connection.execute("SELECT status FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
                 if row is None or row["status"] != "queued":
+                    self._connection.rollback()
+                    return False
+                from .task_revision import revision_capacity_available
+
+                if not revision_capacity_available(self._connection, job_id, worker_capacity):
                     self._connection.rollback()
                     return False
                 now = _utc_now()
@@ -1026,7 +1045,8 @@ class WorkspaceService:
                 star_pipeline.checkpointer = self.checkpointer
         self._waiting_input_jobs: set[str] = set()
         self.store.recover_incomplete_jobs(self.checkpointer)
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="showcase-job")
+        self.worker_capacity = 2
+        self._executor = ThreadPoolExecutor(max_workers=self.worker_capacity, thread_name_prefix="showcase-job")
         self._submitted: set[str] = set()
         self._submit_lock = threading.Lock()
 
@@ -1065,6 +1085,7 @@ class WorkspaceService:
         presentation_mode: str | None = None,
         formal_policy: Mapping[str, Any] | None = None,
         clarification_source: Mapping[str, Any] | None = None,
+        revision_source: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         from .star_product_modes import validate_mode
         requested_presentation_mode = normalize_mode(presentation_mode)
@@ -1149,6 +1170,11 @@ class WorkspaceService:
         from .faithful_task import task_identity
 
         faithful_identity = task_identity(selected, solver_mode)
+        if revision_source is not None:
+            if not faithful_identity:
+                raise WorkspaceError("task_revision_unavailable", status=409)
+            faithful_identity["faithful"]["revision_source"] = dict(revision_source)
+            digest = _request_digest(digest, revision_source)
         if clarification_source is not None:
             if not faithful_identity:
                 raise WorkspaceError("clarification_new_task_unavailable", status=409)
@@ -1441,6 +1467,7 @@ class WorkspaceService:
     def _execute(self, job_id: str) -> None:
         from .faithful_intervention_control import InterventionPaused
 
+        started = False
         try:
             identity = self.store.job_identity(job_id)
             pair_binding = identity.get("experiment_pair")
@@ -1456,8 +1483,9 @@ class WorkspaceService:
                     return
             pipeline = self.star_pipeline if identity.get("solver_mode") in STAR_MODES else self.pipeline
             execution_mode = identity.get("execution_mode", self.execution_mode)
-            if not self.store.start_job(job_id, execution_mode=execution_mode):
+            if not self.store.start_job(job_id, execution_mode=execution_mode, worker_capacity=self.worker_capacity):
                 return
+            started = True
             # Keep the worker asynchronous even for the deterministic adapter so
             # the HTTP contract never waits for execution.
             time.sleep(self.execution_delay)
@@ -1550,6 +1578,11 @@ class WorkspaceService:
             self.store.fail_job(job_id, "job_execution_failed", execution_mode=self.execution_mode)
             if self.checkpointer is not None:
                 self.checkpointer.stop(job_id, "FAILED", "job_execution_failed")
+        finally:
+            if started:
+                from .task_revision import wake_revision_jobs
+
+                wake_revision_jobs(self)
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
         # File-backed STAR reads deliberately leave the writer connection and

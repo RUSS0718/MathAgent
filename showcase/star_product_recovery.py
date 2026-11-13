@@ -72,6 +72,8 @@ def authorize_resume(connection, row, decision, *, read_only=False):
     from .workspace import WorkspaceError
 
     identity = json.loads(row["result_json"] or "{}")
+    if identity.get("faithful", {}).get("revision_to"):
+        raise WorkspaceError("task_revised", status=409)
     if identity.get("solver_mode") not in STAR_MODES:
         return False
     if row["status"] != "failed" or row["error_code"] not in {

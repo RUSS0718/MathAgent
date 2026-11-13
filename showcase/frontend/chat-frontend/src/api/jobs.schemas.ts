@@ -9,6 +9,12 @@ export type JobActionResponse = z.infer<typeof jobActionResponseSchema>
 export type ActiveJobsResponse = z.infer<typeof activeJobsResponseSchema>
 export type ActiveJobResponse = z.infer<typeof activeJobSchema>
 
+export const taskRevisionStateSchema = z.object({
+  input_version: z.number().int(), revision_allowed: z.boolean(),
+  revision_source: z.object({ task_id: z.string() }).optional(),
+  revision_to: z.object({ task_id: z.string() }).optional(),
+})
+
 export const clarificationStateSchema = z.object({
   allowed_actions: z.array(z.string()),
   clarification: z.object({
