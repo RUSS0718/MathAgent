@@ -1,8 +1,8 @@
 # #174 自主并发接线与未完成验收（2026-11-13）
 
-状态：**实现已提交，真实自然并发验收未完成，未达到工程退出**。集成分支 `faithful-autonomous-population`，当前产品源码 `71492154570a34ef3de19b70dce9358ef7254c19`，相关测试修正 `87f5d1ec6b0105c78b39805af191993809c81873`。#174 保持开放，#168 完整服务仍未交付；进行中热切换属于 #175。下方首次交接材料适用于 `c14ff82`，不能替代本节接续结果。
+状态：**实现已提交，真实自然并发验收未完成，未达到工程退出**。集成分支 `faithful-autonomous-population`，最近真实运行源码 `77696377f9a1468fa8dbe8872ddddb5381830893`。live18 已自然选择并准入两条路线，但请求在 HTTP 派发前被预算检查拒绝；不能作为真实模型并发或合格交付的通过证据。#174 保持开放，#168 完整服务仍未交付；进行中热切换属于 #175。下方首次交接材料适用于 `c14ff82`，不能替代本节接续结果。
 
-## 接续修正与真实结果（截至北京时间 22:36）
+## 接续修正与真实结果（截至北京时间 23:32）
 
 本轮阻止只有数字的候选绕过证明及完备性义务；原始整题裁决保留，运行时资格否决单独记录并约束最终绑定和 Best-Effort。常见数学包装、润色前后同源候选一并覆盖。Planner 使用严格 schema 的精简说明与等价串行/并发示例，澄清可选辅助目标与根义务必需的辅助依赖，保持既有修复轮数、预算和冻结规格。
 
@@ -15,12 +15,17 @@
 | live11 参数不等式 | 源码 `9d8dcf1`，自然串行；Reasoner 逻辑超时后保持 unknown，迟到 HTTP 已结算，不自动重发，未交付 |
 | live12 同题、任选独立完整证明 | 同源码，Run `run_b6066c4a546ea517e12949f00eeafa80`；8 Attempt 全部结算，自然串行，最终 `route_duplicate_route_frontier`，无答案。Explore 错把 `(1/2,1/2,0)` 的函数值写成 `(1+t)/8`，计划沿用；独立核对为 `1/8` |
 | live13 同题、路线提示修正后 | 源码 `87f5d1e`、产品 `7149215`，Run `run_4ddc17efa0f432d63f3b6214838904d6`；自然串行，备选前沿与主计划归一后相同。第 6 个 Attempt 的步骤审查进入 unknown，Job 为 `star_needs_review`，未交付 |
+| live14 / live16 数位计数 | 分别在 `b218dd4`（产品 `7149215`）与 `331edf1` 上提出并发，但主计划归属或自依赖未通过；未准入，不算并发执行 |
+| live15 / live17 数位计数 | 分别在 `331edf1` 与 `7769637` 上自然串行；为减少无关串行消耗，通过公共取消入口终止，原请求已结算、持久取消终态已封存；未交付 |
+| live18 数位计数 | 源码 `7769637`，Run `run_73484a2738f8b8ec14fb74cbf9d93314`；自然选择 `population / independent_routes_admitted`，准入两条独立动作。两条 Reasoner 均为 `budget_rejected / run_budget_exhausted`、零 HTTP 派发；原根账本、限额与 deadline 未重置。Job 最终 `failed / star_needs_review`，两动作已结算，无并发答案 |
+
+`331edf1` 明确主计划本身是一条完整证明路线，而不是多个方向的汇总；`7769637` 为根义务归属造成的自依赖提供定向修复反馈，不增加修复轮数或放宽解析和准入。失败见证及聚焦通过记录分别在 `artifacts/issue-174-resume/primary-route-fix/`、`root-owner-feedback/`。live18 原观察器将 JSON 字段顺序误判为预算变化；父任务以只读数据库及已初始化 dashboard 会话核对并保存 `live18-preparation/live-18-digits/parent-readonly-after-interruption.json` 与 `parent-public-job-after-interruption.json`，原失败状态不改写。
 
 live08 起的新 Run 初始配置将根时限与 Population 根时限设为 2400 秒、动作请求上界设为 180 秒，其余预算保持模型/HTTP 各 48 次、工具 8 次、2,097,152 tokens。配置 SHA256 `9170fa5f39e8262e2ea780a54478bdd14d10e4c6da6531381d3f9a055cf97364`，不是运行中重置预算，也不是容量或 SLA 承诺。旧 1100 秒/30 秒配置的历史证据保持原样。
 
 live13 观察脚本因快照超过 Node 子进程输出缓冲而退出，未取消或重提求解。父任务通过已初始化的普通 dashboard 会话只读获取终态，保存 `job-observed-final.json`、`persisted-observed-final.json`；原 `status.json` 的 ENOBUFS 失败保留。恢复观察最初未初始化会话的 GET 返回 401，也单独保留。两种观察失败均不算模型失败或并发验收通过；unknown 请求未重发。真实自然并发、实际路线 UI、并发完整答案及刷新仍未覆盖。
 
-增量双轴审查见仓库外 `C:/Users/CQX/.codex/174-resume-standards-final.md` 与 `174-resume-spec-final.md`，截至 `87f5d1e` 未发现剩余静态问题。尚未启动新的最终门禁：真实并发退出条件仍缺失，避免重复全仓离线测试。当前由父任务持有运行与观察所有权；首次交接末节的清理状态是历史快照。接下来拟用既有独立计数参考验证数位 DP/生成函数的任选完整路线，不携带参考答案进入请求，不恢复或重发上述 unknown 调用。
+增量双轴审查见仓库外 `C:/Users/CQX/.codex/174-resume-standards-final.md` 与 `174-resume-spec-final.md`，截至 `7769637` 未发现剩余静态问题；该结论不能替代 live18 暴露的运行故障。尚未启动新的最终门禁：真实并发退出条件仍缺失，避免重复全仓离线测试。当前由父任务持有运行与观察所有权；首次交接末节的清理状态是历史快照。下一步先复现并修复预算拒绝，再用既有独立计数参考验证完整路线；不携带参考答案进入请求，不恢复或重发上述 unknown 调用。
 
 ## 实现及受控证据
 
