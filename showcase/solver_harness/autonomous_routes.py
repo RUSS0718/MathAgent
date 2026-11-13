@@ -181,7 +181,7 @@ def advance_switch(harness, run, problem):
         if state.get("population"):
             futures = list(harness._population_futures.values())
             if futures:
-                from concurrent.futures import wait, FIRST_COMPLETED
+                from concurrent.futures import FIRST_COMPLETED, wait
 
                 wait(futures, timeout=30, return_when=FIRST_COMPLETED)
             run = _collect(harness, run)
@@ -232,8 +232,9 @@ def advance_switch(harness, run, problem):
     updates = {"execution_switch": projection, "execution_mode_progress": marker,
                "execution_mode_pending": None}
     if mode == "serial" and not state.get("population"):
-        from .population_store import _canonical
         import hashlib
+
+        from .population_store import _canonical
 
         updates.update(population=initial_population(),
                        population_policy=deepcopy(permission["population_policy"]),
@@ -276,6 +277,7 @@ def _seed_serial(harness, run):
 def cancel_switch(connection, run_id, now):
     """Cancel a pending switch in the Job cancellation transaction."""
     import json
+
     from .storage import _json
 
     if not connection.execute("SELECT 1 FROM sqlite_master WHERE name='solver_states'").fetchone():
@@ -329,9 +331,9 @@ def _switch_budget_available(harness, run, plans, problem):
 
 
 def _mode_decision(harness, run, problem, mode, marker, local):
+    from ..redaction import redact
     from .budget import budget_reason
     from .route_budget import route_budget_snapshot
-    from ..redaction import redact
 
     if not run["state"].get("execution_mode_pending") and (harness._meta_port is None or budget_reason(run["state"], harness._config)):
         return run, {"mode": "keep"}
@@ -408,9 +410,10 @@ def serial_checkpoint_view(state, *, expected_revision):
     This is an execution snapshot, never an evidence-adoption operation.
     """
     import hashlib
-    from .population_store import _canonical
+
     from .faithful_intervention_records import FaithfulInterventionError
     from .population_evidence import validate_dependencies
+    from .population_store import _canonical
 
     checkpoint = state.get("serial_checkpoint") or {}
     route = state.get("population", {}).get("routes", {}).get(checkpoint.get("route_id"))
