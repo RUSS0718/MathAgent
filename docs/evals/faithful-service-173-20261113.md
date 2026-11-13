@@ -1,5 +1,23 @@
 # #173 B3 实现与聚焦证据（2026-11-13）
 
+## 审查修复增量（2026-11-13）
+
+隔离工作树 `D:/project/mathagent-173-fix`，基点 `f9061ff`，分支 `fix/showcase-task-revision-review`；后端修复提交 `edb4125`，最终产品源码 `314951ccd89f71bf31058f31c4ddd3ab5ac1ca52`。四项审查意见均已处理：已提交迟到结算触发既有队列准入重查；刷新恢复改题输入及原始提交参数；重复改题的第二个 UUID 以动作回执持久保存且可只读找回；容量与预算共用 HTTP／工具 unknown 判定，保留缺 usage、已知拒绝和未发送的不同处理。
+
+证据均在本修复工作树的 `artifacts/issue-173-review/`：
+
+- `red-wakeup.json` → `green-wakeup.json`：两个旧 worker 退出、两个未知请求占满容量时，新题保持 queued；第一个迟到成功提交后自动完成新题，第二个旧 unknown 保留，旧终态不变。
+- `red-receipt.json` → `green-receipt.json`：第二个 UUID 原先查询 404，修复后找回同一新任务；不同内容继续冲突。
+- `browser-red.log` → `browser-green-02.log`：请求未到服务端后刷新，改题输入由空变为保存的原题，刷新零 POST，显式重试同一键成功。`browser-green.log` 的中间失败为测试误用 heading 定位，改为真实题干及详情链接断言后通过。
+- `predicates-before.json` 与 `focused-backend.json`：提取前既有语义通过；最终 8 项聚焦通过，包含四项改题测试、缺失／部分 usage、超时预留及未知工具。
+- `related-seams.json`：提交恢复、工具取消、迟到超时竞态、迟到 503、已发送连接失败和连接前超时重试，共 6 项通过。
+- `browser-final.log`：`npx playwright test --config tests/faithful-entry.config.ts --grep 'task revision'`，两项受控 Chromium 用例通过；显式输出至本修复工作树 `browser-final/`。复用依赖 junction 导致 Vite 字体 allow-list 提示，未修改产品配置。
+- `frontend-build.log`：`npm run build` 类型检查及构建通过，既有 chunk 大小提示保留。四个变更 Python 文件的 `ruff check` 和 `git diff --check` 通过。
+
+Python 命令沿用下方 `UV_PROJECT_ENVIRONMENT` 和 `scripts/run_unittest_report.py --expect-count` 入口；各 JSON／日志保存实际数量、测试名和结果。完整门禁、live 及 push 均未运行，交由主窗口完成最终验收；主工作树基点 `f9061ff` 的真实浏览器证据 `artifacts/issue-173-work/live-01-change` 保持原样，不由本次受控回归替代。继续使用当前选择的同一模型，具体继承型号无法确认，不猜测。
+
+## 初始实现记录
+
 起点及集成基线 `408e33c`；隔离 worktree `D:/project/mathagent-173-work`，分支 `feat/showcase-task-revision`。适用源码为本记录同一提交，合同见 [B3 合同](../engineering/faithful-service-173-contract.md)。本记录交付实现与聚焦验证；主窗口负责合并、双轴审查、真实服务和最终门禁，不代表父规格 #168 完整服务已交付。
 
 | 边界 | 已观察结果 | 证据 |
