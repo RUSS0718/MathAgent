@@ -36,8 +36,8 @@ class SerialAdoptionTest(unittest.TestCase):
             parent = harness.get_run("native-parent")
             # Enabling the service later must not authorize an existing Run or
             # change its identity hash on resume.
-            from tests.test_faithful_s03_job import SPEC
             from showcase.solver_harness.serial_intervention import advance
+            from tests.test_faithful_s03_job import SPEC
             with SolverHarness(store=self.store, config=harness._config,
                                intervention_enabled=True) as reopened:
                 resumed = reopened.solve(SPEC["original_problem"], {
@@ -58,8 +58,8 @@ class SerialAdoptionTest(unittest.TestCase):
                 adopted["state"]["serial_intervention"]["adoptions"][-1]["evidence_grade"],
             )
             from copy import deepcopy
-            from showcase.solver_harness.serial_intervention import applicable_results
 
+            from showcase.solver_harness.serial_intervention import applicable_results
             from tests.test_faithful_s03_job import SPEC
             foreign = harness.solve(SPEC["original_problem"], {
                 "run_id": "foreign-parent", "problem_spec": SPEC,
@@ -112,6 +112,7 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
 
     def test_adoption_after_two_rejected_challenges_gets_fresh_review(self):
         from unittest.mock import patch
+
         from showcase.solver_harness import SolverHarness
 
         dispatch = SolverHarness.dispatch
@@ -252,6 +253,7 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
 
         if shared:
             from unittest.mock import patch
+
             from tests.test_star_population_runtime import PROBLEM
 
             pipeline = self.app.extensions["showcase_workspace_service"].star_pipeline
