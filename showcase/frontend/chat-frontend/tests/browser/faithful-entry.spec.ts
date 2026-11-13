@@ -1,6 +1,44 @@
 import { expect, test, type Page } from '@playwright/test'
 import { mockWorkspace, report } from './fixtures'
 
+test('pending task revision restores its composer after reload and retries the original identity', async ({ page }) => {
+  await mockWorkspace(page, true)
+  let accepted = false
+  const keys: string[] = []
+  const snapshot = (jobId: string) => ({ success: true, job_id: jobId, session_id: 'session-demo',
+    status: jobId === 'run-new' ? 'succeeded' : 'failed', last_event_id: 0,
+    result: { faithful: { input_version: 1, revision_allowed: true, allowed_actions: [] } },
+  })
+  await page.route('**/api/load_session?*', route => route.fulfill({ json: { success: true,
+    messages: [{ sender: 'user', text: '原题', analysis_job_id: 'run-demo' },
+      ...(accepted ? [{ sender: 'user', text: '计算 2+3。', analysis_job_id: 'run-new' }] : [])],
+  } }))
+  await page.route('**/api/agent/jobs/run-demo', route => route.fulfill({ json: snapshot('run-demo') }))
+  await page.route('**/api/agent/jobs/run-new', route => route.fulfill({ json: snapshot('run-new') }))
+  await page.route('**/api/agent/submissions/*', route => route.fulfill(accepted
+    ? { json: snapshot('run-new') } : { status: 404, json: { code: 'job_not_found' } }))
+  await page.route('**/api/agent/jobs/run-demo/revisions', async route => {
+    keys.push(route.request().headers()['idempotency-key']!)
+    expect(route.request().postDataJSON()).toEqual({ message: '计算 2+3。', input_version: 1 })
+    if (keys.length === 1) { await route.abort('failed'); return }
+    accepted = true
+    await route.fulfill({ status: 202, json: snapshot('run-new') })
+  })
+  await page.goto('/dashboard-assets/session/session-demo')
+  const revision = page.getByRole('region', { name: '关联任务与改题' })
+  await revision.locator('#math-question').fill('计算 2+3。')
+  await revision.getByRole('button', { name: '改题并创建新任务', exact: true }).click()
+  await expect(revision.getByRole('alert')).toContainText('提交身份已保留')
+  await page.reload()
+  await expect(revision.locator('#math-question')).toHaveValue('计算 2+3。')
+  expect(keys).toHaveLength(1)
+  await revision.getByRole('button', { name: '改题并创建新任务', exact: true }).click()
+  await expect(page.getByText('计算 2+3。', { exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: '运行详情', exact: true })).toHaveAttribute('href', '/dashboard/run/run-new')
+  expect(keys).toHaveLength(2)
+  expect(keys[1]).toBe(keys[0])
+})
+
 test('task revision navigates linked records and ignores late old results', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 375, height: 850 })
   await mockWorkspace(page, true)

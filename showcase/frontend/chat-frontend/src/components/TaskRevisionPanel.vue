@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { taskRevisionStateSchema } from '../api/jobs.schemas'
-import { submitOnce } from '../runtime/jobs/submission'
+import { readSubmission, submitOnce } from '../runtime/jobs/submission'
 import ComposerBar from './ComposerBar.vue'
 
 const props = defineProps<{
@@ -10,7 +10,9 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ changed: [jobId: string, nextJobId: string] }>()
 const state = computed(() => taskRevisionStateSchema.safeParse(props.state).data)
-const draft = ref('')
+const saved = readSubmission(props.owner, props.sessionId)?.input
+const restored = saved?.revision?.taskId === props.jobId ? saved : null
+const draft = ref(restored?.message ?? '')
 const pending = ref(false)
 const error = ref('')
 
@@ -19,7 +21,7 @@ async function revise(): Promise<void> {
   pending.value = true
   error.value = ''
   try {
-    const result = await submitOnce(props.owner, {
+    const result = await submitOnce(props.owner, restored ? { ...restored, message: draft.value.trim() } : {
       sessionId: props.sessionId, message: draft.value.trim(), mode: props.mode,
       revision: { taskId: props.jobId, inputVersion: state.value.input_version },
     })

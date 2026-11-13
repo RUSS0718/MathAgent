@@ -204,8 +204,10 @@ async function recoverSubmission(): Promise<void> {
     const found = await lookupSubmission(record)
     if (sessions.currentId !== sessionId || reportDisposed) return
     if (!found) {
-      draft.value = (record.input.presentationMode ? `/${record.input.presentationMode} ` : '') + record.input.message
-      selectedFile.value = record.input.fileId
+      if (!record.input.revision) {
+        draft.value = (record.input.presentationMode ? `/${record.input.presentationMode} ` : '') + record.input.message
+        selectedFile.value = record.input.fileId
+      }
       solverMode.value = record.input.mode
       notice.value = '原提交尚未受理；再次提交将复用同一身份。'
       return
