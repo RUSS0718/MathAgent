@@ -98,7 +98,6 @@ def run_exploration_phase(harness, run: dict[str, Any], problem: str) -> dict[st
 
 def advance(harness, run, metadata, problem):
     from .autonomous_routes import advance_switch
-
     from .serial_intervention import advance as advance_intervention
 
     run = advance_intervention(harness, run, problem)
