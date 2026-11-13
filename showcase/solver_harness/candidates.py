@@ -109,9 +109,20 @@ def prepare_candidates(run, event, updates):
             targets = targets[-1:]
         else:
             review = event
-            reviewed_text = state["exploration_findings"][-1].get("solution_candidate", "")
+            finding = state["exploration_findings"][-1]
+            reviewed_text = finding.get("solution_candidate", "")
             reviewed_hash = hashlib.sha256(redact(reviewed_text).encode("utf-8")).hexdigest()
-            targets = [record for record in targets if record["answer_hash"] == reviewed_hash]
+            reviewed_hashes = {reviewed_hash}
+            qualification = review.get("runtime_qualification") or {}
+            if (qualification.get("verdict") == "REJECT"
+                    and qualification.get("reason") == "scalar_candidate_cannot_discharge_proof_obligations"):
+                from .review import _is_plain_scalar
+
+                # The same finding's scalar original also lacks a proof; retain derivations.
+                original = finding.get("original_solution_candidate") or ""
+                if _is_plain_scalar(original):
+                    reviewed_hashes.add(hashlib.sha256(redact(original).encode("utf-8")).hexdigest())
+            targets = [record for record in targets if record["answer_hash"] in reviewed_hashes]
             if not review.get("runtime_qualification"):
                 targets = targets[-1:]
         for record in targets:
