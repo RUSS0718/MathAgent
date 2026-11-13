@@ -39,7 +39,7 @@ async function loadReplay(): Promise<void> {
       <p>以下状态来自同一 Run 的持久记录；工程注入与回放不代表真实模型效果。</p>
       <dl class="data-list"><template v-for="field in ['run_id', 'state_revision', 'phase', 'status']" :key="field"><dt>{{ field }}</dt><dd>{{ display(solver?.[field]) }}</dd></template></dl>
       <p v-if="report.solver.missing_capabilities?.length">模式限制：{{ report.solver.missing_capabilities.join('、') }}</p>
-      <AutonomousRouteStatus :selection="solver?.execution_selection" :population="population" />
+      <AutonomousRouteStatus :execution-switch="solver?.execution_switch" :selection="solver?.execution_selection" :population="population" />
       <section v-if="population" class="evidence-section" aria-label="并发路线执行">
         <h3>并发路线执行</h3>
         <dl class="data-list">
