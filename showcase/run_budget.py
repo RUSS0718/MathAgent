@@ -209,6 +209,11 @@ class RunBudgetLedger:
                 if reserved is not None:
                     if population_action_id is not None:
                         self._assert_population_owner(run_id, population_action_id, population_scope[1])
+                        if input_estimate > reserved["input_estimate"] and output_cap <= reserved["output_cap"]:
+                            from .solver_harness.population_budget import resize_input_hold
+
+                            resize_input_hold(reserved, input_estimate, summary, limits, floor,
+                                              state["deadline_at"] - time.time())
                     if input_estimate > reserved["input_estimate"] or output_cap > reserved["output_cap"]:
                         raise BudgetExhausted("finalization_reservation_too_small")
                     action_id = attempt_id or uuid4().hex

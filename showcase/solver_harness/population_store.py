@@ -522,7 +522,7 @@ def _transition(connection, state, population, operation, args, *, owner_token):
                              if item.get("event_id") in audit["source_event_ids"]), {})
         event = {**deepcopy(source_event),
                  "event_id": f"population-evidence-accepted-{action['action_id']}",
-                 "type": "step_reviewed", "route_id": route["route_id"],
+                 "type": audit.get("type", "step_reviewed"), "route_id": route["route_id"],
                  "action_id": action["action_id"],
                  "source_event_ids": audit["source_event_ids"],
                  "report_call_ids": audit["report_call_ids"],

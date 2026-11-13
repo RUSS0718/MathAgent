@@ -194,6 +194,11 @@ def merge_route_evidence(current_state, route, action, branch_snapshot):
         and obligation_claims_eligible(branch, item, current_state)
     ]
     if not accepted and not obligation_additions:
+        from .population_checkpoint import continuation_audit
+
+        continuation = continuation_audit(branch, branch_snapshot.get("events", []), route, action)
+        if continuation is not None:
+            return empty, continuation
         return empty, _audit(False, "no_verified_incremental_evidence")
     for item in obligation_additions:
         review_id = item.get("review_call_id")

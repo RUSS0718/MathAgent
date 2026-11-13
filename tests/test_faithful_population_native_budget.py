@@ -1,5 +1,6 @@
 """Native checkpoint requests fit the action reserved by ordinary submission."""
 
+import json
 import threading
 import unittest
 from copy import deepcopy
@@ -23,7 +24,13 @@ class NativePopulationBudgetTest(StarJobFixture, unittest.TestCase):
     def test_checkpoint_local_precheck_uses_original_root_tool_budget(self):
         self.run_checkpoint_routes(use_tool=True)
 
-    def run_checkpoint_routes(self, *, use_tool=False):
+    def test_accepted_yield_continues_with_parent_gaps_and_original_budget(self):
+        self.run_checkpoint_routes(continuation=True)
+
+    def test_long_checkpoint_reaches_verifier_and_delivers_under_original_budget(self):
+        self.run_checkpoint_routes(long_checkpoint=True)
+
+    def run_checkpoint_routes(self, *, use_tool=False, continuation=False, long_checkpoint=False):
         """Exercise ordinary admission and real adapter serialization with offline HTTP."""
         entered = threading.Barrier(2)
         concurrent = []
@@ -50,16 +57,33 @@ class NativePopulationBudgetTest(StarJobFixture, unittest.TestCase):
                                  "execution_selection": {"mode": "population",
                                                          "reason": "Independent complete routes."}}}
             if role == "reasoner":
-                entered.wait(timeout=5)
+                if request["checkpoint_round"] == 1:
+                    entered.wait(timeout=5)
                 concurrent.append(request)
-                reply = reasoner_checkpoint("FINAL", marker=request["step"]["step_id"])
+                first = continuation and request["checkpoint_round"] == 1
+                reply = reasoner_checkpoint("YIELD" if first else "FINAL",
+                    marker=f"{request['step']['step_id']}:{request['checkpoint_round']}")
                 reply["checkpoint"].update(objective=request["current_goal"], argument="1+1=2",
                     claims=[{"statement": "1+1=2", "label": "verified"}])
+                if long_checkpoint:
+                    reply["checkpoint"]["argument"] = "Addition gives two. " * 5000
+                    self.assertLess(len(json.dumps(reply).encode("utf-8")), 32768 * 4)
+                if first:
+                    reply["checkpoint"].update(gaps=["Close this remaining obligation. " * 200])
+                elif continuation:
+                    self.assertEqual(["Close this remaining obligation. " * 200],
+                                     request["open_obligations"])
+                    self.assertEqual(f"{request['step']['step_id']}:1", request["parent_checkpoint_id"])
+                    self.assertEqual([], request["valid_sources"])
                 if use_tool:
                     reply["checkpoint"]["claims"][0].update(label="easy-verify", tool_request={
                         "tool": "polynomial_check", "arguments": {}, "scope": "finite_computation"})
                 return reply
             if role == "step_verifier":
+                self.assertEqual(request["report"]["argument"], request["checkpoint"]["argument"])
+                self.assertEqual(request["step"]["objective"], request["step_goal"])
+                if long_checkpoint:
+                    self.assertEqual("Addition gives two. " * 5000, request["checkpoint"]["argument"])
                 if use_tool:
                     self.assertEqual("success", request["report"]["tool_receipts"][0]["status"])
                 return {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
@@ -94,11 +118,15 @@ class NativePopulationBudgetTest(StarJobFixture, unittest.TestCase):
             final = self.terminal(job_id, timeout=20)
         solver = final["result"]["solver"]
         self.assertEqual("population", solver["execution_selection"]["selected"])
-        self.assertEqual(2, len(concurrent), {
+        minimum = 3 if continuation else 2
+        self.assertGreaterEqual(len(concurrent), minimum, {
             "outbound_roles": [item["role"] for item in self.outbound],
             "recovery": solver.get("recovery"), "population": solver.get("population")})
         self.assertTrue(all(item["checkpoint_protocol"] for item in concurrent))
-        self.assertEqual(2, len({item["call_id"] for item in concurrent}))
+        self.assertLessEqual(len(concurrent), 4 if continuation else 2)
+        self.assertEqual(len(concurrent), len({item["call_id"] for item in concurrent}))
+        self.assertGreaterEqual(sum(item["role"] == "step_verifier" for item in self.outbound), minimum,
+                         {"outbound_roles": [item["role"] for item in self.outbound]})
         self.assertEqual("succeeded", final["status"])
         self.assertEqual("1+1=2", final["result"]["final_response"])
         budget = final["result"]["budget"]
