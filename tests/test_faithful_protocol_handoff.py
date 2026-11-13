@@ -28,6 +28,36 @@ from tests.test_solver_harness_reasoner_checkpoint import checkpoint as reasoner
 
 
 class PlannerHandoffMessagesTest(unittest.TestCase):
+    def test_explore_requests_require_instances_including_nested_tool_requests(self):
+        from showcase.solver_harness.protocol_repair import REPAIR_INSTRUCTION
+
+        tool = {"tool": "python_math", "arguments": {"code": "print(1 + 1)"},
+                "scope": "finite_computation"}
+        reply = {"assessment": "NEED_PLAN", "worked": [], "failed": [],
+                 "candidates": [], "solution_candidate": None, "tool_request": tool}
+        for repair in (False, True):
+            with self.subTest(repair=repair):
+                request = {"role": "explore", "problem": "Compute 1+1",
+                           "allowed_tools": ["python_math"]}
+                if repair:
+                    request["repair_instruction"] = REPAIR_INSTRUCTION
+                schema = response_schema(request)
+                messages = InternModelPort()._messages(request, schema)
+                system = messages[0]["content"]
+                self.assertIn("at every nesting level", system)
+                self.assertIn("tool_request must directly contain", system)
+                self.assertIn("actual argument values", system)
+                self.assertIn("type, properties, required, or additionalProperties", system)
+                self.assertIsNone(schema_error(reply, schema))
+                wrapped = {"type": "object", "properties": reply,
+                           "required": list(reply), "additionalProperties": False}
+                self.assertIsNotNone(schema_error(wrapped, schema))
+                nested = {**reply, "tool_request": {
+                    "type": "object", "properties": tool,
+                    "required": ["tool", "arguments", "scope"], "additionalProperties": False,
+                }}
+                self.assertIsNotNone(schema_error(nested, schema))
+
     def test_runtime_usage_is_separate_from_the_strict_provider_checkpoint(self):
         from showcase.solver_harness.reasoner_checkpoint import parse
 

@@ -42,6 +42,10 @@ def response_instructions(request, schema):
         + " Answer with a filled instance of this schema containing your actual values — "
         "never echo the schema definition itself (a reply like "
         '{"type": "object", "properties": ...} is a protocol failure). '
+        "Return the instance itself at every nesting level. Never wrap a reply or tool_request "
+        "in schema metadata objects using type, properties, required, or additionalProperties. "
+        "A non-null tool_request must directly contain tool (an allowed tool name), "
+        'arguments (an object of actual argument values), and scope ("finite_computation"). '
         "Enum fields must take one of their listed values only. "
         "Use only runtime allowed_tools. A tool_request is a proposed local computation, not evidence. "
         "Never fabricate tool receipts. "
