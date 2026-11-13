@@ -158,6 +158,8 @@ class FaithfulMultistepJobTest(StarJobFixture, unittest.TestCase):
 
     def test_checkpoint_final_binding_error_uses_next_existing_round_with_exact_feedback(self):
         invalid = self.open_checkpoint_binding()
+        repaired = self.replies[3]["plan"]
+        repaired["steps"] = [step for step in repaired["steps"] if step["obligation_ids"]]
         job_id = self.submit()
         final = self.terminal(job_id)
         self.assertEqual("succeeded", final["status"])
@@ -166,6 +168,15 @@ class FaithfulMultistepJobTest(StarJobFixture, unittest.TestCase):
         self.assertEqual("WorkUnit S1 prerequisites must reference earlier WorkUnits: S1",
                          planners[1]["feedback"]["validation_error"])
         self.assertEqual(invalid, planners[1]["feedback"]["invalid_plan"])
+        guidance = planners[1]["feedback"]["instruction"]
+        for text in ("coverage of every frozen root obligation", "change invalid step assignments",
+                     "root-only repair", "auxiliary_goal_ids=[]", "Supporting mathematical reasoning",
+                     "all actual root prerequisite dependencies"):
+            self.assertIn(text, guidance)
+        self.assertNotIn("Preserve all root mappings", guidance)
+        reasoners = [request for request in self.outbound if request["role"] == "reasoner"]
+        self.assertEqual(repaired["steps"][0]["obligation_ids"], reasoners[0]["step"]["obligation_ids"])
+        self.assertEqual([], reasoners[0]["step"]["auxiliary_goal_ids"])
         self.assertIn("earlier WorkUnit", planners[1]["instruction"])
         self.assertIn("same step", planners[1]["instruction"])
         self.assertTrue(planners[1]["checkpoint_last_round"])
@@ -204,6 +215,7 @@ class FaithfulMultistepJobTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(invalid, planners[1]["feedback"]["invalid_plan"])
         self.assertEqual("WorkUnit S4 prerequisites must reference earlier WorkUnits: S4",
                          planners[1]["feedback"]["validation_error"])
+        self.assertNotIn("root-only repair", planners[1]["feedback"]["instruction"])
         for request in planners:
             self.assertNotIn("must have exactly one owner", request["instruction"])
             self.assertIn("one or more step obligation_ids", request["instruction"])
