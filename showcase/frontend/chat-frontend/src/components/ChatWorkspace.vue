@@ -189,10 +189,19 @@ async function recoverSubmission(): Promise<void> {
   finally { checkingSubmission.value = false }
 }
 async function solveAgain(): Promise<void> {
-  const problem = selectedProblem.value || draft.value
+  const submitted = selectedJob.value && sessions.currentId
+    ? readSubmission(auth.username, sessions.currentId)?.input : undefined
+  const input = {
+    draft: submitted
+      ? (submitted.presentationMode ? `/${submitted.presentationMode} ` : '') + submitted.message
+      : selectedProblem.value || draft.value,
+    fileId: submitted ? submitted.fileId : selectedFile.value,
+    fileName: selectedFileName.value,
+    mode: submitted ? submitted.mode : solverMode.value,
+  }
   try {
     const id = await sessions.create()
-    sessionStorage.setItem(`mathagent:resolve:${id}`, problem)
+    sessionStorage.setItem(`mathagent:resolve:${id}`, JSON.stringify(input))
     globalThis.history.pushState({}, '', sessionHref(id))
     globalThis.dispatchEvent(new PopStateEvent('popstate'))
   } catch (error) { notice.value = error instanceof Error ? error.message : '创建新求解失败。' }
@@ -227,8 +236,15 @@ async function initialize(): Promise<void> {
     globalThis.history.replaceState({}, '', sessionHref(sessionId))
   }
   const freshDraftKey = `mathagent:resolve:${sessions.currentId}`
-  draft.value = sessionStorage.getItem(freshDraftKey) ?? draft.value
-  sessionStorage.removeItem(freshDraftKey)
+  const freshInput = sessionStorage.getItem(freshDraftKey)
+  if (freshInput) {
+    const input = JSON.parse(freshInput) as { draft: string; fileId?: string; fileName?: string; mode: string }
+    draft.value = input.draft
+    selectedFile.value = input.fileId
+    selectedFileName.value = input.fileName ?? input.fileId
+    solverMode.value = input.mode
+    sessionStorage.removeItem(freshDraftKey)
+  }
   await recoverSubmission()
   await refreshActive()
   const latest = sessions.messages.at(-1)
@@ -265,7 +281,7 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
       <div v-if="loading" class="loading-state" role="status">正在加载工作台…</div>
       <section v-else-if="!selectedJob" class="workbench-entry" aria-label="提交数学题干">
         <div class="entry-heading"><small>{{ faithful ? 'FAITHFUL AGENT' : 'PLANNER → REASONER → GATE' }}</small><h2>{{ faithful ? 'Faithful 自主求解' : '把题干交给一组会互相质疑的子智能体' }}</h2><p>{{ faithful ? '直接输入数学题，Faithful 自主选择已配置能力与求解步骤。提交后可查看公开执行摘要、实时计划与协作星图。' : '提交后查看公开执行摘要、实时计划与协作星图。运行能力取决于所选模式；模拟数据和历史回放始终单独标记。' }}</p></div>
-        <ComposerBar :submit-label="checkingSubmission ? '正在核对…' : submitting ? '正在提交…' : autonomous ? 'Faithful 自主求解' : '开始求解'" v-model="draft" :disabled="loadFailed || submitting || checkingSubmission" :submit-disabled="faithfulBlocked" :running="false" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><FaithfulEntryControls v-if="faithful" v-model="solverMode" :faithful="faithful" :modes="solverModes" :disabled="submitting" /><StarModeSelector v-else v-model="solverMode" :modes="solverModes" :disabled="submitting" /><PresentationCommandHint :enabled="presentationEnabled" /></template></ComposerBar>
+        <ComposerBar :submit-label="checkingSubmission ? '正在核对…' : submitting ? '正在提交…' : autonomous ? 'Faithful 自主求解' : '开始求解'" v-model="draft" :disabled="loadFailed || submitting || checkingSubmission" :busy="submitting || checkingSubmission" :submit-disabled="faithfulBlocked" :running="false" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><FaithfulEntryControls v-if="faithful" v-model="solverMode" :faithful="faithful" :modes="solverModes" :disabled="submitting" /><StarModeSelector v-else v-model="solverMode" :modes="solverModes" :disabled="submitting" /><PresentationCommandHint :enabled="presentationEnabled" /></template></ComposerBar>
         <div class="entry-examples"><span>示例题干 · 点击回填</span><button type="button" @click="useStarter('解方程 x² − 5x + 6 = 0，并验证候选根。')">方程与候选根</button><button type="button" @click="useStarter('分步推导 1 + 2 + … + n 的求和公式，n 为正整数。')">数列求和</button></div>
       </section>
       <section v-else class="active-workbench">
