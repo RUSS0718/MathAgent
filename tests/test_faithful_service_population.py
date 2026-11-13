@@ -81,6 +81,15 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
         self.assertIn("alongside checkpoint in checkpoint replies", planner["instruction"])
         self.assertIn("NEVER include execution_selection in alternative_plans", planner["instruction"])
         self.assertIn("normal complete plans without execution_selection", planner["instruction"])
+        self.assertIn("the primary plan must itself be one complete whole-problem route",
+                      planner["instruction"])
+        self.assertIn("not a union or coordinator of methods", planner["instruction"])
+        self.assertIn("Put other complete independent routes only in alternative_plans, "
+                      "not in the primary steps", planner["instruction"])
+        self.assertIn("Do not schedule cross-route reconciliation or waiting as primary work",
+                      planner["instruction"])
+        self.assertIn("the executor manages the route race and first qualified delivery",
+                      planner["instruction"])
         self.assertIn("optional whole-proof directions as alternative complete plans", planner["instruction"])
         self.assertIn("not mandatory proof steps after a shared answer", planner["instruction"])
         self.assertIn("Each route must establish its own conclusions, equality conditions and completeness",
