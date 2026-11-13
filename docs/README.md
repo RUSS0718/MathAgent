@@ -1,8 +1,8 @@
 # MathAgent 文档索引
 
-- [#175 同任务安全串并行切换合同](engineering/faithful-service-175-contract.md)：实现中；初始路线选择不作为运行中切换证据，真实切换与恢复按公共 Job 边界验收。
+- [#175 同任务安全串并行切换验收](evals/faithful-service-175-20261114.md)：达到用户授权调整后的开发接线退出条件；[合同](engineering/faithful-service-175-contract.md)。冻结源码 `588b40e` 的 gate-03 六阶段通过（2063 项、0 failure/error、49 skip、源码无漂移），前两轮失败、竞态红绿与双轴复审保留。自然真实热切换、完整正确交付与真实路线UI正向闭环仍留#183，#168未完成；按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)继续#176。
 
-- [#174 自主并发开发接线验收](evals/faithful-service-174-20261113.md)：达到用户授权调整后的开发退出条件。冻结源码 `b8c4ec8` 的 gate-02 六阶段通过（2048 项、0 failure/error、49 skip、源码无漂移）；原 gate-01 的 4 项测试 profile 失败及最小修复保留。真实自然并发完整交付、实际路线 UI 与刷新正向闭环留待 #183，#168 完整服务仍未完成。后续按[无人值守接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)由新 session 处理 #175；unknown 不重发。
+- [#174 自主并发开发接线验收](evals/faithful-service-174-20261113.md)：达到用户授权调整后的开发退出条件。冻结源码 `b8c4ec8` 的 gate-02 六阶段通过（2048 项、0 failure/error、49 skip、源码无漂移）；原 gate-01 的 4 项测试 profile 失败及最小修复保留。真实自然并发完整交付、实际路线 UI 与刷新正向闭环留待 #183，#168 完整服务仍未完成。#175后续进展见上方入口；unknown 不重发。
 
 - [#173 关联改题验收](evals/faithful-service-173-20261113.md)：B3 改题停止旧派发并创建关联新任务；真实新题独立交付 5，旧迟到结算隔离、刷新零新增调用，最终源码只读恢复通过。双轴修复复查无剩余问题；冻结 `9978157` 门禁 6/6 通过（2020 项、49 skip、源码无漂移）。仅交付本票，#168 完整服务仍未完成。
 

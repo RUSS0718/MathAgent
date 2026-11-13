@@ -1,6 +1,6 @@
 # #175 同任务安全串并行切换验收
 
-日期：2026-11-14（Asia/Shanghai）；状态：实施中，未达到退出条件。父规格 #168，[任务合同](../engineering/faithful-service-175-contract.md)。起点 `bc386a09`；集成分支 `faithful-autonomous-population`。
+日期：2026-11-14（Asia/Shanghai）；状态：达到用户授权调整后的开发接线退出条件；自然真实热切换与完整交付未实证，留 #183。父规格 #168，[任务合同](../engineering/faithful-service-175-contract.md)。起点 `bc386a09`；集成分支 `faithful-autonomous-population`。以下保留各历史时点原判，当前结论以文末 gate-03 为准。
 
 ## 已执行
 
@@ -65,3 +65,21 @@
 冻结 `fac899bf081d0071377957a08f301d6d67b5204b`，同一最终入口使用新 run-id `gate-02`。快速通过，完整离线 2063 项、2 failure、0 error、49 skip；`source_changed=false`，临时检查自删除。失败为 native 普通 checkpoint 与工具预算用例各仅观察到一次 step_verifier HTTP；首路合格后冻结其余新工作符合产品合同，旧测试没有同步“两路已进入 HTTP”的初态，不能要求随机调度保证两次调用。
 
 只在受控 provider 为非 continuation 审查增加双路 barrier，确保两条审查实际发出后才允许任一路取得合格裁决。原双路序列化、完整交付、工具次数与根预算断言全部保留，产品源码未变；竞态专项 continuation 不受同步影响。`artifacts/issue-175/gate-fix/native-sync-final.{json,log}` 6/6、0 skip、36.214秒通过。门禁失败原判保留，新冻结最终门禁仍待完成。
+
+## gate-03：开发接线验收完成
+
+冻结源码 `588b40ec4f4e9da4c6b2e96ca10cf913c6aaba39`；最后产品修复 `e2fb6e1`，最后测试时序修复 `7c4ec26`。2026-11-14 05:37:33–06:10:55（Asia/Shanghai），运行 `uv run python scripts/run_final_gate.py --root . --output-dir artifacts/issue-175/gates --run-id gate-03`，六阶段全部通过，耗时2001.359秒，`source_changed=false`。结果保留 `artifacts/issue-175/gates/gate-03/status.json`、`source-manifest.json` 和各阶段日志；完整离线 2063 项、0 failure/error、49 skip、0 expected failure/unexpected success，skip 未计通过。发布27项、前端64项通过，typecheck/build通过，npm audit为0 vulnerabilities。构建有大于500kB chunk提示，未作为本票无关优化。
+
+两轮增量修复均有双轴复审 PASS；最后4行测试同步增量报告为 `175-gate02-{standards,spec}-review.md`。原件已复制到 `artifacts/issue-175/worktree-archives/reviews/`。门禁源码与随后纯文档交接 SHA 分开记录；纯文档不重跑产品套件。
+
+| 合同 | 公共入口与断言 | 证据 | 结论 |
+| --- | --- | --- | --- |
+| C3-1 | 普通 Job/native 受控回复，双向多次切换、keep及停滞后扩展，持久意图与原子checkpoint | `tests/test_faithful_service_population.py`；gate-03完整离线；`gate-fix/consume-red`→`race-green` | 开发通过；自然真实未覆盖 |
+| C3-2 | Job/Run、配置hash、原根预算/deadline、预留和谱系保持 | native模块6项 `gate-fix/native-sync-final`，门禁完整回归 | 通过 |
+| C3-3 | 路线/模式unknown显式新身份重试、取消、完成回执跨进程零重复；迟到只结算 | `crash-green`、gate-03；`gate-fix/fence-final02`；`transport-red`→`race-green` | 通过；两次真实Attempt均已结算 |
+| C3-4 | 工作台/报告三态，桌面/移动与只读刷新 | `ui-green`2项、`ui-browser`1项与截图；gate-03前端64项 | 受控通过；自然真实正向未覆盖 |
+| C3-5 | 切回serial后checkpoint更新，旧hash拒绝，实际native reserve_pair | `test_serial_checkpoint_refreshes_after_selected_route_settles`，`gate-fix/fence-final02`及gate-03 | 通过；自主干预由#176实现 |
+
+真实配置 SHA256 仍为 `9170fa5f39e8262e2ea780a54478bdd14d10e4c6da6531381d3f9a055cf97364`。live01 Job/Run `run_b207ef83d4d9b71cb05d38405016e66b` 的7个Attempt、live02 `run_d79f2812f014e876b2e576ef78c0ebea` 的6个Attempt均已结算；逐项身份见各自目录 `job-final.json` 的 `result.request_attempts` 和 `persisted-latest.json`，失败原判保留，不重发旧身份。没有自然热切换、完整正确答案及真实UI正向证据，不宣称#168完整服务或数学能力提升。
+
+本票无活动服务、测试进程或临时检查；gate-01/02/03终态检查均自删除。实现工作树53份ignored产物已逐份SHA256复制至 `artifacts/issue-175/worktree-archives/`；归档工具拒绝移除 `C:/Users/CQX/.codex/worktrees/faithful-switch-175/Challenge-Cup-2026`，原因是任务主checkout，故保留、不手工删除。状态见该目录 `archive-status.json`。工作树两份未跟踪崩溃见证与已集成文件相同，不是待合代码。主树唯一未跟踪文件仍为受保护 `tests/test.md`，未读取或修改。
