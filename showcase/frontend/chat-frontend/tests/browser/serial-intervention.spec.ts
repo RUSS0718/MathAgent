@@ -11,7 +11,7 @@ test('saved intervention provenance reopens read-only at desktop and mobile widt
   await page.route('**/api/agent/jobs/run-demo/report', route => route.fulfill({ json: {
     ...report, solver: { solver_mode: 'star_faithful', evidence_kind: 'fault_injection', missing_capabilities: [],
       solver: { run_id: 'run-demo', state_revision: 23, phase: 'STEP_EXECUTE', status: 'running',
-        serial_intervention: { status: 'completed', pair_id: 'pair-demo', continuation: 'main_task_continues',
+        serial_intervention: { status: 'completed', reason: null, pair_id: 'pair-demo', continuation: 'main_task_continues',
           decision: { reason: '核对缺失边界', hypothesis: '原方法未覆盖边界', method_id: 'induction' },
           adoptions: [{ status: 'adopted', reason: 'applicable_reviewed_result', evidence_grade: 'LLM_REVIEWED',
             reference: { pair_id: 'pair-demo', arm: 'intervention', source_version: 'a'.repeat(64), scope: '步骤 2' } }],

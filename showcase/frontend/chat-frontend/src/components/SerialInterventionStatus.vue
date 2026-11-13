@@ -6,7 +6,7 @@ import { z } from 'zod'
 const props = defineProps<{ value?: unknown }>()
 const schema = z.object({
   status: z.enum(['deciding', 'reserved', 'completed', 'incomplete', 'interrupted', 'needs_review', 'skipped', 'canceled']),
-  reason: z.string().optional(), pair_id: z.string().nullable().optional(),
+  reason: z.string().nullable().optional(), pair_id: z.string().nullable().optional(),
   continuation: z.string().optional(),
   decision: z.object({ reason: z.string().optional(), hypothesis: z.string().optional(), method_id: z.string().optional() }).nullable().optional(),
   adoptions: z.array(z.object({

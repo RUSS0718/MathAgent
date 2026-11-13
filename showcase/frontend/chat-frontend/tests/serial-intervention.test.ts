@@ -8,7 +8,7 @@ test('serial intervention exposes source, adoption and continuation without prom
   const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' })
   try {
     const { default: Status } = await server.ssrLoadModule('/src/components/SerialInterventionStatus.vue')
-    const value = { status: 'completed', pair_id: 'pair-1', continuation: 'main_task_continues',
+    const value = { status: 'completed', reason: null, pair_id: 'pair-1', continuation: 'main_task_continues',
       decision: { reason: '改用归纳法核对边界', hypothesis: '原方法未覆盖边界', method_id: 'induction' },
       adoptions: [{ status: 'adopted', reason: 'applicable_reviewed_result', evidence_grade: 'LLM_REVIEWED',
         reference: { pair_id: 'pair-1', arm: 'intervention', source_version: 'abc123', scope: '步骤 2',
