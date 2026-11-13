@@ -97,7 +97,7 @@ onUnmounted(pause)
         <p v-if="!shown.length">等待公开执行事件；当前没有匹配的事件。</p>
       </div>
       <aside class="workbench-plan" aria-label="Planner 计划">
-        <AutonomousRouteStatus :selection="state.progress.execution_selection" :population="state.progress.population" />
+        <AutonomousRouteStatus :execution-switch="state.progress.execution_switch" :selection="state.progress.execution_selection" :population="state.progress.population" />
         <h3>Planner <small>v{{ state.progress.plan_version ?? '—' }} · 尝试 {{ state.progress.attempt_index ?? '—' }}</small></h3>
         <p v-if="!state.steps.length">计划尚未生成</p>
         <p v-else class="interjection-note">目标来自已保存的计划；执行状态来自实际核验事件。</p>
