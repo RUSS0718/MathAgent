@@ -67,12 +67,23 @@ test('necessary clarification continues the same task and refreshes read-only', 
 test('a saved clarification can resume after restart', async ({ page }) => {
   await mockWorkspace(page, true)
   let resumes = 0
+  let finished = false
+  let releaseEvents!: () => void
+  const finish = new Promise<void>(resolve => { releaseEvents = resolve })
   await page.route('**/api/agent/jobs/run-demo', route => route.fulfill({ json: {
-    success: true, job_id: 'run-demo', session_id: 'session-demo', status: resumes ? 'queued' : 'failed',
+    success: true, job_id: 'run-demo', session_id: 'session-demo', status: finished ? 'succeeded' : resumes ? 'queued' : 'failed', last_event_id: finished ? 4 : resumes ? 3 : 2,
     result: { faithful: { allowed_actions: resumes ? [] : ['resume'],
       clarification: { request_id: 'clarification:run-demo:1', task_id: 'run-demo', input_version: 1,
         question: '三角形底边和对应高是多少？', reason: '数值面积需要实际尺寸。',
-        status: 'evaluating', answer: '6 cm 和 4 cm' } } },
+        status: finished ? 'answered' : 'evaluating', answer: '6 cm 和 4 cm' } } },
+  } }))
+  await page.route('**/api/agent/jobs/run-demo/events**', async route => {
+    await finish
+    await route.fulfill({ contentType: 'text/event-stream',
+      body: 'id: 4\nevent: final_result\ndata: {"type":"final_result","status":"succeeded"}\n\n' })
+  })
+  await page.route('**/api/agent/jobs/run-demo/report', route => route.fulfill({ json: {
+    ...report, report: { ...report.report, answer: '面积为 12 cm²。' },
   } }))
   await page.route('**/api/agent/jobs/run-demo/resume', route => {
     resumes += 1
@@ -81,8 +92,15 @@ test('a saved clarification can resume after restart', async ({ page }) => {
   await page.goto('/dashboard-assets/session/session-demo')
   await expect(page.getByText('你的回答：6 cm 和 4 cm')).toBeVisible()
   await page.getByRole('button', { name: '恢复执行' }).click()
-  await expect.poll(() => resumes).toBe(1)
-  await expect(page.getByRole('button', { name: '恢复执行' })).toHaveCount(0)
+  try {
+    await expect.poll(() => resumes).toBe(1)
+    await expect(page.getByText('任务执行中', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '恢复执行' })).toHaveCount(0)
+  } finally {
+    finished = true
+    releaseEvents()
+  }
+  await expect(page.getByText('面积为 12 cm²。')).toBeVisible()
 })
 
 test('ready service defaults ordinary submit to Faithful and preserves failed form', async ({ page }) => {

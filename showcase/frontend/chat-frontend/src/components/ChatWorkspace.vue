@@ -120,10 +120,20 @@ async function resumeCurrent(): Promise<void> {
   submitting.value = true
   try {
     const result = await api.resumeJob(target.jobId, '', createIdempotencyKey())
-    jobs.start(target.jobId, target.sessionId, result.status ?? 'queued')
-    observeJob(target.jobId)
+    if (!result.success) throw new Error(result.error ?? '恢复失败。')
+    jobs.confirmResume(target.jobId)
+    if (reportDisposed || sessions.currentId !== target.sessionId) return
     draft.value = ''
     notice.value = result.existing ? '已重放恢复结果。' : '已请求恢复执行；没有追加文本约束。'
+    const observed = await api.getJob(target.jobId).catch(() => null)
+    if (reportDisposed || sessions.currentId !== target.sessionId) return
+    if (observed) {
+      jobs.observe(observed)
+      // Resume from the refreshed snapshot so old pause/failure events cannot undo the transition.
+      jobs.start(target.jobId, target.sessionId, observed.status, observed.last_event_id ?? 0)
+    }
+    if (!observed || observed.status === 'queued' || observed.status === 'running') observeJob(target.jobId)
+    else if (observed.status === 'succeeded') await loadReport(target.jobId)
   } catch (error) { notice.value = error instanceof Error ? error.message : '恢复失败。' }
   finally { submitting.value = false }
 }
