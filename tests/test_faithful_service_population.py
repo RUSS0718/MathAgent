@@ -63,6 +63,7 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                     pass
                 if fault in {"cancel", "unknown"} and request["step"]["step_id"].endswith("construction-0") and not failed_once:
                     import time
+
                     from requests.exceptions import ConnectionError
 
                     for _ in range(100):
@@ -294,9 +295,10 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(["serial", "population", "serial"], [s["target"] for s in history])
 
     def test_checkpoint_export_is_legal_for_native_serial_validator(self):
+        from types import SimpleNamespace
+
         from showcase.solver_harness.autonomous_routes import serial_checkpoint_view
         from showcase.solver_harness.faithful_intervention_native import NativeCheckpointExecutor
-        from types import SimpleNamespace
 
         observed = []
         original = NativeCheckpointExecutor.validate_checkpoint
