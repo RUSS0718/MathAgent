@@ -132,18 +132,12 @@ def select_initial_execution(harness, run, problem):
 
 
 def _independent_plans(plan, specification):
-    from .plan import validate_plan
-    from .routes import frontier_digest, plan_frontier, route_plan_error
-    from .specification import bind_plan_work_units
+    from .population_runtime import prepare_population_plan
 
     plans, digests = [], set()
     for proposal in [plan, *plan.get("alternative_plans", [])]:
         try:
-            validate_plan(proposal)
-            if route_plan_error(proposal):
-                continue
-            bound, _ = bind_plan_work_units(proposal, specification)
-            digest = frontier_digest(plan_frontier(bound, specification))
+            bound, digest = prepare_population_plan(proposal, specification)
             if digest not in digests:
                 digests.add(digest)
                 plans.append(bound)

@@ -9,10 +9,22 @@ from .population_schedule import round_schedule
 from .population_store import command
 
 
-def register_plans(harness, run, plan):
-    """Register distinct, validated route snapshots before any WorkUnit dispatch."""
+def prepare_population_plan(proposal, specification):
+    """Validate and bind a proposal before computing its independent frontier."""
     from .plan import validate_plan
     from .routes import frontier_digest, plan_frontier, route_plan_error
+    from .specification import bind_plan_work_units
+
+    validate_plan(proposal)
+    error = route_plan_error(proposal)
+    if error:
+        raise ValueError(error)
+    bound, _ = bind_plan_work_units(proposal, specification)
+    return bound, frontier_digest(plan_frontier(bound, specification))
+
+
+def register_plans(harness, run, plan):
+    """Register distinct, validated route snapshots before any WorkUnit dispatch."""
     from .specification import bind_plan_work_units
 
     existing_routes = run["state"]["population"]["routes"]
@@ -20,11 +32,7 @@ def register_plans(harness, run, plan):
     primary = next(iter(existing_routes), None)
     for index, proposal in enumerate(proposals, len(existing_routes) + 1):
         try:
-            validate_plan(proposal)
-            error = route_plan_error(proposal)
-            if error:
-                raise ValueError(error)
-            bound, _ = bind_plan_work_units(proposal, run["state"]["problem_spec"])
+            bound, digest = prepare_population_plan(proposal, run["state"]["problem_spec"])
         except (TypeError, ValueError) as exc:
             if index == 1:
                 from .finalize import finish
@@ -36,7 +44,6 @@ def register_plans(harness, run, plan):
                        "type": "population_plan_rejected", "reason": str(exc)},
             )
             continue
-        digest = frontier_digest(plan_frontier(bound, run["state"]["problem_spec"]))
         if any(item["frontier_digest"] == digest
                for item in run["state"]["population"]["routes"].values()):
             continue
