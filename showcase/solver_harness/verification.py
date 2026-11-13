@@ -4,7 +4,7 @@ import hashlib
 from collections.abc import Mapping
 from typing import Any
 
-from .calls import CallInterrupted
+from .calls import CallInterrupted, latest_retry_id
 from .explore import _HarnessOperations
 from .review import VerifierPort
 
@@ -155,6 +155,7 @@ def verify_step(
 
     def reserve_and_dispatch(current, seq, continuation_call_id, continuation_request,
                              *, purpose="compute"):
+        nonlocal call_id
         # Claim-target repairs may continue an already answered computation.
         # Its call identity must own a distinct reservation event.
         identity = hashlib.sha256(continuation_call_id.encode()).hexdigest()[:16]
@@ -176,7 +177,9 @@ def verify_step(
             },
         )
         reply = harness.dispatch(reserved, verifier_port.verify, continuation_request)
-        return harness.get_run(current["run_id"]), reply
+        latest = harness.get_run(current["run_id"])
+        call_id = latest_retry_id(latest["state"].get("calls", {}), continuation_call_id)
+        return latest, reply
 
     try:
         if pending:

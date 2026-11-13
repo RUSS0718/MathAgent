@@ -8,7 +8,7 @@ export const roles = [
   ['step_verifier', '步骤校验', 831, 365], ['whole_solution_verifier', '整体校验', 648, 518],
   ['final_generator', '终稿生成', 352, 518], ['meta', '元策略', 169, 365],
 ] as const
-export interface PlanStep { label: string; status: string }
+export interface PlanStep { label: string; status: string; goal: string }
 export function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 }
@@ -41,7 +41,7 @@ export function projectWorkbench(events: DecodedSseEvent[], result: unknown, rep
   }
   const steps: PlanStep[] = Array.isArray(progress.steps) ? progress.steps.map(value => {
     const step = object(value)
-    return { label: String(step.label ?? '步骤'), status: step.verdict === 'CHALLENGE' ? 'challenged'
+    return { label: String(step.label ?? '步骤'), goal: typeof step.goal_summary === 'string' ? step.goal_summary : '', status: step.verdict === 'CHALLENGE' ? 'challenged'
       : step.verdict === 'ACCEPT' && step.valid === true ? 'pass' : step.current === true ? 'active'
         : !step.reported && revised.has(String(step.label)) ? 'revised' : 'pending' }
   }) : []
@@ -62,5 +62,14 @@ export function projectWorkbench(events: DecodedSseEvent[], result: unknown, rep
   const source = detail.execution_mode === 'fake' ? 'FAKE · 模拟数据'
     : evidenceKind === 'scripted' || evidenceKind === 'fault_injection' ? 'FAKE · 受控数据'
     : replay ? 'REPLAY · 历史重放' : detail.execution_mode === 'live' || evidenceKind === 'live' ? 'LIVE · 实时' : 'UNKNOWN · 来源待确认'
-  return { events: unique, entries, steps, progress, source }
+  const saved = object(progress.partial)
+  const partial = {
+    accepted: Array.isArray(saved.accepted_steps) ? saved.accepted_steps.map(String) : [],
+    unresolved: Array.isArray(saved.unresolved) ? saved.unresolved.map(String) : [],
+    candidates: Array.isArray(saved.candidates) ? saved.candidates.map(value => {
+      const candidate = object(value)
+      return { text: String(candidate.answer_text ?? ''), review: String(candidate.review ?? 'UNREVIEWED'), eligible: candidate.eligible === true }
+    }) : [],
+  }
+  return { events: unique, entries, steps, progress, source, partial }
 }

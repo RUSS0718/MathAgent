@@ -53,12 +53,16 @@ def rating_required(previous, current):
 
 def rating_patch(state, revision):
     from .aprs import rate_routes, replay_decision
+    from .route_graph_refresh import refreshed_routes
 
-    preview = {**state, "state_revision": revision}
+    routes = refreshed_routes(state)
+    refresh = {"route_registry": routes} if routes is not None else {}
+    preview = {**state, **refresh, "state_revision": revision}
     evaluations, decision = rate_routes(preview)
     if not replay_decision(evaluations, decision):
         raise ValueError("route_decision_replay_failed")
     return {
+        **refresh,
         "route_evaluations": [
             *state.get("route_evaluations", []),
             {"state_revision": revision, "evaluations": evaluations},

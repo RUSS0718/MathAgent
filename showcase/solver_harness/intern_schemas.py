@@ -177,6 +177,25 @@ SCHEMAS["reasoner_checkpoint"] = obj(
     ["checkpoint"],
 )
 
+# The provider contract must reject exactly the gap/status combinations that
+# the checkpoint parser rejects, so known failures reach bounded format repair.
+_REASONER_CHECKPOINT = SCHEMAS["reasoner_checkpoint"]["properties"]["checkpoint"]
+_REASONER_CHECKPOINT["properties"]["protocol_version"] = {"type": "integer", "const": 1}
+for _field in ("checkpoint_id", "objective", "argument", "next_action"):
+    _REASONER_CHECKPOINT["properties"][_field] = {"type": "string", "pattern": r"[\s\S]*\S[\s\S]*"}
+_REASONER_CHECKPOINT["properties"]["claims"] = deepcopy(_REASONER_CHECKPOINT["properties"]["claims"])
+_REASONER_CHECKPOINT["properties"]["claims"]["items"]["properties"]["statement"] = {
+    "type": "string", "pattern": r"[\s\S]*\S[\s\S]*",
+}
+_REASONER_BRANCHES = []
+for _statuses, _gap_limits in ((["YIELD"], {"minItems": 1}), (["FINAL"], {"maxItems": 0}),
+                              (["BLOCKED", "FAILED"], {})):
+    _branch = deepcopy(_REASONER_CHECKPOINT)
+    _branch["properties"]["status"] = {"enum": _statuses}
+    _branch["properties"]["gaps"] = {"type": "array", "items": TEXT, **_gap_limits}
+    _REASONER_BRANCHES.append(_branch)
+SCHEMAS["reasoner_checkpoint"]["properties"]["checkpoint"] = {"oneOf": _REASONER_BRANCHES}
+
 _PLANNER_CHECKPOINT_PROPERTIES = {
     "protocol_version": {"type": "integer", "minimum": 1},
     "checkpoint_id": TEXT,
@@ -226,9 +245,13 @@ SCHEMAS["planner_checkpoint"] = obj(
 def response_schema(request):
     role = request["role"]
     if role == "reasoner" and request.get("checkpoint_protocol"):
-        return SCHEMAS["reasoner_checkpoint"]
+        schema = deepcopy(SCHEMAS["reasoner_checkpoint"])
+        if isinstance(request.get("current_goal"), str):
+            for branch in schema["properties"]["checkpoint"]["oneOf"]:
+                branch["properties"]["objective"] = {"type": "string", "const": request["current_goal"]}
+        return schema
     if role == "planner" and request.get("checkpoint_protocol"):
-        return SCHEMAS["planner_checkpoint"]
+        role = "planner_checkpoint"
     if role == "researcher" and request.get("action") == "counterexample_check":
         return obj({
             "verdict": {"enum": ["FOUND_COUNTEREXAMPLE", "NOT_FOUND"]},
@@ -262,26 +285,44 @@ def response_schema(request):
         return schema
     schema = deepcopy(schema)
     if role == "step_verifier":
+        from .intern_instructions import step_review_scope
+        from .specification import _EVIDENCE_TYPES
+
+        scope = step_review_scope(request)
+        roots = scope["root_obligations"] if scope is not None else request["problem_spec"].get("root_obligations", [])
+        evidence = [obj({
+            "obligation_id": {"enum": [root["obligation_id"]]},
+            "evidence_category": {"enum": sorted(_EVIDENCE_TYPES[root["obligation_type"]])},
+            "claim_indexes": {"type": "array", "minItems": 1,
+                              "items": {"type": "integer", "minimum": 0}},
+        }) for root in roots]
         schema["properties"]["obligation_evidence"] = {
             "type": "array",
-            "items": obj({
-                "obligation_id": TEXT,
-                "evidence_category": TEXT,
-                "claim_indexes": {"type": "array", "items": {"type": "integer", "minimum": 0}},
-            }),
+            **({"items": {"oneOf": evidence}} if evidence else {"maxItems": 0}),
         }
     if role in {"planner", "planner_checkpoint"}:
         planner = deepcopy(SCHEMAS["planner"])
         step = planner["properties"]["steps"]["items"]
         step["properties"].update({"obligation_ids": TEXTS, "auxiliary_goal_ids": TEXTS})
+        for field, source, id_field in (
+            ("obligation_ids", "root_obligations", "obligation_id"),
+            ("auxiliary_goal_ids", "auxiliary_goals", "goal_id"),
+        ):
+            objectives = request["problem_spec"].get(source, [])
+            ids = [item[id_field] for item in objectives if id_field in item]
+            if ids:
+                step["properties"][field] = {"type": "array", "items": {"type": "string", "enum": ids}}
+            elif not objectives:
+                step["properties"][field] = {"type": "array", "maxItems": 0, "items": TEXT}
         step["required"].extend(["obligation_ids", "auxiliary_goal_ids"])
         if request.get("progress_policy", {}).get("enabled") is True:
             from .progress import METHOD_IDS
 
             step["properties"]["method_id"] = {
                 "type": "string",
+                "enum": sorted(METHOD_IDS),
                 "description": "Choose " + ", ".join(sorted(METHOD_IDS))
-                + "; unrecognized names are mapped to unknown by the controller.",
+                + "; unknown denotes an unresolved method and cannot start a serial route.",
             }
             step["required"].append("method_id")
         if role == "planner":

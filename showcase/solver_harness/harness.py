@@ -636,7 +636,7 @@ class SolverHarness:
                 "model_calls": max(0, latest["state"]["counters"]["model_calls"] - 1),
             },
         }
-        reason = budget_reason(check, self._config)
+        reason = budget_reason(check, self._config, role=request.get("role"))
         if reason:
             stop(self, latest, reason)
             raise HardBudgetStop(run["run_id"])

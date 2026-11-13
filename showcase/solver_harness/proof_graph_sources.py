@@ -41,6 +41,8 @@ def reasoner_report_call(state: Mapping, step_id: str, report: Mapping,
         request = call.get("request") if isinstance(call, Mapping) else None
         requested_step = request.get("step") if isinstance(request, Mapping) else None
         response = call.get("response") if isinstance(call, Mapping) else None
+        if isinstance(response, Mapping) and isinstance(response.get("checkpoint"), Mapping):
+            response = response["checkpoint"]
         response_claims = [item.get("statement") for item in response.get("claims", [])
                            if isinstance(item, Mapping) and isinstance(item.get("statement"), str)] \
             if isinstance(response, Mapping) and isinstance(response.get("claims"), list) else None
@@ -96,10 +98,18 @@ def _verify_record(state: Mapping, record: Mapping) -> tuple[dict | None, str | 
     review_request, response = review.get("request"), review.get("response")
     if not isinstance(review_request, Mapping) or not isinstance(response, Mapping):
         return None, "review_record_mismatch"
-    verification = step.get("verification")
-    if (not isinstance(verification, Mapping)
-            or response.get("verdict") != verification.get("verdict")):
-        return None, "review_record_mismatch"
+    report = step.get("report")
+    if isinstance(review_request.get("checkpoint"), Mapping):
+        from .checkpoint_graph_sources import reviewed_checkpoint_report
+
+        report = reviewed_checkpoint_report(state, record, review)
+        if report is None:
+            return None, "review_record_mismatch"
+    else:
+        verification = step.get("verification")
+        if (not isinstance(verification, Mapping)
+                or response.get("verdict") != verification.get("verdict")):
+            return None, "review_record_mismatch"
     if not any(
         isinstance(item, Mapping)
         and item.get("category") == record.get("category")
@@ -111,14 +121,13 @@ def _verify_record(state: Mapping, record: Mapping) -> tuple[dict | None, str | 
         for item in response.get("classified_outcomes", [])
     ):
         return None, "review_did_not_accept_record"
-    report = step.get("report")
     report_call_id = reasoner_report_call(
         state, step_id, report, record["plan_version"], record["attempt_index"],
         before_revision=review.get("request_revision", -1),
     ) if isinstance(report, Mapping) else None
     if report_call_id is None:
         return None, "missing_report_call_source"
-    indexes, claims = record.get("claim_indexes"), step["report"].get("claims", [])
+    indexes, claims = record.get("claim_indexes"), report.get("claims", [])
     if (not isinstance(indexes, list) or not indexes
             or any(type(index) is not int or not 0 <= index < len(claims) for index in indexes)):
         return None, "invalid_report_claim_refs"

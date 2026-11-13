@@ -271,8 +271,10 @@ def normalize_work_units(
         ]
         if len(set(prerequisites)) != len(prerequisites):
             raise ValueError("WorkUnit prerequisites must be unique")
-        if any(prerequisite not in seen for prerequisite in prerequisites):
-            raise ValueError("WorkUnit prerequisites must reference earlier WorkUnits")
+        offending = [prerequisite for prerequisite in prerequisites if prerequisite not in seen]
+        if offending:
+            raise ValueError(f"WorkUnit {unit_id} prerequisites must reference earlier WorkUnits: "
+                             + ", ".join(offending))
         raw_required_obligations = item.get("required_obligation_ids", [])
         if not isinstance(raw_required_obligations, list):
             raise ValueError("WorkUnit required_obligation_ids must be a list")

@@ -98,8 +98,14 @@ onUnmounted(pause)
       <aside class="workbench-plan" aria-label="Planner 计划">
         <h3>Planner <small>v{{ state.progress.plan_version ?? '—' }} · 尝试 {{ state.progress.attempt_index ?? '—' }}</small></h3>
         <p v-if="!state.steps.length">计划尚未生成</p>
-        <p v-else class="interjection-note">仅显示公开步骤状态；数学标题和正文待公开摘要接口接入。</p>
-        <ol><li v-for="item in state.steps" :key="item.label" :data-step-status="item.status"><strong>{{ item.label }}</strong><span>{{ item.status }}</span></li></ol>
+        <p v-else class="interjection-note">目标来自已保存的计划；执行状态来自实际核验事件。</p>
+        <ol><li v-for="item in state.steps" :key="item.label" :data-step-status="item.status"><strong>{{ item.label }}</strong><p v-if="item.goal">{{ item.goal }}</p><span>{{ item.status }}</span></li></ol>
+        <details v-if="status === 'failed' && state.partial.unresolved.length">
+          <summary>已保存成果与未解决项</summary>
+          <p>已核验：{{ state.partial.accepted.join('、') || '暂无' }}</p>
+          <p>未解决：{{ state.partial.unresolved.map(item => item === 'whole_solution_review' ? '独立整题审查' : item).join('、') }}</p>
+          <article v-for="(candidate, i) in state.partial.candidates" :key="i"><small>候选 {{ i + 1 }} · {{ candidate.review }} · {{ candidate.eligible ? '已通过审查' : '未获通过' }}</small><p>{{ candidate.text }}</p></article>
+        </details>
         <AgentConstellation mini :selected="role" :active-roles="activeRoles" :message="displayedMessage" @select="selectRole" />
         <p class="interjection-note">文本插话待接入，当前不能向求解器追加约束。暂停与恢复不代表采纳新文本。</p>
       </aside>

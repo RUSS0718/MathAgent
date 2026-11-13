@@ -103,7 +103,7 @@ class AutoIntakeBudgetTest(unittest.TestCase):
                 ledger.close()
 
     def test_invalid_provider_schema_is_known_failure_and_never_enters_explore(self):
-        self.replies = [{"not_a_specification": True}]
+        self.replies = [{"not_a_specification": True}] * 2
         ledger = RunBudgetLedger()
         self.addCleanup(ledger.close)
         budget = ledger.ensure("invalid-provider-spec", RunBudgetLimits())
@@ -114,7 +114,73 @@ class AutoIntakeBudgetTest(unittest.TestCase):
         self.assertNotIn("problem_spec", run["state"])
         self.assertEqual("protocol_failed", run["state"]["calls"]["invalid-provider-spec:problem-intake:1"]["status"])
         self.assertEqual(0, budget.snapshot()["unknown_attempts"])
-        self.assertEqual(1, len(self.requests))
+        self.assertEqual(2, len(self.requests))
+
+    def test_repair_reservation_and_completed_response_survive_process_exit(self):
+        class ProcessExit(BaseException):
+            pass
+
+        for boundary in ("failure", "reservation", "response"):
+            with self.subTest(boundary=boundary), TemporaryDirectory() as folder:
+                path = Path(folder) / "intake.sqlite3"
+                run_id = f"repair-crash-{boundary}"
+                repair_id = f"{run_id}:problem-intake:1:repair-1"
+                self.requests.clear()
+                self.replies = [{"not_a_specification": True}, SPEC]
+
+                def crash(run, event):
+                    reserved = (boundary == "reservation" and event["type"] == "problem_intake_dispatched"
+                                and run["state"]["problem_intake"].get("reserved_call_id") == repair_id)
+                    responded = (boundary == "response" and event["type"] == "call_audit"
+                                 and event.get("outcome") == "completed"
+                                 and run["state"]["calls"].get(repair_id, {}).get("status") == "completed")
+                    failed = (boundary == "failure" and event["type"] == "problem_intake_parse_failed")
+                    if reserved or responded or failed:
+                        raise ProcessExit()
+
+                ledger = RunBudgetLedger(database_path=Path(folder) / "budget.sqlite3")
+                try:
+                    budget = ledger.ensure(run_id, RunBudgetLimits(max_model_calls=2, max_http_attempts=2))
+                    with bind_budget(budget), SolverHarness(database_path=path, config=CONFIG,
+                            model_port=self.port, event_observer=crash) as harness:
+                        with self.assertRaises(ProcessExit):
+                            harness.solve(PROBLEM, {"run_id": run_id})
+                    before = budget.snapshot()
+                    with bind_budget(budget), SolverHarness(database_path=path, config=CONFIG,
+                                                            model_port=self.port) as harness:
+                        restored = harness.solve(PROBLEM, {"run_id": run_id})
+                    self.assertEqual("completed", restored["state"]["problem_intake"]["status"])
+                    self.assertEqual(repair_id, restored["state"]["problem_intake"]["call_id"])
+                    self.assertEqual(2, len(self.requests))
+                    self.assertEqual(2, budget.snapshot()["http_attempts"])
+                    self.assertEqual(before["deadline_at"], budget.snapshot()["deadline_at"])
+                finally:
+                    ledger.close()
+
+    def test_failed_repair_is_terminal_after_process_exit_without_a_third_request(self):
+        class ProcessExit(BaseException):
+            pass
+
+        def crash(run, event):
+            if (event["type"] == "call_audit" and event.get("outcome") == "protocol_failed"
+                    and any(call_id.endswith(":repair-1") and call["status"] == "protocol_failed"
+                            for call_id, call in run["state"]["calls"].items())):
+                raise ProcessExit()
+
+        self.replies = [{"not_a_specification": True}] * 2
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "intake.sqlite3"
+            with SolverHarness(database_path=path, config=CONFIG, model_port=self.port,
+                               event_observer=crash) as harness:
+                with self.assertRaises(ProcessExit):
+                    harness.solve(PROBLEM, {"run_id": "failed-repair-crash"})
+            with SolverHarness(database_path=path, config=CONFIG, model_port=self.port) as harness:
+                restored = harness.solve(PROBLEM, {"run_id": "failed-repair-crash"})
+                repeated = harness.solve(PROBLEM, {"run_id": "failed-repair-crash"})
+            self.assertEqual("protocol_failure_unrepaired", restored["state"]["result_reason"])
+            self.assertEqual("TERMINAL", restored["state"]["phase"])
+            self.assertEqual(restored, repeated)
+            self.assertEqual(2, len(self.requests))
 
 
 if __name__ == "__main__":

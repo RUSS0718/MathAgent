@@ -5,8 +5,16 @@ from collections.abc import Mapping
 from copy import deepcopy
 
 from .budget import budget_reason, stop
-from .calls import latest_retry_id
+from .calls import CallInterrupted
 from .initial_state import problem_spec_state
+from .protocol_repair import (
+    completed_call_id,
+    interrupted_call,
+    known_protocol_failure,
+    repair_enabled,
+    repair_request,
+    reserve_repair,
+)
 from .specification import normalize_problem_spec
 
 POLICY = {"version": "auto-problem-spec-v1", "status": "pending"}
@@ -32,6 +40,25 @@ def reject_intake(harness, run, reason):
     )
 
 
+def _reserve_intake(harness, run, call_id, *, authorized=False):
+    """Charge each initial/retry/repair identity once before dispatch."""
+    state = run["state"]
+    if state["problem_intake"].get("reserved_call_id") == call_id:
+        return run
+    reason = budget_reason(state, harness._config)
+    if reason:
+        return stop(harness, run, reason)
+    return harness.commit_event(
+        run["run_id"], expected_revision=run["state_revision"],
+        event={"event_id": f"problem-intake-reserved:{call_id}",
+               "type": "problem_intake_retry_reserved" if authorized else "problem_intake_dispatched"},
+        state_updates={
+            "problem_intake": {**state["problem_intake"], "reserved_call_id": call_id},
+            "counters": {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1},
+        },
+    )
+
+
 def ensure_problem_spec(harness, run, problem):
     """Consume a completed intake, or dispatch once; unknown calls need explicit retry.
 
@@ -45,7 +72,7 @@ def ensure_problem_spec(harness, run, problem):
     state = run["state"]
     call_id = f"{run['run_id']}:problem-intake:1"
     calls = state.get("calls", {})
-    current_id = latest_retry_id(calls, call_id)
+    current_id = completed_call_id(calls, call_id)
     record = calls.get(current_id)
     retry = state.get("authorized_retry")
     authorized = (isinstance(retry, Mapping) and retry.get("call_id") == current_id
@@ -53,30 +80,43 @@ def ensure_problem_spec(harness, run, problem):
     if record is not None and record["status"] == "completed":
         reply = record["response"]
     else:
-        if record is not None and not authorized:
+        known_failure = (record is not None and known_protocol_failure(record)
+                         and repair_enabled(harness._config))
+        pending_repair = known_failure and not record.get("request", {}).get("repair_instruction")
+        if known_failure and not pending_repair:
+            raise CallInterrupted(run["run_id"], current_id)
+        if record is not None and not authorized and not pending_repair:
             return run
         if harness._model_port is None:
             return reject_intake(harness, run, "problem_intake_port_unavailable")
-        reservation = retry["new_call_id"] if authorized else call_id
-        if state["problem_intake"].get("reserved_call_id") != reservation:
-            reason = budget_reason(state, harness._config)
-            if reason:
-                return stop(harness, run, reason)
-            run = harness.commit_event(
-                run["run_id"], expected_revision=run["state_revision"],
-                event={"event_id": f"problem-intake-reserved:{reservation}",
-                       "type": "problem_intake_dispatched" if not authorized else "problem_intake_retry_reserved"},
-                state_updates={
-                    "problem_intake": {**state["problem_intake"], "reserved_call_id": reservation},
-                    "counters": {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1},
-                },
-            )
-        reply = harness.dispatch(run, harness._model_port.complete, {
-            "run_id": run["run_id"], "call_id": call_id, "role": "problem_intake",
+        request = {
+            "run_id": run["run_id"], "call_id": current_id, "role": "problem_intake",
             "session_key": f"problem-intake:{run['run_id']}", "problem": problem,
-        })
+        }
+        if pending_repair:
+            request = repair_request(request, failed_call=record)
+        reservation = retry["new_call_id"] if authorized else request["call_id"]
+        run = _reserve_intake(harness, run, reservation, authorized=authorized)
+        if run["state"]["phase"] == "TERMINAL":
+            return run
+        try:
+            reply = harness.dispatch(run, harness._model_port.complete, request)
+        except CallInterrupted as exc:
+            if pending_repair:
+                raise
+            run = reserve_repair(harness, run["run_id"], exc,
+                failure_event=lambda latest, failed: {
+                    "event_id": f"problem-intake-parse:{failed['call_id']}",
+                    "type": "problem_intake_parse_failed", "call_id": failed["call_id"],
+                })
+            failed = interrupted_call(harness, run["run_id"], exc)
+            request = repair_request({**request, "call_id": failed["call_id"]}, failed_call=failed)
+            run = _reserve_intake(harness, run, request["call_id"])
+            if run["state"]["phase"] == "TERMINAL":
+                return run
+            reply = harness.dispatch(run, harness._model_port.complete, request)
         run = harness.get_run(run["run_id"], problem=problem)
-        current_id = latest_retry_id(run["state"].get("calls", {}), call_id)
+        current_id = completed_call_id(run["state"].get("calls", {}), call_id)
     try:
         spec = normalize_problem_spec(reply)
     except (TypeError, ValueError):

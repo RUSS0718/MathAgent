@@ -13,6 +13,25 @@ def collaboration_fields(event, state):
         "meta_decided": ("meta", "controller", "decision", "Meta 裁决已记录"),
         "trace_back_applied": ("controller", "reasoner", "rollback", "回退已应用，重算尚未完成"),
     }
+    if state.get("problem_intake", {}).get("version") == "auto-problem-spec-v1":
+        from .faithful_public_progress import goal_summary
+
+        current = next((step for step in (state.get("plan") or {}).get("steps", [])
+                        if step.get("step_id") == state.get("current_step")), {})
+        goal = goal_summary(current)
+        routes.update({
+            "initial_plan_generated": ("planner", "controller", "decision", "初始计划已生成"),
+            "plan_replaced": ("planner", "controller", "decision", "已替换计划，保留根预算与截止时间"),
+            "step_dispatched": ("controller", "reasoner", "decision", f"正在执行目标：{goal}"),
+            "step_reported": ("reasoner", "step_verifier", "reply", f"已提交步骤结果，等待独立核验：{goal}"),
+            "step_reviewed": ("step_verifier", "controller", "decision", "步骤核验已记录"),
+            "final_candidate_generated": ("final_generator", "whole_solution_verifier", "reply", "候选答案已生成，等待整题审查"),
+            "final_candidate_reviewed": ("whole_solution_verifier", "controller", "decision",
+                "整题审查通过" if (event.get("review") or {}).get("verdict") == "ACCEPT"
+                else "整题审查未通过，需在剩余额度内纠正"),
+            "route_stagnation_guard": ("controller", "meta", "escalation", "进展停滞，重新评估路线"),
+            "finalization_completed": ("controller", "controller", "decision", "本轮结束，成果与未解决项已保存"),
+        })
     if kind == "step_reviewed" and event.get("verdict") == "CHALLENGE":
         route = ("step_verifier", "reasoner", "challenge", "本步收到质疑")
     else:

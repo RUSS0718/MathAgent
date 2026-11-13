@@ -158,7 +158,7 @@ def run_exploration(
                 },
             )
             successful_request = protocol_repair.repair_request(
-                request, instruction=(
+                request, failed_call=protocol_repair.interrupted_call(harness, state["run_id"], exc), instruction=(
                     "The previous reply was complete but not valid protocol JSON. "
                     "Re-issue the exploration assessment as one strict JSON object "
                     "matching the schema; escape every backslash inside code strings."

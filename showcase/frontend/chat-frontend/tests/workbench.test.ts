@@ -3,6 +3,15 @@ import test from 'node:test'
 import { projectWorkbench } from '../src/runtime/jobs/workbench.ts'
 import { decodeSseBlock, SseProtocolError } from '../src/api/events.schemas.ts'
 
+test('ordinary task renders public goals and retained partial work on refresh', () => {
+  const state = projectWorkbench([], { solver: { state_revision: 5, progress: {
+    plan_version: 1, steps: [{ label: '步骤 1', goal_summary: '建立递推', current: true }],
+    partial: { accepted_steps: [], candidates: [], unresolved: ['义务 1'] },
+  } } }, false)
+  assert.equal(state.steps[0]?.goal, '建立递推')
+  assert.deepEqual(state.partial.unresolved, ['义务 1'])
+})
+
 test('one projection deduplicates events and replaces complete plan snapshots', () => {
   const event = { id: 1, event: 'solver_progress', data: { type: 'solver_progress',
     role: 'planner', solver_event_type: 'initial_plan_generated',

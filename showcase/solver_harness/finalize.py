@@ -223,9 +223,9 @@ def dispatch(harness, run, operation, request, _repair_attempt=0):
         failed = protocol_repair.interrupted_call(harness, run["run_id"], exc)
         if (
             _repair_attempt == 0
-            # The planner owns its bounded repair (plan_generation); this
-            # wrapper only repairs the roles with no other owner.
-            and request["role"] != "planner"
+            # Plan generation owns structural repair; checkpoint planners
+            # have no protocol-repair owner of their own.
+            and (request["role"] != "planner" or request.get("checkpoint_protocol") is True)
             and failed is not None
             and protocol_repair.repair_enabled(harness._config)
             and protocol_repair.known_protocol_failure(failed)
@@ -441,6 +441,8 @@ def run_finalization(harness, run, *, problem, model_port, verifier_port, config
         generator_request, review_reservation_request = finalization_requests(
             problem, facts, proofs, session, previous_review, handoff_mode
         )
+        if previous_review is not None and current_attempts:
+            generator_request["previous_candidate"] = current_attempts[-1]["candidate"]
         candidate_byte_cap = None
         if spec_enabled:
             from ..run_budget import current_budget

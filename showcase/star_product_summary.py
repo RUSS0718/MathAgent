@@ -5,12 +5,16 @@ from .redaction import redact_text
 
 
 def progress_summary(state):
+    from .faithful_public_progress import goal_summary, partial_progress
+
     plan = state.get("plan") or {}
+    autonomous = state.get("problem_intake", {}).get("version") == "auto-problem-spec-v1"
     steps = []
     for number, step in enumerate(plan.get("steps", []), 1):
         stored = state.get("steps", {}).get(step["step_id"], {})
         review = stored.get("verification", {})
         steps.append({"label": f"步骤 {number}",
+            **({"goal_summary": goal_summary(step)} if autonomous else {}),
             "current": state.get("current_step") == step["step_id"],
             "reported": bool(stored.get("report")),
             **{key: review[key] for key in ("verdict", "valid", "goal_gate", "logic_gate")
@@ -32,6 +36,8 @@ def progress_summary(state):
             for item in state.get("verified_results_ledger", [])
             if isinstance(item, dict) and isinstance(item.get("category"), str)],
         "meta_decision": (state.get("meta_decision") or {}).get("decision")}
+    if autonomous:
+        summary["partial"] = partial_progress(state, steps)
     if state.get("problem_spec_policy", {}).get("enabled") is True:
         ledger = state.get("obligation_ledger", [])
         summary["root_obligations"] = {
