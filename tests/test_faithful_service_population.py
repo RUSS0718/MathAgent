@@ -76,6 +76,11 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
 
     def test_plain_submission_selects_parallel_routes_and_reloads_bound_delivery(self):
         job_id, final, concurrent = self.run_plain_submission()
+        planner = next(item for item in self.outbound if item["role"] == "planner")
+        self.assertIn("execution_selection only on the primary plan", planner["instruction"])
+        self.assertIn("checkpoint.plan", planner["instruction"])
+        self.assertIn("NEVER include execution_selection in alternative_plans", planner["instruction"])
+        self.assertIn("normal complete plans without execution_selection", planner["instruction"])
         solver = final["result"]["solver"]
         self.assertEqual("population", solver.get("execution_selection", {}).get("selected"))
         self.assertEqual(2, len(concurrent))
