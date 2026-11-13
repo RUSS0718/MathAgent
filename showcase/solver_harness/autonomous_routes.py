@@ -21,11 +21,11 @@ def freeze_permission(config, population_config, unavailable_reason):
         config["population_policy"] = policy
 
 
-def initial_permission(config):
+def initial_permission(config, unavailable_reason=None):
     """Only new ordinary tasks receive a selection contract; old tasks stay unchanged."""
     return deepcopy(config.get("autonomous_routes") or {
         "version": "autonomous-routes-v1", "population_policy": None,
-        "unavailable_reason": "population_not_enabled",
+        "unavailable_reason": unavailable_reason or "population_not_enabled",
     })
 
 
@@ -69,7 +69,8 @@ def select_initial_execution(harness, run, problem):
     capacity = policy.get("capacity") or {}
     plans = _independent_plans(plan, state["problem_spec"])
     snapshot = route_budget_snapshot(harness._state_store._connection, run["run_id"])
-    reason = "model_selected_serial" if proposal else "no_population_proposal"
+    reason = (permission.get("unavailable_reason")
+              or ("model_selected_serial" if proposal else "no_population_proposal"))
     selected = "serial"
     reserves = []
     closing = {}

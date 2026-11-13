@@ -326,6 +326,8 @@ class StarProductPipeline:
                         run = resume_solver(harness, problem, run_id, retry_call)
                     else:
                         metadata = {"run_id": run_id, "user_hint": solver_hint}
+                        if self.population_enabled and self.population_config is None:
+                            metadata["population_unavailable_reason"] = self.population_capacity_gap
                         if problem_spec is not None:
                             metadata["problem_spec"] = problem_spec
                         if self.population_memory_enabled and problem_spec is not None:

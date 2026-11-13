@@ -276,7 +276,8 @@ class SolverHarness:
             from .problem_intake import POLICY
 
             state["problem_intake"] = dict(POLICY)
-            state["autonomous_routes"] = initial_permission(self._config)
+            state["autonomous_routes"] = initial_permission(
+                self._config, (effective_metadata or {}).get("population_unavailable_reason"))
         if serial_routes and supplied_spec is None and not pending_intake:
             raise SolverValidationError("serial_routes_requires_problem_spec")
         if self._config.get("features", {}).get("progress_scheduling") is True:

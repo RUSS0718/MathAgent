@@ -13,6 +13,24 @@ from tests.test_faithful_s03_job import CAPACITY_POLICY
 
 
 class FaithfulServiceConfigTest(unittest.TestCase):
+    def test_unavailable_population_preserves_ordinary_config_identity(self):
+        from showcase.run_budget import RunBudgetLimits
+        from showcase.star_product_config import full_config
+        from showcase.star_product_pipeline import StarProductPipeline
+        from tests.test_star_population_runtime import CAPACITY
+
+        features = {"auto_problem_spec": True}
+        budget = RunBudgetLimits(max_model_calls=40)
+        expected = {**full_config(budget, features), "hint_mode": "none"}
+        for enabled, capacity in ((False, None), (False, CAPACITY),
+                                  (True, None), (True, {**CAPACITY, "worker_slots": 0})):
+            with self.subTest(enabled=enabled, capacity=capacity):
+                pipeline = StarProductPipeline(
+                    self.temp.name, full_budget=budget, full_features=features,
+                    population_enabled=enabled, population_capacity=capacity,
+                )
+                self.assertEqual(expected, pipeline.full_config)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

@@ -12,7 +12,8 @@ from tests.test_star_population_runtime import CAPACITY, PROBLEM, ROOT_ID, SPEC
 
 
 class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
-    def run_plain_submission(self, *, runtime=7200, timeout=15):
+    def run_plain_submission(self, *, runtime=7200, timeout=15, capacity=CAPACITY,
+                             selection_mode="population"):
         entered = threading.Barrier(2)
         concurrent = []
 
@@ -29,7 +30,7 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                 alternative = deepcopy(plan)
                 alternative["steps"][0].update(step_id="construction", method_id="construction")
                 return {**plan, "alternative_plans": [alternative],
-                        "execution_selection": {"mode": "population",
+                        "execution_selection": {"mode": selection_mode,
                                                 "reason": "Two independent methods cover the goal."}}
             if role == "reasoner":
                 try:
@@ -59,7 +60,7 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                 "progress_scheduling", "serial_routes"}, True),
             SHOWCASE_STAR_FULL_BUDGET=limits,
             SHOWCASE_STAR_POPULATION_ENABLED=True,
-            SHOWCASE_STAR_POPULATION_CAPACITY=CAPACITY,
+            SHOWCASE_STAR_POPULATION_CAPACITY=capacity,
             SHOWCASE_STAR_POPULATION_REQUEST_TIMEOUT_SECONDS=timeout,
             # This separate advanced-preset budget must never replace the root.
             SHOWCASE_STAR_POPULATION_BUDGET=RunBudgetLimits(max_model_calls=99))
@@ -110,3 +111,22 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
         self.assertNotIn("population", final["result"]["solver"])
         self.assertEqual(180, final["result"]["budget"]["limits"]["max_runtime_seconds"])
         self.assertEqual(selection, self.job(job_id)["result"]["solver"]["execution_selection"])
+
+    def test_unavailable_population_preserves_admission_reason_for_either_model_choice(self):
+        for capacity, timeout, mode, reason in (
+            ({**CAPACITY, "status": "unverified"}, 15, "population", "population_capacity_unverified"),
+            (CAPACITY, 31, "population", "population_request_timeout_invalid"),
+            ({**CAPACITY, "worker_slots": 0}, 15, "serial", "population_capacity_invalid"),
+        ):
+            with self.subTest(reason=reason, mode=mode):
+                job_id, final, concurrent = self.run_plain_submission(
+                    capacity=capacity, timeout=timeout, selection_mode=mode)
+                selection = final["result"]["solver"]["execution_selection"]
+                self.assertEqual(reason, selection["reason"])
+                self.assertEqual("serial", selection["selected"])
+                self.assertEqual([], concurrent)
+                planner = next(item for item in self.outbound if item["role"] == "planner")
+                self.assertEqual(reason, planner["autonomous_routes"]["unavailable_reason"])
+                before = len(self.outbound)
+                self.assertEqual(selection, self.job(job_id)["result"]["solver"]["execution_selection"])
+                self.assertEqual(before, len(self.outbound))
