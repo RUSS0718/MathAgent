@@ -555,6 +555,9 @@ def projection(run, *, answer=None, verification_mode="auto", include_prover_rou
             **candidate_projection(run),
             **({'formal_verification': state['formal_verification']}
                if isinstance(state.get('formal_verification'), Mapping) else {})}
+    if state.get('serial_intervention'):
+        from .solver_harness.serial_intervention import public_projection
+        result['serial_intervention'] = public_projection(state['serial_intervention'])
     if state.get("execution_selection"):
         result["execution_selection"] = state["execution_selection"]
     if state.get("execution_switch"):

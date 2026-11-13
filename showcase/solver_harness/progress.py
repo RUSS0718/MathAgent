@@ -100,6 +100,11 @@ def review_progress(state, event, updates):
 
 def guard_action(harness, run):
     """A Meta continuation cannot dispatch an already blocked action."""
+    # A reserved symmetric experiment intentionally measures the blocked action
+    # once per arm. Native admission and its parent ledger still fence every call.
+    from .faithful_intervention_native import CheckpointHarness
+    if isinstance(harness, CheckpointHarness):
+        return run
     state = run["state"]
     if (state.get("phase") not in {"PLAN", "STEP_EXECUTE", "CHALLENGE"}
             or state.get("progress_policy", {}).get("enabled") is not True):

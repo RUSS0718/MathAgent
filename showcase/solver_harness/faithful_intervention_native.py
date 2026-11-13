@@ -16,6 +16,10 @@ from .progress import METHOD_IDS
 class CheckpointHarness(SolverHarness):
     """Namespace new calls/sessions while retaining inherited checkpoint identities."""
 
+    def _commit_event(self, run_id, *, event, **kwargs):
+        event = {**event, 'event_id': self.namespace_call_id(event['event_id'])}
+        return super()._commit_event(run_id, event=event, **kwargs)
+
     def namespace_call_id(self, call_id):
         """Return the call identity used by both branch dispatch and evidence owners."""
         prefix = f"{self.branch_id}:"

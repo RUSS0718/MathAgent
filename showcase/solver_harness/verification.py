@@ -153,6 +153,10 @@ def verify_step(
         "state_revision": reserved["state_revision"],
     }
 
+    if state.get('serial_intervention'):
+        from .serial_intervention import applicable_results
+        request['intervention_results'] = applicable_results(harness, run)
+
     def reserve_and_dispatch(current, seq, continuation_call_id, continuation_request,
                              *, purpose="compute"):
         nonlocal call_id

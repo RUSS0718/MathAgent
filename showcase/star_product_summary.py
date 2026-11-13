@@ -36,6 +36,9 @@ def progress_summary(state):
             for item in state.get("verified_results_ledger", [])
             if isinstance(item, dict) and isinstance(item.get("category"), str)],
         "meta_decision": (state.get("meta_decision") or {}).get("decision")}
+    if state.get('serial_intervention'):
+        from .solver_harness.serial_intervention import public_projection
+        summary['serial_intervention'] = public_projection(state['serial_intervention'])
     if state.get("execution_selection"):
         summary["execution_selection"] = state["execution_selection"]
     if state.get("execution_switch"):

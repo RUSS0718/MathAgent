@@ -99,6 +99,11 @@ def run_exploration_phase(harness, run: dict[str, Any], problem: str) -> dict[st
 def advance(harness, run, metadata, problem):
     from .autonomous_routes import advance_switch
 
+    from .serial_intervention import advance as advance_intervention
+
+    run = advance_intervention(harness, run, problem)
+    if (run['state'].get('serial_intervention') or {}).get('status') == 'needs_review':
+        return run
     run = advance_switch(harness, run, problem)
     if (run["state"].get("execution_switch") or {}).get("status") in {"converging", "needs_review"}:
         return run
