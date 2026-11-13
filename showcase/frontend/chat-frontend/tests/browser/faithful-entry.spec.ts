@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { mockWorkspace } from './fixtures'
+import { mockWorkspace, report } from './fixtures'
 
 const faithful = { enabled: true, ready: true, solver_mode: 'star_reference', input_mode: 'automatic', unavailable_reasons: [] as string[] }
 const capabilities = {
@@ -22,6 +22,47 @@ async function setup(page: Page, entry: typeof faithful | undefined) {
   await expect(page.locator('#math-question')).toBeVisible()
   return requests
 }
+
+test('necessary clarification continues the same task and refreshes read-only', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 850 })
+  await mockWorkspace(page, true)
+  const question = { request_id: 'clarification:run-demo:1', task_id: 'run-demo', input_version: 1,
+    question: '三角形底边和对应高是多少？', reason: '数值面积需要实际尺寸。' }
+  let answers = 0
+  await page.route('**/api/agent/jobs/run-demo', route => route.fulfill({ json: {
+    success: true, job_id: 'run-demo', session_id: 'session-demo',
+    status: answers ? 'succeeded' : 'waiting_input',
+    result: { faithful: { allowed_actions: answers ? [] : ['cancel', 'answer_clarification'],
+      clarification: { ...question, status: answers ? 'answered' : 'waiting',
+        ...(answers ? { answer: '6 cm 和 4 cm' } : {}) } } },
+  } }))
+  await page.route('**/api/agent/jobs/run-demo/events**', route => route.fulfill({
+    contentType: 'text/event-stream', body: answers
+      ? 'id: 2\nevent: final_result\ndata: {"type":"final_result","status":"succeeded"}\n\n'
+      : 'id: 1\nevent: interrupt\ndata: {"type":"interrupt","status":"waiting_input"}\n\n',
+  }))
+  await page.route('**/api/agent/jobs/run-demo/report', route => route.fulfill({ json: {
+    ...report, report: { ...report.report, answer: answers ? '面积为 12 cm²。' : '旧错误面积 999' },
+  } }))
+  await page.route('**/api/agent/jobs/run-demo/clarifications/*', route => {
+    answers += 1
+    expect(route.request().postDataJSON()).toEqual({ task_id: 'run-demo', input_version: 1, answer: '6 cm 和 4 cm' })
+    expect(route.request().headers()['x-csrf-token']).toBe('synthetic')
+    return route.fulfill({ status: 202, json: { success: true, job_id: 'run-demo', status: 'queued' } })
+  })
+  await page.goto('/dashboard-assets/session/session-demo')
+  await expect(page.getByText(question.question)).toBeVisible()
+  await expect(page.getByRole('button', { name: '恢复执行' })).toHaveCount(0)
+  await expect(page.getByText('旧错误面积 999')).toHaveCount(0)
+  await page.getByLabel('补充条件', { exact: true }).fill('6 cm 和 4 cm')
+  await page.getByRole('button', { name: '回答并继续' }).click()
+  await expect(page.getByText('面积为 12 cm²。')).toBeVisible()
+  await page.reload()
+  await expect(page.getByText('面积为 12 cm²。')).toBeVisible()
+  await expect(page.getByText('你的回答：6 cm 和 4 cm')).toBeVisible()
+  expect(answers).toBe(1)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
 
 test('ready service defaults ordinary submit to Faithful and preserves failed form', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 900 })

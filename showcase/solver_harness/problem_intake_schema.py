@@ -25,3 +25,7 @@ PROBLEM_SPEC_SCHEMA = _object({
         "goal_id": _TEXT, "description": _TEXT, "dependencies": _TEXTS,
     }, ["goal_id", "description"])},
 })
+PROBLEM_SPEC_SCHEMA["properties"]["clarification"] = _object({
+    "question": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
+})

@@ -685,6 +685,11 @@ def create_app(
         except WorkspaceError as exc:
             return _workspace_error(exc)
 
+    from .clarification_api import register_clarification_api
+
+    register_clarification_api(app, workspace_service, require_auth=_require_auth,
+                               request_object=_request_object, error_response=_workspace_error)
+
     @app.post("/api/agent/jobs/<job_id>/formal-attempts")
     def create_formal_attempt(job_id: str) -> tuple[Response, int]:
         session = _require_auth(g.auth_session)

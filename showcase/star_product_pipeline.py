@@ -338,6 +338,8 @@ class StarProductPipeline:
                     if solver_mode not in BEST_EFFORT_MODES or exc.category != "run_deadline_exhausted":
                         raise
                     run = harness.get_run(run_id)
+                if run["state"].get("clarification", {}).get("status") == "waiting":
+                    return {"status": "WAITING_INPUT"}
                 try:
                     if solver_mode == "star_population":
                         from .solver_harness.population_lifecycle import (
@@ -496,6 +498,8 @@ class StarProductPipeline:
         graph = builder.compile(checkpointer=self.checkpointer)
         graph_config = {"configurable": {"thread_id": run_id}}
         result = solve()
+        if result["status"] == "WAITING_INPUT":
+            return result
         result = graph.invoke(result, graph_config, durability="sync")
         sink({"type": "final_result" if result["status"] == "COMPLETED" else "needs_review",
               "job_id": run_id, "node_name": "terminal", "step_id": "terminal",

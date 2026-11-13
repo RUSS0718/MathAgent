@@ -48,6 +48,11 @@ def response_instructions(request, schema):
     )
     if role == "problem_intake":
         instructions += (
+            "If and only if a missing necessary condition prevents answering the requested question, "
+            "include clarification with a concrete question and a reason explaining why the answer "
+            "depends on that missing information. Preserve the requested root obligations even when "
+            "their inputs are missing. Do not invent values. If a complete answer by cases or in "
+            "parameters satisfies the request (for example ax=1), omit clarification and proceed. "
             "Root obligations are required mathematical conclusions, not workflow stages "
             "such as making a plan or running Python. Do not duplicate a root obligation as an "
             "auxiliary goal. auxiliary_goals may be empty; add only separate non-root work. "

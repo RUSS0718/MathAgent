@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api/client'
 import type { CapabilitiesResponse } from '../api/capabilities.schemas'
+import { clarificationStateSchema } from '../api/jobs.schemas'
 import { lookupSubmission, readSubmission, submitOnce } from '../runtime/jobs/submission'
 import { useAuthStore } from '../stores/auth.store'
 import { createIdempotencyKey } from '../runtime/jobs/idempotency'
@@ -22,6 +23,7 @@ import PresentationCommandHint from './PresentationCommandHint.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
 import ConversationWorkbench from './ConversationWorkbench.vue'
+import ClarificationPanel from './ClarificationPanel.vue'
 
 const auth = useAuthStore()
 const sessions = useSessionsStore()
@@ -54,6 +56,9 @@ const selectedJob = computed(() => {
   return jobId ? jobs.byId(jobId) : undefined
 })
 const presentationMode = computed(() => selectedJob.value?.presentationMode ?? null)
+const clarification = computed(() => clarificationStateSchema.safeParse(selectedJob.value?.result?.faithful).data)
+const showReport = computed(() => !clarification.value ||
+  (clarification.value.clarification.status === 'answered' && !current.value) ? report.value : null)
 const selectedProblem = computed(() => {
   const jobId = selectedJob.value?.jobId
   return [...sessions.messages].reverse().find((message) => message.analysis_job_id === jobId && message.sender === 'user')?.text ?? ''
@@ -120,6 +125,20 @@ async function resumeCurrent(): Promise<void> {
     notice.value = result.existing ? '已重放恢复结果。' : '已请求恢复执行；没有追加文本约束。'
   } catch (error) { notice.value = error instanceof Error ? error.message : '恢复失败。' }
   finally { submitting.value = false }
+}
+async function clarificationChanged(jobId: string, nextJobId?: string): Promise<void> {
+  const sessionId = sessions.currentId
+  if (!sessionId || selectedJob.value?.jobId !== jobId || reportDisposed) return
+  report.value = null
+  try {
+    if (nextJobId) await sessions.select(sessionId)
+    const target = nextJobId ?? jobId
+    const observed = await api.getJob(target)
+    if (sessions.currentId !== sessionId || reportDisposed) return
+    jobs.observe(observed)
+    if (observed.status === 'queued' || observed.status === 'running') observeJob(target)
+    else if (observed.status === 'succeeded') await loadReport(target)
+  } catch (error) { notice.value = error instanceof Error ? error.message : '暂时无法读取任务状态。' }
 }
 async function sessionAction(action: () => Promise<void>): Promise<void> { try { await action() } catch (error) { notice.value = error instanceof Error ? error.message : '会话操作失败，请重试。' } }
 async function newSession(): Promise<void> { await sessionAction(async () => { const id = await sessions.create(); sidebarOpen.value = false; globalThis.history.pushState({}, '', sessionHref(id)); globalThis.dispatchEvent(new PopStateEvent('popstate')) }) }
@@ -274,10 +293,10 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
       <header class="constellation-topbar">
         <UiButton icon-only variant="ghost" class="mobile-only" aria-label="打开会话栏" @click="sidebarOpen = true"><UiIcon name="menu" /></UiButton>
         <div><small>MATHAGENT · 数学推理工作台</small><h1>{{ selectedJob ? '对话式求解工作台' : '新建求解 · 输入题干' }}</h1></div>
-        <div class="constellation-actions"><span>{{ current ? '任务执行中' : selectedJob ? '持久运行记录' : '准备提交' }}</span><UiButton v-if="current" variant="danger" @click="cancelCurrent">取消任务</UiButton><UiButton v-if="selectedJob" @click="newSession">新建求解</UiButton><UiButton v-if="selectedJob || notice" :disabled="submitting || checkingSubmission || !!current" @click="solveAgain">再次求解</UiButton><a v-if="selectedJob" :href="`/dashboard/run/${selectedJob.jobId}`">运行详情</a></div>
+        <div class="constellation-actions"><span>{{ current?.status === 'waiting_input' ? '等待输入' : current ? '任务执行中' : selectedJob ? '持久运行记录' : '准备提交' }}</span><UiButton v-if="current && clarification?.clarification.status !== 'waiting'" variant="danger" @click="cancelCurrent">取消任务</UiButton><UiButton v-if="selectedJob" @click="newSession">新建求解</UiButton><UiButton v-if="selectedJob || notice" :disabled="submitting || checkingSubmission || !!current" @click="solveAgain">再次求解</UiButton><a v-if="selectedJob" :href="`/dashboard/run/${selectedJob.jobId}`">运行详情</a></div>
       </header>
       <p v-if="notice" class="notice" role="status">{{ notice }}<UiButton v-if="!loadFailed && !submitting && !checkingSubmission" @click="recoverSubmission">核对原提交</UiButton><UiButton v-if="loadFailed" @click="initialize">重新加载</UiButton></p>
-      <p v-if="current?.status === 'waiting_input'" class="notice notice--warning" role="status">运行已暂停。文本插话待接入；恢复执行不会追加新约束。<UiButton :disabled="submitting" @click="resumeCurrent">恢复执行</UiButton></p>
+      <p v-if="current?.status === 'waiting_input' && !clarification" class="notice notice--warning" role="status">运行已暂停。恢复执行不会追加新约束。<UiButton :disabled="submitting" @click="resumeCurrent">恢复执行</UiButton></p>
       <div v-if="loading" class="loading-state" role="status">正在加载工作台…</div>
       <section v-else-if="!selectedJob" class="workbench-entry" aria-label="提交数学题干">
         <div class="entry-heading"><small>{{ faithful ? 'FAITHFUL AGENT' : 'PLANNER → REASONER → GATE' }}</small><h2>{{ faithful ? 'Faithful 自主求解' : '把题干交给一组会互相质疑的子智能体' }}</h2><p>{{ faithful ? '直接输入数学题，Faithful 自主选择已配置能力与求解步骤。提交后可查看公开执行摘要、实时计划与协作星图。' : '提交后查看公开执行摘要、实时计划与协作星图。运行能力取决于所选模式；模拟数据和历史回放始终单独标记。' }}</p></div>
@@ -286,9 +305,10 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
       </section>
       <section v-else class="active-workbench">
         <article class="workbench-problem"><small>当前题干</small><p>{{ selectedProblem }}</p></article>
+        <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" @changed="clarificationChanged" @cancel="cancelCurrent" />
         <ConversationWorkbench :key="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" />
-        <PresentationSection :source-version="report" v-if="report && presentationMode" :job-id="selectedJob.jobId" :mode="presentationMode" :job-status="selectedJob.status" :problem="selectedProblem" :fallback-answer="report.report.answer" />
-        <ReportSection v-else-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
+        <PresentationSection :source-version="showReport" v-if="showReport && presentationMode" :job-id="selectedJob.jobId" :mode="presentationMode" :job-status="selectedJob.status" :problem="selectedProblem" :fallback-answer="showReport.report.answer" />
+        <ReportSection v-else-if="showReport" :mode="showReport.mode" :status="showReport.status" :report="showReport.report" />
       </section>
     </main>
   </div>

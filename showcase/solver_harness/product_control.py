@@ -21,6 +21,15 @@ def controlled_patch(connection, run_id, event, updates):
     ).fetchone()
     stopped = job[0] != "running"
     expired = deadline is not None and time.time() >= deadline[0]
+    if not expired and job[0] == "waiting_input" and event.get("clarification_request_id"):
+        state = json.loads(connection.execute(
+            "SELECT state_json FROM solver_states WHERE run_id=?", (run_id,)).fetchone()[0])
+        question = state.get("clarification", {})
+        if (question.get("status") == "waiting"
+                and question.get("request_id") == event["clarification_request_id"]
+                and event["type"] == "problem_spec_revised"
+                and updates.get("clarification", {}).get("status") == "answered"):
+            return updates
     if not stopped and not expired:
         return updates
     if expired and not stopped and _expired_selection(connection, run_id, event, updates):

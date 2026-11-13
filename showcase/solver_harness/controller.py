@@ -230,6 +230,8 @@ def advance_product(harness, run, problem):
     from ..run_control import check_control
 
     for _ in range(64):
+        if run["state"].get("clarification", {}).get("status") == "waiting":
+            return run
         if run["state"]["phase"] == "TERMINAL" or run["state"]["status"] in {
             "interrupted", "recovered_pending_validation"
         }:

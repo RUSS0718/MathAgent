@@ -488,6 +488,11 @@ class WorkspaceStore:
                         self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled", "scope": "future_dispatch", "remote_request": "cannot_revoke"})
                     result = {"success": True, "job_id": job_id, "status": "canceled"}
                 else:
+                    from .clarification_api import pending_question
+
+                    question = pending_question(self._connection, job_id)
+                    if question and question["status"] == "waiting":
+                        raise WorkspaceError("clarification_answer_required", status=409)
                     intervention_control = self._connection.execute(
                         "SELECT 1 FROM sqlite_master WHERE type='table' "
                         "AND name='faithful_intervention_control'"
@@ -521,6 +526,9 @@ class WorkspaceStore:
                 raise
 
     def recover_incomplete_jobs(self, checkpointer=None) -> int:
+        from .clarification_api import pending_question
+
+        waiting = []
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             rows = self._connection.execute("SELECT job_id,status,result_json FROM workspace_jobs WHERE status IN ('queued','running','waiting_input')").fetchall()
@@ -530,6 +538,11 @@ class WorkspaceStore:
             ).fetchone()
             for row in rows:
                 job_id = row["job_id"]
+                question = pending_question(self._connection, job_id)
+                if question and question["status"] == "waiting":
+                    if row["status"] != "waiting_input":
+                        waiting.append(job_id)
+                    continue
                 if row["status"] == "waiting_input" and checkpointer is not None and checkpointer.is_interrupted(job_id):
                     continue
                 if row["status"] == "waiting_input" and intervention_table is not None:
@@ -546,6 +559,8 @@ class WorkspaceStore:
                 self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, execution_mode=(_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable"), result=self.job_identity(job_id), error={"category": "needs_review"}, asset_refs=self._asset_refs(job_id))), now, job_id))
                 self._insert_event(job_id, "needs_review", {"type": "needs_review", "job_id": job_id, "status": "failed", "reason": "process_restart"})
             self._connection.commit()
+            for job_id in waiting:
+                self.mark_waiting_input(job_id)
             if checkpointer is not None:
                 for row in rows:
                     state = self.control_status(row["job_id"])
@@ -1049,6 +1064,7 @@ class WorkspaceService:
         problem_spec: Mapping[str, Any] | None = None,
         presentation_mode: str | None = None,
         formal_policy: Mapping[str, Any] | None = None,
+        clarification_source: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         from .star_product_modes import validate_mode
         requested_presentation_mode = normalize_mode(presentation_mode)
@@ -1132,6 +1148,12 @@ class WorkspaceService:
         )
         from .faithful_task import task_identity
 
+        faithful_identity = task_identity(selected, solver_mode)
+        if clarification_source is not None:
+            if not faithful_identity:
+                raise WorkspaceError("clarification_new_task_unavailable", status=409)
+            faithful_identity["faithful"]["clarification_source"] = dict(clarification_source)
+            digest = _request_digest(digest, clarification_source)
         payload, existing = self.store.create_job(
             user_id=user_id,
             session_id=session_id,
@@ -1146,7 +1168,7 @@ class WorkspaceService:
                    if self.stream_timeout_policy is not None else {}),
                 **presentation_identity,
                 **formal_identity,
-                **task_identity(selected, solver_mode),
+                **faithful_identity,
             },
             experiment_binding=experiment_binding,
             problem_spec=problem_spec,

@@ -68,6 +68,8 @@ def ensure_problem_spec(harness, run, problem):
     """
     if not intake_pending(run):
         return run
+    if run["state"].get("clarification", {}).get("status") == "waiting":
+        return run
     harness._validate_identity(run, run["run_id"], hashlib.sha256(problem.encode("utf-8")).hexdigest())
     state = run["state"]
     call_id = f"{run['run_id']}:problem-intake:1"
@@ -130,6 +132,13 @@ def ensure_problem_spec(harness, run, problem):
         "problem_intake": {**run["state"]["problem_intake"], "status": "completed",
                            "call_id": current_id, "authority": "generated_task_spec_not_proof"},
     }
+    if reply.get("clarification"):
+        from .clarification import necessary_question
+
+        try:
+            updates.update(necessary_question(run, updates["problem_intake"], reply["clarification"]))
+        except (TypeError, ValueError):
+            return reject_intake(harness, run, "problem_intake_invalid_clarification")
     if harness._config.get("features", {}).get("concurrent_routes") is True:
         from .population_store import initial_population
 

@@ -18,7 +18,7 @@ def task_identity(pipeline, mode):
     }}
 
 
-def attach_task_state(payload, *, allowed_actions=None):
+def attach_task_state(payload, *, allowed_actions=None, question=None):
     """Project committed Job/Solver state without creating another controller."""
     result = payload.get("result") or {}
     identity = result.get("faithful")
@@ -47,5 +47,12 @@ def attach_task_state(payload, *, allowed_actions=None):
         "allowed_actions": (allowed_actions if allowed_actions is not None else
                             ["cancel"] if status in {"queued", "running", "waiting_input"} else []),
     }
+    question = identity.get("clarification_reply") or question
+    if question:
+        from .redaction import redact
+
+        result["faithful"].pop("clarification_reply", None)
+        result["faithful"]["clarification"] = redact({key: value for key, value in question.items()
+                                                     if key != "receipt"})
     payload["result"] = result
     return payload

@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from contextlib import closing
 from pathlib import Path
 
+from .clarification_api import pending_question
 from .job_observation import observe_deadline
 from .run_budget import _summary
 from .star_product_modes import STAR_MODES
@@ -39,10 +40,11 @@ def read_job(service, job_id, user_id):
     with store._lock:
         row = store._connection.execute("SELECT * FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
         actions = allowed_job_actions(store._connection, row)
-    return _with_accounting(payload, attempts, budget, ledger_attempts, star, actions)
+        question = pending_question(store._connection, job_id) if star else None
+    return _with_accounting(payload, attempts, budget, ledger_attempts, star, actions, question)
 
 
-def _with_accounting(payload, attempts, budget, ledger_attempts, star, actions=None):
+def _with_accounting(payload, attempts, budget, ledger_attempts, star, actions=None, question=None):
     if budget is not None and (star or not (payload.get("result") or {}).get("budget")):
         payload["result"] = {**(payload.get("result") or {}), "budget": budget}
     attempts = list({item["attempt_id"]: item for item in [*attempts, *ledger_attempts]}.values())
@@ -52,7 +54,7 @@ def _with_accounting(payload, attempts, budget, ledger_attempts, star, actions=N
         observe_deadline(payload, ledger_attempts, budget)
     from .faithful_task import attach_task_state
 
-    return attach_task_state(payload, allowed_actions=actions)
+    return attach_task_state(payload, allowed_actions=actions, question=question)
 
 
 def read_job_snapshot(store, job_id, user_id):
@@ -106,6 +108,7 @@ def read_job_snapshot(store, job_id, user_id):
         attempts = [json.loads(event["payload_json"])["attempt"] for event in attempt_events]
         ledger = connection.execute("SELECT ledger_json FROM run_budgets WHERE run_id=?", (job_id,)).fetchone()
         actions = allowed_job_actions(connection, row)
+        question = (solver_snapshot[0]["state"].get("clarification") if solver_snapshot else None)
         # Projection only uses the fetched snapshot. Release its SQLite read
         # lock before computing it so stream progress writers can commit.
         connection.commit()
@@ -124,4 +127,4 @@ def read_job_snapshot(store, job_id, user_id):
             budget = _summary(state)
             ledger_attempts = [action["public_attempt"] for action in state["actions"]
                                if action.get("public_attempt")]
-        return _with_accounting(payload, attempts, budget, ledger_attempts, star, actions)
+        return _with_accounting(payload, attempts, budget, ledger_attempts, star, actions, question)

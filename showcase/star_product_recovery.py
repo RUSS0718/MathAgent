@@ -148,6 +148,11 @@ def allowed_job_actions(connection, row):
     actions = ["cancel"] if row["status"] in {"queued", "running", "waiting_input"} else []
     if not isinstance(json.loads(row["result_json"] or "{}").get("faithful"), dict):
         return actions
+    from .clarification_api import clarification_actions
+
+    clarification = clarification_actions(connection, row)
+    if clarification is not None:
+        return clarification
     if row["status"] not in {"waiting_input", "failed"}:
         return actions
     try:
