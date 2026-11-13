@@ -165,6 +165,26 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
             self.assertEqual(job_id, self.job(response.get_json()["job_id"])["result"]["faithful"]["clarification_source"]["task_id"])
         self.assertEqual(1, len(self.outbound))
 
+    def test_public_run_strips_raw_reply_from_existing_snapshot(self):
+        job_id, before = self.waiting()
+        question = before["result"]["faithful"]["clarification"]
+        store = self.app.extensions["showcase_workspace_service"].store
+        with store._lock, store._connection as connection:
+            # Reproduce the snapshot shape written by 0649be6 before sanitization.
+            reply = {**question, "status": "expired", "answer": "legacy-raw-reply-sentinel",
+                     "receipt": {"answer_saved": True}}
+            connection.execute(
+                "UPDATE runs SET snapshot_json=json_set(snapshot_json, "
+                "'$.result.faithful.clarification_reply', json(?)) WHERE run_id=?",
+                (json.dumps(reply), job_id),
+            )
+        run = self.client.get(f"/api/runs/{job_id}")
+        self.assertEqual(200, run.status_code)
+        self.assertNotIn("legacy-raw-reply-sentinel", run.get_data(as_text=True))
+        identity = run.get_json()["result"]["faithful"]
+        self.assertNotIn("clarification_reply", identity)
+        self.assertEqual({**question, "status": "expired"}, identity["clarification"])
+
     def test_stale_answer_rejected_and_expiry_saves_without_dispatch(self):
         job_id, before = self.waiting()
         question = before["result"]["faithful"]["clarification"]
