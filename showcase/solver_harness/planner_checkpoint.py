@@ -110,6 +110,9 @@ def _request(base, *, call_id, round_number, max_rounds, checkpoint=None, feedba
             "When correcting binding, prefer one owner per objective and one step per mapped objective "
             "in topological dependency order "
             "rather than grouping objectives. "
+            "Prefer one owner per root within each route. Optional independent whole-problem methods "
+            "belong in separate alternative_plans, each covering all roots; the primary plan is "
+            "one independently deliverable method, with no cross-route comparison or waiting step. "
             "Return BLOCKED with the planning obstacle if a valid Plan cannot be produced. "
             f"This is planner checkpoint round {round_number} of {max_rounds}; "
             f"{remaining} rounds remain after this reply. "
@@ -196,6 +199,16 @@ def generate_checkpoint_plan(harness, run, *, problem, model_port, request, vers
                         "within the remaining rounds."
                     )
                 root_ids = {root["obligation_id"] for root in run["state"]["problem_spec"]["root_obligations"]}
+                if any(error["kind"] == "forward_dependency"
+                       and error["objective_id"] in root_ids and error["prerequisite_id"] in root_ids
+                       for error in feedback["binding_errors"]):
+                    feedback["instruction"] += (
+                        " Prefer one owner per root within each route. Move optional whole-problem routes to alternative_plans, "
+                        "each independently covering every frozen root and its prerequisites. Keep one complete method "
+                        "in primary steps; do not require cross-route comparison or waiting before delivery. "
+                        "Do not merely reorder duplicate method owners into a mandatory combined route. "
+                        "Apply binding rules independently within each plan; never mix owners between plans."
+                    )
                 if any(error["kind"] == "self_dependency"
                        and error["objective_id"] in root_ids and error["prerequisite_id"] in root_ids
                        for error in feedback["binding_errors"]):
