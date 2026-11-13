@@ -25,11 +25,27 @@ PROBLEM_SPEC_SCHEMA = _object({
         "goal_id": _TEXT, "description": _TEXT, "dependencies": _TEXTS,
     }, ["goal_id", "description"])},
 })
-PROBLEM_SPEC_SCHEMA["properties"]["clarification"] = _object({
-    "question": {"type": "string", "minLength": 1, "maxLength": 1000},
-    "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
-})
 
-PROBLEM_SPEC_SCHEMA["properties"]["applicable_condition"] = {
-    "type": "string", "minLength": 1, "maxLength": 8000,
-}
+
+def _nonblank_text(max_length):
+    return {"type": "string", "pattern": r"^[\s\S]*\S[\s\S]*$",
+            "minLength": 1, "maxLength": max_length}
+
+
+PROBLEM_SPEC_SCHEMA["properties"]["clarification"] = {"oneOf": [
+    {"enum": [None]},
+    _object({"question": _nonblank_text(1000), "reason": _nonblank_text(1000)}),
+]}
+PROBLEM_SPEC_SCHEMA["properties"]["applicable_condition"] = {"oneOf": [
+    {"enum": [None]}, _nonblank_text(8000),
+]}
+
+
+def ungrounded_clarification_condition(reply, request):
+    """A model's sufficiency verdict must carry a literal excerpt of the reply."""
+    submitted = request.get("clarification_input")
+    condition = reply.get("applicable_condition")
+    return (request["role"] == "problem_intake" and submitted is not None
+            and condition is not None
+            and (reply.get("clarification") is not None
+                 or condition.strip() not in submitted["answer"]))

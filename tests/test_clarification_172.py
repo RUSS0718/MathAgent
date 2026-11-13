@@ -38,8 +38,8 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
     def open_star(self, replies, **config):
         super().open_star(replies, SHOWCASE_PRESENTATION_ENABLED=True, **config)
 
-    def waiting(self):
-        self.open_faithful([SPEC])
+    def waiting(self, spec=SPEC):
+        self.open_faithful([spec])
         created = self.client.post("/api/agent/jobs", headers=self.headers(),
             json={"session_id": self.session, "message": PROBLEM, "presentation_mode": "teach"})
         self.assertEqual(202, created.status_code, created.get_json())
@@ -93,6 +93,36 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
         self.assertIn("12", self.report(job_id)["answer"])
         self.assertEqual(5, len(self.outbound))
         self.assertEqual(final["result"]["faithful"], self.job(job_id)["result"]["faithful"])
+
+    def test_live_reply_shapes_require_one_budgeted_repair_before_solving(self):
+        generic = "三角形的几何参数已明确给出，可直接计算其数值面积。"
+        for clarification in ({"question": "", "reason": ""}, None):
+            with self.subTest(clarification=clarification):
+                job_id, before = self.waiting({**SPEC, "applicable_condition": generic})
+                question = before["result"]["faithful"]["clarification"]
+
+                def repair(context):
+                    self.assertIn("repair_instruction", context)
+                    self.assertEqual(ANSWER, context["clarification_input"]["answer"])
+                    return {**REASSESSED, "clarification": None}
+
+                def solve(context):
+                    self.assertIn(ANSWER, context["problem_spec"]["assumptions"][-1])
+                    return SOLVED_AREA
+
+                self.replies.extend([{**REASSESSED, "clarification": clarification,
+                                      "applicable_condition": generic},
+                                     repair, solve, POLISHED_AREA, ACCEPT])
+                self.assertEqual(202, self.answer(job_id, question).status_code)
+                final = self.terminal(job_id)
+                self.assertEqual("succeeded", final["status"],
+                                 final["result"]["solver"].get("result_reason"))
+                self.assertEqual(["problem_intake"] * 3 + ["explore", "explore_polish",
+                                                           "whole_solution_verifier"],
+                                 [request["role"] for request in self.outbound])
+                self.assertEqual(6, final["result"]["budget"]["logical_calls"])
+                self.assertEqual(before["result"]["budget"]["deadline_at"],
+                                 final["result"]["budget"]["deadline_at"])
 
     def test_non_answer_reopens_versioned_question_without_solving(self):
         job_id, before = self.waiting()
