@@ -286,15 +286,16 @@ class FaithfulProtocolHandoffTest(StarJobFixture, unittest.TestCase):
     def test_binding_feedback_identifies_objective_and_its_self_owned_prerequisite(self):
         spec = deepcopy(SPEC)
         spec["root_obligations"].append({"obligation_id": "root:explain", "obligation_type": "universal",
-            "statement": "Explain the derived value", "prerequisite_ids": ["duplicate"]})
+            "statement": "Explain the derived value", "prerequisite_ids": ["duplicate", "root:value"]})
         spec["auxiliary_goals"] = [{"goal_id": "duplicate", "description": "Use the established value",
                                     "dependencies": ["root:value"]}]
         bad = {"version": 1, "steps": [{"step_id": "S1", "title": "Add", "objective": "Compute 1+1",
                 "obligation_ids": ["root:value"], "auxiliary_goal_ids": ["duplicate"], "method_id": "direct"},
             {"step_id": "S3", "title": "Explain", "objective": "Explain the value", "depends_on": ["S1"],
-             "obligation_ids": ["root:explain"], "auxiliary_goal_ids": [], "method_id": "direct"}]}
+             "obligation_ids": ["root:value", "root:explain"], "auxiliary_goal_ids": [], "method_id": "direct"}]}
         corrected = deepcopy(bad)
         corrected["steps"][0]["auxiliary_goal_ids"] = []
+        corrected["steps"][1]["obligation_ids"] = ["root:explain"]
         corrected["steps"][1]["depends_on"] = ["S2"]
         corrected["steps"].insert(1, {"step_id": "S2", "title": "Use", "objective": "Use the established value",
             "depends_on": ["S1"], "obligation_ids": [], "auxiliary_goal_ids": ["duplicate"], "method_id": "direct"})
@@ -309,9 +310,25 @@ class FaithfulProtocolHandoffTest(StarJobFixture, unittest.TestCase):
         self.assertNotIn("root-only repair", feedback["instruction"])
         self.assertNotIn("auxiliary_goal_ids=[]", feedback["instruction"])
         self.assertIn("after every owner of prerequisite_id", feedback["instruction"])
+        for hint in (
+            "prefer one actual proof owner per root",
+            "Do not claim the same root in both preparation and completion steps",
+            "Fold preparation into the actual proof owner or omit an unneeded preparation step",
+            "retain needed legally mapped auxiliary goals and preserve required auxiliary owners",
+            "Do not leave a WorkUnit with both mapping lists empty",
+            "The dependent root and its prerequisite must have different owners",
+            "place the dependent after all prerequisite owners",
+            "Apply these same binding rules independently to every proposed complete plan, including alternative_plans",
+            "do not mix owners between plans",
+        ):
+            self.assertIn(hint, feedback["instruction"])
         self.assertEqual(bad, feedback["invalid_plan"])
         self.assertEqual([{"step_id": "S1", "objective_id": "duplicate", "prerequisite_id": "root:value",
-                           "owner_step_id": "S1", "kind": "self_dependency"}], feedback.get("binding_errors"))
+                           "owner_step_id": "S1", "kind": "self_dependency"},
+                          {"step_id": "S1", "objective_id": "duplicate", "prerequisite_id": "root:value",
+                           "owner_step_id": "S3", "kind": "forward_dependency"},
+                          {"step_id": "S3", "objective_id": "root:explain", "prerequisite_id": "root:value",
+                           "owner_step_id": "S3", "kind": "self_dependency"}], feedback.get("binding_errors"))
         planner_systems = [messages[0]["content"] for request, messages in
                            zip(self.outbound, self.outbound_messages) if request["role"] == "planner"]
         for system in planner_systems:

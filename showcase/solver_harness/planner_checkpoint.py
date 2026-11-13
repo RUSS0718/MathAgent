@@ -195,6 +195,21 @@ def generate_checkpoint_plan(harness, run, *, problem, model_port, request, vers
                         "Do not drop frozen roots or their dependencies. Return FINAL with a valid Plan "
                         "within the remaining rounds."
                     )
+                root_ids = {root["obligation_id"] for root in run["state"]["problem_spec"]["root_obligations"]}
+                if any(error["kind"] == "self_dependency"
+                       and error["objective_id"] in root_ids and error["prerequisite_id"] in root_ids
+                       for error in feedback["binding_errors"]):
+                    feedback["instruction"] += (
+                        " For root self-dependencies, prefer one actual proof owner per root as a minimal repair. "
+                        "Do not claim the same root in both preparation and completion steps. "
+                        "Fold preparation into the actual proof owner or omit an unneeded preparation step; "
+                        "retain needed legally mapped auxiliary goals and preserve required auxiliary owners. "
+                        "Do not leave a WorkUnit with both mapping lists empty. "
+                        "The dependent root and its prerequisite must have different owners; "
+                        "place the dependent after all prerequisite owners. Preserve every frozen root "
+                        "and its prerequisite dependencies. Apply these same binding rules independently "
+                        "to every proposed complete plan, including alternative_plans; do not mix owners between plans."
+                    )
             else:
                 return run, redact(plan)
         if status in {"BLOCKED", "FAILED"}:
