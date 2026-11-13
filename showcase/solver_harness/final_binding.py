@@ -80,9 +80,21 @@ def review_binding(run, answer):
         return {"whole_review": "not_reviewed", "binding": "unbound"}
     latest = records[-1]
     source = latest.get("source", {})
+    qualification = latest.get("runtime_qualification")
+    qualification_valid = qualification is None or (
+        isinstance(qualification, Mapping)
+        and qualification.get("verdict") == "REJECT"
+        and any(event.get("type") == "solution_review_qualification"
+                and event.get("source") == source
+                and event.get("artifact") == latest.get("artifact")
+                and all(event.get(key) == qualification.get(key)
+                        for key in ("event_id", "verdict", "reason"))
+                for event in run.get("events", []))
+    )
     call = run["state"].get("calls", {}).get(source.get("call_id"), {})
     valid = (
         latest.get("invalidated") is not True
+        and qualification_valid
         and latest.get("invalidated_by_specification_version") is None
         and latest.get("verdict") in {"ACCEPT", "REJECT"}
         and source.get("run_id") == run["run_id"]
@@ -100,7 +112,7 @@ def review_binding(run, answer):
     )
     same = latest.get("artifact") == artifact_identity(answer)
     return {
-        "whole_review": ("accepted" if latest["verdict"] == "ACCEPT" else "rejected")
+        "whole_review": ("accepted" if latest["verdict"] == "ACCEPT" and qualification is None else "rejected")
                         if valid else "invalid_source",
         "binding": "artifact_changed" if not same else "same_artifact" if valid else "unbound",
     }
@@ -114,10 +126,11 @@ def delivery_verification(run, answer):
     history = [bind_verification(answer, {
         "status": "unknown", "checker": "whole_solution_verifier",
         "checker_version": "star-whole-review-v1", "scope": "whole_solution_llm_review",
-        "findings": ["llm_whole_review_" + record["verdict"].lower()],
+        "findings": ["llm_whole_review_" + record["verdict"].lower(),
+                     *(["runtime_qualification_rejected"] if record.get("runtime_qualification") else [])],
         "limitations": ["LLM review does not prove mathematical correctness or completeness."],
         **{key: record[key] for key in ("artifact", "source", "versions", "fact_sources",
-                                        "proof_sources")
+                                        "proof_sources", "runtime_qualification")
            if key in record},
     })["history"][0] for record in records]
     check = bind_verification(answer, {

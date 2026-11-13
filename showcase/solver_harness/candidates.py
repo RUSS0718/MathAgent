@@ -111,7 +111,9 @@ def prepare_candidates(run, event, updates):
             review = event
             reviewed_text = state["exploration_findings"][-1].get("solution_candidate", "")
             reviewed_hash = hashlib.sha256(redact(reviewed_text).encode("utf-8")).hexdigest()
-            targets = [record for record in targets if record["answer_hash"] == reviewed_hash][-1:]
+            targets = [record for record in targets if record["answer_hash"] == reviewed_hash]
+            if not review.get("runtime_qualification"):
+                targets = targets[-1:]
         for record in targets:
             _review(registry, actions, record, event, review, source == "STEP_EXECUTE")
     elif kind in {"trace_back_applied", "plan_archived", "problem_spec_revised"}:
@@ -235,7 +237,8 @@ def _review(registry, actions, record, event, review, local):
             event,
             "candidate_refuted" if refuted else "candidate_reviewed",
             review_state="refuted" if refuted else record["review_state"],
-            selection_eligible=False if refuted else record["selection_eligible"],
+            selection_eligible=False if refuted or review.get("runtime_qualification", {}).get("verdict") == "REJECT"
+                               else record["selection_eligible"],
             known_objections=[*record["known_objections"], objection],
             evidence_refs=[*record["evidence_refs"], event["event_id"]],
         )

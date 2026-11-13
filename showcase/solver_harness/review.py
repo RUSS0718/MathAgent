@@ -171,25 +171,35 @@ def review_solution(
     if unfulfilled:
         reply = {"verdict": "REJECT", "reason": "verifier_tool_request_unfulfilled"}
     specification = state.get("problem_spec") or {}
+    qualification = None
     # A scalar can be a result or witness, but cannot supply a required proof.
     if (isinstance(reply, Mapping) and reply.get("verdict") == "ACCEPT"
         and any(root["obligation_type"] in {"universal", "completeness", "extremum_bound", "filtering"}
                 for root in specification.get("root_obligations", []))
         and re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?(?:/[+-]?\d+)?",
                          candidate.strip())):
-        reply = {**reply, "verdict": "REJECT",
-                 "reason": "scalar_candidate_cannot_discharge_proof_obligations"}
+        qualification = {"event_id": "review-qualified", "verdict": "REJECT",
+                         "reason": "scalar_candidate_cannot_discharge_proof_obligations"}
     accepted = (
         isinstance(reply, Mapping) and reply.get("verdict") == "ACCEPT" and bool(candidate.strip())
-        and not unfulfilled
+        and not unfulfilled and qualification is None
     )
     next_phase = "TERMINAL" if accepted else "PLAN"
     updates = {"phase": next_phase}
     finding = state["exploration_findings"][-1]
-    record = review_record(run, candidate, "ACCEPT" if accepted else "REJECT",
+    record = review_record(run, candidate, reply.get("verdict", "REJECT"),
         call_id=base_call_id, origin="explore_polish",
         versions=[{"text": finding.get("original_solution_candidate", candidate)},
                   {"text": candidate}])
+    if qualification is not None:
+        record["runtime_qualification"] = qualification
+        run = harness.commit_event(
+            run_id,
+            expected_revision=run["state_revision"],
+            event={**qualification, "type": "solution_review_qualification",
+                   "source": record["source"], "artifact": record["artifact"]},
+            state_updates={},
+        )
     updates["whole_solution_reviews"] = [*state.get("whole_solution_reviews", []), record]
     if accepted:
         updates.update(status="completed_llm_reviewed", final_response=candidate)
@@ -201,10 +211,12 @@ def review_solution(
             "type": "solution_review_assessed",
             "verdict": "ACCEPT" if accepted else "REJECT",
             "next_phase": next_phase,
+            **({"runtime_qualification": qualification, "reason": qualification["reason"]}
+               if qualification is not None else {}),
             **{
                 key: reply[key]
                 for key in ("reason", "counterexample")
-                if isinstance(reply, Mapping) and isinstance(reply.get(key), str)
+                if qualification is None and isinstance(reply, Mapping) and isinstance(reply.get(key), str)
             },
         },
         state_updates=updates,
