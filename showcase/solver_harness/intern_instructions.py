@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 
 from .faithful_memory_injection import has_population_memory
 from .roles import definition
@@ -144,6 +145,31 @@ def response_instructions(request, schema):
                     step.update(obligation_ids=[objective], auxiliary_goal_ids=[])
                     if request.get("progress_policy", {}).get("enabled") is True:
                         step["method_id"] = "direct"
+            example = {
+                "checkpoint": {"protocol_version": 1, "checkpoint_id": "example",
+                    "status": "FINAL", "objective": "Plan the solution", "dependencies": [],
+                    "evidence": [], "gaps": [], "next_action": "Execute S1"},
+                "plan": {"version": 1, "steps": example_steps},
+            }
+            illustrations = example
+            if request.get("autonomous_routes"):
+                example["plan"].update(execution_selection={
+                    "mode": "serial", "reason": "One coherent method suffices"}, alternative_plans=[])
+                population = deepcopy(example)
+                alternative_steps = deepcopy(example_steps)
+                alternative_steps[0].update(title="Establish A independently", objective="Prove A by contradiction")
+                if "method_id" in alternative_steps[0]:
+                    alternative_steps[0]["method_id"] = "contradiction"
+                population["plan"].update(execution_selection={
+                    "mode": "population", "reason": "An independent proof method is worth exploring"},
+                    alternative_plans=[{"version": 1, "steps": alternative_steps}])
+                illustrations = [example, population]
+                instructions += (
+                    " The serial and population examples are equally valid shapes, not mode recommendations. "
+                    "Return one chosen object, never the examples array. The complete alternative_plans array "
+                    "ends after its ordinary complete plan objects; alternatives have no execution_selection. "
+                    "At the response root and inside checkpoint, required and additionalProperties are schema metadata, never output fields. "
+                )
             instructions += (
                 " This Planner call uses the checkpoint protocol. "
                 "Your returned Plan itself satisfies the request for a separate pre-computation plan. "
@@ -157,13 +183,9 @@ def response_instructions(request, schema):
                 "prefer existing auxiliary goals for that work, leaving obligation_ids empty. "
                 "Keep proof-establishing work explicit in the step that actually supplies the proof. "
                 "Do not repeat method selection already completed by Explore unless further work is needed. "
-                "Illustrative instance (fictional IDs only; use current objective_dependencies IDs "
-                "in your actual plan): " + json.dumps({
-                    "checkpoint": {"protocol_version": 1, "checkpoint_id": "example",
-                        "status": "FINAL", "objective": "Plan the solution", "dependencies": [],
-                        "evidence": [], "gaps": [], "next_action": "Execute S1"},
-                    "plan": {"version": 1, "steps": example_steps},
-                }, ensure_ascii=False)
+                + ("Illustrative instances " if request.get("autonomous_routes") else "Illustrative instance ")
+                + "(fictional IDs only; use current objective_dependencies IDs "
+                "in your actual plan): " + json.dumps(illustrations, ensure_ascii=False)
             )
         else:
             instructions += (

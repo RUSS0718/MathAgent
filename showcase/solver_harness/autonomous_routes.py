@@ -43,7 +43,7 @@ def planner_request(harness, run, request):
         "unavailable_reason": permission.get("unavailable_reason"), "root_budget": budget,
     }, "instruction": request.get("instruction", "") + (
         " Choose execution_selection {mode: serial|population, reason: a short public summary}. "
-        "Place execution_selection only on the primary plan (checkpoint.plan for checkpoint replies). "
+        "Place execution_selection only on the primary top-level plan, alongside checkpoint in checkpoint replies. "
         "NEVER include execution_selection in alternative_plans; alternatives must be "
         "normal complete plans without execution_selection. "
         "Use goals, independent directions, available capacity and remaining root budget. "
