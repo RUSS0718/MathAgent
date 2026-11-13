@@ -1,6 +1,6 @@
 # #172 必要条件澄清验收（2026-11-13）
 
-范围为父规格 #168 的 B2，起点 `4b4ab94`，集成分支 `faithful-clarification`。合同见 [B2 合同](../engineering/faithful-service-172-contract.md)。当前尚未达到工程退出，不据此关闭 #172 或父规格。
+范围为父规格 #168 的 B2，起点 `4b4ab94`，集成分支 `faithful-clarification`。合同见 [B2 合同](../engineering/faithful-service-172-contract.md)。本票已达到工程退出，仅交付 #172；父规格 #168 完整服务仍未完成。
 
 初版产品源码 `0649be6`。原公共用例在基点失败，实现后 29 项聚焦 Python 检查、9 项受控 Chromium 检查及前端构建通过。证据已从实现工作树复制到 `artifacts/issue-172-work/implementation/`；受控响应不代表真实模型闭环。
 
@@ -19,4 +19,6 @@
 
 失败记录不覆盖：live-01 因 Docker 引擎关闭在提交前被就绪检查阻止；live-02 驱动缺服务配置身份，提交前退出；live-03 真实复判返回空问题对象和泛化条件，诚实失败，修正 `59ba09a`、`ef9db26` 后增加具体用户条件引用与阶段组合校验；live-04 真实首次规格返回空根义务，修正 `f6b327d` 使非空目标进入 schema 和既有有界修复。live-05 的有效英文问题被脚本中文匹配误拒绝，因此 live-06 继续原等待 Job，没有重提题目。live-06 求解实际成功，但脚本遗漏英文完整单位；后续只读复核确认结果，不新增模型调用。只读复核前两次分别因未建立认证和定位器命中两处失败，第三次通过，均未提交求解。
 
-当前最终冻结源码门禁及临时服务清理尚未完成，仍不关闭本票。独立数学评测 `not_run`。官方 baseline 未修改；`tests/test.md` 未读取或修改。
+最终冻结门禁源码为 `1c37325`，命令 `uv run --no-sync python scripts/run_final_gate.py --root . --output-dir artifacts/issue-172-work/gates --run-id gate-01`。`gate-01` 六阶段全部通过，`source_changed=false`，耗时 1845.062 秒；完整测试 2016 项、0 failure/error、49 skip（不计通过）。快速 baseline/官方导入边界、发布检查、前端安装/审计/检查均通过。门禁后只有文档交接更新，保留此源码 SHA，不因纯文档重跑产品套件。
+
+8092 临时服务、真实验收与最终门禁的每 30 分钟任务均已停止或删除，两个本票实现工作树已清理。失败、成功、unknown 和初始空环境诊断保持原记录。独立数学评测 `not_run`，不声称数学能力提升。官方 baseline 字节门禁通过；`tests/test.md` 未读取或修改。交接继续使用当前选择的同一模型；本会话无法确认具体代理型号，不猜测型号。
