@@ -39,18 +39,66 @@ def response_instructions(request, schema):
     role = request["role"]
     instructions = (
         f"You are the {role}. {definition(role)} Return one JSON object only, no Markdown or commentary. "
-        "Obey this exact response schema: " + json.dumps(schema, ensure_ascii=False)
-        + " Answer with a filled instance of this schema containing your actual values — "
-        "never echo the schema definition itself (a reply like "
-        '{"type": "object", "properties": ...} is a protocol failure). '
-        "Return the instance itself at every nesting level. Never wrap a reply or tool_request "
-        "in schema metadata objects using type, properties, required, or additionalProperties. "
-        "A non-null tool_request must directly contain tool (an allowed tool name), "
-        'arguments (an object of actual argument values), and scope ("finite_computation"). '
-        "Enum fields must take one of their listed values only. "
-        "Use only runtime allowed_tools. A tool_request is a proposed local computation, not evidence. "
-        "Never fabricate tool receipts. "
     )
+    if (role == "planner" and request.get("checkpoint_protocol") and request.get("autonomous_routes")
+            and isinstance(request.get("problem_spec"), Mapping)):
+        # Render only the canonical data shape; runtime validation retains the full schema.
+        root = schema["properties"]
+        checkpoints = root["checkpoint"]["oneOf"]
+        checkpoint = checkpoints[0]
+        plan = root["plan"]["oneOf"][0]
+        fields = plan["properties"]
+        step = fields["steps"]["items"]
+        statuses = [status for branch in checkpoints
+                    for status in branch["properties"]["status"].get(
+                        "enum", [branch["properties"]["status"].get("const")])]
+        instructions += (
+            "Data contract (filled values only): root allows only " + ", ".join(root)
+            + "; root must contain " + ", ".join(schema["required"]) + ". "
+            "Use the canonical root object with checkpoint and a separate top-level plan. "
+            "checkpoint contains exactly these fields: " + ", ".join(checkpoint["required"]) + ". "
+            "checkpoint.status is one of " + ", ".join(statuses) + ". "
+            "status and gaps belong INSIDE checkpoint, never at the response root; "
+            "plan belongs at the response root, not inside checkpoint. "
+            "protocol_version is integer 1; checkpoint_id, objective and next_action are strings; "
+            "dependencies, evidence and gaps are arrays of strings. FINAL has gaps=[] and a complete plan; "
+            "YIELD has nonempty planning gaps and may use plan=null; BLOCKED/FAILED retain unresolved gaps. "
+            "plan allows only " + ", ".join(fields) + "; required: " + ", ".join(plan["required"]) + ". "
+            "version is a positive integer; steps is a nonempty array of objects allowing only "
+            + ", ".join(step["properties"]) + "; required: " + ", ".join(step["required"]) + ". "
+            "step_id, title and objective are strings; depends_on is an array of earlier step IDs. "
+            "obligation_ids and auxiliary_goal_ids are arrays of runtime objective IDs. "
+        )
+        for name in ("obligation_ids", "auxiliary_goal_ids", "method_id"):
+            if name in step["properties"]:
+                field = step["properties"][name]
+                choices = field.get("items", field).get("enum", [])
+                instructions += name + " allowed values: " + json.dumps(choices, ensure_ascii=False) + ". "
+        selection = fields["execution_selection"]
+        instructions += (
+            "execution_selection belongs only to the primary plan; it contains "
+            + ", ".join(selection["required"]) + ". mode is one of "
+            + ", ".join(selection["properties"]["mode"]["enum"]) + "; reason is a string. "
+            "method_id is one allowed string when present; unknown cannot start a serial route. "
+            "alternative_plans is an array of at most " + str(fields["alternative_plans"]["maxItems"])
+            + " ordinary complete plans, each with version and steps covering all root obligations, "
+            "without execution_selection or nested alternatives. Use [] when none is executable. "
+            "No other object fields are allowed. Close every array and object, including the root object. "
+        )
+    else:
+        instructions += (
+            "Obey this exact response schema: " + json.dumps(schema, ensure_ascii=False)
+            + " Answer with a filled instance of this schema containing your actual values — "
+            "never echo the schema definition itself (a reply like "
+            '{"type": "object", "properties": ...} is a protocol failure). '
+            "Return the instance itself at every nesting level. Never wrap a reply or tool_request "
+            "in schema metadata objects using type, properties, required, or additionalProperties. "
+            "A non-null tool_request must directly contain tool (an allowed tool name), "
+            'arguments (an object of actual argument values), and scope ("finite_computation"). '
+            "Enum fields must take one of their listed values only. "
+            "Use only runtime allowed_tools. A tool_request is a proposed local computation, not evidence. "
+            "Never fabricate tool receipts. "
+        )
     if role == "problem_intake":
         instructions += (
             "If and only if a missing necessary condition prevents answering the requested question, "

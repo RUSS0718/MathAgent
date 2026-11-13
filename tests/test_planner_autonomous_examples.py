@@ -35,6 +35,8 @@ class AutonomousPlannerExamplesTest(unittest.TestCase):
                 schema = response_schema(current)
                 messages = InternModelPort()._messages(current, schema)
                 system = messages[0]["content"]
+                self.assertFalse(json.dumps(schema, ensure_ascii=False) in system,
+                                 "Autonomous checkpoint instructions must use the compact data contract")
                 examples = json.loads(system.split("Illustrative instances ", 1)[1].split(": ", 1)[1])
                 self.assertIn("required and additionalProperties are schema metadata, never output fields", system)
                 self.assertEqual({"serial", "population"},
@@ -56,3 +58,7 @@ class AutonomousPlannerExamplesTest(unittest.TestCase):
                         target = polluted if location == "root" else polluted["checkpoint"]
                         target.update(required=[], additionalProperties=False)
                         self.assertIsNotNone(schema_error(polluted, schema))
+                    misplaced = deepcopy(example)
+                    misplaced["status"] = misplaced["checkpoint"].pop("status")
+                    misplaced["gaps"] = misplaced["checkpoint"]["gaps"]
+                    self.assertIsNotNone(schema_error(misplaced, schema))
