@@ -81,6 +81,15 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
         self.assertIn("alongside checkpoint in checkpoint replies", planner["instruction"])
         self.assertIn("NEVER include execution_selection in alternative_plans", planner["instruction"])
         self.assertIn("normal complete plans without execution_selection", planner["instruction"])
+        self.assertIn("optional whole-proof directions as alternative complete plans", planner["instruction"])
+        self.assertIn("not mandatory proof steps after a shared answer", planner["instruction"])
+        self.assertIn("Each route must establish its own conclusions, equality conditions and completeness",
+                      planner["instruction"])
+        self.assertIn("Explore candidates are unverified", planner["instruction"])
+        self.assertIn("never freeze their maximum or equality claims as established", planner["instruction"])
+        self.assertIn("Choose one complete serial method when independent exploration adds no value",
+                      planner["instruction"])
+        self.assertIn("or its budget cost is not justified", planner["instruction"])
         solver = final["result"]["solver"]
         self.assertEqual("population", solver.get("execution_selection", {}).get("selected"))
         self.assertEqual(2, len(concurrent))

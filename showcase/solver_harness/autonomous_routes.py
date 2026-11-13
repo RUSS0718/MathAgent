@@ -49,7 +49,14 @@ def planner_request(harness, run, request):
         "Use goals, independent directions, available capacity and remaining root budget. "
         "For population, propose alternative_plans with distinct controlled methods/frontiers, "
         "each covering all root obligations. Renaming steps is not independence. "
-        "Choose serial when independent exploration adds no value. This selects initial execution; "
+        "When any one complete proof suffices for delivery, treat optional whole-proof directions as "
+        "alternative complete plans, not mandatory proof steps after a shared answer. "
+        "Each route must establish its own conclusions, equality conditions and completeness as applicable; "
+        "do not depend on another route's unverified result. "
+        "Explore candidates are unverified: check elementary substitutions and "
+        "never freeze their maximum or equality claims as established. "
+        "Choose one complete serial method when independent exploration adds no value "
+        "or its budget cost is not justified, and explain why. This selects initial execution; "
         "mid-run switching is unavailable. Never invent capacity or increase the root budget."
     )}
 
