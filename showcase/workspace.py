@@ -779,7 +779,7 @@ class WorkspaceStore:
         return payload
 
     def get_job_by_idempotency_key(
-        self, *, user_id: str, idempotency_key: str, request_digest: str
+        self, *, user_id: str, idempotency_key: str, request_digest: str | None = None
     ) -> dict[str, Any]:
         from .experiment_transport_projection import project_transport_identity
 
@@ -793,7 +793,7 @@ class WorkspaceStore:
         if len(rows) != 1:
             raise WorkspaceError("idempotency_lookup_ambiguous", status=409)
         row = rows[0]
-        if row["request_digest"] != request_digest:
+        if request_digest is not None and row["request_digest"] != request_digest:
             raise WorkspaceError("idempotency_conflict", status=409)
         with self._lock:
             state_row = self._connection.execute(
@@ -1537,7 +1537,7 @@ class WorkspaceService:
         return self.store.problem(job_id)
 
     def get_job_by_idempotency_key(
-        self, *, user_id: str, idempotency_key: str, request_digest: str
+        self, *, user_id: str, idempotency_key: str, request_digest: str | None = None
     ) -> dict[str, Any]:
         job = self.store.get_job_by_idempotency_key(
             user_id=user_id,

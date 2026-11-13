@@ -566,6 +566,23 @@ def create_app(
             status = 200 if existing else 202
             return jsonify({"success": True, "job_id": job["job_id"], "status": job["status"], "existing": existing}), status
 
+    @app.get("/api/agent/submissions/<submission_id>")
+    def submission_lookup(submission_id: str):
+        session = _require_auth(g.auth_session)
+        try:
+            if uuid.UUID(submission_id).version != 4:
+                raise ValueError
+        except (ValueError, AttributeError):
+            return _json_error("idempotency_key_invalid", 400)
+        try:
+            job = workspace_service.get_job_by_idempotency_key(
+                user_id=session.user_id, idempotency_key=submission_id,
+            )
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+        return jsonify({"success": True, "job_id": job["job_id"],
+                        "session_id": job["session_id"], "status": job["status"]})
+
     if app.config.get("SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED") is True:
         @app.get("/api/agent/jobs/by-idempotency")
         def get_job_by_idempotency_key() -> tuple[Response, int] | Response:
