@@ -1,6 +1,10 @@
 # #174 自主并发接线与未完成验收（2026-11-13）
 
-2026-11-14 当前状态：用户授权降低验收标准后，#174 改为**开发接线验收**；已有真实自主提案/准入与合法替代、受控公共入口/原生 HTTP 执行器和 UI/恢复检查及两轴审查，最终工程门禁待执行。普通入口真实自然并发并完整交付仍未通过，保留为 #183 的最终服务要求。下文失败记录保持原判，不能因开发退出调整升级为真实能力证据。
+2026-11-14 当前状态：用户授权降低验收标准后，#174 改为**开发接线验收**；已有真实自主提案/准入与合法替代、受控公共入口/原生 HTTP 执行器和 UI/恢复检查及两轴审查，最终工程门禁待通过。普通入口真实自然并发并完整交付仍未通过，保留为 #183 的最终服务要求。下文失败记录保持原判，不能因开发退出调整升级为真实能力证据。
+
+最终门禁 `artifacts/issue-174-resume/gates/gate-01/` 在冻结源码 `358eae793ad4d344e813ad0d29ba721648cd109e` 上失败：快速检查通过，完整测试 2048 项、4 failure、0 error、49 skip，`source_changed=false`；其余阶段未运行。4 项串行检查点用例的测试专用流式 profile 未登记普通 Planner 的自主路线 schema，实际请求被 `provider_profile_unverified` 正确拒绝。独立 4 项复现同样失败；只为两处测试请求补充 `autonomous_routes`，原消息形状、受控端点及严格 schema 指纹核对保持不变，4 项复查通过（33.840 秒）。证据在 `artifacts/issue-174-resume/gate-fix/{red,green}.json` 及 `transport-diagnostic.json`。原门禁不追改为成功；修正后的源码另行冻结验收。
+
+该测试修复的增量 Standards / Spec 两轴各 0 项具体问题，未重复测试；报告在 `artifacts/issue-174-resume/gate-fix/{standards,spec}.md`，原件在仓库外 `C:/Users/CQX/.codex/174-gate-fixture-{standards,spec}.md`。单文件 ruff 与 `git diff --check` 通过。
 
 最近补丁：产品提交 `230cd59fefa090d02a5ae1e1c1164d8d87c2f04d`，交付源码 `121b21ab7dcdb4c6e4e3de97e63772b6fc4266e0`，仅澄清独立完整路线和前向依赖修复反馈。原始非法回复 replay 仍被拒绝；7 项聚焦检查通过，双轴审查无剩余具体问题。证据 `artifacts/issue-174-resume/planner-live20-fix/`，仓库外 `174-planner-live20-{merge,standards,spec}.md`；未重跑全仓。
 
