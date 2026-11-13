@@ -77,6 +77,7 @@ class NativePopulationBudgetTest(StarJobFixture, unittest.TestCase):
     def run_checkpoint_routes(self, *, use_tool=False, continuation=False, long_checkpoint=False):
         """Exercise ordinary admission and real adapter serialization with offline HTTP."""
         entered = threading.Barrier(2)
+        reviewed = threading.Barrier(2)
         concurrent = []
         executed = []
         registry = ToolRegistry()
@@ -126,6 +127,9 @@ class NativePopulationBudgetTest(StarJobFixture, unittest.TestCase):
                         "tool": "polynomial_check", "arguments": {}, "scope": "finite_computation"})
                 return reply
             if role == "step_verifier":
+                if not continuation:
+                    # Both routes reach HTTP before either can qualify delivery.
+                    reviewed.wait(timeout=5)
                 self.assertEqual(request["report"]["argument"], request["checkpoint"]["argument"])
                 self.assertEqual(request["step"]["objective"], request["step_goal"])
                 if long_checkpoint:
