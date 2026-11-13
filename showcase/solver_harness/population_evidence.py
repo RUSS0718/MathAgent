@@ -191,6 +191,7 @@ def merge_route_evidence(current_state, route, action, branch_snapshot):
         if item.get("evidence_id") not in existing_obligations
         and item.get("source") in event_steps
         and _valid_obligation_evidence(branch, item)
+        and obligation_claims_eligible(branch, item, current_state)
     ]
     if not accepted and not obligation_additions:
         return empty, _audit(False, "no_verified_incremental_evidence")
@@ -355,6 +356,21 @@ def _valid_result(state, result, current, route=None, action=None):
     )
 
 
+def obligation_claims_eligible(state, evidence, graph_state=None):
+    """Exclude obligation source claims contradicted by the current proof graph."""
+    claims = state.get("steps", {}).get(evidence.get("source"), {}).get("report", {}).get("claims", [])
+    indexes = evidence.get("claim_indexes", [])
+    if not indexes or any(type(index) is not int or not 0 <= index < len(claims)
+                          for index in indexes):
+        return False
+    current = _current_propositions(state if graph_state is None else graph_state)
+    for index in indexes:
+        prop = current.get(_proposition_for_result(state, claims[index]), {})
+        if prop.get("conflict") is True or prop.get("status") == "refuted":
+            return False
+    return True
+
+
 def _valid_obligation_evidence(state, evidence):
     import hashlib
     import json
@@ -364,6 +380,7 @@ def _valid_obligation_evidence(state, evidence):
         or evidence.get("invalidated") is True
         or evidence.get("run_id") != state.get("run_id")
         or evidence.get("specification_version") != state.get("specification_version")
+        or not obligation_claims_eligible(state, evidence)
     ):
         return False
     step_id = evidence.get("source")

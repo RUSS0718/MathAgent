@@ -8,6 +8,38 @@ from showcase.solver_harness.population_delivery import delivery_allowed
 
 
 class PopulationDeliveryTests(unittest.TestCase):
+    def test_whole_review_accept_does_not_discharge_known_graph_conflict(self):
+        from showcase.solver_harness.proof_graph import initial_proof_graph, proposition_id
+
+        connection = sqlite3.connect(":memory:")
+        self.addCleanup(connection.close)
+        connection.execute("CREATE TABLE run_budgets(run_id TEXT,ledger_json TEXT)")
+        connection.execute("INSERT INTO run_budgets VALUES(?,?)",
+                           ("run", json.dumps({"limits": {}, "actions": []})))
+        graph = initial_proof_graph()
+        graph["snapshots"][0]["propositions"]["known"] = {
+            "status": "supported", "conflict": True,
+        }
+        state = {"run_id": "run", "proof_graph": graph,
+                 "whole_solution_reviews": [{"verdict": "ACCEPT"}]}
+        self.assertEqual((False, "population_unresolved_proof_conflict"),
+                         delivery_allowed(connection, state))
+        graph["current_version"] = 1
+        graph["snapshots"].append({"graph_version": 1, "propositions": {
+            "known": {"status": "supported", "conflict": False},
+        }})
+        self.assertEqual((True, None), delivery_allowed(connection, state))
+        state.update(problem_hash="problem", specification_version=1,
+                     steps={"step": {"report": {"claims": [{"statement": "Claim"}]}}},
+                     obligation_evidence_ledger=[{"source": "step", "claim_indexes": [0],
+                                                 "valid": True}])
+        prop_id = proposition_id(state, "Claim", "problem")
+        graph["snapshots"][-1]["propositions"][prop_id] = {
+            "status": "refuted", "conflict": False,
+        }
+        self.assertEqual((False, "population_unresolved_proof_conflict"),
+                         delivery_allowed(connection, state))
+
     def test_independent_answer_keeps_unrelated_unknown_but_rejects_missing_hold(self):
         connection = sqlite3.connect(":memory:")
         self.addCleanup(connection.close)

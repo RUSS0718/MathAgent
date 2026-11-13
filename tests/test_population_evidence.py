@@ -154,6 +154,49 @@ def _base_state():
 
 
 class PopulationEvidenceTests(unittest.TestCase):
+    def test_obligation_coverage_rejects_claims_conflicted_in_branch_or_parent(self):
+        from showcase.solver_harness.obligation_evidence import collect_obligation_evidence
+        from tests.test_star_population_runtime import ROOT_ID, SPEC
+
+        parent = _base_state()
+        parent["problem_spec"] = {**copy.deepcopy(SPEC), "specification_version": 2}
+        branch = copy.deepcopy(parent)
+        record = _accepted_record(branch, "route-1:step", "route-result", "route", "Route lemma")
+        prop_id = _graph_with_result(branch, record)
+        declaration = {"obligation_id": ROOT_ID, "evidence_category": "format_check",
+                       "claim_indexes": [0]}
+        branch["calls"]["route-verifier"]["response"]["obligation_evidence"] = [declaration]
+        evidence, rejected = collect_obligation_evidence(
+            parent["problem_spec"], [declaration], report=branch["steps"][record["source"]]["report"],
+            run_id=RUN_ID, review_call_id="route-verifier", state_revision=14,
+            work_unit_id=record["source"], work_unit_obligation_ids=[ROOT_ID],
+            plan_version=PLAN_VERSION, attempt_index=0,
+        )
+        self.assertEqual([], rejected)
+        branch["obligation_evidence_ledger"] = evidence
+        route = {"route_id": "route-1", "plan_version": PLAN_VERSION, "owner": dict(OWNER)}
+        action = {"action_id": "action-1", "route_id": "route-1", "status": "completed",
+                  "owner": dict(OWNER), "dependencies": []}
+        snapshot = {"run_id": RUN_ID, "state": branch, "events": [{
+            "event_id": "accepted", "type": "step_reviewed", "verdict": "ACCEPT",
+            "step_id": record["source"],
+        }]}
+        updates, audit = merge_route_evidence(parent, route, action, snapshot)
+        self.assertTrue(audit["accepted"])
+        self.assertEqual("satisfied", updates["obligation_ledger"][0]["status"])
+        for origin in ("branch", "parent"):
+            for status, conflict in (("supported", True), ("refuted", False)):
+                with self.subTest(origin=origin, status=status, conflict=conflict):
+                    current, candidate = copy.deepcopy(parent), copy.deepcopy(snapshot)
+                    target = candidate["state"] if origin == "branch" else current
+                    target["proof_graph"]["snapshots"][-1]["propositions"][prop_id] = {
+                        "id": prop_id, "statement": "Route lemma", "scope": "problem",
+                        "status": status, "conflict": conflict,
+                    }
+                    updates, audit = merge_route_evidence(current, route, action, candidate)
+                    self.assertEqual({}, updates)
+                    self.assertFalse(audit["accepted"])
+
     def test_dependencies_bind_only_adopted_propositions_not_global_graph_version(self):
         state = _base_state()
         dependency = capture_dependencies(

@@ -5,6 +5,14 @@ import json
 
 def delivery_allowed(connection, state):
     """Check independent proof sources without requiring unrelated requests to settle."""
+    from .population_evidence import _current_propositions, obligation_claims_eligible
+
+    if any(item.get("conflict") is True for item in _current_propositions(state).values()):
+        return False, "population_unresolved_proof_conflict"
+    if any(not obligation_claims_eligible(state, item)
+           for item in state.get("obligation_evidence_ledger", [])
+           if item.get("invalidated") is not True and item.get("valid") is not False):
+        return False, "population_unresolved_proof_conflict"
     row = connection.execute(
         "SELECT ledger_json FROM run_budgets WHERE run_id=?", (state["run_id"],)
     ).fetchone()
