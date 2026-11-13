@@ -280,22 +280,44 @@ class FaithfulProtocolHandoffTest(StarJobFixture, unittest.TestCase):
 
     def test_binding_feedback_identifies_objective_and_its_self_owned_prerequisite(self):
         spec = deepcopy(SPEC)
+        spec["root_obligations"].append({"obligation_id": "root:explain", "obligation_type": "universal",
+            "statement": "Explain the derived value", "prerequisite_ids": ["duplicate"]})
         spec["auxiliary_goals"] = [{"goal_id": "duplicate", "description": "Use the established value",
                                     "dependencies": ["root:value"]}]
         bad = {"version": 1, "steps": [{"step_id": "S1", "title": "Add", "objective": "Compute 1+1",
-                "obligation_ids": ["root:value"], "auxiliary_goal_ids": ["duplicate"], "method_id": "direct"}]}
+                "obligation_ids": ["root:value"], "auxiliary_goal_ids": ["duplicate"], "method_id": "direct"},
+            {"step_id": "S3", "title": "Explain", "objective": "Explain the value", "depends_on": ["S1"],
+             "obligation_ids": ["root:explain"], "auxiliary_goal_ids": [], "method_id": "direct"}]}
         corrected = deepcopy(bad)
         corrected["steps"][0]["auxiliary_goal_ids"] = []
+        corrected["steps"][1]["depends_on"] = ["S2"]
+        corrected["steps"].insert(1, {"step_id": "S2", "title": "Use", "objective": "Use the established value",
+            "depends_on": ["S1"], "obligation_ids": [], "auxiliary_goal_ids": ["duplicate"], "method_id": "direct"})
         self.open_faithful([spec, {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []},
             {"checkpoint": {**planner_checkpoint("FINAL"), "gaps": []}, "plan": bad},
-            {"checkpoint": {**planner_checkpoint("FINAL"), "gaps": []}, "plan": corrected}], calls=4)
-        self.terminal(self.submit())
+            {"checkpoint": {**planner_checkpoint("FINAL"), "gaps": []}, "plan": corrected},
+            {"checkpoint": {**reasoner_checkpoint("FINAL"), "objective": "Compute 1+1"}}], calls=5)
+        final = self.terminal(self.submit())
         planners = [request for request in self.outbound if request["role"] == "planner"]
         self.assertEqual(2, len(planners))
         feedback = planners[1]["feedback"]
+        self.assertNotIn("root-only repair", feedback["instruction"])
+        self.assertNotIn("auxiliary_goal_ids=[]", feedback["instruction"])
+        self.assertIn("after every owner of prerequisite_id", feedback["instruction"])
         self.assertEqual(bad, feedback["invalid_plan"])
         self.assertEqual([{"step_id": "S1", "objective_id": "duplicate", "prerequisite_id": "root:value",
                            "owner_step_id": "S1", "kind": "self_dependency"}], feedback.get("binding_errors"))
+        planner_systems = [messages[0]["content"] for request, messages in
+                           zip(self.outbound, self.outbound_messages) if request["role"] == "planner"]
+        for system in planner_systems:
+            self.assertIn("Auxiliary goals outside the frozen root prerequisite closure are optional; "
+                          "keep required auxiliary owners", system)
+        reasoners = [request for request in self.outbound if request["role"] == "reasoner"]
+        self.assertEqual(1, len(reasoners))
+        self.assertEqual("S1", reasoners[0]["step"]["step_id"])
+        self.assertNotEqual("invalid_problem_spec_work_units", final["result"]["solver"]["result_reason"])
+        self.assertEqual(5, final["result"]["budget"]["logical_calls"])
+        self.assertEqual(5, len(self.outbound))
 
     def test_reasoner_empty_yield_is_repaired_before_serial_execution_continues(self):
         spec = deepcopy(SPEC)
