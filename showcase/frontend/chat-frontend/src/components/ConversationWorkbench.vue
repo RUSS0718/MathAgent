@@ -5,6 +5,7 @@ import type { Collaboration } from '../api/workbench.schemas'
 import { projectWorkbench, roles } from '../runtime/jobs/workbench'
 import AgentConstellation from './AgentConstellation.vue'
 import AutonomousRouteStatus from './AutonomousRouteStatus.vue'
+import SerialInterventionStatus from './SerialInterventionStatus.vue'
 
 const props = defineProps<{ events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null }>()
 const view = ref('conversation')
@@ -98,6 +99,7 @@ onUnmounted(pause)
       </div>
       <aside class="workbench-plan" aria-label="Planner 计划">
         <AutonomousRouteStatus :execution-switch="state.progress.execution_switch" :selection="state.progress.execution_selection" :population="state.progress.population" />
+        <SerialInterventionStatus :value="state.progress.serial_intervention" />
         <h3>Planner <small>v{{ state.progress.plan_version ?? '—' }} · 尝试 {{ state.progress.attempt_index ?? '—' }}</small></h3>
         <p v-if="!state.steps.length">计划尚未生成</p>
         <p v-else class="interjection-note">目标来自已保存的计划；执行状态来自实际核验事件。</p>

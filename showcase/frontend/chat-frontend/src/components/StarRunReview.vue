@@ -6,6 +6,7 @@ import UiButton from './ui/UiButton.vue'
 import StatusBadge from './ui/StatusBadge.vue'
 import ProofGraphView from './ProofGraphView.vue'
 import AutonomousRouteStatus from './AutonomousRouteStatus.vue'
+import SerialInterventionStatus from './SerialInterventionStatus.vue'
 const props = defineProps<{ report: JobReport; jobId: string }>()
 const solver = computed(() => props.report.solver?.solver)
 const population = computed(() => solver.value?.population)
@@ -40,6 +41,7 @@ async function loadReplay(): Promise<void> {
       <dl class="data-list"><template v-for="field in ['run_id', 'state_revision', 'phase', 'status']" :key="field"><dt>{{ field }}</dt><dd>{{ display(solver?.[field]) }}</dd></template></dl>
       <p v-if="report.solver.missing_capabilities?.length">模式限制：{{ report.solver.missing_capabilities.join('、') }}</p>
       <AutonomousRouteStatus :execution-switch="solver?.execution_switch" :selection="solver?.execution_selection" :population="population" />
+      <SerialInterventionStatus :value="solver?.serial_intervention" />
       <section v-if="population" class="evidence-section" aria-label="并发路线执行">
         <h3>并发路线执行</h3>
         <dl class="data-list">
