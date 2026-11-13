@@ -1,6 +1,16 @@
-# #174 自主并发接线与未完成验收（2026-11-13）
+# #174 自主并发开发接线验收（2026-11-14）
 
-2026-11-14 当前状态：用户授权降低验收标准后，#174 改为**开发接线验收**；已有真实自主提案/准入与合法替代、受控公共入口/原生 HTTP 执行器和 UI/恢复检查及两轴审查，最终工程门禁待通过。普通入口真实自然并发并完整交付仍未通过，保留为 #183 的最终服务要求。下文失败记录保持原判，不能因开发退出调整升级为真实能力证据。
+2026-11-14 当前状态：#174 达到用户授权调整后的**开发接线验收**退出条件；真实自主提案/准入与合法替代、受控公共入口/原生 HTTP 执行器、UI/恢复检查、两轴审查及最终工程门禁完成。普通入口真实自然并发并完整交付仍未通过，保留为 #183 的最终服务要求，#168 完整服务仍未完成。下文失败记录保持原判，不能因开发退出调整升级为真实能力证据。
+
+## 最终工程退出
+
+冻结源码 `b8c4ec854a531925ebfedc9ded774c9f16545661`，集成分支 `faithful-autonomous-population`。命令 `uv run python scripts/run_final_gate.py --root . --output-dir artifacts/issue-174-resume/gates --run-id gate-02`；六阶段全部通过，耗时 1828.390 秒，`source_changed=false`。完整测试 2048 项、0 failure、0 error、49 skip，跳过项不计通过；发布检查 27 项通过，前端安装、审计、检查及构建通过，审计 0 vulnerabilities，既有构建 chunk 大小提示保留。源码 manifest 前后 hash 均为 `ff2ceb222834804bfbf084ae269d1c2d7b3428ff4fae2b791c8e66fd0170add9`。快速检查确认 baseline 字节及官方入口边界；没有重新评分或数学能力提升结论。
+
+证据为 `artifacts/issue-174-resume/gates/gate-02/{status,source-manifest}.json`、`repository-check/{tests.json,diagnostics.log}` 及六阶段日志。最终门禁后仅更新验收、索引及交接文档，不重复产品测试；门禁源码与最终纯文档交接 SHA 分开，交接 SHA 见 #174 关闭记录。开发退出合同见[任务合同](../engineering/faithful-service-174-contract.md)，下一票与循环规则见[当前交接](../engineering/unattended-ticket-handoff.md)。
+
+live21 的 7 HTTP 和 2 工具已物理结算成功，无在途请求；原 Reasoner unknown 数学状态保留且未重发，不升级为答案成功。live19–live21 所属服务均已按原 PID/创建时间核对后停止。本轮 gate-01/gate-02 临时定时检查已自删除，没有待转移的本票运行或监控。两个实现工作树已清理，140 份产物复制后逐项核对 SHA256，归档清单在 `artifacts/issue-174-resume/worktree-archives/manifest.json`；主工作树运行证据原样保留。`tests/test.md` 未读取、修改或提交。继续使用当前选择的同一模型；无法独立确认新 session 的具体型号继承，不猜测。
+
+## 最终门禁失败与定点修复
 
 最终门禁 `artifacts/issue-174-resume/gates/gate-01/` 在冻结源码 `358eae793ad4d344e813ad0d29ba721648cd109e` 上失败：快速检查通过，完整测试 2048 项、4 failure、0 error、49 skip，`source_changed=false`；其余阶段未运行。4 项串行检查点用例的测试专用流式 profile 未登记普通 Planner 的自主路线 schema，实际请求被 `provider_profile_unverified` 正确拒绝。独立 4 项复现同样失败；只为两处测试请求补充 `autonomous_routes`，原消息形状、受控端点及严格 schema 指纹核对保持不变，4 项复查通过（33.840 秒）。证据在 `artifacts/issue-174-resume/gate-fix/{red,green}.json` 及 `transport-diagnostic.json`。原门禁不追改为成功；修正后的源码另行冻结验收。
 
@@ -10,7 +20,7 @@
 
 live21（同题、同配置验证上述提示修正）Job `run_0fdeeb9c4ca3b4622ad968c71878a288`，源码 `121b21a`、产品 `230cd59`：Explore 协议失败后继续规划，最终合法选择串行；Reasoner 超时，Job `failed/star_needs_review`，Solver `STEP_EXECUTE/interrupted`。7 次 HTTP，原 unknown 不重发；没有完整答案。原驱动 `natural_population_not_selected_no_retry` 失败不变。证据在 `artifacts/issue-174-resume/live21-preparation/`。不再为取得单次自然并发成功重复抽样。
 
-状态：**实现已提交，真实自然并发验收未完成，未达到工程退出**。集成分支 `faithful-autonomous-population`，最近真实运行源码 `77696377f9a1468fa8dbe8872ddddb5381830893`。live18 已自然选择并准入两条路线，但请求在 HTTP 派发前被预算检查拒绝；不能作为真实模型并发或合格交付的通过证据。#174 保持开放，#168 完整服务仍未交付；进行中热切换属于 #175。下方首次交接材料适用于 `c14ff82`，不能替代本节接续结果。
+历史快照（live18 时点，尚未调整开发退出口径）：**实现已提交，真实自然并发验收未完成，未达到工程退出**。集成分支 `faithful-autonomous-population`，当时最近真实运行源码 `77696377f9a1468fa8dbe8872ddddb5381830893`。live18 已自然选择并准入两条路线，但请求在 HTTP 派发前被预算检查拒绝；不能作为真实模型并发或合格交付的通过证据。当时 #174 保持开放；当前开发退出以上方最终记录为准，#168 完整服务仍未交付，进行中热切换属于 #175。下方首次交接材料适用于 `c14ff82`，不能替代本节接续结果。
 
 ## 2026-11-14 接续修复
 
@@ -22,7 +32,7 @@ live19 使用 live18 的普通输入、配置和独立保留参考，源码 `0fb
 
 所属服务在原 PID/创建时间及物理结算核对后停止；验收调整见合同的“2026-11-14 代表场景调整”。live20 采用骨牌计数较小代表题，独立保留参考不进入 provider 输入，源码 `72930e531124d65c3e538e99950030e9ee7d7aca`。Job `run_a515825f32f063d34b106990204f7ce3` 的真实 Planner 提出 Population，但主计划重复分配计数义务，输出步骤引用尚在后面的另一计数步骤，且要求两个方向先交叉核对。一次修复仍返回相同非法绑定，最终 `invalid_problem_spec_work_units`；4 HTTP 成功、没有路线执行，不算真实并发通过。原始回复、ProblemSpec 和反馈在 `live20-preparation/planner-diagnostic.json`，终态与物理结算封存在 `parent-closure-seal.json`；所属服务已按 PID/创建时间核对后停止。
 
-真实自然并发、合格答案、UI 与只读刷新及最终工程门禁仍未通过。用户授权的无人值守接续规则见 [接续合同](../engineering/unattended-ticket-loop.md)。
+上述运行时点，真实自然并发、合格答案、UI 与只读刷新及最终工程门禁仍未通过。当前开发退出以上方最终记录为准；真实服务缺口仍未通过。用户授权的无人值守接续规则见 [接续合同](../engineering/unattended-ticket-loop.md)。
 
 ## 接续修正与真实结果（2026-11-13，截至北京时间 23:53）
 
@@ -93,7 +103,7 @@ live05 例如把 21² 至 30² 的和写成 6485，实际为 6585；把 `169175�
 
 证据位于 `artifacts/issue-174-work/live-01-population/`，以及 `live02-preparation/live-02-matrices/` 至 `live05-preparation/live-05-sums/`：保留普通输入截图、Job/Run、Attempt、配置/源码身份、公共结果和持久只读快照。每轮验收器因缺失路线选择正确判失败，没有把求解 HTTP 成功计为并发成功。未达到刷新验收步骤的运行不声称刷新通过。自然并发、实际路线 UI、并发答案交付及恢复仍为 **not_run / 未覆盖**。
 
-## 审查、门禁与交接
+## 首次交接的审查、门禁与清理（历史快照）
 
 仓库外审查原件：`C:/Users/CQX/.codex/174-standards.md`、`174-spec.md`，修复定点复查：`174-standards-final.md`、`174-spec-final.md`。最终源码两轴未发现剩余实现问题；静态审查不替代真实验收。协议诊断见同目录 `174-live02-protocol.md`、`174-live03-protocol.md`，未导出完整 prompt 或隐藏推理。
 

@@ -1,6 +1,6 @@
 # MathAgent 文档索引
 
-- [#174 自主并发开发接线验收](evals/faithful-service-174-20261113.md)：普通入口、根预算、冲突守卫及路线 UI 已接线；最新产品修复 `230cd59`。已按授权调整为开发接线验收，真实自然并发完整交付、实际路线 UI 与刷新正向闭环留待 #183。冻结门禁 gate-01 的 2048 项中 4 项因测试 profile 未登记自主路线 schema 失败，最小测试修复后 4 项通过，最终门禁待通过；unknown 不重发。后续 session 依[无人值守接续合同](engineering/unattended-ticket-loop.md)完成当前票再交接下一票；#174 及 #168 保持开放。
+- [#174 自主并发开发接线验收](evals/faithful-service-174-20261113.md)：达到用户授权调整后的开发退出条件。冻结源码 `b8c4ec8` 的 gate-02 六阶段通过（2048 项、0 failure/error、49 skip、源码无漂移）；原 gate-01 的 4 项测试 profile 失败及最小修复保留。真实自然并发完整交付、实际路线 UI 与刷新正向闭环留待 #183，#168 完整服务仍未完成。后续按[无人值守接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)由新 session 处理 #175；unknown 不重发。
 
 - [#173 关联改题验收](evals/faithful-service-173-20261113.md)：B3 改题停止旧派发并创建关联新任务；真实新题独立交付 5，旧迟到结算隔离、刷新零新增调用，最终源码只读恢复通过。双轴修复复查无剩余问题；冻结 `9978157` 门禁 6/6 通过（2020 项、49 skip、源码无漂移）。仅交付本票，#168 完整服务仍未完成。
 
