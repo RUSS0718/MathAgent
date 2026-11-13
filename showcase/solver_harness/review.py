@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
@@ -169,6 +170,15 @@ def review_solution(
     )
     if unfulfilled:
         reply = {"verdict": "REJECT", "reason": "verifier_tool_request_unfulfilled"}
+    specification = state.get("problem_spec") or {}
+    # A scalar can be a result or witness, but cannot supply a required proof.
+    if (isinstance(reply, Mapping) and reply.get("verdict") == "ACCEPT"
+        and any(root["obligation_type"] in {"universal", "completeness", "extremum_bound", "filtering"}
+                for root in specification.get("root_obligations", []))
+        and re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?(?:/[+-]?\d+)?",
+                         candidate.strip())):
+        reply = {**reply, "verdict": "REJECT",
+                 "reason": "scalar_candidate_cannot_discharge_proof_obligations"}
     accepted = (
         isinstance(reply, Mapping) and reply.get("verdict") == "ACCEPT" and bool(candidate.strip())
         and not unfulfilled
