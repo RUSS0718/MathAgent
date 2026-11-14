@@ -238,6 +238,11 @@ def dispatch(harness, run, operation, request, session_dispatch):
             }
         _save(harness, run, record)
         prepared = harness.prepare_request(run, prepared)
+        memory = prepared.get("population_memory_advisory", {})
+        record["population_memory_record_ids"] = [
+            item["record_id"] for item in memory.get("observations", [])
+            if isinstance(item, Mapping) and isinstance(item.get("record_id"), str)
+        ]
         context_policy = prepared.pop("_context_policy", None)
         context_source = prepared.pop("_context_pack", None)
         if isinstance(context_policy, Mapping) and context_policy.get("enabled") is True:
@@ -520,6 +525,18 @@ def dispatch(harness, run, operation, request, session_dispatch):
             partial_text="".join(partial),
             usage=response.get("usage"),
         )
+        if record["population_memory_record_ids"]:
+            record["memory_decisions"] = [
+                {key: item[key] for key in ("record_id", "decision", "reason")}
+                for item in response.get("memory_decisions", [])
+                if isinstance(item, Mapping)
+                and item.get("record_id") in record["population_memory_record_ids"]
+                and item.get("decision") in {"adopt", "reject"}
+                and isinstance(item.get("reason"), str) and 0 < len(item["reason"]) <= 500
+            ][:25]
+            record["memory_decision_status"] = (
+                "reported" if record["memory_decisions"] else "not_reported"
+            )
         _save(harness, run, record)
         return response
 

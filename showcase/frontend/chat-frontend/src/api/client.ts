@@ -86,6 +86,16 @@ export const api = {
     )
   },
   goalCache: (sessionId: string) => requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/goal-cache`, {}, goalCacheResponseSchema),
+  importPopulationMemory: (sessionId: string, sourceSessionId: string, recordId: string) => requestJson(
+    `/api/sessions/${encodeURIComponent(sessionId)}/memory/population/${encodeURIComponent(sessionId)}/imports`,
+    json({ source_session_id: sourceSessionId, source_kind: 'population', source_scope_id: sourceSessionId, record_id: recordId }),
+    z.object({ success: z.literal(true), record_id: z.string(), authority: z.literal('advisory') }),
+  ),
+  clearPopulationMemory: (sessionId: string) => requestJson(
+    `/api/sessions/${encodeURIComponent(sessionId)}/memory/population/${encodeURIComponent(sessionId)}`,
+    { method: 'DELETE' },
+    z.object({ success: z.literal(true), cleared: z.literal(true) }),
+  ),
   setGoalCacheEnabled: (sessionId: string, enabled: boolean) => requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/goal-cache`, { ...json({ enabled }), method: 'PUT' }, z.unknown()),
   clearGoalCache: (sessionId: string) => requestJson(`/api/sessions/${encodeURIComponent(sessionId)}/goal-cache`, { method: 'DELETE' }, z.unknown()),
   interventions: (jobId: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/interventions`, {}, interventionsResponseSchema),

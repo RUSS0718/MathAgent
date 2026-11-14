@@ -9,8 +9,34 @@ from pathlib import Path
 
 from flask import g, jsonify, request
 
-from .run_budget import _summary
+from .redaction import redact_text
+from .run_budget import _summary, public_solver_call_id
 from .workspace import WorkspaceError
+
+
+def _memory_usage(run_id, calls):
+    aliases = {call_id: public_solver_call_id(run_id, call_id) for call_id in calls}
+    usage = []
+    for call_id, call in calls.items():
+        record_ids = list(dict.fromkeys(
+            item for item in call.get("population_memory_record_ids", [])
+            if isinstance(item, str)
+        ))[:25]
+        decisions = []
+        for item in call.get("memory_decisions", [])[:25]:
+            if (not isinstance(item, dict) or item.get("record_id") not in record_ids
+                    or item.get("decision") not in {"adopt", "reject"}
+                    or not isinstance(item.get("reason"), str) or not item["reason"].strip()):
+                continue
+            reason = redact_text(item["reason"])
+            for private_id, alias in aliases.items():
+                reason = reason.replace(private_id, alias)
+            decisions.append({"record_id": item["record_id"], "decision": item["decision"],
+                              "reason": reason[:500]})
+        usage.append({"call_id": aliases[call_id], "record_ids": record_ids,
+                      "decision_status": "reported" if decisions else "not_reported",
+                      "decisions": decisions})
+    return usage
 
 
 def project_run_memory(run_id, revision, state, budget=None):
@@ -39,6 +65,7 @@ def project_run_memory(run_id, revision, state, budget=None):
         "graph_version": (state.get("proof_graph") or {}).get("current_version"),
         "budget": budget,
         "valid_evidence": evidence,
+        "memory_usage": _memory_usage(run_id, state.get("calls", {})),
         "invalidated_count": sum(
             isinstance(item, dict)
             and (

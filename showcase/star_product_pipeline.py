@@ -313,6 +313,7 @@ class StarProductPipeline:
                                tool_port=RegistryToolPort(self.registry) if self.registry else None,
                                event_observer=observe) as harness:
                 harness_ref["harness"] = harness
+                harness._population_memory_enabled = self.population_memory_enabled
                 existing = harness._state_store.get_run(run_id)
                 harness._product_recovery = existing is not None
                 if existing is not None:

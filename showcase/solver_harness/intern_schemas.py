@@ -243,6 +243,23 @@ SCHEMAS["planner_checkpoint"] = obj(
 
 
 def response_schema(request):
+    schema = _response_schema(request)
+    memory = request.get("population_memory_advisory", {})
+    ids = [item["record_id"] for item in memory.get("observations", [])
+           if isinstance(item, dict) and isinstance(item.get("record_id"), str)]
+    if ids and memory.get("authority") == "advisory_only":
+        schema = deepcopy(schema)
+        schema["properties"]["memory_decisions"] = {
+            "type": "array", "maxItems": 25,
+            "items": obj({"record_id": {"type": "string", "enum": ids},
+                          "decision": {"type": "string", "enum": ["adopt", "reject"]},
+                          "reason": {"type": "string", "minLength": 1, "maxLength": 500,
+                                     "pattern": r"[\s\S]{1,500}"}}),
+        }
+    return schema
+
+
+def _response_schema(request):
     if request.get('serial_intervention_decision') is True and request.get('role') == 'meta':
         from .progress import METHOD_IDS
         return obj({'decision': {'enum': ['keep', 'intervene']}, 'reason': TEXT,

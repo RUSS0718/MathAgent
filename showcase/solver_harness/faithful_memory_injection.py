@@ -5,10 +5,60 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Mapping
+from copy import deepcopy
 
 _SCHEMA = "population-memory-injection-v1"
 _MAX_OBSERVATIONS = 25
 _MAX_CONTEXT_BYTES = 16_384
+
+
+def refresh_memory_request(connection, run, request, *, enabled):
+    """Rebuild guidance from current consent; never replay memory-bearing dialogue."""
+    memory = load_population_memory(
+        connection, run_id=run["run_id"], problem_spec=run["state"].get("problem_spec")
+    ) if enabled else _envelope(None)
+    latest = {**run, "state": {**run["state"]}}
+    latest["state"].pop("population_memory_advisory", None)
+    calls = run["state"].get("calls", {})
+
+    def contains_memory(value):
+        if isinstance(value, Mapping):
+            return ("population_memory_advisory" in value
+                    or bool(value.get("population_memory_record_ids"))
+                    or any(contains_memory(item) for item in value.values()))
+        return isinstance(value, list) and any(contains_memory(item) for item in value)
+
+    def clean(value):
+        if isinstance(value, Mapping):
+            return {key: clean(item) for key, item in value.items()
+                    if key not in {"population_memory_advisory", "population_memory_record_ids"}}
+        if isinstance(value, list):
+            return [clean(item) for item in value]
+        return deepcopy(value)
+
+    if (not memory["observations"]
+            and "population_memory_advisory" not in run["state"]
+            and not contains_memory(request)
+            and not any(call.get("population_memory_cost") for call in calls.values())):
+        return run, request
+
+    prepared = clean(request)
+    history = request.get("session_history")
+    if isinstance(history, list):
+        prepared["session_history"] = [
+            clean(exchange) for exchange in history
+            if not contains_memory(exchange)
+            and not calls.get(exchange.get("request", {}).get("call_id"), {}).get(
+                "population_memory_cost")
+        ]
+    # These are derived from old dialogue; rebuild them after filtering history.
+    for key in ("session_history_summary", "_context_pack", "context_pack", "_context_policy",
+                "prompt_layers", "role_context", "prompt_fingerprint", "prompt_layers_fingerprint"):
+        prepared.pop(key, None)
+    if memory["observations"]:
+        latest["state"]["population_memory_advisory"] = memory
+        prepared["population_memory_advisory"] = deepcopy(memory)
+    return latest, prepared
 
 
 def has_population_memory(request: Mapping) -> bool:
@@ -135,9 +185,15 @@ def _import_source(connection, provenance, observation, owner_id):
         (source_owner, source_session, scope_kind, scope_id),
     ).fetchone()
     source_payload = _load_json(payload_json)
+    source_consent = connection.execute(
+        "SELECT enabled FROM faithful_memory_injection_controls "
+        "WHERE owner_id=? AND workspace_id=? AND scope_kind='population' AND scope_id=?",
+        (source_owner, source_session, source_session),
+    ).fetchone()
     original = provenance.get("original_provenance")
     if (
         source_session_owner is None
+        or (source_consent is not None and not bool(source_consent[0]))
         or (source_scope_control is not None and not bool(source_scope_control[0]))
         or not isinstance(source_payload, dict)
         or not isinstance(original, dict)

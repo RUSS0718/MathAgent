@@ -14,6 +14,13 @@ test('opt-in memory review shows the persisted evidence level and advisory histo
       phase: 'TERMINAL', status: 'completed', plan_version: 2, graph_version: 3,
       budget: { http_attempts: 1 }, invalidated_count: 0,
       valid_evidence: [{ result_id: 'evidence-1', evidence_level: 'llm_reviewed', category: 'Lemma' }],
+      memory_usage: [
+        { call_id: 'call-1', record_ids: ['memory-a', 'memory-b'], decision_status: 'reported', decisions: [
+          { record_id: 'memory-a', decision: 'adopt', reason: '适用当前问题' },
+          { record_id: 'memory-b', decision: 'reject', reason: '条件不适用' },
+        ] },
+        { call_id: 'call-2', record_ids: ['memory-c'], decision_status: 'not_reported', decisions: [] },
+      ],
     },
   } }))
   await page.route('**/api/sessions/session-demo/population-memory', route => route.fulfill({ json: {
@@ -31,6 +38,14 @@ test('opt-in memory review shows the persisted evidence level and advisory histo
   await expect(memory).toContainText('run-older')
   await expect(memory).toContainText('未知观察数')
   await expect(memory).toContainText('不构成数学证明')
+  const usage = memory.getByRole('region', { name: '经验记忆使用与决策' })
+  await expect(usage).toContainText('检索或注入不表示采用')
+  await expect(usage).toContainText('memory-a、memory-b')
+  await expect(usage).toContainText('memory-a · 明确采用（adopt） · 原因：适用当前问题')
+  await expect(usage).toContainText('memory-b · 明确拒绝（reject） · 原因：条件不适用')
+  await expect(usage).toContainText('memory-c')
+  await expect(usage).toContainText('未报告采用或拒绝（not_reported）')
+  await expect(usage.getByRole('listitem')).toHaveCount(2)
   await page.setViewportSize({ width: 390, height: 844 })
   const widths = await memory.evaluate(element => ({
     panel: element.getBoundingClientRect().width,

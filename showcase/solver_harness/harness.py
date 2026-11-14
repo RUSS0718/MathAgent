@@ -578,6 +578,12 @@ class SolverHarness:
         from .tool_precheck import allowed_tool_ids
 
         latest = run if use_snapshot else self.get_run(run["run_id"])
+        from .faithful_memory_injection import refresh_memory_request
+
+        latest, request = refresh_memory_request(
+            self._state_store._connection, latest, request,
+            enabled=getattr(self, "_population_memory_enabled", False),
+        )
         from . import handoff
 
         if handoff.enabled(self._config):

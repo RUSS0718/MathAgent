@@ -175,6 +175,7 @@ def _work(parent, database_path, run_id, rid, aid, problem):
                        meta_port=parent._meta_port, tool_port=parent._tool_port,
                        event_observer=parent._event_observer) as worker:
         worker._population_owner = deepcopy(parent._population_owner)
+        worker._population_memory_enabled = getattr(parent, "_population_memory_enabled", False)
         local = RouteHarness(worker, run_id, rid, aid)
         result = local.get_run(run_id)
         status = "completed"
