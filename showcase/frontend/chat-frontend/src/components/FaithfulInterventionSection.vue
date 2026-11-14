@@ -7,7 +7,7 @@ import { createIdempotencyKey } from '../runtime/jobs/idempotency'
 import UiButton from './ui/UiButton.vue'
 import FaithfulInterventionSetup from './FaithfulInterventionSetup.vue'
 
-const props = defineProps<{ jobId: string; jobStatus: string; refreshToken: number }>()
+const props = defineProps<{ jobId: string; allowedActions: string[]; refreshToken: number }>()
 type ViewState = { status: 'loading' | 'unavailable' | 'error' } | { status: 'available'; data: InterventionsView }
 const view = ref<ViewState>({ status: 'loading' })
 const pending = ref('')
@@ -69,6 +69,7 @@ async function execute(pairId: string): Promise<void> {
 }
 
 async function resume(): Promise<void> {
+  if (!props.allowedActions.includes('resume_intervention') || pending.value) return
   await mutate('resume', () => api.resumeInterventionParent(props.jobId, createIdempotencyKey()), '已请求在原 Run 中显式续算。')
 }
 
@@ -87,9 +88,9 @@ onUnmounted(() => { generation += 1; clearTimeout(pairPoll) })
       <div v-if="error" class="notice notice--error" role="alert">{{ error }}</div>
       <p v-if="notice" role="status" aria-live="polite">{{ notice }}</p>
       <div class="action-row">
-        <UiButton v-if="jobStatus === 'running'" :busy="pending === 'pause'" :disabled="Boolean(pending)" @click="pause">请求安全暂停</UiButton>
+        <UiButton v-if="allowedActions.includes('pause')" :busy="pending === 'pause'" :disabled="Boolean(pending)" @click="pause">请求安全暂停</UiButton>
         <UiButton :disabled="Boolean(pending)" @click="load">刷新干预状态</UiButton>
-        <UiButton v-if="jobStatus === 'waiting_input' && view.data.status === 'paused' && !view.data.pairs.some(pair => pair.status === 'reserved' || pair.status === 'running')" variant="primary" :busy="pending === 'resume'" :disabled="Boolean(pending)" @click="resume">显式恢复父 Run</UiButton>
+        <UiButton v-if="allowedActions.includes('resume_intervention')" variant="primary" :busy="pending === 'resume'" :disabled="Boolean(pending)" @click="resume">显式恢复父 Run</UiButton>
       </div>
       <FaithfulInterventionSetup v-if="view.data.status === 'paused'" :job-id="jobId" :view="view.data" @changed="load" />
       <h3>配对报告</h3>

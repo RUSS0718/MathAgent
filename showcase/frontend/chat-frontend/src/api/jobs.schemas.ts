@@ -24,3 +24,9 @@ export const clarificationStateSchema = z.object({
   }),
 })
 export type ClarificationState = z.infer<typeof clarificationStateSchema>
+
+export const faithfulTaskStateSchema = z.object({
+  phase: z.string(), allowed_actions: z.array(z.string()).default([]),
+  reason: z.string().nullable().optional(),
+})
+export type FaithfulTaskState = z.infer<typeof faithfulTaskStateSchema>

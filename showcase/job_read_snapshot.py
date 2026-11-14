@@ -11,7 +11,7 @@ from .job_observation import observe_deadline
 from .run_budget import _summary
 from .star_product_modes import STAR_MODES
 from .star_product_projection import current_solver, persisted_solver
-from .star_product_recovery import allowed_job_actions
+from .star_product_recovery import allowed_job_actions, intervention_phase
 
 
 def _attach_formal(payload):
@@ -27,7 +27,7 @@ def read_job(service, job_id, user_id):
     """Keep memory/legacy reads; isolate file-backed STAR reads from writers."""
     store = service.store
     if service.star_pipeline is not None and store.database_path != ":memory:":
-        return read_job_snapshot(store, job_id, user_id)
+        return read_job_snapshot(store, job_id, user_id, pipeline=service.star_pipeline)
     payload = store.get_job(job_id, user_id)
     star = (payload.get("result") or {}).get("solver_mode") in STAR_MODES
     if star:
@@ -39,13 +39,14 @@ def read_job(service, job_id, user_id):
     budget, ledger_attempts = service.budget_ledger.view(job_id) if service.budget_ledger is not None else (None, [])
     with store._lock:
         row = store._connection.execute("SELECT * FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
-        actions = allowed_job_actions(store._connection, row)
+        actions = allowed_job_actions(store._connection, row, pipeline=service.star_pipeline)
+        control_phase = intervention_phase(store._connection, row)
         question = pending_question(store._connection, job_id) if star else None
         question = expired_reply(store._connection, row, question) or question
-    return _with_accounting(payload, attempts, budget, ledger_attempts, star, actions, question)
+    return _with_accounting(payload, attempts, budget, ledger_attempts, star, actions, question, control_phase)
 
 
-def _with_accounting(payload, attempts, budget, ledger_attempts, star, actions=None, question=None):
+def _with_accounting(payload, attempts, budget, ledger_attempts, star, actions=None, question=None, control_phase=None):
     if budget is not None and (star or not (payload.get("result") or {}).get("budget")):
         payload["result"] = {**(payload.get("result") or {}), "budget": budget}
     attempts = list({item["attempt_id"]: item for item in [*attempts, *ledger_attempts]}.values())
@@ -55,10 +56,10 @@ def _with_accounting(payload, attempts, budget, ledger_attempts, star, actions=N
         observe_deadline(payload, ledger_attempts, budget)
     from .faithful_task import attach_task_state
 
-    return attach_task_state(payload, allowed_actions=actions, question=question)
+    return attach_task_state(payload, allowed_actions=actions, question=question, control_phase=control_phase)
 
 
-def read_job_snapshot(store, job_id, user_id):
+def read_job_snapshot(store, job_id, user_id, *, pipeline=None):
     """Read one committed STAR snapshot through an independent read-only connection.
 
     ADR-0013 keeps one SQLite database and transaction boundary, not one Python
@@ -108,7 +109,8 @@ def read_job_snapshot(store, job_id, user_id):
         ).fetchall()
         attempts = [json.loads(event["payload_json"])["attempt"] for event in attempt_events]
         ledger = connection.execute("SELECT ledger_json FROM run_budgets WHERE run_id=?", (job_id,)).fetchone()
-        actions = allowed_job_actions(connection, row)
+        actions = allowed_job_actions(connection, row, pipeline=pipeline)
+        control_phase = intervention_phase(connection, row)
         question = (solver_snapshot[0]["state"].get("clarification") if solver_snapshot else None)
         question = expired_reply(connection, row, question) or question
         # Projection only uses the fetched snapshot. Release its SQLite read
@@ -129,4 +131,4 @@ def read_job_snapshot(store, job_id, user_id):
             budget = _summary(state)
             ledger_attempts = [action["public_attempt"] for action in state["actions"]
                                if action.get("public_attempt")]
-        return _with_accounting(payload, attempts, budget, ledger_attempts, star, actions, question)
+        return _with_accounting(payload, attempts, budget, ledger_attempts, star, actions, question, control_phase)

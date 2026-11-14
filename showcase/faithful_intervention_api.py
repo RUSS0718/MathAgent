@@ -30,6 +30,39 @@ _STATUSES = {"active", "falsified", "confirmed", "retired"}
 _SCHEMA_LOCK = threading.RLock()
 
 
+def pause_admission(row, pipeline):
+    """Shared read-only qualification for the existing pause route."""
+    from .star_product_modes import BEST_EFFORT_MODES, STAR_MODES
+
+    if row is None or row["status"] != "running":
+        raise WorkspaceError("intervention_parent_not_running", status=409)
+    identity = json.loads(row["result_json"] or "{}")
+    if (pipeline is None or pipeline.intervention_enabled is not True
+            or identity.get("solver_mode") not in STAR_MODES - BEST_EFFORT_MODES):
+        raise WorkspaceError("intervention_parent_not_eligible", status=409)
+    features = pipeline.preset_config(identity["solver_mode"])["features"]
+    if (features.get("problem_spec") is not True or features.get("serial_routes") is not True
+            or features.get("concurrent_routes") is True):
+        raise WorkspaceError("intervention_parent_not_eligible", status=409)
+
+
+def resume_intervention_admission(connection, row):
+    """Preview dedicated parent resume without authorizing or resolving a pair."""
+    from .clarification_api import pending_question
+    from .star_product_recovery import authorize_resume, resume_budget
+
+    job_id = row["job_id"]
+    control = _paused(connection, job_id)
+    _assert_paused_checkpoint(connection, job_id, control["checkpoint_revision"],
+                              control["applied_config_fingerprint"])
+    question = pending_question(connection, job_id)
+    if question and question["status"] == "waiting":
+        raise WorkspaceError("clarification_answer_required", status=409)
+    resume_budget(connection, job_id)
+    authorize_resume(connection, row, None, read_only=True)
+    return authorize_explicit_resume(connection, job_id, read_only=True)
+
+
 def register_faithful_intervention_api(app, database_path: str | Path, *, enabled: bool) -> None:
     """Register job-owned routes; integration supplies server-only native factories."""
     if not enabled:
@@ -114,19 +147,7 @@ def register_faithful_intervention_api(app, database_path: str | Path, *, enable
             ).fetchone()
             runtime = app.extensions.get("showcase_workspace_service")
             pipeline = getattr(runtime, "star_pipeline", None)
-            identity = json.loads(row["result_json"]) if row and row["result_json"] else {}
-            from .star_product_modes import BEST_EFFORT_MODES, STAR_MODES
-
-            if row is None or row["status"] != "running":
-                raise WorkspaceError("intervention_parent_not_running", status=409)
-            if (pipeline is None or pipeline.intervention_enabled is not True
-                    or identity.get("solver_mode") not in STAR_MODES - BEST_EFFORT_MODES):
-                raise WorkspaceError("intervention_parent_not_eligible", status=409)
-            features = pipeline.preset_config(identity["solver_mode"])["features"]
-            if (features.get("problem_spec") is not True
-                    or features.get("serial_routes") is not True
-                    or features.get("concurrent_routes") is True):
-                raise WorkspaceError("intervention_parent_not_eligible", status=409)
+            pause_admission(row, pipeline)
             connection.execute(
                 "INSERT INTO faithful_intervention_control(job_id,run_id,status,updated_at) "
                 "VALUES(?,?,'pause_requested',?) ON CONFLICT(job_id) DO UPDATE SET "
@@ -399,6 +420,19 @@ def register_faithful_intervention_api(app, database_path: str | Path, *, enable
             raise WorkspaceError("idempotency_key_invalid", status=400)
         with closing(connect(write=True)) as connection:
             owned_job(connection, job_id)
+            from .workspace import _request_digest
+
+            saved = connection.execute(
+                "SELECT operation,job_id,request_digest,response_json FROM workspace_actions "
+                "WHERE user_id=? AND idempotency_key=?", (session.user_id, idempotency_key)
+            ).fetchone()
+            if saved is not None:
+                if (saved["operation"] != "resume" or saved["job_id"] != job_id
+                        or saved["request_digest"] != _request_digest("resume", job_id, "", None)):
+                    raise WorkspaceError("idempotency_conflict", status=409)
+                return jsonify({**json.loads(saved["response_json"]), "existing": True}), 200
+            row = connection.execute("SELECT * FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+            resume_intervention_admission(connection, row)
             authorize_explicit_resume(connection, job_id)
             connection.commit()
         try:

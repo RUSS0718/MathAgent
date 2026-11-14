@@ -37,7 +37,7 @@ def public_run_result(result):
     return public
 
 
-def attach_task_state(payload, *, allowed_actions=None, question=None):
+def attach_task_state(payload, *, allowed_actions=None, question=None, control_phase=None):
     """Project committed Job/Solver state without creating another controller."""
     result = payload.get("result") or {}
     identity = result.get("faithful")
@@ -52,13 +52,20 @@ def attach_task_state(payload, *, allowed_actions=None, question=None):
     elif status == "canceled":
         phase = "canceled"
     elif status == "waiting_input":
-        phase = "waiting_input"
+        phase = control_phase or "waiting_input"
     elif status == "failed":
         phase = ("unknown" if recovery.get("unknown_calls") or recovery.get("unknown_tools")
                  else "budget_exhausted" if solver.get("status") == "partial_budget_exhausted"
-                 else "protocol_error" if "protocol" in str(reason) else "failed")
+                 else "protocol_error" if "protocol" in str(reason)
+                 else "incomplete" if solver.get("status", "").startswith(("partial_", "completed_"))
+                 else "failed")
     else:
-        phase = "intake" if solver.get("intake_status") == "pending" else solver.get("phase", status).lower()
+        switch = solver.get("execution_switch") or {}
+        phase = (control_phase or
+                 ("unknown" if switch.get("status") == "needs_review" else
+                  "converging" if switch.get("status") == "converging" else
+                  "intake" if solver.get("intake_status") == "pending" else
+                  solver.get("phase", status).lower()))
     result["faithful"] = {
         **identity, "specification_version": solver.get("specification_version"),
         "state_revision": solver.get("state_revision", 0),
