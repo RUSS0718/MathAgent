@@ -24,3 +24,11 @@ red.json 是测试夹具补丁过早退出导致的运行失败，修正后 red-
 Standards 无阻塞。Spec 发现原报告被表达区域遮住、Provider 用量仅有泛泛说明两项 P2，已分别保留完整原报告并逐项投影 provider_known；spec-recheck.md 确认解除。最终真实只读 UI 复验 read-final.json 确认原报告可见、三个 Provider 字段为未知、四次原请求、零写请求及零脚本错误。受控前端4项通过、聚焦前端24项通过、typecheck通过；旧S06用例适配及最终冻结门禁结果待退出时补记。
 
 未执行项目不计通过；复杂路线、澄清与形式化新版本归 #182，#168 和最终服务 #183 保持开放。
+
+## 冻结门禁与中断接续退出
+
+原实现提交 `f2d856279817d16d9eaa1a0ff31e2f150a90a5fe`，原会话因用量限制中断；监控会话 `01a1d5b0-edc4-7091-ae38-f144087c9280` 确认无人执行后接手。gate-01 的完整测试保留失败：旧 #172 夹具在 waiting_input 状态生成历史表达，与本票终态生成合同冲突。takeover-red.json 单项稳定复现409；仅修历史夹具，明确断言非终态返回409，临时终态预置历史产物后 finally 恢复等待态，仍由真实澄清路径失效候选与表达。takeover-green.json 单项及 takeover-module.json 全部9项通过，0skip；独立 Standards / Spec 增量审查各0项发现，见 reviews/takeover-incremental.md。运行时代码没有为旧夹具放宽。
+
+最终冻结源码 `36c0c36f460ea6926d3c1832cd95ceeb5b44ffc5`，命令 `uv run python scripts/run_final_gate.py --root . --output-dir artifacts/issue-181/gate-control/runs --run-id gate-02` 六阶段通过，2121.5秒，source_changed=false。完整测试2096项、0failure/error、42skip（跳过不计通过）；发布27项、前端68项和typecheck/build通过，audit 0 vulnerabilities。证据为 gate-control/runs/gate-02/{status.json,source-manifest.json,repository-check/tests.json}。11个官方baseline文件逐项SHA256一致。最终S06五项浏览器通过见 frontend-s06-final-06.log；前述“待退出时补记”在此完成，早期失败保持原判。
+
+门禁后仅维护文档，复用以上产品证据，另记最终交接SHA。门禁进程21068/24636及原服务14812均已退出，MathAgent-Issue181-Gate临时检查已删除；浏览器服务清理证据见 frontend-services-final.json。只保留受保护 tests/test.md 未跟踪，不读取。交接沿用当前选择的同一模型，具体型号继承未知，不主动覆盖。达到本票G1退出条件后提交推送并关闭；#182接续合同见无人值守交接，#168完整服务及#183真实能力缺口仍未完成。
