@@ -61,7 +61,12 @@ def completion_updates(state):
     snapshot.update({k: deepcopy(state[k]) for k in (*MATH_FIELDS, 'calls', 'proof_graph',
                                                     'native_report_sources') if k in state})
     snapshot.update(phase='STEP_EXECUTE' if state['phase'] == 'META_DECIDE' else state['phase'])
-    route.update(snapshot=snapshot, revision=route['revision'] + 1)
+    revision = max(route['revision'], state['state_revision']) + 1
+    snapshot['state_revision'] = revision
+    route.update(snapshot=snapshot, revision=revision)
+    route['events'].append({'event_id': f'population-intervention-completed-{revision}',
+                            'type': 'population_intervention_completed', 'run_id': state['run_id'],
+                            'route_id': source['route_id'], 'state_revision': revision})
     checkpoint = {**source, 'route_revision': route['revision'],
                   'snapshot_hash': hashlib.sha256(_canonical(snapshot).encode()).hexdigest(),
                   'revision': state['state_revision'] + 1}

@@ -428,14 +428,18 @@ def _advance_serial(harness, run, problem):
             engine, pair_id, executor=executor, ledger=ledger, job_gate=SerialGate()
         )
     except (BudgetExhausted, ValueError) as error:
+        pair_exists = engine._connection.execute(
+            'SELECT 1 FROM faithful_intervention_pairs WHERE pair_id=?', (pair_id,)
+        ).fetchone() is not None
         return _commit(
             harness,
             harness.get_run(run["run_id"]),
             {
                 **projection,
-                "status": "skipped",
+                "status": "needs_review" if pair_exists else "skipped",
+                "pair_id": pair_id if pair_exists else None,
                 "reason": str(error),
-                "continuation": "main_task_continues",
+                "continuation": "pending" if pair_exists else "main_task_continues",
             },
             phase="META_DECIDE",
         )

@@ -21,6 +21,43 @@ class PopulationInterventionTest(StarJobFixture, unittest.TestCase):
     def test_revoked_permission_blocks_native_dispatch(self):
         self.run_case('permission')
 
+    def test_unreserved_pair_skips_intervention_and_continues(self):
+        from unittest.mock import patch
+
+        from showcase.run_budget import BudgetExhausted
+        from showcase.solver_harness.faithful_intervention import FaithfulInterventionEngine
+
+        with patch.object(FaithfulInterventionEngine, 'reserve_pair',
+                          side_effect=BudgetExhausted('insufficient_pair_budget')):
+            self.run_case('budget')
+
+    def test_reserved_pair_failure_preserves_holds_and_blocks_replay(self):
+        import sqlite3
+        from contextlib import closing
+        from unittest.mock import patch
+
+        from showcase.run_budget import BudgetExhausted
+        from showcase.solver_harness.faithful_intervention import FaithfulInterventionEngine
+
+        reserved = []
+        reserve = FaithfulInterventionEngine.reserve_pair
+        def capture(engine, **kwargs):
+            report = reserve(engine, **kwargs)
+            reserved.append(report)
+            return report
+        with patch.object(FaithfulInterventionEngine, 'reserve_pair', new=capture), patch(
+                'showcase.solver_harness.faithful_intervention_native.execute_native_pair',
+                side_effect=BudgetExhausted('insufficient_pair_budget')) as execute:
+            self.run_case('reserved_budget')
+            self.assertEqual(1, execute.call_count)
+            self.assertEqual(1, len(reserved))
+            before = reserved[0]
+            with closing(sqlite3.connect(self.app.config['SHOWCASE_DATABASE_PATH'])) as connection:
+                after = FaithfulInterventionEngine(connection).get_pair(before['pair_id'])
+            self.assertEqual('reserved', after['status'])
+            self.assertEqual(before['budget_reservation'], after['budget_reservation'])
+            self.assertTrue(all(arm['status'] == 'not_started' for arm in after['arms'].values()))
+
     def run_case(self, fault=None):
         from unittest.mock import patch
 
@@ -36,6 +73,10 @@ class PopulationInterventionTest(StarJobFixture, unittest.TestCase):
                     return advance(harness, run, problem)
             result = advance(harness, run, problem)
             if result['state']['population_intervention']['status'] == 'completed':
+                from showcase.solver_harness.calls import pending_call
+
+                route = result['state']['population']['routes'][result['state']['execution_serial_route']]
+                self.assertIsNone(pending_call({'state': route['snapshot'], 'events': route['events']}))
                 count = len(self.outbound)
                 self.assertEqual(result, advance(harness, result, problem))
                 self.assertEqual(count, len(self.outbound))
@@ -95,14 +136,27 @@ class PopulationInterventionTest(StarJobFixture, unittest.TestCase):
             original([provider] * 100, SHOWCASE_FAITHFUL_INTERVENTION_ENABLED=True, **config)
         self.open_star = opened
         job_id, final, _ = support.FaithfulPopulationJobTest.run_plain_submission(
-            self, multi_step=True, modes=['intervene'], job_timeout=60, fault='cancel' if fault == 'cancel' else 'mode_crash' if fault else None)
-        if fault in {'conflict', 'permission'}:
+            self, multi_step=True, modes=['intervene'], job_timeout=60, fault='cancel' if fault == 'cancel' else 'mode_crash' if fault in {'unknown', 'conflict', 'permission', 'reserved_budget'} else None)
+        if fault in {'conflict', 'permission', 'budget', 'reserved_budget'}:
             self.assertFalse(any(':pair:' in r.get('call_id', '') for r in self.outbound))
         else:
             self.assertTrue(any(r.get('serial_intervention_decision') for r in self.outbound))
             self.assertTrue(any(':pair:' in r.get('call_id', '') for r in self.outbound))
-        if not fault:
+        if not fault or fault == 'budget':
             self.assertTrue(replayed)
+        if fault == 'budget':
+            projection = final['result']['solver']['serial_intervention']
+            self.assertEqual('skipped', projection['status'])
+            self.assertEqual('insufficient_pair_budget', projection['reason'])
+            self.assertEqual([], projection['adoptions'])
+            self.assertEqual('main_task_continues', projection['continuation'])
+            self.assertIsNone(projection['pair_id'])
+        if fault == 'reserved_budget':
+            projection = final['result']['solver']['serial_intervention']
+            self.assertEqual('needs_review', projection['status'])
+            self.assertEqual('insufficient_pair_budget', projection['reason'])
+            self.assertEqual('pending', projection['continuation'])
+            self.assertTrue(projection['pair_id'])
         if fault == 'unknown':
             projection = final['result']['solver']['serial_intervention']
             self.assertEqual('needs_review', projection['status'])
