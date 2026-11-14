@@ -188,4 +188,3 @@ class DedicatedResumeApiTest(unittest.TestCase):
         self.assertEqual(409, missing.status_code)
         self.assertEqual("run_deadline_exhausted", missing.get_json()["code"])
         dispatch.assert_not_called()
-
