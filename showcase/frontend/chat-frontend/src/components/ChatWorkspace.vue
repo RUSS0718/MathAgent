@@ -323,8 +323,8 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
         <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" :resuming="submitting" @resume="resumeCurrent" @changed="clarificationChanged" @cancel="cancelCurrent" />
         <TaskRevisionPanel :key="selectedJob.jobId + ':revision'" :job-id="selectedJob.jobId" :session-id="selectedJob.sessionId" :owner="auth.username" :mode="solverMode" :state="selectedJob.result?.faithful" :disabled="submitting || checkingSubmission" @changed="clarificationChanged" />
         <ConversationWorkbench :key="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" />
-        <PresentationSection :source-version="showReport" v-if="showReport && presentationMode" :job-id="selectedJob.jobId" :mode="presentationMode" :job-status="selectedJob.status" :problem="selectedProblem" :fallback-answer="showReport.report.answer" />
-        <ReportSection v-else-if="showReport" :mode="showReport.mode" :status="showReport.status" :report="showReport.report" />
+        <PresentationSection :source-version="showReport" v-if="showReport && (presentationMode || (selectedJob.status === 'succeeded' && selectedJob.result?.faithful && (selectedJob.result.faithful as { version?: string }).version === 'faithful-task-v1'))" :job-id="selectedJob.jobId" :mode="presentationMode ?? undefined" :answer-report="showReport.report" :job-status="selectedJob.status" :problem="selectedProblem" :fallback-answer="showReport.report.answer" />
+        <ReportSection v-if="showReport" :mode="showReport.mode" :status="showReport.status" :report="showReport.report" />
       </section>
     </main>
   </div>

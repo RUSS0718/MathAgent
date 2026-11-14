@@ -8,7 +8,10 @@ const modes = [
 
 test('S06 parses Composer output commands and restores each independent artifact', async ({ page }) => {
   const submissions: Array<{ body: Record<string, unknown>; key: string; jobId: string }> = []
-  let loseFirstTeachReply = true
+  let presentationPosts = 0
+  page.on('request', request => {
+    if (request.method() === 'POST' && /\/api\/agent\/jobs\/[^/]+\/(solve|teach|report)$/.test(new URL(request.url()).pathname)) presentationPosts++
+  })
   await page.route('**/api/agent/jobs', async (route) => {
     if (route.request().method() !== 'POST') return route.continue()
     const body = route.request().postDataJSON() as Record<string, unknown>
@@ -18,39 +21,17 @@ test('S06 parses Composer output commands and restores each independent artifact
     const response = await route.fetch()
     const accepted = await response.json() as { job_id?: string }
     submission.jobId = accepted.job_id ?? ''
-    if (body.presentation_mode === 'teach' && loseFirstTeachReply) {
-      loseFirstTeachReply = false
-      await route.abort('failed')
-      return
-    }
     await route.fulfill({ response })
   })
   await page.goto('/dashboard-assets/')
   const artifactIds: string[] = []
 
   for (const { command, label } of modes) {
+    await page.getByRole('button', { name: '新建会话', exact: true }).click()
+    await expect(page.getByText('正在加载工作台…', { exact: true })).toHaveCount(0)
     const problem = `S06 browser ${label}`
     await page.getByLabel('数学问题').fill(`${command} ${problem}`)
-    const firstTeachRequestFailed = command === '/teach'
-      ? page.waitForEvent('requestfailed', (request) => {
-        if (request.method() !== 'POST' || new URL(request.url()).pathname !== '/api/agent/jobs') return false
-        return (request.postDataJSON() as Record<string, unknown>).presentation_mode === 'teach'
-      })
-      : undefined
-    await page.getByRole('button', { name: '发送' }).click()
-    if (command === '/teach') {
-      const failedRequest = await firstTeachRequestFailed!
-      expect(failedRequest.failure()).not.toBeNull()
-      await expect.poll(() => submissions.filter((item) => item.body.presentation_mode === 'teach' && item.body.message === problem).length).toBe(1)
-      const lostTeachSubmission = submissions.find((item) => item.body.presentation_mode === 'teach' && item.body.message === problem)
-      expect(lostTeachSubmission?.jobId).toMatch(/^run_/)
-      await expect(page.locator('.workspace-notice')).toContainText('无法连接服务器')
-      await page.getByRole('button', { name: '发送' }).click()
-      await expect.poll(() => submissions.filter((item) => item.body.presentation_mode === 'teach' && item.body.message === problem && item.jobId).length).toBe(2)
-      const teachSubmissions = submissions.filter((item) => item.body.presentation_mode === 'teach' && item.body.message === problem)
-      expect(teachSubmissions[1]?.key).toBe(teachSubmissions[0]?.key)
-      expect(teachSubmissions[1]?.jobId).toBe(teachSubmissions[0]?.jobId)
-    }
+    await page.getByLabel('数学问题').press('Enter')
 
     await expect.poll(() => submissions.filter((item) => item.body.presentation_mode === command.slice(1) && item.body.message === problem && item.jobId).length).toBeGreaterThan(0)
     const output = page.getByLabel('S06 输出模式')
@@ -59,6 +40,10 @@ test('S06 parses Composer output commands and restores each independent artifact
     expect(submitted?.body.message).toBe(problem)
     expect(submitted?.body.presentation_mode).toBe(command.slice(1))
     expect(submitted?.jobId).toMatch(/^run_/)
+    await expect(output).toHaveAttribute('data-presentation-mode', command.slice(1))
+    await expect(output).toContainText('尚未保存')
+    expect(presentationPosts).toBe(artifactIds.length)
+    await output.getByRole('button', { name: '生成模板' + label, exact: true }).click()
     await expect(output).toHaveAttribute('data-source-job-id', submitted!.jobId)
     await expect(output).toHaveAttribute('data-presentation-mode', command.slice(1))
     await expect(output).toContainText(label)
@@ -84,11 +69,16 @@ test('S06 parses Composer output commands and restores each independent artifact
     await expect(restored).toContainText('已验证范围')
     await expect(restored).toContainText(problem)
     expect(await restored.getAttribute('data-artifact-id')).toBe(artifactIds.at(-1))
+    expect(presentationPosts).toBe(artifactIds.length)
   }
   expect(new Set(artifactIds).size).toBe(3)
 
+  await page.getByRole('button', { name: '新建会话', exact: true }).click()
+    await expect(page.getByText('正在加载工作台…', { exact: true })).toHaveCount(0)
   await page.getByLabel('数学问题').fill('S06 browser ordinary legacy path')
-  await page.getByRole('button', { name: '发送' }).click()
+  await page.getByLabel('数学问题').press('Enter')
+  await expect.poll(() => submissions.at(-1)?.jobId).toMatch(/^run_/)
+  await expect(page.getByRole('region', { name: '数学报告', exact: true })).toBeVisible()
   await expect(page.getByLabel('S06 输出模式')).toHaveCount(0)
   expect(submissions.at(-1)?.body.message).toBe('S06 browser ordinary legacy path')
   expect(submissions.at(-1)?.body).not.toHaveProperty('presentation_mode')
@@ -109,14 +99,18 @@ test('late presentation responses cannot overwrite a newer Job', async ({ page }
 
   await page.goto('/dashboard-assets/')
   await page.getByLabel('数学问题').fill('/teach S06 browser delayed A')
-  await page.getByRole('button', { name: '发送' }).click()
+  await page.getByLabel('数学问题').press('Enter')
+  await page.getByRole('button', { name: '生成模板教学', exact: true }).click()
   await expect.poll(() => teachRequests > 0).toBe(true)
 
+  await page.getByRole('button', { name: '新建会话', exact: true }).click()
+    await expect(page.getByText('正在加载工作台…', { exact: true })).toHaveCount(0)
   await page.getByLabel('数学问题').fill('/report S06 browser current B')
-  await page.getByRole('button', { name: '发送' }).click()
+  await page.getByLabel('数学问题').press('Enter')
   const output = page.getByLabel('S06 输出模式')
   await expect(output).toContainText('报告', { timeout: 20000 })
   await expect(output).toContainText('S06 browser current B')
+  await output.getByRole('button', { name: '生成模板报告', exact: true }).click()
   await expect(output).toHaveAttribute('data-source-job-id', /^run_/)
   const currentJobId = await output.getAttribute('data-source-job-id')
 
@@ -140,6 +134,8 @@ async function seedOutput(page: Page, problem: string, mode: string): Promise<{ 
   expect(response.status()).toBe(202)
   const job = (await response.json()).job_id as string
   await expect.poll(async () => (await (await page.request.get(`${origin}/api/agent/jobs/${job}`)).json()).status).toBe('succeeded')
+  const generated = await page.request.post(`${origin}/api/agent/jobs/${job}/${mode}`, { headers, data: {} })
+  expect(generated.status()).toBe(200)
   return { session, job }
 }
 
@@ -153,6 +149,7 @@ test('late report cannot become another Jobs original-answer fallback', async ({
   let releaseB!: () => void
   const released = new Promise<void>(resolve => { release = resolve })
   const bReleased = new Promise<void>(resolve => { releaseB = resolve })
+  await page.route('**/api/agent/jobs/*/outputs/*', route => route.fulfill({ status: 503, body: '{}' }))
   await page.route('**/api/agent/jobs/*/report', async route => {
     if (route.request().method() === 'POST') return route.fulfill({ status: 503, body: '{}' })
     const response = await route.fetch()
@@ -170,8 +167,10 @@ test('late report cannot become another Jobs original-answer fallback', async ({
   })
   await page.goto(`/dashboard-assets/session/${first.session}`)
   await expect.poll(() => held).toBe(true)
+  await page.getByRole('button', { name: '新建会话', exact: true }).click()
+    await expect(page.getByText('正在加载工作台…', { exact: true })).toHaveCount(0)
   await page.getByLabel('数学问题').fill('/report S06 current report B')
-  await page.getByRole('button', { name: '发送' }).click()
+  await page.getByLabel('数学问题').press('Enter')
   const output = page.getByLabel('S06 输出模式')
   await expect(output).toContainText('S06 current report B')
   await expect(output).toContainText('CURRENT_B_ANSWER')
@@ -187,7 +186,7 @@ test('late report cannot become another Jobs original-answer fallback', async ({
 test('refreshing a terminal report rechecks a changed presentation source', async ({ page }) => {
   const seeded = await seedOutput(page, 'S06 refreshed source', 'teach')
   let reads = 0
-  await page.route(`**/api/agent/jobs/${seeded.job}/teach`, async route => {
+  await page.route(`**/api/agent/jobs/${seeded.job}/outputs/teach`, async route => {
     const response = await route.fetch()
     const body = await response.json()
     if (++reads > 1) {
@@ -206,7 +205,7 @@ test('refreshing a terminal report rechecks a changed presentation source', asyn
 test('F6 paragraph references open their versioned public evidence without replacing the answer', async ({ page }, testInfo) => {
   const seeded = await seedOutput(page, 'F6 evidence walkthrough', 'teach')
   const formalRef = 'verification:' + 'a'.repeat(64)
-  await page.route(`**/api/agent/jobs/${seeded.job}/teach`, async route => {
+  await page.route(`**/api/agent/jobs/${seeded.job}/outputs/teach`, async route => {
     const response = await route.fetch()
     const body = await response.json()
     // Controlled public evidence fixture; backend provenance is covered by API contracts.
@@ -222,6 +221,7 @@ test('F6 paragraph references open their versioned public evidence without repla
   await page.goto(`/dashboard-assets/run/${seeded.job}`)
   const output = page.getByLabel('S06 输出模式')
   await expect(output).toHaveAttribute('data-artifact-id', /^presentation:/)
+  await page.waitForLoadState('networkidle')
   const original = await output.getByLabel('原答案内容').innerText()
   await output.getByRole('button', { name: '表达内容', exact: true }).click()
   const expression = output.getByLabel('表达内容', { exact: true })

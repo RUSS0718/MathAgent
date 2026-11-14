@@ -78,7 +78,9 @@ def presentation_snapshot(job, public_report=None):
         "budget": _public_budget(result.get("budget")),
         "request_attempts": _public_attempts(result.get("request_attempts")),
     }
-    if result.get("presentation_policy_version") == POLICY_VERSION:
+    if (result.get("presentation_policy_version") == POLICY_VERSION
+            or ("presentation_policy_version" not in result
+                and (result.get("faithful") or {}).get("version") == "faithful-task-v1")):
         snapshot["policy_version"] = POLICY_VERSION
         evidence = solver.get("presentation_evidence") or {}
         snapshot["versions"]["specification_version"] = evidence.get("specification_version")
