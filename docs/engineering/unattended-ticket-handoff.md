@@ -1,29 +1,34 @@
-# 无人值守交接：#177 → #178
+# 无人值守交接：#178 → #179
 
-日期：2026-11-14（Asia/Shanghai）。先读[接续合同](unattended-ticket-loop.md)，每个session完成一票后继续同一循环。用户已授权完成验收、提交推送、关闭当前票、按真实依赖创建唯一同项目本地接班session；减少不必要离线测试，两次有目的自然尝试后按合同透明调整过高验收。不要并发启动接班票。
+日期：2026-11-14（Asia/Shanghai）。先读[接续合同](unattended-ticket-loop.md)。用户已授权完成当前票后提交推送、关闭、按实时依赖创建唯一同项目本地接班 session，并让后续票继续循环。复用当前 checkout，不并发启动下一票。
 
 ## 已完成票与源码
 
-- 复用 `D:/project/工程化MathAgent/Challenge-Cup-2026` 当前checkout和集成分支 `faithful-autonomous-population`，不创建新worktree。#177已按授权调整后的开发接线条件交付、推送并关闭completed；[完成评论](https://github.com/RUSS0718/MathAgent/issues/177#issuecomment-6873531081)。交付HEAD `1696c6903796110682260ecf2c4682c71e15fda4` 已与远端核对一致。本文随后纯文档提交作为最终交接HEAD，以实际git HEAD及远端核对，避免自引用SHA。
-- [#177验收记录](../evals/faithful-service-177-20261114.md)及[合同](faithful-service-177-contract.md)定义结论。产品提交90e2976、6040dd5、0d4f792、d5faad6、04d493b，接通并发收敛、合法串行checkpoint、原生F4、父独立来源核验、成果回接和继续。保留原串行入口隔离、同Run根预算/deadline、权限及unknown边界。不得简单移除串行隔离或复制子臂权威账本。
-- 双轴初审及增量复审位于 `artifacts/issue-177/reviews/`，最终 `spec-budget-recheck.md` 关闭预算P1，受影响Standards/Spec无新增阻塞。公共Job预算失败红绿、来源/重复回写与续接消费事件见验收记录；最终预算回归10项全通过。不要重做#175/#176/#177已有接线或重复已通过同源码证据。
-- 冻结受测源码 `0225fd9cd69a374d4cd9b26bba43eecc929655b7`。gate-01异常退出（0x40010004），无有效测试总数，原因未知，终态另存 `gate-control/gate-01.terminal-observation.json`。gate-02快速检查通过，完整测试2060项、0 failure、1 Docker setup error、49 skip；Docker当时未运行，test_star_experiment的20项未执行，原报告保持failed。
-- 恢复已有Docker Desktop后，依接续合同只复验受影响模块，gate-03为 `affected-recheck`、`passed_with_reuse`，不是标准入口单次全仓通过。20项复验0 failure/error/skip，加上gate-02覆盖共2080项、49 skip。随后六个mutation probes、两个CLI、发布27项、前端65项/typecheck/build及安装/audit（0漏洞）通过。gate-02/03源码哈希一致，source_changed=false。续接脚本及精确命令在 `artifacts/issue-177/gate-control/`，原失败不改判。门禁后只有文档修改，不因此重跑产品门禁。
-- 工作树预期唯一未跟踪文件 `tests/test.md`，禁止读取、修改、提交或删除。继续使用当前选择的同一模型和思考设置，不设覆盖；具体型号及新session继承结果未知，不猜测。provider配置不是助手型号。
+- 路径 `D:/project/工程化MathAgent/Challenge-Cup-2026`，集成分支 `faithful-autonomous-population`。#178 产品提交 `209640d`、`19666bf`；最终产品源码 `19666bff3f30ad4ea26e67920e2b9806a2e50937`。随后纯文档提交的交付 HEAD 以实际 `git rev-parse HEAD` 及远端核对为准，避免自引用 SHA。
+- [#178 验收记录](../evals/faithful-service-178-20261114.md)与[合同](faithful-service-178-contract.md)记录普通输入生成受限形式目标、原题及有效规格来源冻结、真实 Lean、严格证明与机器要求区分、整题要求覆盖核对、重试和恢复失效及公共 UI 范围。不要重做本票接线；不能把局部 L2/L3 当整题满足。
+- 双轴修复与复查已完成；最终报告为 `artifacts/issue-178/reviews/standards-recheck-02.md`、`spec-recheck.md`、`spec-intent-recheck.md`，无剩余阻塞。聚焦回归45项、澄清9项、重试模式3项、意图2项及前端16项通过。初始失败与审查更正均保留，不用最终成功覆盖历史。
+- 最终门禁源码 f00842000c666c9cdc785a7c41bdb073d9d8925e，gate-02六阶段通过：2087项、0 failure/error、49 skip、source_changed=false，安装/audit（0漏洞）及前端检查通过。gate-01的单项旧fixture协议失败保留；fixture修复聚焦1项及增量复核通过。证据位于 artifacts/issue-178/gate-control/runs/，门禁后仅文档变更。
+- 工作树仅保留用户未跟踪的 `tests/test.md`，禁止读取、修改、提交或删除。官方 baseline 字节与默认路径保持隔离。继续使用当前选择的同一模型和思考设置，不设覆盖；具体型号和新 session 继承结果未知，不猜测，provider Intern-S2 不是助手型号。
 
 ## 下一票与实时依赖
 
-2026-11-14 15:47前后通过GitHub公共GET重新读取#168、#177至#183及原生blocked_by，快照 `artifacts/issue-177/handoff-dependencies.json`。#177 closed/completed；#178 open/ready-for-agent，唯一显式前置#169 closed，因此下一票选择 **#178：自然题自主生成形式目标并展示验证范围**。#179/#181亦就绪；#180等#178；#182仍等#179/#180/#181（#171/#172/#173/#177已关闭）；#183等#182；#168保持open。
+2026-11-14 18:19前后实时核验#168、#178–#183及原生blocked_by，快照 artifacts/issue-178/handoff-dependencies-corrected.json。#178 closed/completed，完成评论6875794777；#179唯一前置#169已closed，选择下一票#179。#180因#178关闭亦已就绪，#181前置#169已closed；#182仍等#179/#180/#181，#183仍等#182；#168开放。
 
-#178从普通输入按适用性提出形式目标，沿用受限单变量有理多项式全称等式Lean后端。保留定义域、量词、假设、义务及原题来源；生成、对应审核和执行分责，计入同任务原预算。区分严格数学证明与明确机器验证要求，完成判定必须核对指定对象、覆盖、等级和有效来源，不能把局部L2/L3当整题满足。公开界面区分LLM_REVIEWED/L1/L2/L3与范围，错误、超时、unknown不作反证。先实时读取完整Issue，复用既有S09形式化合同及公共案例，补一个局部成功但整题未满足的关键反例；真实普通输入、Lean回执、答案/证据及刷新为主要验收。
+下一票 **#179：授权内自动经验记忆及撤销生效**。先实时读取完整 Issue。复用会话同意、来源链与管理入口；无同意不 capture/inject。真实成功或失败观察仅作为经验，按可信 domain、相关性、来源筛选，Agent 可采用或拒绝，不能当作证明。跨会话仅同所有者显式导入并复核来源祖先；关闭、清理、撤销后后续读写、继续与恢复必须停止使用，已存 advisory 副本不得绕过。用最少真实授权记录和选用证据，以及一个公共撤销后继续或重启不再注入的反例验收，不新增收益大样本。
 
-实施前按仓库规则确保设计、任务合同和验收案例可审阅。以最小失败公共见证驱动，切片只跑聚焦和受影响回归，完整纵切集中双轴审查；失败只复查受影响部分，不无条件重跑整仓。完成本票后继续同一循环：提交推送、关闭tracker、实时核对下一依赖、更新本交接、创建唯一同项目local接班session。
+按仓库规则先使设计、合同和验收案例可审阅，以公共失败见证驱动最小修改。切片跑聚焦及受影响回归，纵切集中双轴审查，源码冻结后一次最终门禁；失败按接续合同处理，不无条件重跑整仓。完成后继续同一循环，创建下一唯一 local session。
 
-## 未实证能力与进程所有权
+## 真实证据与仍未覆盖的能力
 
-- #174自然并发完整交付、#175自然热切换、#176自然串行干预仍留#183；历史证据及限制见各票验收记录。旧unknown不恢复或自动重发，不能把受控provider或HTTP成功当真实能力。
-- #177 live01源码6040dd5、Run/Job `run_17a6a5b720840a4f46ec1ae6c2082e37`，自然serial/keep，11调用后route_duplicate_route_frontier。live02源码d5faad6、Run/Job `run_711be219ec5f44dbc07410161673725e`，13调用、串行intervene但skipped/pair_id为空、0native，最终invalid_meta_decision。两次均无已验证完整答案，配置SHA256均 `5e639bc68672b93967c40e0cce71f1b8d8e51832b2db5a056f1712d991d174c0`。原失败保留，不再碰运气重跑。
-- 自然并发→收敛→合法checkpoint→真实F4→采用或明确拒绝→主任务继续、完整正确答案、真实干预UI终态与进程退出后D2续跑仍未实证，已同步#183。刷新前后写请求数不变、无pageerror；总写请求2包含会话创建和原提交。live02重开截图仍加载态，不能认定真实UI稳定终态通过。#168完整服务未交付。
-- live01服务8128/uv11844、observer42396，live02服务32496/uv16280、observer30400均已退出；临时检查清理。gate-01控制40704/门禁12424异常退出，gate-02控制35708/门禁17520失败退出，gate-03控制22980/门禁26724组合复验完成退出；全部 `MathAgent-Issue177-*` 临时检查已清理，无监控所有权转移，无子代理留守。Docker Desktop作为共享工具保持运行，不停止其他项目容器。
-- #177所有实现/审查代理已关闭。旧#171/#175/#176工作树与归档限制沿用各票记录，不在本票额外删除。
-- 接班项目ID `1a1107a1-ae54-43ad-a80c-48fbec3e5823`（解绑挂帅），已查询确认同一路径/local Git仓库。创建前已检查没有#178接班session，结果保存到 `artifacts/issue-177/handoff-session.json`。若创建状态未知，先查询而非重复创建；确认启动后父session停止，不再修改共享源码。
+- #178 live03 为普通浏览器输入 `For every rational x, x + x = 2 * x.`，标准装配、真实 Intern 与 Lean；Run/Job `run_72ce600c5b590273aa100f782fea0893`，Formal Attempt `formal_037b1ab5ec044ec08d1e672ab8b55835`。4模型调用与1工具调用，正确答案，Lean accepted、kernel0、cleanup=true、L2，原题对应 not_reviewed。配置SHA256 `45a917d23852677489311e7c7134c4c0d349f2bb85c294fa2eb8e9e351d65e53`；1024MiB、90秒工具配置，根48调用/48HTTP/8工具/262144tokens/1100秒。
+- 原 acceptance.json 仍 failed：额外 L3 条件未达到，答案的中间等式也不匹配简单子串。独立 acceptance-reconciliation.json 记录真实 L2 路径及简单恒等式人工核对，不改写原结果。一般原题对应 L3、自然明确机器要求的正向成功仍未实证，留 #183；本票不要求额外 L3 成功。live01 预算失败/Lean timeout、live02 正确答案但 Lean CPU限制退出全部保留，旧unknown不恢复或重发。
+- live03 原刷新与停止后只读 Run 页重开均没有写请求、Attempt不变、无脚本错误；`readonly-formal-section.png` 已实际查看，明确显示L2、目标、对应待复核、整题覆盖为空。只读复核未提交新任务。
+- #174 自然并发、#175 自然热切换、#176/#177 自然干预与完整交付等历史缺口仍按各票记录留 #183，本票简单恒等式不替代这些证据。#168 完整服务未交付。
+
+## 进程、监控与接班所有权
+
+live01控制31936/服务20456/观察13200、live02控制30744/服务21720/观察34464、live03控制22720/服务8136/观察20008均已按PID与创建时间核对退出，见process-audit.json。只读复核服务已停止。gate-01控制34636/门禁33732失败退出；gate-02控制36752/门禁13740通过退出。MathAgent-Issue178-*临时检查全部清理，无监控所有权需要转移。
+
+全部本票实现与审查代理已关闭，没有子代理留守。共享 Docker Desktop 保持运行，不停止其他项目容器。长运行继续唯一后台实例，提供PID、创建时间、阶段、完成计数及日志末尾的可执行监控命令，每30分钟临时检查，无变化静默，失败或完成才通知并删除检查；若交接时还有运行，应转移所有权而非重复启动。
+
+接班项目 ID `1a1107a1-ae54-43ad-a80c-48fbec3e5823`，创建前重新 list_projects 与 list_threads，确认同目录 local Git 项目且无 #179 接班实例。创建结果写入忽略目录 `artifacts/issue-178/handoff-session.json`，结果未知先查询；确认已启动后父 session 停止，不再编辑共享源码。
