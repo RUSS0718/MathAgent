@@ -1,29 +1,23 @@
-# 无人值守交接：#181 → #182
+# 无人值守交接：#182 → #183
 
-日期：2026-11-15（Asia/Shanghai）。先读[接续合同](unattended-ticket-loop.md)。用户已授权每票完成后创建唯一同项目local新session，继续同一循环，减少重复离线测试，必要时透明调整过高标准但保留真实失败。
+日期：2026-11-15（Asia/Shanghai）。先读[接续合同](unattended-ticket-loop.md)，授权循环不变，当前session只完成#182，下一票实时核对后唯一创建。
 
-## 当前源码与本票结果
+## 源码与完成证据
 
-复用D:/project/工程化MathAgent/Challenge-Cup-2026当前checkout，faithful-autonomous-population，不建worktree、不切分支。产品提交f2d856279817d16d9eaa1a0ff31e2f150a90a5fe；门禁夹具修正与最终冻结36c0c36f460ea6926d3c1832cd95ceeb5b44ffc5。本次之后仅文档提交作为最终交接SHA，接班先用git核对HEAD和origin。预期仅tests/test.md未跟踪，禁止读取、修改、提交、删除。继续当前选择的同一模型，不主动覆盖model/thinking；原型号及继承无法核实，记录未知。
+复用D:/project/工程化MathAgent/Challenge-Cup-2026，faithful-autonomous-population，不建worktree不切分支。产品abb0cc4、最终冻结e62d1458a385ced6c754abceaf586fc09945ebc7，之后仅文档交接提交；接班核对HEAD与origin。预期仅tests/test.md未跟踪，禁止读取、修改、提交、删除。独立#184提交不误合入或覆盖。继续当前选择的同一模型和思考设置，不主动覆盖，具体型号及继承无法核实，未知不猜测。
 
-#181按G1合同完成，提交推送关闭后才创建接班。见[验收记录](../evals/faithful-service-181-20261115.md)和[合同](faithful-service-181-contract.md)。普通Faithful按需显式POST模板讲解/报告，GET仅恢复已保存输出，F6独立身份和F7固定深链复用；完整原报告及Provider各项未知用量保留。模板表达不升级证明等级，不承诺模型讲解或教学质量。
+#182 G2已完成状态/控制组合修复，见[合同](faithful-service-182-contract.md)及[验收记录](../evals/faithful-service-182-20261115.md)。汇入既有暂停/收敛/unknown/未完成，前端按钮遵循后端allowed_actions。暂停恢复为resume_intervention专用动作，不能借普通resume；共享准入检查原deadline与checkpoint，过期/无预算零授权；已有同键收据合法重放。原暂停资格重复维护、暂停恢复入口断路及详情unknown按钮权限问题已修复，双轴复查解除，证据artifacts/issue-182/reviews/。
 
-复用#169真实Run run_2fa0391d0ebdf22aac27bf15dd833482、Session session_44937cbc096761daf8ce6fab908ee6bc、答案5及原四次Request Attempt。Chromium显式生成teach/report两份产物、段落深链、刷新重开、错误身份unavailable均通过；仅两次用户点击对应POST，无新数学求解，预算与答案不变，errors=[]。原整题文字审查REVIEWED、历史根义务0/1与形式化未验证如实保留。身份和产物见artifacts/issue-181/live-summary.json、read-final.json。当前真实配置不是本助手型号。
+冻结e62d145的gate-01六阶段通过，2142.922秒，source_changed=false，完整2105项0failure/error42skip（不计通过），发布27项、前端69项、typecheck/build及audit 0 vulnerabilities，baseline11逐项SHA256不变。门禁后只文档，不重跑相同源码套件。聚焦27项+强化专用API2项，受控浏览器4项通过。证据artifacts/issue-182/gate-control/runs/gate-01/。
 
-最终门禁gate-02六阶段通过，2121.5秒，source_changed=false，完整测试2096项、0failure/error、42skip（不计通过），发布27项、前端68项、typecheck/build及audit通过，audit 0 vulnerabilities。冻结源码36c0c36，证据artifacts/issue-181/gate-control/runs/gate-02/。11个baseline文件SHA256不变。旧S06浏览器5项通过；原实现双轴及增量双轴审查通过。门禁后仅文档变化，不重复产品套件。
+真实复用169 Run run_2fa0391d0ebdf22aac27bf15dd833482、Session session_44937cbc096761daf8ce6fab908ee6bc，答案5，原4次Attempt；桌面/移动刷新、F7深链、重开与实际服务重启后整个预算/Attempt/答案相同，零写请求零脚本错误，原teach/report产物身份不变。原文字审查REVIEWED、历史根义务0/1、形式未验证、provider各项未知如实保留。见restart-comparison.json和read-after-restart.json。既有dist漏F7构建开关导致初次深链首页，按VITE_F7_SYSTEM_VIEW_ENABLED=true重建后通过；观察脚本路径错误也保留，不能冒称产品修复。
 
-原session 01a1db1d-096e-7f43-8307-b06ccd770290因usage limit停止，监控session 01a1d5b0-edc4-7091-ae38-f144087c9280核实空闲后接手。gate-01旧#172夹具在waiting_input生成表达返回409的失败保持失败；takeover-red单项复现，最小历史夹具修正后单项和相关9项通过，增量双轴0项。没有降低运行时终态限制或伪造通过。
+## 下一票 #183
 
-## 下一票与依赖
+先实时读取#168/#183、原生blocked_by和当前任务图。183负责从停止状态重复启动、最小真实场景补缺与完整服务交付；不能把本票控制组合或前票开发接线当完整自然能力。具体自然并发/热切换/串并行干预、采用续跑、自然经验采用撤销、可信缓存命中等缺口见#183正文及#174–#180记录；178真实L2不代表一般L3。历史unknown不重发。允许两次有目的尝试后透明调整额外过高标准，但核心真实闭环不能伪造，未满足不得关闭183或168。已有简单题/澄清/关联改题/形式L2/表达和只读恢复证据复用，仅补实际缺口。使用C:/Users/CQX/.codex/skills/implement-spec/SKILL.md。
 
-#182：整合全能力状态、控制与恢复交互。交接前读取#168/#182实时正文及原生blocked_by：#182前置#171/#172/#173/#177/#179/#180均closed，#181本次关闭后解除最后前置；#183仍被#182阻塞，#168仍open。接班需再核实GitHub。使用C:/Users/CQX/.codex/skills/implement-spec/SKILL.md（如路径缺失先查找），完成#182本票后按同一合同继续下一就绪票。
+## 所有权与接续
 
-复用既有状态与后端允许操作，组合核对澄清失效、串并行/干预交付、形式范围、撤销上下文和表达深链；SSE/刷新/重启只观察，同任务预算/来源/幂等保持，unknown显式新身份重试保留原预留。桌面/移动及键盘必要控制可用，主对话简明，公开字段脱敏。只补跨票实际缺口，不新建平行状态机、新功能或无关视觉改版；复用已有真实运行，不把受控证据冒充真实模型决策。
+本票wrapper22524/runner33608已终态；8097本票服务已停止，MathAgent-Issue182-Gate临时检查已删除，stopped.json记录。无活动长测试需接管，不重启旧Run或unknown。模型服务、共享Docker不归清理。原每90分钟空闲监控继续存在。
 
-此前#174–#180自然并发、热切换、干预、自然经验采用/撤销、自然可信缓存命中等未实证能力继续留#183；#178已有真实Lean L2不等于一般L3，#181模板表达不补这些缺口。独立#184曾切共享分支，其提交保留，本分支不误合入；历史unknown不重发。
-
-## 运行所有权与接续
-
-本票gate-01/02均终态，wrapper21068/runner24636、原服务14812已退出，MathAgent-Issue181-Gate临时检查已删除；前端服务已退出见frontend-services-final.json。不需要接管活动测试，不重复启动旧运行。原模型服务与共享Docker不属于本票清理范围。当前仅有每90分钟空闲接手监控继续存在。
-
-长运行唯一隐藏后台，立即给PID/创建时间/阶段/完成计数/日志监控，每30分钟临时检查，无变化静默、失败或完成通知并删除；不用子代理持续轮询。接班完成当前票并审查、验收、更新记录、提交推送及关闭后，刷新依赖，再通过create_thread只创建唯一同项目local下一票session，传递本合同并确认启动后停止操作共享源码。项目1a1107a1-ae54-43ad-a80c-48fbec3e5823。创建结果未知先查询；本次唯一接班身份保存在artifacts/issue-181/handoff-session.json。
+长测试仅唯一隐藏后台，立即提供PID/创建时间/阶段/完成数/日志监控代码，每30分钟临时检查，无变化静默、失败或完成通知并删除；不用子代理持续轮询。完成本票提交推送并关闭后刷新依赖，使用create_thread在项目1a1107a1-ae54-43ad-a80c-48fbec3e5823/local同checkout创建唯一下一票session，传递同合同并确认启动才停止。创建结果未知先查询，不能重复；新身份记artifacts/issue-182/handoff-session.json。

@@ -1,5 +1,7 @@
 # MathAgent 文档索引
 
+- [#182 状态与控制组合验收](evals/faithful-service-182-20261115.md)：[G2合同](engineering/faithful-service-182-contract.md)。冻结e62d145的gate-01六阶段通过（2105项、0failure/error、42skip、source_changed=false），双轴复查解除；真实旧Run刷新/重启保持原预算、4次Attempt和输出身份。仅整合已有能力，#168完整服务仍未完成，按[交接](engineering/unattended-ticket-handoff.md)继续#183。
+
 - [#181 答案表达与只读恢复验收](evals/faithful-service-181-20261115.md)：G1工程退出通过；[合同](engineering/faithful-service-181-contract.md)。复用#169真实答案5，显式模板表达、同版本深链和只读恢复通过，原4次模型调用及预算不变。冻结36c0c36的gate-02六阶段通过（2096项、0failure/error、42skip、源码无漂移），原gate-01夹具失败和最小修复保留。表达不代表新增验证或教学质量提升。按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)继续#182；#168完整服务仍未完成。
 
 - [#180 证明缓存当前核验验收](evals/faithful-service-180-20261115.md)：达到授权调整后的开发接线退出条件；[合同](engineering/faithful-service-180-contract.md)。冻结35eaa43的gate-01六阶段通过（2095项、0failure/error、42skip、源码无漂移）。固定真实Lean当前重验与同根计账、当前回执身份UI完成；三轮自然来源失败保留，自然命中及真实当前回执UI/跨进程恢复留#183。#168未完成；按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)继续#181。
