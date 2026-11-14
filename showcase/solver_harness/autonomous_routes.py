@@ -224,7 +224,14 @@ def advance_switch(harness, run, problem):
     state = run["state"]
     target = proposal.get("mode", "keep")
     if target == "intervene":
-        if (mode != "population" or not getattr(harness, "_intervention_enabled", False)
+        if state.get('serial_intervention') or (state.get('population_intervention') or {}).get('status') == 'completed':
+            run = harness.commit_event(run['run_id'], expected_revision=run['state_revision'],
+                event={'event_id': f"population-intervention-rejected-{run['state_revision']}",
+                       'type': 'population_intervention_rejected', 'reason': 'population_intervention_already_used'},
+                state_updates={})
+            state = run['state']
+            target = 'keep'
+        elif (mode != "population" or not getattr(harness, "_intervention_enabled", False)
                 or state.get("serial_intervention_permission") != {"enabled": True, "version": "serial-intervention-v1"}):
             target = "keep"
         else:

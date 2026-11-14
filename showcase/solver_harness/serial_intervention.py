@@ -458,11 +458,16 @@ def _advance_serial(harness, run, problem):
         # establishes its own authority; neither child ledger nor its verdict is copied.
         step_id = run["state"]["current_step"]
         projection["review_id"] = _digest(reusable[-1]["reference"])
+        from .report_sources import native_material
+
+        material = native_material(engine, reusable[-1]['reference'])
+        source_id = 'native-report:' + _digest(material)
         run = _commit(
             harness,
             run,
             projection,
             phase="STEP_VERIFY",
+            native_report_sources={**run['state'].get('native_report_sources', {}), source_id: material},
             steps={
                 **run["state"]["steps"],
                 step_id: {

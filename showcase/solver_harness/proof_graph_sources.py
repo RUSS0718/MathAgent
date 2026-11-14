@@ -30,7 +30,7 @@ def recorded_call(state: Mapping, call_id: object, role: str) -> Mapping | None:
     return call
 
 
-def reasoner_report_call(state: Mapping, step_id: str, report: Mapping,
+def local_reasoner_report_call(state: Mapping, step_id: str, report: Mapping,
                          plan_version: int, attempt_index: int,
                          before_revision: int | None = None) -> str | None:
     """Find the completed reasoner call matching the saved report and attempt."""
@@ -59,6 +59,17 @@ def reasoner_report_call(state: Mapping, step_id: str, report: Mapping,
                 and response_claims == claims):
             candidates.append((call.get("request_revision", -1), call_id))
     return max(candidates, default=(None, None))[1]
+
+
+def reasoner_report_call(state, step_id, report, plan_version, attempt_index, before_revision=None):
+    """返回本地回执或显式原生来源身份，禁止伪造父 reasoner 调用。"""
+    from .report_sources import resolve_report_source
+
+    review = next((call for call in state.get('calls', {}).values()
+                   if call.get('role') == 'step_verifier' and call.get('request_revision') == before_revision
+                   and call.get('request', {}).get('step', {}).get('step_id') == step_id), None)
+    source = resolve_report_source(state, step_id, report, plan_version, attempt_index, review=review)
+    return source['source_id'] if source else None
 
 
 def _verify_record(state: Mapping, record: Mapping) -> tuple[dict | None, str | None]:

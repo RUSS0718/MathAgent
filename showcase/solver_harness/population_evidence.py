@@ -102,6 +102,8 @@ def prepare_adoption(parent, route_snapshot):
         "verified_results_ledger": selected,
         "steps": snapshot_steps,
         "calls": snapshot_calls,
+        "native_report_sources": {**route_snapshot.get('native_report_sources', {}),
+                                  **parent.get('native_report_sources', {})},
     }
     if dependencies:
         patch["proof_graph"] = deepcopy(parent.get("proof_graph"))
@@ -317,7 +319,8 @@ def _valid_result(state, result, current, route=None, action=None):
     ):
         return False
     report_id = _report_call_for(state, result)
-    report = state.get("calls", {}).get(report_id, {})
+    source = _report_source_for(state, result)
+    report = source['call'] if source else {}
     if (
         report.get("role") != "reasoner"
         or report.get("status") != "completed"
@@ -421,16 +424,10 @@ def _valid_obligation_evidence(state, evidence):
     step = state.get("steps", {}).get(step_id, {})
     review = state.get("calls", {}).get(evidence.get("review_call_id"), {})
     report = step.get("report", {})
-    report_call_id = _report_call_for(
-        state,
-        {
-            "source": step_id,
-            "review_call_id": evidence.get("review_call_id"),
-            "plan_version": evidence.get("plan_version"),
-            "attempt_index": evidence.get("attempt_index"),
-        },
-    )
-    report_call = state.get("calls", {}).get(report_call_id, {})
+    source = _report_source_for(state, {
+        'source': step_id, 'review_call_id': evidence.get('review_call_id'),
+        'plan_version': evidence.get('plan_version'), 'attempt_index': evidence.get('attempt_index')})
+    report_call = source['call'] if source else {}
     report_digest = hashlib.sha256(
         json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -452,27 +449,18 @@ def _valid_obligation_evidence(state, evidence):
     )
 
 
+def _report_source_for(state, result):
+    from .report_sources import resolve_report_source
+
+    step_id = result.get('source')
+    return resolve_report_source(state, step_id, state.get('steps', {}).get(step_id, {}).get('report', {}),
+                                 result.get('plan_version'), result.get('attempt_index'),
+                                 review=state.get('calls', {}).get(result.get('review_call_id')))
+
+
 def _report_call_for(state, result):
-    review = state.get("calls", {}).get(result.get("review_call_id"), {})
-    candidates = []
-    for call_id, record in state.get("calls", {}).items():
-        request = record.get("request", {})
-        step = request.get("step", {})
-        step_id = step.get("step_id", request.get("step_id"))
-        if (record.get("role") != "reasoner" or record.get("status") != "completed"
-                or step_id != result.get("source")
-                or record.get("plan_version") != result.get("plan_version")
-                or record.get("attempt_index") != result.get("attempt_index")):
-            continue
-        if review and (any(record.get(key) != review.get(key) for key in ("route_id", "action_id"))
-                       or record.get("request_revision", 0) > review.get("request_revision", 0)):
-            continue
-        claims = record.get("response", {}).get("claims", [])
-        if all(type(index) is int and 0 <= index < len(claims)
-               and claims[index].get("statement") == result.get("statement")
-               for index in result.get("claim_indexes", [])):
-            candidates.append((record.get("request_revision", 0), call_id))
-    return max(candidates)[1] if candidates else None
+    source = _report_source_for(state, result)
+    return source['source_id'] if source else None
 
 
 def _proposition_for_result(state, result):

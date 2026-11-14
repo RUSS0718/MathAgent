@@ -209,7 +209,50 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             raise PopulationConflict("population_owner_epoch_mismatch")
         if state['state_revision'] != args['expected_revision']:
             raise PopulationConflict('population_intervention_revision_changed')
-        return _event('population_intervention_completed'), deepcopy(args['updates'])
+        from .autonomous_routes import serial_checkpoint_view
+        from .faithful_intervention import FaithfulInterventionEngine
+        from .population_intervention import completion_updates
+        from .report_sources import native_material
+
+        allowed = {'population', 'serial_checkpoint', 'serial_checkpoint_snapshot', 'phase',
+                   'execution_serial_sources', 'population_intervention', 'serial_intervention'}
+        updates = args.get('updates')
+        if not isinstance(updates, dict) or set(updates) != allowed:
+            raise PopulationConflict('population_intervention_patch_forbidden')
+        intent = state.get('population_intervention') or {}
+        projection = state.get('serial_intervention') or {}
+        if (intent.get('status') != 'executing' or state.get('phase') == 'TERMINAL'
+                or projection.get('status') not in {'completed', 'incomplete', 'skipped'}
+                or projection.get('continuation') != 'main_task_continues'
+                or any(c.get('status') in {'dispatched', 'streaming', 'unknown_outcome'}
+                       for c in state.get('calls', {}).values())):
+            raise PopulationConflict('population_intervention_not_complete')
+        source = intent.get('source') or {}
+        if (source != state.get('serial_checkpoint')
+                or source.get('route_id') != state.get('execution_serial_route')
+                or projection.get('route_id') != source.get('route_id')
+                or projection.get('source_version') != source.get('snapshot_hash')):
+            raise PopulationConflict('population_intervention_source_changed')
+        serial_checkpoint_view(state, expected_revision=state['state_revision'])
+        engine = FaithfulInterventionEngine(connection)
+        if projection.get('pair_id'):
+            report = engine.get_pair(projection['pair_id'])
+            frozen = json.loads(connection.execute(
+                'SELECT checkpoint_json FROM faithful_intervention_pairs WHERE pair_id=?',
+                (projection['pair_id'],)).fetchone()[0])
+            if frozen['state'].get('serial_checkpoint_source') != source:
+                raise PopulationConflict('population_intervention_pair_source_changed')
+            if (report['run_id'] != run_id or report['job_id'] != run_id
+                    or report.get('status') != projection['status'] or report.get('unknown_pairs')
+                    or report.get('config_hash') != state.get('config_hash')):
+                raise PopulationConflict('population_intervention_pair_changed')
+        for material in state.get('native_report_sources', {}).values():
+            if native_material(engine, material['reference']) != material:
+                raise PopulationConflict('population_intervention_report_changed')
+        expected = completion_updates(state)
+        if updates != expected:
+            raise PopulationConflict('population_intervention_patch_changed')
+        return _event('population_intervention_completed'), expected
 
     if operation == "execution_intent":
         if owner is None or owner_token != owner:
