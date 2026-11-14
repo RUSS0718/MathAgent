@@ -208,6 +208,12 @@ def _commit(harness, run, projection, **updates):
 
 
 def advance(harness, run, problem):
+    if run["state"].get("population_policy", {}).get("enabled") or run["state"].get("execution_serial_route"):
+        return run
+    return _advance_serial(harness, run, problem)
+
+
+def _advance_serial(harness, run, problem):
     """Ask once at a reviewed serial obstacle and execute existing symmetric native F4."""
     from ..run_budget import BudgetExhausted, RunBudgetLedger
     from .calls import CallInterrupted
@@ -222,8 +228,6 @@ def advance(harness, run, problem):
         not getattr(harness, "_intervention_enabled", False)
         or state.get("serial_intervention_permission") != {"enabled": True, "version": "serial-intervention-v1"}
         or not state.get("autonomous_routes")
-        or state.get("population_policy", {}).get("enabled")
-        or state.get("execution_serial_route")
         or harness._meta_port is None
     ):
         return run
@@ -238,6 +242,8 @@ def advance(harness, run, problem):
         ):
             return run
         projection = {
+            **({k: state['population_intervention'][k] for k in ('origin', 'route_id', 'source_version')}
+               if state.get('population_intervention', {}).get('origin') == 'population' else {}),
             "status": "deciding",
             "decision": None,
             "pair_id": None,
@@ -460,7 +466,7 @@ def advance(harness, run, problem):
             steps={
                 **run["state"]["steps"],
                 step_id: {
-                    **run["state"]["steps"][step_id],
+                    **run["state"]["steps"].get(step_id, {}),
                     "report": reusable[-1]["report"],
                     "status": "REPORTED",
                 },
@@ -486,6 +492,7 @@ def public_projection(projection):
             k: deepcopy(projection.get(k))
             for k in ("status", "decision", "pair_id", "continuation", "reason")
         },
+        **{k: deepcopy(projection[k]) for k in ("origin", "route_id", "source_version") if k in projection},
         "adoptions": [
             {
                 **{k: item.get(k) for k in ("status", "reason", "evidence_grade")},

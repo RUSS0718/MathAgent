@@ -248,7 +248,7 @@ def response_schema(request):
         return obj({'decision': {'enum': ['keep', 'intervene']}, 'reason': TEXT,
                     'hypothesis': TEXT, 'method_id': {'enum': sorted(METHOD_IDS)}})
     if request.get("execution_mode_decision") is True and request.get("role") == "meta":
-        return obj({"mode": {"enum": ["serial", "population", "keep"]}, "reason": TEXT})
+        return obj({"mode": {"enum": ["serial", "population", "keep", "intervene"]}, "reason": TEXT})
     role = request["role"]
     if role == "reasoner" and request.get("checkpoint_protocol"):
         schema = deepcopy(SCHEMAS["reasoner_checkpoint"])

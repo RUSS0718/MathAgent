@@ -225,6 +225,9 @@ class NativeCheckpointExecutor:
         source = self.engine._connection
         run_id = checkpoint["run_id"]
         row = source.execute("SELECT * FROM solver_states WHERE run_id=?", (run_id,)).fetchone()
+        if checkpoint['state'].get('serial_checkpoint_source'):
+            row = list(row)
+            row[1] = _encode(checkpoint['state'])
         connection.execute("INSERT INTO solver_states VALUES (?,?,?,?,?,?,?)", tuple(row))
         for event in source.execute("SELECT * FROM solver_events WHERE run_id=? ORDER BY sequence", (run_id,)):
             connection.execute("INSERT INTO solver_events VALUES (?,?,?,?,?,?)", tuple(event))

@@ -205,6 +205,8 @@ def advance_switch(harness, run, problem):
     plans = _independent_plans(local["plan"], state["problem_spec"])
     if mode == "serial" and (len(plans) < 2 and not serial_route):
         return run
+    if (state.get('population_intervention') or {}).get('status') == 'executing':
+        return run
     # Receipts, rather than ticks or audit revisions, bound model deliberation.
     marker = {"rounds": state.get("progress", {}).get("rounds", 0),
               "actions": sorted(a["action_id"] for a in state.get("population", {}).get("actions", {}).values()
@@ -221,6 +223,27 @@ def advance_switch(harness, run, problem):
     run, proposal = _mode_decision(harness, run, problem, mode, marker, local)
     state = run["state"]
     target = proposal.get("mode", "keep")
+    if target == "intervene":
+        if (mode != "population" or not getattr(harness, "_intervention_enabled", False)
+                or state.get("serial_intervention_permission") != {"enabled": True, "version": "serial-intervention-v1"}):
+            target = "keep"
+        else:
+            from ..run_control import check_control
+            from .storage import SolverRevisionConflictError
+
+            while True:
+                check_control()
+                run = harness.get_run(run["run_id"])
+                try:
+                    run = harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
+                        event={"event_id": f"population-intervention-intent-{run['state_revision']}",
+                               "type": "population_intervention_intent"},
+                        state_updates={"population_intervention": {"status": "converging"}})
+                    break
+                except SolverRevisionConflictError:
+                    continue
+            state = run["state"]
+            target = "serial"
     if target in {"keep", mode} or (target == "population" and not _switch_budget_available(harness, run, plans, problem)):
         from .storage import SolverRevisionConflictError
 
@@ -355,7 +378,7 @@ def _mode_decision(harness, run, problem, mode, marker, local):
                              for r in run["state"].get("population", {}).get("routes", {}).values()],
                "plan": deepcopy(local.get("plan")),
                "root_budget": route_budget_snapshot(harness._state_store._connection, run["run_id"]),
-               "instruction": "Choose mode serial, population, or keep from current progress, stagnation, unfinished goals and independent fronts. Keep useful parallel work; expand stalled serial work only when independent fronts justify cost. This is a runtime decision, not intervention scheduling.",
+               "instruction": "Choose mode serial, population, or keep from current progress, stagnation, unfinished goals and independent fronts. Keep useful parallel work; expand stalled serial work only when independent fronts justify cost. Choose intervene only for a falsifiable mathematical obstacle requiring a controlled method experiment; this first converges all routes to a legal serial checkpoint, then asks the intervention decision. Never use it for transport failure.",
                "allowed_tools": [], "tool_policy": {"allow": []}}
     from .calls import CallInterrupted, latest_retry_id
     from .storage import SolverRevisionConflictError
@@ -394,7 +417,7 @@ def _mode_decision(harness, run, problem, mode, marker, local):
                 continue
         request["state_revision"] = run["state_revision"]
         reply = dict(harness.dispatch(run, harness._meta_port.complete, harness.prepare_request(run, request)))
-    if reply.get("mode") not in {"keep", "serial", "population"} or not isinstance(reply.get("reason"), str):
+    if reply.get("mode") not in {"keep", "serial", "population", "intervene"} or not isinstance(reply.get("reason"), str):
         raise ValueError("invalid_execution_mode_decision")
     run = harness.get_run(run["run_id"])
     while True:

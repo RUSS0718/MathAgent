@@ -100,12 +100,24 @@ def advance(harness, run, metadata, problem):
     from .autonomous_routes import advance_switch
     from .serial_intervention import advance as advance_intervention
 
+    if (run['state'].get('population_intervention') or {}).get('status') == 'executing':
+        from .population_intervention import advance as advance_composition
+
+        run = advance_composition(harness, run, problem)
+        if run['state']['population_intervention']['status'] != 'completed':
+            return run
     run = advance_intervention(harness, run, problem)
     if (run['state'].get('serial_intervention') or {}).get('status') == 'needs_review':
         return run
     run = advance_switch(harness, run, problem)
     if (run["state"].get("execution_switch") or {}).get("status") in {"converging", "needs_review"}:
         return run
+    if run["state"].get("population_intervention"):
+        from .population_intervention import advance as advance_composition
+
+        run = advance_composition(harness, run, problem)
+        if (run["state"].get("serial_intervention") or {}).get("status") == "needs_review":
+            return run
     if run["state"].get("population_policy", {}).get("enabled") is True:
         from .population_lifecycle import advance_population
 

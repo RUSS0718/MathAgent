@@ -204,6 +204,13 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             "population": population,
         }
 
+    if operation == "intervention_complete":
+        if owner is None or owner_token != owner:
+            raise PopulationConflict("population_owner_epoch_mismatch")
+        if state['state_revision'] != args['expected_revision']:
+            raise PopulationConflict('population_intervention_revision_changed')
+        return _event('population_intervention_completed'), deepcopy(args['updates'])
+
     if operation == "execution_intent":
         if owner is None or owner_token != owner:
             raise PopulationConflict("population_owner_epoch_mismatch")

@@ -33,6 +33,7 @@ const reasons: Record<string, string> = {
   source_proof_not_applicable: '来源证明已失效或不适用',
   population_intervention_permission_revoked: '干预权限已撤销',
   population_intervention_source_changed: '收敛来源已变化，不能继续干预',
+  population_intervention_unknown_call: '在途调用结果未确认，等待复核',
   serial_checkpoint_source_changed: '串行检查点来源已变化，不能继续干预',
 }
 </script>
