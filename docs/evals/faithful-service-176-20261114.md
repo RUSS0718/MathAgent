@@ -43,4 +43,8 @@ live02 证据为 `artifacts/issue-176/live02/diagnosis.json`、`job-final.json`�
 
 ## 最终门禁与交接
 
-`1b1a058` 的 `gate-01` 在 offline 阶段因最终 Ruff 检出测试文件4处 I001 导入排序而由所有者中止，见 `gates/gate-01/owner-abort.json`，不计通过。排序修复提交 `1bf47fb`，无行为改变，最终 Ruff 通过见 `review-fix/final-ruff-fixed.log`；语义审查仍适用。`gate-02` 将对包含该修复及本记录的冻结源码执行 `uv run python scripts/run_final_gate.py --root . --output-dir artifacts/issue-176/gates --run-id gate-02`，最终结果待记录；门禁通过不能替代真实能力。最终交接 SHA 另记，纯文档变化不重复运行同源码门禁。
+`1b1a058` 的 `gate-01` 在 offline 阶段因最终 Ruff 检出测试文件4处 I001 导入排序而由所有者中止，见 `gates/gate-01/owner-abort.json`，不计通过。排序修复提交 `1bf47fb`，无行为改变，最终 Ruff 通过见 `review-fix/final-ruff-fixed.log`；语义审查仍适用。
+
+`gate-02` 冻结源码 `3b2934a521faecb0212a323ae8cae04f0cb735bc`：快速阶段通过，offline 2070项中1 failure、0 error、49 skip，耗时1884.508秒，`source_changed=false`。失败为 `FaithfulPopulationJobTest.test_population_can_contract_expand_and_contract_on_new_receipts` 的20秒公共观察超时；后续阶段未执行。原失败保留。单项原代码复验18.972秒通过，已接近观察上限；这支持观察窗口偏紧的解释，未实证具体环境根因。提交 `f34857d` 仅把该三次切换用例 `job_timeout` 改为60秒，保留全部切换、最终交付断言及产品预算/deadline；修后单项19.097秒通过，Ruff通过，见 `gate-timeout-focused/attempt-01.json`、`fixed.json`、`ruff.log`。
+
+`gate-03` 待对包含该修复及本记录的冻结源码执行 `uv run python scripts/run_final_gate.py --root . --output-dir artifacts/issue-176/gates --run-id gate-03`；最终结果待记录。门禁通过不能替代真实能力。最终交接 SHA 另记，纯文档变化不重复运行同源码门禁。
