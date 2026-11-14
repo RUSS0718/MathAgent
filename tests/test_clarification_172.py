@@ -3,12 +3,16 @@
 import json
 import unittest
 import uuid
+from copy import deepcopy
 from unittest.mock import patch
 
 import requests
 
+from showcase.formal_specification import canonical_identity
 from tests import test_faithful_service_job as service_tests
 from tests.star_product_support import ACCEPT, StarJobFixture
+from tests.test_faithful_s09_public_job import SPEC as RATIONAL_SPEC
+from tests.test_faithful_s09_public_job import TARGET
 
 PROBLEM = "求这个三角形的数值面积。"
 SPEC = {
@@ -93,6 +97,50 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
         self.assertIn("12", self.report(job_id)["answer"])
         self.assertEqual(5, len(self.outbound))
         self.assertEqual(final["result"]["faithful"], self.job(job_id)["result"]["faithful"])
+
+    def test_clarification_rebinds_formal_selection_to_effective_spec(self):
+        initial = deepcopy(RATIONAL_SPEC)
+        initial["clarification"] = {"question": "Is x positive?", "reason": "Confirm the additional condition."}
+        initial["formalization"] = {"status": "not_selected", "reason": "awaiting clarification",
+                                    "require_formal": False, "obligation_ids": [], "target": None}
+        reply = deepcopy(RATIONAL_SPEC)
+        reply["applicable_condition"] = "x > 0"
+        reply["formalization"] = {
+            "status": "proposed", "reason": "rational identity", "require_formal": True,
+            "obligation_ids": ["root:identity"],
+            "target": {key: value for key, value in TARGET.items()
+                       if key not in {"hash", "_lean_lhs", "_lean_rhs"}},
+        }
+        self.open_faithful([initial, reply, SOLVED_AREA, POLISHED_AREA, ACCEPT])
+        created = self.client.post("/api/agent/jobs", headers=self.headers(),
+            json={"session_id": self.session, "message": initial["original_problem"]})
+        self.assertEqual(202, created.status_code, created.get_json())
+        job_id = created.get_json()["job_id"]
+        before = self.wait_for(lambda: value if (value := self.job(job_id))["status"]
+                               in {"waiting_input", "failed"} else None)
+        self.assertEqual("waiting_input", before["status"], before)
+        question = before["result"]["faithful"]["clarification"]
+        self.assertEqual(202, self.answer(job_id, question, answer="x > 0").status_code)
+        final = self.terminal(job_id)
+        service = self.app.extensions["showcase_workspace_service"]
+        with service.store._lock:
+            state = json.loads(service.store._connection.execute(
+                "SELECT state_json FROM solver_states WHERE run_id=?", (job_id,)).fetchone()[0])
+        selection = state["formalization"]
+        self.assertTrue(selection["require_formal"])
+        self.assertEqual("unsupported", selection["status"])
+        self.assertEqual("spec_target_mismatch", selection["reason"])
+        self.assertNotIn("target", selection)
+        self.assertEqual(2, state["problem_spec"]["specification_version"])
+        self.assertIn("x > 0", state["problem_spec"]["assumptions"][-1])
+        self.assertEqual(canonical_identity(state["problem_spec"]), selection["source"]["specification_hash"])
+        self.assertEqual(f"{job_id}:problem-intake:2", selection["source"]["generation_call_id"])
+        self.assertEqual(["root:identity"], selection["source"]["obligation_ids"])
+        self.assertEqual("failed", final["status"])
+        self.assertEqual("unsupported", final["result"]["formal_verification"]["status"])
+        self.assertEqual("unmet", final["result"]["formal_verification"]["assessment"]["status"])
+        self.assertEqual(5, len(self.outbound))
+        self.assertEqual(before["result"]["budget"]["deadline_at"], final["result"]["budget"]["deadline_at"])
 
     def test_live_reply_shapes_require_one_budgeted_repair_before_solving(self):
         generic = "三角形的几何参数已明确给出，可直接计算其数值面积。"

@@ -103,6 +103,8 @@ def ensure_problem_spec(harness, run, problem):
         }
         if evaluating:
             request["clarification_input"] = redact({key: question[key] for key in ("question", "answer")})
+        if state["problem_intake"].get("formal_generation_required") is True:
+            request["formal_generation_required"] = True
         if pending_repair:
             request = repair_request(request, failed_call=record)
         reservation = retry["new_call_id"] if authorized else request["call_id"]
@@ -127,6 +129,9 @@ def ensure_problem_spec(harness, run, problem):
             reply = harness.dispatch(run, harness._model_port.complete, request)
         run = harness.get_run(run["run_id"], problem=problem)
         current_id = completed_call_id(run["state"].get("calls", {}), call_id)
+    if (run["state"]["problem_intake"].get("formal_generation_required") is True
+            and not isinstance(reply.get("formalization"), Mapping)):
+        return reject_intake(harness, run, "problem_intake_formalization_missing")
     try:
         spec = normalize_problem_spec(reply)
     except (TypeError, ValueError):
@@ -142,6 +147,11 @@ def ensure_problem_spec(harness, run, problem):
         "problem_intake": {**run["state"]["problem_intake"], "status": "completed",
                            "call_id": current_id, "authority": "generated_task_spec_not_proof"},
     }
+    from .formal_generation import select_formalization
+
+    selection = select_formalization(reply.get("formalization"), spec, current_id)
+    if selection is not None:
+        updates["formalization"] = selection
     if reply.get("clarification"):
         try:
             updates.update(necessary_question(run, updates["problem_intake"], reply["clarification"]))
@@ -174,5 +184,10 @@ def _apply_clarification(harness, run, reply, call_id, version):
     else:
         change = answer_change(state, condition.strip(), {**intake, "status": "completed"})
         updates, event = change["updates"], change["event"]
+        from .formal_generation import select_formalization
+
+        selection = select_formalization(reply.get("formalization"), updates["problem_spec"], call_id)
+        if selection is not None:
+            updates["formalization"] = selection
     return harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
                                 event={**event, "call_id": call_id}, state_updates=updates)

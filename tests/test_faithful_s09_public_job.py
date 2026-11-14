@@ -325,6 +325,29 @@ class FaithfulS09PublicJobTest(StarJobFixture, unittest.TestCase):
                          self.job(job_id)["result"]["formal_verification"]["current_attempt_id"])
         self.assertEqual(1, len(self.transport.calls))
 
+    def test_formal_retry_preserves_required_verification_mode(self):
+        self.open_formal(statuses=("unavailable", "unavailable"))
+        response = self.client.post("/api/agent/jobs", json={
+            "message": PROBLEM, "session_id": self.session, "solver_mode": "star_limited",
+            "problem_spec": SPEC, "formal_policy": POLICY, "verification_mode": "required"},
+            headers=self.headers())
+        job_id = response.get_json()["job_id"]
+        first = self.terminal(job_id)["result"]["formal_verification"]["current_attempt_id"]
+        response = self.client.post(f"/api/agent/jobs/{job_id}/formal-attempts",
+            json={"expected_attempt_id": first, "operation": "retry"}, headers=self.headers())
+        self.assertEqual(202, response.status_code, response.get_json())
+        child = response.get_json()["attempt_id"]
+
+        def finished():
+            job = self.job(job_id)
+            formal = job["result"]["formal_verification"]
+            return job if formal["current_attempt_id"] == child and formal["status"] != "dispatched" else None
+
+        job = self.wait_for(finished)
+        self.assertEqual("failed", job["status"])
+        self.assertEqual("required_unmet", job["result"]["solver"]["semantics"]["verification_requirement"])
+        self.assertEqual(2, len(self.transport.calls))
+
     def test_public_single_tool_budget_prevents_a_second_explicit_dispatch(self):
         self.open_formal(statuses=("unavailable", "solved"), tool_budget=1)
         job_id = self.create().get_json()["job_id"]
@@ -520,7 +543,7 @@ class FaithfulS09PublicJobTest(StarJobFixture, unittest.TestCase):
             "formal_policy": {**POLICY, "require_formal": True},
             "formal_verification": {"status": "solved", "grade": "L2"},
         }}
-        self.assertEqual("met", result_semantics(run, "", verification_mode="required")["formal_requirement"])
+        self.assertEqual("unmet", result_semantics(run, "", verification_mode="required")["formal_requirement"])
         run["state"]["formal_verification"]["grade"] = None
         self.assertEqual("unmet", result_semantics(run, "", verification_mode="required")["formal_requirement"])
 

@@ -54,6 +54,7 @@ def load_faithful_config(path):
         raise ValueError("faithful_population_memory_invalid")
     config = {
         "SHOWCASE_FAITHFUL_AUTONOMOUS": True,
+        "SHOWCASE_FORMAL_GENERATION_REQUIRED": True,
         "SHOWCASE_STAR_FULL_ENABLED": True,
         "SHOWCASE_STAR_PYTHON_IMAGE_ID": image,
         "SHOWCASE_STAR_FULL_FEATURES": features,
@@ -84,7 +85,10 @@ def load_faithful_config(path):
                       SHOWCASE_STAR_POPULATION_BUDGET=budget,
                       SHOWCASE_STAR_POPULATION_REQUEST_TIMEOUT_SECONDS=timeout)
     if "formal" in value:
-        from .formal import LeanTacticProver
+        import secrets
+
+        from .formal import LeanTacticProver, ReviewAuthority
+        from .formal_correspondence import CHECKER_VERSION
         from .formal_docker import LeanDockerExecutor
 
         formal = _object(value["formal"], {"manifest", "policy"})
@@ -98,6 +102,9 @@ def load_faithful_config(path):
                                       timeout_seconds=policy["timeout_seconds"],
                                       max_output_bytes=policy["max_output_bytes"])
         config.update(SHOWCASE_FORMAL_BACKEND=LeanTacticProver(
-            executor, timeout_seconds=policy["timeout_seconds"]),
+            executor, timeout_seconds=policy["timeout_seconds"],
+            review_authority=ReviewAuthority(
+                {CHECKER_VERSION: secrets.token_hex(32)},
+                {CHECKER_VERSION: "independent_service"})),
             SHOWCASE_FORMAL_VERIFICATION_CONFIG=policy)
     return config

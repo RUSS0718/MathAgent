@@ -132,11 +132,15 @@ def register_revision_api(app, service, *, require_auth, request_object, error_r
                 if row is None:
                     raise WorkspaceError("job_not_found", status=404)
                 identity = json.loads(row["result_json"] or "{}")
+            formal_policy = identity.get("formal_policy")
+            if isinstance(formal_policy, dict) and formal_policy.get("source", {}).get("generation_call_id"):
+                # A generated target belongs to the old input; intake must regenerate it.
+                formal_policy = None
             job, existing = service.create_job(user_id=session.user_id, session_id=row["session_id"],
                 problem=message.strip(), idempotency_key=request.headers.get("Idempotency-Key", ""),
                 solver_mode=identity.get("solver_mode", "legacy"), verification_mode=row["verification_mode"],
                 input_user_file_id=row["input_user_file_id"], presentation_mode=identity.get("presentation_mode"),
-                formal_policy=identity.get("formal_policy"),
+                formal_policy=formal_policy,
                 revision_source={"task_id": job_id, "input_version": version})
             return jsonify({"success": True, "job_id": job["job_id"], "status": job["status"],
                             "existing": existing}), 200 if existing else 202

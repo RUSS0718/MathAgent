@@ -287,6 +287,9 @@ def response_schema(request):
     if role not in SCHEMAS:
         raise ValueError("unsupported_intern_role")
     schema = SCHEMAS[role]
+    if role == "problem_intake" and request.get("formal_generation_required") is True:
+        schema = deepcopy(schema)
+        schema["required"].append("formalization")
     if not isinstance(request.get("problem_spec"), dict):
         return schema
     schema = deepcopy(schema)

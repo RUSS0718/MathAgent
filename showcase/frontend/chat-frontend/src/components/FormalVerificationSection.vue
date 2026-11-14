@@ -20,6 +20,8 @@ const statusLabels: Record<string, string> = {
 }
 
 const current = computed(() => props.verification.current)
+const requirementUnmet = computed(() => props.verification.assessment?.status === 'unmet'
+  || (props.verification.policy.require_formal === true && props.verification.assessment?.status !== 'met'))
 const parentAttemptId = computed(() => props.verification.current?.parent_attempt_id ?? props.verification.lineage.parent_attempt_id ?? '无')
 const backend = computed(() => stringValue(props.verification.policy.backend) || stringValue(props.verification.policy.requested_backend) || 'unknown')
 const target = computed(() => objectValue(props.verification.policy.target))
@@ -96,11 +98,19 @@ function attemptLabel(attempt: FormalAttempt): string {
       </div>
     </div>
     <p class="formal-headline" role="status">{{ headline }}</p>
-    <p v-if="verification.policy.require_formal === true && !effectiveGrade">形式化要求未满足；原答案仍保留。</p>
-    <p class="formal-boundary">LLM 整题审查通过不等同于形式化；仅在后端返回 solved 且等级为 L2/L3 时显示形式化等级。</p>
+    <p v-if="requirementUnmet">形式化要求未满足；原答案仍保留。</p>
+    <p v-else-if="verification.assessment?.status === 'met'">形式化要求已满足。</p>
+    <p class="formal-boundary">LLM_REVIEWED 表示 LLM 整题审查通过；L1 表示有限工具检查；L2 表示形式目标通过内核与公理审计；L3 还要求独立规格对应审查。等级仅适用于已覆盖义务，不代表整题要求已满足。错误、超时和 unknown 不构成命题为假的反证。</p>
     <p v-if="effectiveGrade === 'L3' && reviewedCorrespondenceCount < correspondence.length" class="notice notice--warning" role="alert">L3 审查记录不完整；不能据此显示“原题已独立复核”。</p>
 
     <dl class="data-list">
+      <template v-if="verification.assessment">
+        <dt>证明范围</dt><dd>{{ verification.assessment.scope === 'original_problem' ? '原题范围' : '形式目标范围' }}（已覆盖义务）</dd>
+        <dt>要求等级</dt><dd>{{ verification.assessment.required_grade }}</dd>
+        <dt>已覆盖义务</dt><dd>{{ verification.assessment.covered_obligation_ids.join('、') || '无' }}</dd>
+        <dt>要求判定原因</dt><dd>{{ verification.assessment.reason }}</dd>
+      </template>
+      <template v-else><dt>证明范围</dt><dd>形式目标；原题覆盖范围未报告</dd></template>
       <dt>Backend</dt><dd>{{ backend }}</dd>
       <dt>目标</dt><dd>{{ stringValue(target.lhs) && stringValue(target.rhs) ? `${stringValue(target.lhs)} = ${stringValue(target.rhs)}` : '未公开或不可用' }}</dd>
       <dt>环境</dt><dd>{{ stringValue(environment.lean_version) || '未知' }} · Mathlib {{ stringValue(environment.mathlib_version) || '未知' }}</dd>

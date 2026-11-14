@@ -89,5 +89,6 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
         hint_mode=config.get("SHOWCASE_STAR_HINT_MODE", "none"),
         evidence_kind=config.get("SHOWCASE_STAR_EVIDENCE_KIND", "live"),
         formal_backend=formal_backend,
+        formal_generation_required=config.get("SHOWCASE_FORMAL_GENERATION_REQUIRED") is True,
         formal_registry=formal_registry,
         formal_server_policy=formal_server_policy)

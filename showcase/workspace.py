@@ -46,14 +46,16 @@ def _apply_formal_requirement(result: dict[str, Any]) -> None:
     formal = result.get("formal_verification")
     if not isinstance(formal, Mapping):
         formal = solver.get("formal_verification")
-    met = (isinstance(formal, Mapping) and formal.get("status") == "solved"
-           and formal.get("grade") in {"L2", "L3"})
+    from .formal_requirements import assess_formal_requirement
+
+    # The solver projection carries the current specification-bound assessment.
+    assessment = assess_formal_requirement(policy, formal)
+    if isinstance(formal, Mapping) and isinstance(formal.get("assessment"), Mapping):
+        assessment = formal["assessment"]
     updated_solver = dict(solver)
-    updated_solver["semantics"] = {
-        **dict(semantics),
-        "formal_requirement": ("met" if met else "unmet")
-        if policy.get("require_formal") is True else "default",
-    }
+    updated_solver["semantics"] = {**dict(semantics), "formal_requirement": assessment["status"]}
+    if assessment["status"] == "unmet":
+        updated_solver["semantics"]["execution"] = "needs_review"
     result["solver"] = updated_solver
 
 
@@ -682,6 +684,9 @@ class WorkspaceStore:
                     if frozen_key in prior:
                         result[frozen_key] = prior[frozen_key]
                 _apply_formal_requirement(result)
+                if result.get("solver", {}).get("semantics", {}).get("formal_requirement") == "unmet":
+                    terminal_status = "failed"
+                    error_code = "formal_requirement_unmet"
                 if isinstance(prior.get("experiment_pair"), dict):
                     result["experiment_pair"] = prior["experiment_pair"]
                     _mark_pair_config_not_applied(result)
@@ -1286,9 +1291,13 @@ class WorkspaceService:
             ).fetchone()
             if row is None:
                 raise WorkspaceError("job_not_found", status=404)
-            if row["status"] != "succeeded":
-                raise WorkspaceError("formal_retry_job_not_terminal", status=409)
             identity = _loads(row["result_json"]) if row["result_json"] else {}
+            semantics = identity.get("solver", {}).get("semantics", {})
+            reviewed_failure = (row["status"] == "failed"
+                                and semantics.get("whole_review") == "accepted"
+                                and semantics.get("binding") == "same_artifact")
+            if row["status"] != "succeeded" and not reviewed_failure:
+                raise WorkspaceError("formal_retry_job_not_terminal", status=409)
             policy = identity.get("formal_policy")
             if identity.get("solver_mode") not in STAR_MODES or not isinstance(policy, dict):
                 raise WorkspaceError("formal_retry_unavailable", status=409)
@@ -1347,8 +1356,8 @@ class WorkspaceService:
                     )
                     updated = connection.execute(
                         "UPDATE workspace_jobs SET status='running',updated_at=? "
-                        "WHERE job_id=? AND user_id=? AND status='succeeded'",
-                        (_utc_now(), job_id, user_id),
+                        "WHERE job_id=? AND user_id=? AND status=?",
+                        (_utc_now(), job_id, user_id, row["status"]),
                     )
                     if updated.rowcount != 1:
                         raise SolverPersistenceError("formal_retry_job_not_terminal")
@@ -1434,14 +1443,31 @@ class WorkspaceService:
                 formal = saved if isinstance(saved, Mapping) else record
             budget = self.budget_ledger.snapshot(job_id)
         persisted = self.store.job_identity(job_id)
+        from .formal_requirements import assess_formal_requirement
+
+        formal = dict(formal)
+        formal["assessment"] = assess_formal_requirement(
+            persisted.get("formal_policy"), formal, current["state"].get("problem_spec"))
         persisted["formal_verification"] = formal
         if budget is not None:
             persisted["budget"] = budget
+        from .star_result_semantics import result_semantics
+
+        with self.store._lock:
+            latest = state_store.get_run(job_id)
+        if latest is not None and isinstance(persisted.get("solver"), Mapping):
+            persisted["solver"] = {**dict(persisted["solver"]), "semantics": result_semantics(
+                latest, persisted.get("final_response", ""),
+                verification_mode=self.store.verification_mode(job_id))}
         _apply_formal_requirement(persisted)
+        unmet = persisted.get("solver", {}).get("semantics", {}).get("formal_requirement") == "unmet"
+        completed = persisted.get("solver", {}).get("semantics", {}).get("execution") == "completed"
         with self.store._lock:
             self.store._connection.execute(
-                "UPDATE workspace_jobs SET status='succeeded',error_code=NULL,result_json=?,updated_at=? WHERE job_id=?",
-                (_json(persisted), _utc_now(), job_id),
+                "UPDATE workspace_jobs SET status=?,error_code=?,result_json=?,updated_at=? WHERE job_id=?",
+                ("succeeded" if completed and not unmet else "failed",
+                 "formal_requirement_unmet" if unmet else None,
+                 _json(persisted), _utc_now(), job_id),
             )
             self.store._connection.commit()
 

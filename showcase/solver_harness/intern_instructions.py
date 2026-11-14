@@ -101,6 +101,16 @@ def response_instructions(request, schema):
         )
     if role == "problem_intake":
         instructions += (
+            "Optionally return formalization with status proposed/unsupported/not_selected, reason, "
+            "require_formal, obligation_ids and target (null unless proposed). Propose only a useful "
+            "single-variable rational polynomial universal equality: domain=rationals, variables=[x], "
+            "quantifiers=[forall x], assumptions=[], direction=equality, Python lhs/rhs expressions. "
+            "When proposing a target assign explicit root obligation_id values and reference those IDs. "
+            "Preserve domain, quantifiers, assumptions and actual root IDs; never erase conditions "
+            "to fit the backend. Unsupported targets need a reason. Generation cannot approve "
+            "correspondence or award proof grades. Strict mathematical proof alone is not a machine "
+            "requirement: require_formal=true only for explicit machine/Lean verification requests, "
+            "including unsupported ones. "
             "If and only if a missing necessary condition prevents answering the requested question, "
             "include clarification with a concrete question and a reason explaining why the answer "
             "depends on that missing information. Preserve the requested root obligations even when "

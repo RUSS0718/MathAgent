@@ -37,7 +37,7 @@ class StarProductPipeline:
                  population_enabled=None, population_memory_enabled=False,
                  population_request_timeout_seconds=None,
                  intervention_enabled=False, formal_backend=None,
-                 formal_registry=None, formal_server_policy=None):
+                 formal_registry=None, formal_server_policy=None, formal_generation_required=False):
         from .star_experiment_policy import ExperimentRunPolicy
 
         if experiment_policy is not None and not isinstance(experiment_policy, ExperimentRunPolicy):
@@ -100,6 +100,7 @@ class StarProductPipeline:
         self.config["hint_mode"] = hint_mode
         self.registry = registry
         self.formal_backend = formal_backend
+        self.formal_generation_required = formal_generation_required is True
         self.formal_registry = formal_registry
         if self.formal_backend is not None and self.formal_registry is None:
             from .formal import BackendRegistry, register_formal_backend
@@ -327,6 +328,8 @@ class StarProductPipeline:
                         run = resume_solver(harness, problem, run_id, retry_call)
                     else:
                         metadata = {"run_id": run_id, "user_hint": solver_hint}
+                        if self.formal_generation_required:
+                            metadata["formal_generation_required"] = True
                         if self.population_enabled and self.population_config is None:
                             metadata["population_unavailable_reason"] = self.population_capacity_gap
                         if problem_spec is not None:
@@ -393,6 +396,25 @@ class StarProductPipeline:
                 formal_identity = json.loads(identity_row[0]) if identity_row and identity_row[0] else {}
                 formal_policy = formal_identity.get("formal_policy")
                 formal_verification = None
+                selection = math.get("formalization")
+                generation_error = None
+                if formal_policy is None and selection is not None:
+                    from .solver_harness.formal_generation import (
+                        freeze_generated_policy,
+                        generated_policy,
+                    )
+                    from .solver_harness.formal_policy import FormalPolicyError
+
+                    try:
+                        formal_policy = generated_policy(
+                            selection, math.get("problem_spec", {}), self.formal_server_policy,
+                            self.formal_backend is not None,
+                        )
+                    except FormalPolicyError as exc:
+                        generation_error = exc.category
+                    if formal_policy is not None:
+                        run = freeze_generated_policy(harness, run, formal_identity, formal_policy)
+                        math = run["state"]
                 if formal_policy is not None:
                     from .solver_harness.formal_integration import (
                         FormalIntegrationState,
@@ -452,7 +474,45 @@ class StarProductPipeline:
                         )
                         math = run["state"]
                     else:
-                        formal_verification = reserved
+                        from .formal_requirements import assess_formal_requirement
+
+                        formal_verification = dict(reserved)
+                        formal_verification["assessment"] = assess_formal_requirement(
+                            formal_policy, reserved, current_state["state"].get("problem_spec"),
+                        )
+                        if formal_verification != reserved:
+                            run = harness.commit_event(
+                                run_id, expected_revision=current_state["state_revision"],
+                                event={"event_id": "formal-assessment-" + str(current_state["state_revision"]),
+                                       "type": "formal_requirement_assessed"},
+                                state_updates={"formal_verification": formal_verification},
+                            )
+                            math = run["state"]
+                if formal_policy is None and selection is not None:
+                    from .solver_harness.formal_integration import _initial
+
+                    fallback_policy = {"enabled": False, "require_formal": selection["require_formal"]}
+                    formal_verification = {
+                        **_initial(fallback_policy),
+                        "status": ("unsupported" if selection["status"] == "unsupported" else
+                                   "disabled" if selection["status"] == "not_selected" else "unavailable"),
+                        "grade": None, "reason": generation_error or selection["reason"],
+                        "source": selection["source"],
+                    }
+                    from .formal_requirements import assess_formal_requirement
+
+                    formal_verification["assessment"] = assess_formal_requirement(
+                        fallback_policy, formal_verification,
+                        math.get("problem_spec"),
+                    )
+                    if math.get("formal_verification") != formal_verification:
+                        run = harness.commit_event(
+                            run_id, expected_revision=run["state_revision"],
+                            event={"event_id": "formal-generation-" + str(run["state_revision"]),
+                                   "type": "formal_generation_unavailable"},
+                            state_updates={"formal_verification": formal_verification},
+                        )
+                    math = run["state"]
                 attempts = []
                 for call in port.invocations:
                     for attempt in call["request_attempts"]:
@@ -493,6 +553,14 @@ class StarProductPipeline:
                     from .solver_harness.handoff import delivery_check
 
                     result["engineering_delivery"] = delivery_check(run, answer)
+                if formal_verification is not None:
+                    result["formal_verification"] = formal_verification
+                    if formal_verification.get("assessment", {}).get("status") == "unmet":
+                        result["status"] = "NEEDS_REVIEW"
+                        result["error"] = {"category": "formal_requirement_unmet"}
+                if formal_policy is not None:
+                    result["formal_policy"] = formal_policy
+                    result["formal_policy_hash"] = formal_identity.get("formal_policy_hash")
                 check_control(allow_expired_selection=math.get("best_effort_decision") is not None)
                 if self.population_memory_enabled:
                     from .solver_harness.faithful_memory_capture import (

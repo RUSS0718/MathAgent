@@ -246,6 +246,22 @@ test('only backend solved grades render as L2 or L3 and correspondence stays ind
       } },
     } }))
     assert.match(l3, /形式目标与规格对应已独立核验/)
+
+    // A valid local proof does not discharge the original problem's obligations.
+    {
+      const grade = 'L3'
+      const partial = formalVerificationSchema.parse({
+        ...base, status: 'solved', grade, current: { ...base.current, grade }, attempts: [],
+        policy: { ...base.policy, require_formal: true },
+        assessment: {
+          status: 'unmet', reason: 'uncovered_root_obligation', scope: 'original_problem',
+          required_grade: 'L3', covered_obligation_ids: ['root:local_identity'],
+        },
+      })
+      const html = await renderToString(createSSRApp(FormalVerificationSection, { verification: partial }))
+      assert.match(html, /形式化要求未满足/)
+      assert.ok(html.includes('status-label">' + grade + '<'))
+    }
   } finally {
     await server.close()
   }

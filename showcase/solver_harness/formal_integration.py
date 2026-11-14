@@ -139,6 +139,7 @@ def reserve_formal_retry(
 ) -> dict[str, Any]:
     """Create a persisted child attempt for an explicit retry or switch."""
     record = _record_for_public(existing)
+    record.pop("assessment", None)
     if record.get("current_attempt_id") != expected_attempt_id:
         raise FormalIntegrationError("explicit_current_attempt_required")
     current = record.get("current")
@@ -200,13 +201,18 @@ def execute_reserved_attempt(
     goal_cache_connection: Any = None,
 ) -> dict[str, Any]:
     """Execute a persisted dispatch through the registered bounded tool path."""
+    from ..formal_requirements import assess_formal_requirement
     from ..run_budget import BudgetExhausted
+
+    def assessed(value):
+        value["assessment"] = assess_formal_requirement(state.policy, value, state.problem_spec)
+        return value
 
     current = _record_for_public(record)
     if current.get("status") != "dispatched" or not isinstance(current.get("current"), Mapping):
-        return current
+        return assessed(current)
     if _policy_disabled(state.policy):
-        return mark_inflight_unknown(current)
+        return assessed(mark_inflight_unknown(current))
     timeout_seconds = budget.remaining_seconds() if budget is not None else None
     try:
         child = current.get("current") if isinstance(current.get("current"), Mapping) else {}
@@ -231,13 +237,18 @@ def execute_reserved_attempt(
             goal_cache_connection=goal_cache_connection,
         )
     except BudgetExhausted as exc:
-        return _complete_reserved(
+        return assessed(_complete_reserved(
             current,
             {"status": "unavailable", "grade": None, "reason": str(exc),
              "cost": {"elapsed_seconds": 0.0, "output_bytes": 0, "usage": {},
                       "unknown": False}, "specifications": {}, "proof_artifact": None},
-        )
-    return _complete_reserved(current, result)
+        ))
+    except ValueError as exc:
+        return assessed(_complete_reserved(current, {
+            "status": "unsupported", "grade": None, "reason": str(exc),
+            "specifications": {}, "proof_artifact": None,
+        }))
+    return assessed(_complete_reserved(current, result))
 
 
 def _aggregate_cost(attempts):
@@ -360,6 +371,7 @@ def reserve_formal_attempt(
 def mark_inflight_unknown(record: Mapping[str, Any]) -> dict[str, Any]:
     """Close a recovered reservation as unknown without dispatching or rerunning."""
     value = _record_for_public(record)
+    value.pop("assessment", None)
     current = value.get("current")
     if not isinstance(current, Mapping) or current.get("status") != "dispatched":
         return value

@@ -94,6 +94,13 @@ export const formalAttemptSchema = z.object({
 
 export const formalVerificationSchema = z.object({
   schema_version: z.literal('formal-verification-v1'),
+  assessment: z.object({
+    status: z.enum(['default', 'met', 'unmet']),
+    reason: z.string(),
+    scope: z.enum(['original_problem', 'formal_target']),
+    required_grade: z.enum(['L2', 'L3']),
+    covered_obligation_ids: z.array(z.string()),
+  }).optional(),
   policy: z.record(z.string(), z.unknown()),
   policy_hash: z.string(),
   status: z.enum(['disabled', 'dispatched', 'unsupported', 'unavailable', 'not_verified', 'partial', 'timeout', 'error', 'failed', 'unknown', 'solved']),

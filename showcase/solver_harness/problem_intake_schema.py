@@ -53,3 +53,14 @@ def invalid_intake_phase_reply(reply, request):
     if condition is None:
         return followup is None
     return followup is not None or condition.strip() not in submitted["answer"]
+
+
+PROBLEM_SPEC_SCHEMA["properties"]["formalization"] = _object({
+    "status": {"enum": ["proposed", "unsupported", "not_selected"]},
+    "reason": _TEXT, "require_formal": {"type": "boolean"},
+    "obligation_ids": _TEXTS,
+    "target": {"oneOf": [{"enum": [None]}, _object({
+        "domain": _TEXT, "variables": _TEXTS, "lhs": _TEXT, "rhs": _TEXT,
+        "quantifiers": _TEXTS, "assumptions": _TEXTS, "direction": _TEXT,
+    })]},
+})

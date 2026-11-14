@@ -19,6 +19,23 @@ class TaskRevisionTest(StarJobFixture, unittest.TestCase):
         return self.client.post(f"/api/agent/jobs/{job_id}/revisions",
             headers=headers or self.headers(), json={"input_version": version, "message": message})
 
+    def test_generated_formal_target_is_not_inherited_by_changed_problem(self):
+        self.open_faithful([SPEC, SOLVED, POLISH, ACCEPT])
+        old = self.client.post("/api/agent/jobs", headers=self.headers(),
+            json={"session_id": self.session, "message": "1+1"}).get_json()["job_id"]
+        self.terminal(old)
+        service = self.app.extensions["showcase_workspace_service"]
+        service.worker_enabled = False
+        with service.store._lock, service.store._connection:
+            identity = service.store.job_identity(old)
+            identity["formal_policy"] = {"enabled": True, "source": {
+                "generation_call_id": "old-intake"}, "target": {"lhs": "x+x", "rhs": "2*x"}}
+            service.store._connection.execute("UPDATE workspace_jobs SET result_json=? WHERE job_id=?",
+                (json.dumps(identity), old))
+        revised = self.revise(old)
+        self.assertEqual(202, revised.status_code, revised.get_json())
+        self.assertNotIn("formal_policy", self.job(revised.get_json()["job_id"])["result"])
+
     def test_late_committed_settlement_wakes_queued_revision_after_workers_exit(self):
         self.open_faithful([{**SPEC, "original_problem": "计算 2+3"},
             {**SOLVED, "solution_candidate": "5"}, {**POLISH, "solution_candidate": "2+3=5"}, ACCEPT])
