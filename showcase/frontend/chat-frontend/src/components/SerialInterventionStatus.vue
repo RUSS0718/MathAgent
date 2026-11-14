@@ -55,7 +55,8 @@ const reasons: Record<string, string> = {
         <p>原证据等级：{{ item.evidence_grade ?? '未取得' }}</p>
       </article>
     </details>
-    <p v-if="receipt.status === 'needs_review'">未知结果保留原预留，等待显式复核。</p>
+    <p v-if="receipt.status === 'needs_review' && (!receipt.reason || receipt.reason === 'population_intervention_unknown_call')">未知结果保留原预留，等待显式复核。</p>
+    <p v-else-if="receipt.status === 'needs_review'">干预已阻止，等待复核上述原因。</p>
     <p v-else-if="receipt.continuation === 'main_task_continues'">主任务继续，沿用原预算与截止时间；完整答案仍须整题审查。</p>
   </section>
 </template>

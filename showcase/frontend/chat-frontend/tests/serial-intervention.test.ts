@@ -20,6 +20,11 @@ test('serial intervention exposes source, adoption and continuation without prom
     const unknown = await renderToString(createSSRApp(Status, { value: { ...value, status: 'needs_review', continuation: 'pending' } }))
     assert.match(unknown, /等待复核/)
     assert.doesNotMatch(unknown, /主任务继续/)
+    const revoked = await renderToString(createSSRApp(Status, { value: {
+      ...value, status: 'needs_review', reason: 'population_intervention_permission_revoked', continuation: 'pending', origin: 'population',
+    } }))
+    assert.match(revoked, /干预权限已撤销/)
+    assert.doesNotMatch(revoked, /未知结果保留原预留/)
     const population = await renderToString(createSSRApp(Status, { value: {
       ...value, origin: 'population', route_id: 'route-1', source_version: 'source-177',
     } }))
