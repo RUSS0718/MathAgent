@@ -1,6 +1,6 @@
 # #177 并发收敛后干预验收记录
 
-日期：2026-11-14（Asia/Shanghai）；当前状态：开发中，未达到退出条件。父规格 #168 保持开放。要求见[任务合同](../engineering/faithful-service-177-contract.md)，循环规则见[接续合同](../engineering/unattended-ticket-loop.md)。
+日期：2026-11-14（Asia/Shanghai）；当前状态：达到用户授权调整后的开发接线退出条件。父规格 #168 和真实服务验收 #183 保持开放。要求见[任务合同](../engineering/faithful-service-177-contract.md)，循环规则见[接续合同](../engineering/unattended-ticket-loop.md)。最终门禁采用同源码失败后的受影响复验，详见末节；不宣称单次完整门禁通过。
 
 ## 身份及证据范围
 
@@ -11,7 +11,7 @@
 - 前端 `artifacts/issue-177/frontend-red.log` 保留“并发收敛后干预”缺失的失败见证；`frontend-green.log` 同一断言通过。组件沿用现有状态、来源及证据等级显示，无新操作入口。
 - `browser.log`：受控串行及并发两组通过，均覆盖320/768/1024/1440宽度、来源展示、刷新零写请求、无页面脚本错误及无水平溢出。截图 `population-reopened.png`、`serial-reopened.png`。此证据使用拦截响应，不是自然干预或真实模型证据。
 - `typecheck.log`、`build.log` 通过；构建仍提示现有 bundle 大小警告，不据此宣称性能通过。
-- 后端受控组合及修复回归已通过；真实模型、独立增量复审及冻结源码最终门禁仍在进行。失败诊断文件保留，不能因名称含 green 就判通过。
+- 后端受控组合及修复回归、独立增量复审与冻结源码组合门禁已完成。两次真实模型运行未覆盖自然D2。失败诊断文件保留，不能因名称含 green 就判通过。
 
 ## 首次真实尝试与独立审查
 
@@ -44,4 +44,29 @@ live02在源码 `d5faad6972de3fecdbb58844e14ae96566636261`、同一配置文件S
 | D2-3 | unknown/取消/版本冲突/权限撤销及完成回执重放不重复 | `PopulationInterventionTest`四项故障及正向重放、`ReviewBoundaryTest`二次拒绝；只读Job无新增调用 | 受控pass；实际进程退出后D2续跑not_run |
 | D2-4 | 工作台与只读重开；两次自然尝试如实留档 | 受控浏览器2组；live01/02均未覆盖D2，合同与Issue同步 | 开发UI pass；自然未覆盖留#183 |
 
-已通过的受控工程检查不能证明数学正确性、自然选择或 #168 完整服务交付。旧 #176 自然失败保持原判，本票不恢复或重发其 unknown。
+已通过的受控工程检查不能证明数学正确性、自然选择或 #168 完整服务交付。旧 #176 自然失败保持原判，本票不恢复或重发其 unknown。live02 的 `reopened.png` 实际仍为加载态，不能证明真实UI稳定终态。
+
+## 最终复审与组合门禁
+
+下列结论更新前文各次尝试中“待复审、待门禁”的历史状态。最终窄复审 `artifacts/issue-177/reviews/spec-budget-recheck.md` 关闭预算P1；受影响Standards和Spec无新增阻塞。审查对象 `04d493b` 的三份受审文件与冻结HEAD无差异。此前初审、增量复审与红绿记录均保留。
+
+冻结源码为 `0225fd9cd69a374d4cd9b26bba43eecc929655b7`，无tracked改动。门禁原入口为 `uv run python scripts/run_final_gate.py --root . --output-dir artifacts/issue-177/gates --run-id gate-01`，之后使用新run ID。
+
+- `gate-01` worker异常退出，Windows状态码1073807364（0x40010004），原因未确认；报告的0项不是有效完整测试计数。进程已退出，原状态文件停留running，实际终态另存 `gate-control/gate-01.terminal-observation.json`，不覆盖原记录。
+- `gate-02` 快速检查通过，完整测试2060项、0 failure、1 error、49 skip、1653.456秒。唯一error为 `test_star_experiment.setUpModule` 无法连接Docker Linux引擎，该模块20项未执行。门禁保持failed，source_changed=false；mutation及后续阶段当时未执行。
+- 现场核对Docker Desktop无进程、服务停止；启动已安装的Docker Desktop后，`docker version` 返回真实Linux Server。未改生产代码、测试、依赖或配置。依据接续合同“失败只复查受影响部分”，复用同一源码已覆盖的2060项与快速检查，仅重跑未执行的20项并补齐余下检查。
+- `gate-03` 是显式 `affected-recheck`，`final_status=passed_with_reuse`，440.172秒；不是标准入口单次全仓通过。续接脚本 `artifacts/issue-177/gate-control/resume-gate.py` 校验gate-02唯一错误、计数以及前后源码哈希一致，完成后再次核对source_changed=false。原gate-02失败不改判。
+
+| 门禁要求 | 最终证据与结果 |
+| --- | --- |
+| 快速检查、baseline及官方入口 | `gate-02/fast.log`，pass |
+| 全部测试覆盖 | `gate-02/repository-check/tests.json` 的2060项与 `gate-03/experiment-tests.json` 的20项组合，共2080项，49 skip；模块复验20项0 failure/error/skip，299.635秒。原setup error经复验解决，不从原报告删除 |
+| mutation probes与两个服务CLI | `gate-03/offline.log`，六个既有probe和两个CLI均exit 0 |
+| 发布检查 | `gate-03/release.log`，27项，0 failure/error，pass |
+| 前端安装及审计 | `gate-03/frontend-install.log`、`frontend-audit.log`，pass，0漏洞 |
+| 前端依赖合同、typecheck、测试与build | `gate-03/frontend-check.log`，65项全通过；保留现有bundle大小警告 |
+| 源码冻结 | gate-02及gate-03的 `source-manifest.json`，前后哈希一致，无源码漂移 |
+
+受影响模块的可复现命令为 `uv run python scripts/run_unittest_report.py --expect-count 20 --summary-json artifacts/issue-177/gates/gate-03/experiment-tests.json --diagnostics artifacts/issue-177/gates/gate-03/experiment-diagnostics.log tests.test_star_experiment`。续接顺序和其余完整命令见 `gate-control/finish-offline.py`、`resume-gate.py` 与各阶段日志。49项skip的逐项原因保留在gate-02诊断，包含未配置独立验证镜像及显式Docker集成开关，不记作通过。
+
+最终受测源码之后只更新文档，保留上述门禁SHA。三个门禁进程均终态退出，临时检查均已清理；Docker Desktop作为共享本机工具保持运行，不由本票停止。自然并发干预、完整正确答案、真实干预UI终态与进程退出后D2续跑仍未实证，继续留#183，#168不关闭。

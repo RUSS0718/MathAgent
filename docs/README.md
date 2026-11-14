@@ -1,5 +1,7 @@
 # MathAgent 文档索引
 
+- [#177 并发收敛后自主干预验收](evals/faithful-service-177-20261114.md)：达到授权调整后的开发接线退出条件；[合同](engineering/faithful-service-177-contract.md)。冻结源码 `0225fd9c` 以gate-02及gate-03受影响复验组合完成门禁，覆盖2080项、49 skip；原异常退出和Docker错误保持失败，非单次全仓通过。发布27项、前端65项及审计通过，源码无漂移。自然并发干预、完整正确答案、真实干预UI终态和进程退出续跑未实证，留#183；#168未完成。按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)继续。
+
 - [#176 串行自主干预与成果采用验收](evals/faithful-service-176-20261114.md)：达到授权调整后的开发接线退出条件；[合同](engineering/faithful-service-176-contract.md)。冻结源码 `b958807` 的 gate-03 六阶段通过（2070项、0 failure/error、49 skip、源码无漂移）；原门禁中止/观察超时、修复红绿及双轴复审保留。自然干预、完整正确交付、真实干预UI正向闭环及进程退出续跑未实证，继续留#183；#168未完成。按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)推进下一就绪票。
 
 - [#175 同任务安全串并行切换验收](evals/faithful-service-175-20261114.md)：达到用户授权调整后的开发接线退出条件；[合同](engineering/faithful-service-175-contract.md)。冻结源码 `588b40e` 的 gate-03 六阶段通过（2063 项、0 failure/error、49 skip、源码无漂移），前两轮失败、竞态红绿与双轴复审保留。自然真实热切换、完整正确交付与真实路线UI正向闭环仍留#183，#168未完成；按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)继续#176。
