@@ -370,7 +370,20 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
             result["final_response"] = "旧错误面积 999"
             connection.execute("UPDATE workspace_jobs SET result_json=? WHERE job_id=?", (json.dumps(result), job_id))
             connection.commit()
-        old = self.client.post(f"/api/agent/jobs/{job_id}/teach", json={}, headers=self.headers())
+        blocked = self.client.post(f"/api/agent/jobs/{job_id}/teach", json={}, headers=self.headers())
+        self.assertEqual(409, blocked.status_code, blocked.get_json())
+        self.assertEqual("presentation_job_not_terminal", blocked.get_json()["code"])
+        # Seed a historical output through the terminal-only API, then restore
+        # the waiting task so answering must invalidate that old output.
+        with service.store._lock:
+            connection.execute("UPDATE workspace_jobs SET status='succeeded' WHERE job_id=?", (job_id,))
+            connection.commit()
+        try:
+            old = self.client.post(f"/api/agent/jobs/{job_id}/teach", json={}, headers=self.headers())
+        finally:
+            with service.store._lock:
+                connection.execute("UPDATE workspace_jobs SET status='waiting_input' WHERE job_id=?", (job_id,))
+                connection.commit()
         self.assertEqual(200, old.status_code, old.get_json())
         self.replies.extend([REASSESSED, SOLVED_AREA, POLISHED_AREA, ACCEPT])
         with patch.object(service, "_submit"):
