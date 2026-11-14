@@ -4,13 +4,14 @@ import { mockWorkspace } from './fixtures'
 function metadata(enabled: boolean, cleared = false) {
   const entry = {
     cache_id: 'cache-demo', state: cleared ? 'invalidated' : 'active',
-    reason: cleared ? 'cache_cleared' : 'current',
+    reason: cleared ? 'cache_cleared' : null,
     created_at: '2026-11-10T01:00:00Z', updated_at: cleared ? '2026-11-10T02:00:00Z' : '2026-11-10T01:00:00Z',
     ...(cleared ? { source_run_id: 'run-demo', source_attempt_id: 'attempt-demo', source_grade: 'L2', grade_ceiling: 'L2' } : {}),
   }
   return {
     success: true, authority: 'metadata_only', enabled, entries: [entry],
     events: [
+      { cache_id: null, event: 'cache_enabled', details: { tombstone: false }, created_at: '2026-11-10T00:00:00Z' },
       { cache_id: 'cache-demo', event: 'receipt_admitted', created_at: '2026-11-10T01:00:00Z' },
       { cache_id: 'cache-demo', event: 'receipt_rechecked', details: { current_run_id: 'run-current', current_attempt_id: 'formal-current', current_status: 'solved', current_grade: 'L2' }, created_at: '2026-11-10T01:01:00Z' },
       ...(cleared ? [{ cache_id: 'cache-demo', event: 'receipt_invalidated', details: { reason: 'cache_cleared', tombstone: true }, created_at: '2026-11-10T02:00:00Z' }, { event: 'cache_cleared', details: { tombstone: true }, created_at: '2026-11-10T02:00:01Z' }] : []),
