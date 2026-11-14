@@ -1,5 +1,7 @@
 # MathAgent 文档索引
 
+- [#180 证明缓存当前核验验收](evals/faithful-service-180-20261115.md)：达到授权调整后的开发接线退出条件；[合同](engineering/faithful-service-180-contract.md)。冻结35eaa43的gate-01六阶段通过（2095项、0failure/error、42skip、源码无漂移）。固定真实Lean当前重验与同根计账、当前回执身份UI完成；三轮自然来源失败保留，自然命中及真实当前回执UI/跨进程恢复留#183。#168未完成；按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)继续#181。
+
 - [#179 授权经验与撤销验收](evals/faithful-service-179-20261114.md)：达到用户授权调整后的开发接线退出条件；[合同](engineering/faithful-service-179-contract.md)。冻结 a82b345 的 gate-01 六阶段通过（2095项、0 failure/error、49 skip、源码无漂移）。真实关联新 Job 正确交付7，自动捕获及同域来源注入可追踪，但决策为 not_reported；新 Job 公共投影仅事后离线导出，观察器原失败保留。自然 adopt/reject、真实关闭/清理/跨会话导入、重启后的真实撤销及完整真实 UI 闭环留 #183，#168未完成。按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)继续 #180。
 
 - [#178 自然题形式目标与范围验收](evals/faithful-service-178-20261114.md)：普通输入取得真实 Lean L2、正确恒等式答案及只读恢复；对应未审查不冒认整题L3。[合同](engineering/faithful-service-178-contract.md)取消额外自然L3门槛，原失败保留。冻结f008420的gate-02六阶段通过（2087项、0 failure/error、49 skip、源码无漂移）；一般L3及自然明确机器要求正向仍未实证，留#183。#168未完成。

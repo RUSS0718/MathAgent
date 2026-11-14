@@ -1,6 +1,6 @@
 # #180 自主证明缓存开发接线验收
 
-日期2026-11-15（Asia/Shanghai）。基点df5e9d06806e15c9438516fcad33ee88ef03c5f3；最终源码SHA及工程门禁结果待冻结后填写。适用[本票合同](../engineering/faithful-service-180-contract.md)和[接续合同](../engineering/unattended-ticket-loop.md)。当前模型及思考设置未主动覆盖，具体型号和继承结果未知。
+日期2026-11-15（Asia/Shanghai）。基点df5e9d06806e15c9438516fcad33ee88ef03c5f3；产品冻结源码35eaa4350c6ffa265e94156ba8dafbcdc1b4b703。适用[本票合同](../engineering/faithful-service-180-contract.md)和[接续合同](../engineering/unattended-ticket-loop.md)。当前模型及思考设置未主动覆盖，具体型号和继承结果未知。
 
 复用既有S10自动缓存及#178普通形式目标接线；本票只新增命中审计的当前Run、Attempt、状态和L2等级及既有缓存UI显示。默认关闭、可信来源、身份覆盖、当前核验、原根预算、旧L3不得继承和经验授权均沿用原边界。
 
@@ -25,3 +25,9 @@
 每轮`run1-final.json`、`run1-report.json`、`run1-cache.json`及终态截图为公共GET/UI证据；观察器失败不覆盖Job状态。provider缺失用量维持unknown，不重发。缓存events只有启用，不能宣称命中、采用或当前证明资格。固定内核和受控UI不替代自然能力。自然命中、真实当前回执UI和跨进程恢复仍留#183，#168未完成。
 
 双轴报告`artifacts/issue-180/reviews/{standards,spec}.md`：Standards无阻塞；Spec无新增代码偏差但指出真实证据P1缺口。开发退出依合同显式调整，原完整目标保持在#183，不把该缺口伪装成已通过。
+
+## 最终工程退出
+
+`uv run python scripts/run_final_gate.py --root . --output-dir artifacts/issue-180/gate-control/runs --run-id gate-01`：六阶段通过，耗时2121.219秒，source_changed=false。2095项测试、0failure/error、42skip；恢复可信manifest后原7项Lean跳过实际执行，skip不计通过。发布27项、前端安装/审计/检查通过；既有大bundle提示不作新增改动。证据`artifacts/issue-180/gate-control/runs/gate-01/{status.json,repository-check/tests.json,fast.log,release.log,frontend-check.log}`。快速检查包含官方baseline字节一致。
+
+Spec复核`reviews/spec-recheck.md`确认调整透明、开发退出无新增阻塞，原真实证据P1仍未通过。#183移交评论6881008410。达到有效开发退出条件，不能称完整服务通过。仅文档收尾发生于门禁后，最终交付HEAD另见交接及Issue完成评论。所有live服务/观察器、gate进程与MathAgent-Issue180-*临时检查已结束清理，无监控转移。
