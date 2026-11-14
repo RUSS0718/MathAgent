@@ -1,6 +1,6 @@
 # #176 串行自主干预与成果采用验收
 
-日期：2026-11-14（Asia/Shanghai）。状态：已按授权调整为开发接线验收，最终门禁进行中，尚未退出。父规格 #168 D1；[任务合同](../engineering/faithful-service-176-contract.md)及[接续合同](../engineering/unattended-ticket-loop.md)定义要求。起点 `64a8c98c72252c2d8501e147b231489a462b7106`；真实 GitHub 依赖仅 #170，已 closed；核验快照 `artifacts/issue-176/dependencies-before.json`。
+日期：2026-11-14（Asia/Shanghai）。状态：达到用户授权调整后的开发接线退出条件；自然能力缺口留 #183，#168完整服务未交付。父规格 #168 D1；[任务合同](../engineering/faithful-service-176-contract.md)及[接续合同](../engineering/unattended-ticket-loop.md)定义要求。起点 `64a8c98c72252c2d8501e147b231489a462b7106`；真实 GitHub 依赖仅 #170，已 closed；核验快照 `artifacts/issue-176/dependencies-before.json`。
 
 ## 现有证据
 
@@ -47,4 +47,6 @@ live02 证据为 `artifacts/issue-176/live02/diagnosis.json`、`job-final.json`�
 
 `gate-02` 冻结源码 `3b2934a521faecb0212a323ae8cae04f0cb735bc`：快速阶段通过，offline 2070项中1 failure、0 error、49 skip，耗时1884.508秒，`source_changed=false`。失败为 `FaithfulPopulationJobTest.test_population_can_contract_expand_and_contract_on_new_receipts` 的20秒公共观察超时；后续阶段未执行。原失败保留。单项原代码复验18.972秒通过，已接近观察上限；这支持观察窗口偏紧的解释，未实证具体环境根因。提交 `f34857d` 仅把该三次切换用例 `job_timeout` 改为60秒，保留全部切换、最终交付断言及产品预算/deadline；修后单项19.097秒通过，Ruff通过，见 `gate-timeout-focused/attempt-01.json`、`fixed.json`、`ruff.log`。
 
-`gate-03` 待对包含该修复及本记录的冻结源码执行 `uv run python scripts/run_final_gate.py --root . --output-dir artifacts/issue-176/gates --run-id gate-03`；最终结果待记录。门禁通过不能替代真实能力。最终交接 SHA 另记，纯文档变化不重复运行同源码门禁。
+`gate-03` 冻结源码 `b958807d13090af0d7b0a207319da514958372a6` 六阶段通过，`source_changed=false`，耗时2034.031秒。命令为 `uv run python scripts/run_final_gate.py --root . --output-dir artifacts/issue-176/gates --run-id gate-03`：快速、完整离线、发布、前端安装/审计/检查均通过；全仓2070项、0 failure/error、49 skip，发布27项，前端65项及typecheck/build通过，audit 0 vulnerabilities。既有chunk大小提示保留。49 skip不计通过，ID及原因见 `repository-check/diagnostics.log`；默认离线门禁不代表真实provider或分类证明专项通过。11个baseline文件SHA256匹配，见 `baseline-final.json`。
+
+门禁证据在 `artifacts/issue-176/gates/gate-03/`，超时窄改的两轴复查为 `reviews/timeout-standards.md` / `timeout-spec.md`，无剩余问题。全部本票服务、观察及门禁进程和临时检查均已结束，无子代理继续运行。最终交付/交接SHA另记，纯文档变化不重复同源码产品门禁；#176仅按开发接线范围关闭，GitHub #183保留未实证能力。
