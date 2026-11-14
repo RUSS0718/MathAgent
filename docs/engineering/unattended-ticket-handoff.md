@@ -14,9 +14,11 @@
 
 最终聚焦37项0failure/error/skip，前端9/9单测及4/4浏览器。Standards/Spec两项P1（worker继承、内部决策不可见）已修并复核，无剩余阻塞，报告 artifacts/issue-179/reviews/*recheck.md。冻结门禁gate-01六阶段通过，2095项、0failure/error、49skip、source_changed=false；证据 artifacts/issue-179/gate-control/runs/gate-01。不要重跑未变化的通过证据。
 
-真实live01算术2+3=5正确，但误有机器要求导致formal_requirement_unmet，原失败保留，自动捕获同会话integers观察；provider用量缺失故outcome=unknown。live02提交前观察器会话数假设失败，零模型请求。live03普通UI改题为Compute 3+4 using ordinary arithmetic. No machine verification is requested.，Run/Job run_9ba09d5598ac821d090a71ba783a23e8成功交付7；3个调用读取首轮来源8acbd5a10ec54722a11123e7014b1271，决策not_reported，不冒称采用。live03脚本等待响应超时，但持久Job已成功，原观察器失败保留。预算不变，unknown不重发。
+真实live01算术2+3=5正确，但误有机器要求导致formal_requirement_unmet，4次模型调用，原失败保留，自动捕获同会话integers观察；provider用量缺失故outcome=unknown。live02提交前观察器会话数假设失败，零模型请求。live03普通UI改题为Compute 3+4 using ordinary arithmetic. No machine verification is requested.，通过旧Job的/revisions创建关联新Job run_9ba09d5598ac821d090a71ba783a23e8，5次模型调用后成功交付7；3个调用读取首轮来源8acbd5a10ec54722a11123e7014b1271，决策not_reported，不冒称采用。live03脚本等待错误端点超时，未保存新Job公共GET或UI终态；原观察器失败保留。事后只读DB及现有投影函数导出证据见artifacts/issue-179/acceptance-reconciliation.json，数据库前后SHA相同、零新增模型请求。预算不变，unknown不重发。
 
-公共关闭后显式resume的受控反例验证旧历史不再注入、原deadline及旧调用审计保留。真实跨会话导入、独立进程真实重启后的撤销复验未实证，留#183；受控前端启用/关闭/导入/清理通过。#168仍未完成，不能宣称一般数学收益。
+公共关闭后显式resume的受控反例验证旧历史不再注入、原deadline及旧调用审计保留。受控前端启用/关闭/导入/清理通过，真实仅启用已执行。自然adopt/reject、真实关闭/清理/跨会话导入、独立进程真实重启后的撤销复验及完整真实管理/来源UI闭环未实证，留#183。本票按接续合同调整为开发接线退出，Issue同步有效退出条件。#168仍未完成，不能宣称一般数学收益。
+
+#179 Issue已保留原目标并补充有效开发退出条件；#183缺口评论6880748744。关闭结果和最终交付SHA由artifacts/issue-179/tracker/final179.json记录，接班先实时核对，不能只凭本交接推定状态。
 
 ## 下一票
 
