@@ -20,6 +20,11 @@ test('serial intervention exposes source, adoption and continuation without prom
     const unknown = await renderToString(createSSRApp(Status, { value: { ...value, status: 'needs_review', continuation: 'pending' } }))
     assert.match(unknown, /等待复核/)
     assert.doesNotMatch(unknown, /主任务继续/)
+    const population = await renderToString(createSSRApp(Status, { value: {
+      ...value, origin: 'population', route_id: 'route-1', source_version: 'source-177',
+    } }))
+    for (const text of ['并发收敛后干预', 'route-1', 'source-177']) assert.ok(population.includes(text), text)
+    assert.doesNotMatch(population, /串行自主干预|PRIVATE_/)
     const invalid = await renderToString(createSSRApp(Status, { value: { status: 'invented' } }))
     assert.doesNotMatch(invalid, /串行自主干预/)
   } finally { await server.close() }

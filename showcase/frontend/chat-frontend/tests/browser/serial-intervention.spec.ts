@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test'
 import { mockWorkspace, report } from './fixtures'
 
-test('saved intervention provenance reopens read-only at desktop and mobile widths', async ({ page }, info) => {
+for (const origin of ['serial', 'population']) {
+test(`saved ${origin} intervention provenance reopens read-only at desktop and mobile widths`, async ({ page }, info) => {
+  const regionName = origin === 'population' ? '并发收敛后干预' : '串行自主干预'
   await mockWorkspace(page, true)
   const errors: string[] = [], mutations: string[] = []
   page.on('pageerror', error => errors.push(error.message))
@@ -12,6 +14,7 @@ test('saved intervention provenance reopens read-only at desktop and mobile widt
     ...report, solver: { solver_mode: 'star_faithful', evidence_kind: 'fault_injection', missing_capabilities: [],
       solver: { run_id: 'run-demo', state_revision: 23, phase: 'STEP_EXECUTE', status: 'running',
         serial_intervention: { status: 'completed', reason: null, pair_id: 'pair-demo', continuation: 'main_task_continues',
+          origin, route_id: 'route-177', source_version: 'source-177',
           decision: { reason: '核对缺失边界', hypothesis: '原方法未覆盖边界', method_id: 'induction' },
           adoptions: [{ status: 'adopted', reason: 'applicable_reviewed_result', evidence_grade: 'LLM_REVIEWED',
             reference: { pair_id: 'pair-demo', arm: 'intervention', source_version: 'a'.repeat(64), scope: '步骤 2' } }],
@@ -21,17 +24,22 @@ test('saved intervention provenance reopens read-only at desktop and mobile widt
   for (const width of [320, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 1000 })
     await page.goto('/dashboard-assets/run/run-demo')
-    const region = page.getByRole('region', { name: '串行自主干预', exact: true })
+    const region = page.getByRole('region', { name: regionName, exact: true })
     await expect(region).toContainText('主任务继续')
     await region.getByText('成果来源与采用记录', { exact: true }).click()
     await expect(region).toContainText('已采用')
     await expect(region).toContainText('LLM_REVIEWED')
     await expect(region).toContainText('来源 pair-demo')
+    if (origin === 'population') {
+      await expect(region).toContainText('收敛来源：route-177')
+      await expect(region).toContainText('来源版本 source-177')
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   }
   await page.reload()
-  await expect(page.getByRole('region', { name: '串行自主干预', exact: true })).toContainText('整题审查')
+  await expect(page.getByRole('region', { name: regionName, exact: true })).toContainText('整题审查')
   await page.screenshot({ path: info.outputPath('intervention-reopened.png'), fullPage: true })
   expect(errors).toEqual([])
   expect(mutations).toEqual([])
 })
+}
