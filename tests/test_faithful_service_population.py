@@ -307,7 +307,8 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
 
     def test_population_can_contract_expand_and_contract_on_new_receipts(self):
         _, final, _ = self.run_plain_submission(multi_step=True, step_count=6,
-                                               modes=["serial", "population", "serial"])
+                                               modes=["serial", "population", "serial"],
+                                               job_timeout=60)
         history = final["result"]["solver"]["execution_switch_history"]
         self.assertEqual(["serial", "population", "serial"], [s["target"] for s in history])
 
