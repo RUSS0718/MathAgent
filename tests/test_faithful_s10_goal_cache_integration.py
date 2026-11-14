@@ -296,6 +296,11 @@ class GoalCacheFormalIntegrationTest(unittest.TestCase):
         events = [event["event"] for event in cache.list_audit_events()]
         self.assertIn("receipt_admitted", events)
         self.assertIn("receipt_rechecked", events)
+        rechecked = next(e for e in cache.list_audit_events() if e["event"] == "receipt_rechecked")
+        self.assertEqual("run-1", rechecked["details"]["current_run_id"])
+        self.assertEqual(second["current"]["attempt_id"], rechecked["details"]["current_attempt_id"])
+        self.assertEqual("solved", rechecked["details"]["current_status"])
+        self.assertEqual("L2", rechecked["details"]["current_grade"])
 
     def test_real_l3_lean_and_independent_review_admit_with_l2_ceiling(self):
         import secrets

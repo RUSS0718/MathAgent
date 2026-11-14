@@ -12,6 +12,7 @@ function metadata(enabled: boolean, cleared = false) {
     success: true, authority: 'metadata_only', enabled, entries: [entry],
     events: [
       { cache_id: 'cache-demo', event: 'receipt_admitted', created_at: '2026-11-10T01:00:00Z' },
+      { cache_id: 'cache-demo', event: 'receipt_rechecked', details: { current_run_id: 'run-current', current_attempt_id: 'formal-current', current_status: 'solved', current_grade: 'L2' }, created_at: '2026-11-10T01:01:00Z' },
       ...(cleared ? [{ cache_id: 'cache-demo', event: 'receipt_invalidated', details: { reason: 'cache_cleared', tombstone: true }, created_at: '2026-11-10T02:00:00Z' }, { event: 'cache_cleared', details: { tombstone: true }, created_at: '2026-11-10T02:00:01Z' }] : []),
     ],
   }
@@ -84,6 +85,9 @@ test('disabled cache can be enabled, reports busy and failed states, and shows c
   await expect(enable).toHaveAttribute('aria-busy', 'true')
   releaseEnable()
   await expect(panel).toContainText('已启用')
+  await expect(panel).toContainText('当前 Run run-current')
+  await expect(panel).toContainText('当前 Attempt formal-current')
+  await expect(panel).toContainText('当前核验 solved · L2')
   await expect(panel.getByRole('button', { name: '停用本会话缓存' })).toBeVisible()
 
   const disable = panel.getByRole('button', { name: '停用本会话缓存' })
