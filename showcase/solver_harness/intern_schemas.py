@@ -267,7 +267,7 @@ def response_schema(request):
             obj({**schema["properties"], action: {"enum": choices}, "trace_back_to": target},
                 schema["required"])
             for choices, target in (
-                ([trace], {"type": "integer", "minimum": 1}),
+                ([trace], {"type": "integer", "exclusiveMinimum": 0}),
                 ([choice for choice in actions if choice != trace], {"enum": [None]}),
             )
         ]

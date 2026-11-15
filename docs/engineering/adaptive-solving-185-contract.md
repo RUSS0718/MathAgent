@@ -76,6 +76,8 @@ Meta 的普通裁决及 Guidance 在 provider schema 同时绑定动作和回退
 `TRACE_BACK` / `trace_back` 携带正整数 `trace_back_to`，其余动作必须为 null。
 完整但关联字段冲突的响应进入已有一次协议修复，保留原任务与预算并取得新调用身份；
 不静默删除目标、不改变裁决或重规划授权。第二次失败及 unknown 仍不自动续修。
+正整数下限通过 Meta 新使用的 `exclusiveMinimum: 0` 执行；不改变其他角色既有
+`minimum` 字段由消费端校验及分类的路径，避免引入额外修复或派发。
 
 ## 退出
 
