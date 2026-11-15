@@ -1,6 +1,6 @@
 # #183 当前机器真实服务阶段记录
 
-当前状态（2026-11-15 16:16）：新任务3600秒总时限已在live24账本生效；39ca1e9修复同计划CONTINUE新attempt误注册路线，红绿/37相关回归（1skip）及双轴检查通过。live24因单请求360秒超时终态failed/star_needs_review，1调用未知、无完整答案，未触发CONTINUE；进程与监控已清理，未自动重试。旧失败保留，#183/#168仍开放。
+当前状态（2026-11-15 16:30）：efff923修复显式版本化流式策略的服务JSON接线，默认关闭、旧Run不迁移；2案例红绿及39相关回归、两轴检查通过。live25准备新Job观察，旧live24未知不重发；真实长流及数学正确交付仍以终态结果为准，#183/#168开放。
 
 日期：2026-11-15（Asia/Shanghai）。源码HEAD `c01683ddf5cc526d0b5c61f2bac11f8f677975e9`，与origin一致；初轮真实求解时产品未修改；随后发现并修复缓存前端可空字段合同。适用[本票合同](../engineering/faithful-service-183-contract.md)。具体模型继承未知，保持当前设置。#183/#168仍开放，完整服务未通过。
 
@@ -206,3 +206,11 @@ live24仅准备普通输入的新Job，沿用live23数学题，唯一诊断目�
 启动首次误传短SHA触发HEAD mismatch，未建worker/Job；改传完整HEAD后唯一启动成功，旧guard及旧Run未重用。唯一后台wrapper22440(08:00:22.350784Z)、observer41940(08:00:30.9072647Z)、服务37012(08:00:24.6519484Z)、uv10552(08:00:24.5586256Z)均退出，8103无监听，MathAgent-Issue183-live24检查已自动删除。终态后identity.py检查通过，确认运行中源码/配置/dist未变；旧8100服务保留且未加载本轮修复。run1-final.json、run1-report.json、run1-terminal.png及source-identity.json均保留。
 
 本轮只完成新任务总时限授权落实及已复现路线身份缺陷的最小修复；实际正确交付仍未达到。当前无新运行，不自动重试该unknown，不增请求timeout或继续随机换题；如后续显式处置未知调用，仍走既有新调用身份/原根剩余额度及deadline合同。#183/#168保持开放，必要最终门禁尚未执行；本次未重复离线全仓测试，未推送或关票。当前选择模型保持，具体Codex型号继承未知。
+
+### 16:30 流式策略接线修复及live25准备
+
+用户要求修复并再跑一次。源码efff923d7ab3af931c3e835a7ef20f1700a46c79新增可选JSON stream_timeout_policy_version，经既有policy_for_version严格校验映射App配置；省略/null保持关闭，不改全局默认、旧Run或adapter策略。原新字段不获加载的2案例先红后绿；14配置及25相关S01（活跃长流/有效idle/根deadline/公共Job冻结恢复/调用依据等）共39项40.719秒通过，ruff通过。两轴McClintock/Leibniz独立只读审查clear，未独立执行测试。不据此宣称真实长流已成功。
+
+live24草稿端点2b系数与a=±4边界错误已确认；同冻结状态按compose_request重建含Explore已计算端点输出，未发现漏传，consumed_receipt_ids空仅是无report直接引用。草稿不完整JSON且0accepted步骤，未执行其提出的工具请求，不能计正确交付。本次不把独立参考、反例或正确判据写入模型提示，真实运行仍须现有工具与Verifier纠正并完成全题。
+
+live25已准备唯一新普通Job，沿用live24输入，显式faithful-stream-v1；新根3600秒/2097152及48/48/8、旧request配置360保持。旧360配置在新策略下不是活跃流整次硬截止，原phase/batch/Run截止仍优先。上线前preflight确认映射，新Job后核对账本及attempt的策略身份，实际是否越过360及完整正确答案以真实结果为准。启动时源码/HEAD/dist/scripts/config全部冻结，唯一后台与30分钟临时检查；不重试旧unknown。当前准备not_run，状态见artifacts/issue-183/live25/status.json；旧8100展示仍保留，#183/#168未完成，不在此切片重跑全仓门禁。
