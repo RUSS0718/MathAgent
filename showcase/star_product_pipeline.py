@@ -636,6 +636,8 @@ def projection(run, *, answer=None, verification_mode="auto", include_prover_rou
         }
         if state.get("adaptive_resource_policy"):
             result["adaptive_solving"]["resource_policy"] = state["adaptive_resource_policy"]
+        if state.get("adaptive_search_policy"):
+            result["adaptive_solving"]["search_policy"] = state["adaptive_search_policy"]
     if state.get("execution_switch"):
         result["execution_switch"] = state["execution_switch"]
         result["execution_switch_history"] = state.get("execution_switch_history", [])

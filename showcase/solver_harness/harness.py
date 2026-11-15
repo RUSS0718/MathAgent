@@ -275,8 +275,15 @@ class SolverHarness:
         pending_intake = auto_spec and supplied_spec is None
         if self._config.get("features", {}).get("adaptive_solving") is True:
             from .adaptive_resources import VERSION
+            from .progress import ADAPTIVE_SEARCH_VERSION
 
             state["adaptive_resource_policy"] = VERSION
+            state["adaptive_search_policy"] = ADAPTIVE_SEARCH_VERSION
+            if (effective_metadata or {}).get("plan") is not None:
+                from .adaptive_solving import VERSION as solving_version
+
+                state["adaptive_solving"] = {"version": solving_version, "corrections": 0,
+                                             "reason": "supplied_plan"}
         if pending_intake:
             from .autonomous_routes import initial_permission
             from .problem_intake import POLICY
