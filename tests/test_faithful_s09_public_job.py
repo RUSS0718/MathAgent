@@ -341,7 +341,8 @@ class FaithfulS09PublicJobTest(StarJobFixture, unittest.TestCase):
         def finished():
             job = self.job(job_id)
             formal = job["result"]["formal_verification"]
-            return job if formal["current_attempt_id"] == child and formal["status"] != "dispatched" else None
+            return job if (formal["current_attempt_id"] == child and formal["status"] != "dispatched"
+                           and job["status"] in {"succeeded", "failed", "canceled"}) else None
 
         job = self.wait_for(finished)
         self.assertEqual("failed", job["status"])

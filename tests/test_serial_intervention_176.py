@@ -162,8 +162,8 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
                     return {"mode": "keep", "reason": "Continue serial"}
                 if request["role"] == "meta":
                     return {
-                        "decision": "CONTINUE",
-                        "reason_summary": "Use the experiment result",
+                        "decision": "CONTINUE" if enabled else "ABORT",
+                        "reason_summary": "Use the experiment result" if enabled else "No authorized intervention",
                         "plan_summary": "",
                         "forbidden_directions": [],
                         "reusable_results": [],
@@ -211,6 +211,7 @@ class SerialPublicJobTest(StarJobFixture, unittest.TestCase):
         )
         solver = final["result"]["solver"]
         if not enabled:
+            self.assertTrue(any(r["role"] == "reasoner" for r in self.outbound))
             self.assertFalse(any(r.get("serial_intervention_decision") or ":pair:" in r["call_id"]
                                  for r in self.outbound))
             self.assertFalse(solver.get("serial_intervention"))
