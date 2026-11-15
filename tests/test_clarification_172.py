@@ -100,10 +100,12 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
 
     def test_clarification_rebinds_formal_selection_to_effective_spec(self):
         initial = deepcopy(RATIONAL_SPEC)
+        initial["original_problem"] += " Please provide a machine-checked proof."
         initial["clarification"] = {"question": "Is x positive?", "reason": "Confirm the additional condition."}
         initial["formalization"] = {"status": "not_selected", "reason": "awaiting clarification",
                                     "require_formal": False, "obligation_ids": [], "target": None}
         reply = deepcopy(RATIONAL_SPEC)
+        reply["original_problem"] = initial["original_problem"]
         reply["applicable_condition"] = "x > 0"
         reply["formalization"] = {
             "status": "proposed", "reason": "rational identity", "require_formal": True,

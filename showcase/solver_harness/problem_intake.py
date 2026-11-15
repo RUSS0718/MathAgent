@@ -147,14 +147,21 @@ def ensure_problem_spec(harness, run, problem):
         "problem_intake": {**run["state"]["problem_intake"], "status": "completed",
                            "call_id": current_id, "authority": "generated_task_spec_not_proof"},
     }
-    from .formal_generation import select_formalization
+    from .formal_generation import explicit_requirement, select_formalization
 
-    selection = select_formalization(reply.get("formalization"), spec, current_id)
+    selection = select_formalization(reply.get("formalization"), spec, current_id,
+                                     explicit_policy=explicit_requirement(harness, run))
     if selection is not None:
         updates["formalization"] = selection
-    if reply.get("clarification"):
+    clarification = reply.get("clarification")
+    if selection and selection["requirement_authority"]["status"] == "unresolved":
+        updates.update(_authority_question_updates(run, updates["problem_intake"], spec))
+        clarification = None
+    else:
+        updates["formal_authority_question"] = None
+    if clarification:
         try:
-            updates.update(necessary_question(run, updates["problem_intake"], reply["clarification"]))
+            updates.update(necessary_question(run, updates["problem_intake"], clarification))
         except (TypeError, ValueError):
             return reject_intake(harness, run, "problem_intake_invalid_clarification")
     if harness._config.get("features", {}).get("concurrent_routes") is True:
@@ -169,25 +176,97 @@ def ensure_problem_spec(harness, run, problem):
     )
 
 
+def _authority_question_updates(run, intake, spec, *, version=1):
+    """Persist provenance only on the server-owned issuance path, never from reply data."""
+    from ..formal_specification import canonical_identity
+    from .formal_generation import AUTHORITY_QUESTION
+
+    updates = necessary_question(run, intake, AUTHORITY_QUESTION, version=version)
+    question = updates["clarification"]
+    updates["formal_authority_question"] = {
+        **{key: question[key] for key in ("request_id", "task_id", "input_version", "question", "reason")},
+        "specification_hash": canonical_identity(spec),
+    }
+    return updates
+
+
+def _is_authority_question(run):
+    """A model copying even the entire question has no independent issuance record."""
+    from ..formal_specification import canonical_identity
+    from .formal_generation import AUTHORITY_QUESTION
+
+    state = run["state"]
+    if not isinstance(state.get("formal_authority_question"), Mapping):
+        return False
+    question = state["clarification"]
+    version = question.get("input_version")
+    expected = {**AUTHORITY_QUESTION, "task_id": run["run_id"], "input_version": version,
+                "request_id": f"clarification:{run['run_id']}:{version}",
+                "specification_hash": canonical_identity(state["problem_spec"])}
+    return (question.get("status") == "evaluating"
+            and all(question.get(key) == value for key, value in expected.items()
+                    if key != "specification_hash")
+            and state.get("formal_authority_question") == expected)
+
+
 def _apply_clarification(harness, run, reply, call_id, version):
     state = run["state"]
     question = state["clarification"]
     intake = {**state["problem_intake"], "call_id": call_id}
     followup = reply.get("clarification")
     condition = reply.get("applicable_condition")
+    authority_question = _is_authority_question(run)
+    if authority_question:
+        answer = question["answer"].strip().lower().rstrip(".。!")
+        if answer not in {"yes", "是", "需要", "no", "否", "不需要"}:
+            updates = _authority_question_updates(run, intake, state["problem_spec"], version=version)
+            return harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
+                event={"event_id": f"formal-authority-followup:{version}",
+                       "type": "clarification_followup", "call_id": call_id}, state_updates=updates)
+        # This is an output-authority decision, not a new mathematical condition.
+        # Do not trust a model's applicable_condition or followup to reinterpret it.
+        followup = None
+        condition = question["answer"]
     if followup or not isinstance(condition, str) or not condition.strip():
         try:
             updates = necessary_question(run, intake, followup or question, version=version)
+            updates["formal_authority_question"] = None
         except (TypeError, ValueError):
             return reject_intake(harness, run, "problem_intake_invalid_clarification")
         event = {"event_id": f"clarification-followup:{version}", "type": "clarification_followup"}
     else:
-        change = answer_change(state, condition.strip(), {**intake, "status": "completed"})
-        updates, event = change["updates"], change["event"]
-        from .formal_generation import select_formalization
+        if authority_question:
+            from .specification_change import build_specification_change
 
-        selection = select_formalization(reply.get("formalization"), updates["problem_spec"], call_id)
+            revised = deepcopy(state["problem_spec"])
+            revised["specification_version"] += 1
+            change = build_specification_change(state, revised)
+            change["event"]["clarification_request_id"] = question["request_id"]
+            change["updates"].update({"clarification": {**question, "status": "answered"},
+                "formal_authority_question": None,
+                "problem_intake": {**intake, "status": "completed"},
+                "phase": "SETUP", "status": "running"})
+        else:
+            change = answer_change(state, condition.strip(), {**intake, "status": "completed"})
+            change["updates"]["formal_authority_question"] = None
+        updates, event = change["updates"], change["event"]
+        from .formal_generation import explicit_requirement, select_formalization
+
+        selection = select_formalization(reply.get("formalization"), updates["problem_spec"], call_id,
+                                         clarification=question,
+                                         server_question_confirmed=authority_question,
+                                         explicit_policy=explicit_requirement(harness, run))
         if selection is not None:
+            previous = state.get("formalization", {})
+            if previous.get("require_formal") is True:
+                selection["require_formal"] = True
+                selection["requirement_authority"] = deepcopy(previous.get("requirement_authority", {
+                    "status": "requested", "source": "legacy_frozen_selection",
+                    "frozen_source": previous.get("source", {}),
+                }))
             updates["formalization"] = selection
+            if selection["requirement_authority"]["status"] == "unresolved":
+                updates.update(_authority_question_updates(
+                    run, intake, updates["problem_spec"], version=version))
     return harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
                                 event={**event, "call_id": call_id}, state_updates=updates)
