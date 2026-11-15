@@ -67,6 +67,8 @@ Planner/Reasoner 检查点；远端超过工作截止不能被假定取消成功
 Reasoner 检查点的工具请求和工具证据引用只能放在相应 `checkpoint.claims` 项，
 不能直接挂在 checkpoint；已知 schema 错误的一次修复说明准确位置并保留原代码、
 参数和数学主张。验证器才使用 verdict，Reasoner 不被要求填入不存在的 verdict 字段。
+Meta 切换到 `reason_noncoding` 时仍遵守已启用的同一 checkpoint 协议和当前目标绑定；
+纯推理只收紧工具权限，不切回普通 StepReport。未启用 checkpoint 的旧格式保持不变。
 
 ## 退出
 

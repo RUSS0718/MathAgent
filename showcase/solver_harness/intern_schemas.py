@@ -267,7 +267,7 @@ def _response_schema(request):
     if request.get("execution_mode_decision") is True and request.get("role") == "meta":
         return obj({"mode": {"enum": ["serial", "population", "keep", "intervene"]}, "reason": TEXT})
     role = request["role"]
-    if role == "reasoner" and request.get("checkpoint_protocol"):
+    if role in {"reasoner", "reason_noncoding"} and request.get("checkpoint_protocol"):
         schema = deepcopy(SCHEMAS["reasoner_checkpoint"])
         if isinstance(request.get("current_goal"), str):
             for branch in schema["properties"]["checkpoint"]["oneOf"]:
