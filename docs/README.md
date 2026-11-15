@@ -1,6 +1,6 @@
 # MathAgent 文档索引
 
-- [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：live19有效经验拒绝、撤销后正确继续及只读重启通过；live20可信Lean L2来源入库，但次题未命中。修复提交至fbbb8e1，待最终门禁。live15最后超时、live18自然population选择后绑定拒绝等原失败保留。自然并发/切换/F4及缓存当前重验仍缺，#183/#168开放。见[启动与恢复](engineering/faithful-service-183-delivery.md)及[当前交接](engineering/unattended-ticket-handoff.md)。
+- [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：live19有效经验拒绝、撤销后正确继续及只读重启通过；live20可信Lean L2来源入库但次题未命中。修复与当前目标合法提示示例提交至2736308，准备gate-05；gate-03/04及native未解释的原模块失败保留。live21仍在绑定阶段失败，未进入自然路线。自然并发/切换/F4及缓存当前重验仍缺，#183/#168开放。见[启动与恢复](engineering/faithful-service-183-delivery.md)及[当前交接](engineering/unattended-ticket-handoff.md)。
 
 - [#182 状态与控制组合验收](evals/faithful-service-182-20261115.md)：[G2合同](engineering/faithful-service-182-contract.md)。冻结e62d145的gate-01六阶段通过（2105项、0failure/error、42skip、source_changed=false），双轴复查解除；真实旧Run刷新/重启保持原预算、4次Attempt和输出身份。仅整合已有能力，#168完整服务仍未完成，按[交接](engineering/unattended-ticket-handoff.md)继续#183。
 
