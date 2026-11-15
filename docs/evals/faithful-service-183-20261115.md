@@ -1,5 +1,7 @@
 # #183 当前机器真实服务阶段记录
 
+当前状态（2026-11-15 11:27）：产品修复已提交至 fbbb8e1，门禁待执行。live14–20 均终态，后文旧“准备”段保留为当时快照，以本文末尾实际结果为准。live19补有效经验拒绝、撤销继续和重启只读；live20首题可信Lean L2入库但次题未命中。自然并发、热切换、F4及缓存当前重验仍缺，#183/#168不关闭。未实证的一般L3不新增为本票门槛。
+
 日期：2026-11-15（Asia/Shanghai）。源码HEAD `c01683ddf5cc526d0b5c61f2bac11f8f677975e9`，与origin一致；初轮真实求解时产品未修改；随后发现并修复缓存前端可空字段合同。适用[本票合同](../engineering/faithful-service-183-contract.md)。具体模型继承未知，保持当前设置。#183/#168仍开放，完整服务未通过。
 
 ## 新增真实证据
@@ -26,7 +28,7 @@ Provider token用量缺失仍为未知；本地预估保守计账，未填零、
 
 ## 当前退出状态
 
-尚不满足本票完整退出条件。由于两类规划尝试在当前token上限受阻，已向用户请求是否允许**仅新任务**采用#177曾用2097152tokens/2400秒；48/48/8不变，旧任务不修改。答复前不扩大预算、不新增模型请求。Standards/Spec阶段审查及文档验证另记；复用#182冻结e62d145的六阶段门禁（2105项、0failure/error、42skip），不重跑未变产品套件。
+尚不满足本票完整退出条件。由于两类规划尝试在当前token上限受阻，用户已明确授权**仅新任务**采用2097152tokens/2400秒；48/48/8不变，旧任务不修改。live05以后任务使用该授权，当前不再等待预算选择。新增产品修复须对最终冻结源码执行门禁。
 
 ## 公共缓存UI失败与最小修复
 
@@ -48,4 +50,87 @@ Provider token用量缺失仍为未知；本地预估保守计账，未填零、
 - Standards原P2为accepted字段含义歧义，复查确认solver语义accepted与公开verification needs_review/unknown分别属不同层次；文档已明确，原报告保留。两个字段nullish修复Standards复查0新增、Spec复查无新增代码阻塞；Spec的完整服务缺口继续保留。报告在reviews/。
 - 所有长测试终态，MathAgent-Issue183-*临时检查已自删除；未重启历史unknown。11个官方baseline SHA256一致，tests/test.md未读取或改动。门禁后仅文档收尾。
 
-最终使用[交付步骤](../engineering/faithful-service-183-delivery.md)从停止状态启动真实CLI，并实际GET /health、两个既有Job及报告；delivery-*产物保留完整原答案、4/5次Attempt和缓存禁用状态，writes=[]、errors=[]。这是读取恢复，不是新增模型验收。服务仅监听127.0.0.1:8100。#183/#168保持开放，等待新任务预算选择，不创建接班session或关闭父票。
+最终使用[交付步骤](../engineering/faithful-service-183-delivery.md)从停止状态启动真实CLI，并实际GET /health、两个既有Job及报告；delivery-*产物保留完整原答案、4/5次Attempt和缓存禁用状态，writes=[]、errors=[]。这是读取恢复，不是新增模型验收。服务仅监听127.0.0.1:8100。#183/#168保持开放，不创建接班session或关闭父票。
+
+
+## 授权后的真实补验与失败诊断
+
+以下是追加阶段记录，未替代上述原失败；源码起点47b83cdf20c509699b73953e4a57704bba86f5d2，live09/10另含source-identity.json冻结的未提交最小修复。每轮唯一后台、普通浏览器、真实Intern与适用工具，48/48/8不变；新根额度2097152 token/2400秒。各轮status、公共最终Job/Report、source-identity及实际截图在artifacts/issue-183/liveNN/。
+
+| 轮次 | Run与实际结果 | 未满足项 |
+| --- | --- | --- |
+| live05 | run_5aa64a944e476d2e12beeb42785e9300；11模型、2Python、659399计账token；模型选串行，route_duplicate_route_frontier | 无完整答案；提高预算未解决自然并发与推进 |
+| live06 | run_f4cd31a961145db7fe15cfe0ae4f0ed6；12位数位和54且模7计数；8模型、0工具、460864计账token；串行挑战重复草稿后reasoner_checkpoint_no_progress | 无完整答案；独立DP与半数枚举参考5123724123未送模型 |
+| live07 | run_8812dca648d19b6e39a3d993d632c711；4模型，正确有理数恒等式证明，Job succeeded；明确授权经验和缓存；形式化unsupported/spec_target_mismatch | 无可准入缓存来源，第二次请求未派发；自动捕获unknown观察不等于成功经验 |
+| live08 | run_172a768d1e3e104b04e9ae70b8d6d420；沿用live07实际数据库与会话，4模型，正确证明，Job succeeded | rationals与rational numbers域措辞导致旧观察未注入；无采用/拒绝证据 |
+| live09 | run_a6e5bdd4479460a7e1ae98eaa6a8dc1e；4模型，三个调用实际注入两条旧记录；全部memory_decisions=[] | 模型未报告经验选择；普通proof被升为require_formal=true，Job因formal_requirement_unmet失败；原失败保留 |
+| live10 | run_42d98ba995e3f64767c997bca2266165；9模型、2Python、547081计账token；模型仍选serial | Step Verifier多余tool_request.label触发严格schema拒绝；有界修复后Reasoner unknown_outcome，最终star_needs_review；未重发未知调用，无完整答案 |
+
+本轮最小修复仅限真实故障：有理数域两个已证实别名用于advisory相关性，不修改原规格或缓存键；挑战重复checkpoint不接受、不入库，转入已有单次有界Meta升级，并在实际UI区分重复草稿与轮数耗尽。既有单步无进展守卫仍保留。公共红绿与受影响40项回归、浏览器6项及构建证据在memory-alias-*、challenge-*、affected-regression*及前端日志；仅证明工程合同，不将live10升级为成功。集中审查见reviews/*-runtime-fixes.md；完整服务缺口仍在。
+
+缓存只读窄对比已确认live02完整规格仅output_requirements[0]措辞不同，其余规范字段相同；完整身份合同下miss正确，未删字段或降低身份来制造命中。证据cache-spec-differences.json、cache-miss-analysis.md。live09硬形式要求来源诊断见formal-requirement-analysis.md；需独立公共反例及修复，不能以降低L3资格、删除合法假设或忽略真正用户要求处理。
+
+
+## 来源边界修复与Planner版本见证
+
+形式要求来源修复不把模型require_formal布尔值视为用户权威。明确受支持的肯定句直接见证；模型声称需要或工具相关语境无法确定时，走既有必要澄清。该有限语法不声称理解所有自然语言；否定、引用及条件语境保守澄清，可能多问一次。显式客户端策略及旧冻结硬要求保留。原用户未要求机器验证的live09不追改成功。
+
+集中Standards/Spec初审各发现同3类阻塞：模型复制澄清reason可伪授予权威，条件跨行误授予，以及authority回答被追加为数学假设。原报告保留；新增3个公共Job用例修前4个失败断言（含复制整题问题），修复仅服务器签发的持久问题绑定可消费yes/no，授权回答不进入数学assumptions。formal-source-review-green-48.log为48项通过，非真实模型补验或最终门禁。既有澄清重绑定夹具明确添加真实机器请求后保持unsupported/unmet断言，formal-clarification-green.json为9/9；旧失败日志保留。
+
+live11：run_43ce283b0b0624af5be929aa204d4141，4模型，无完整答案。第一Plan把前提和依赖目标同放S1而自依赖；第二轮Plan结构修复但version由请求冻结1变2，执行前invalid_planner_checkpoint。实际截图又超时，观察器保持failed、completed=0，不能声称稳定UI。旧schema只要求正整数，InternPort红见证planner-version-red2证明错误版本被接受；现在仅把主Plan版本绑定到已有request.plan_version，保留alternative独立版本及最终检查。planner-version-green及planner-affected-green的18项通过只证明协议边界，使错误版本进入既有有界格式修复，不声称自然规划已恢复。
+
+
+live12：run_e77c7a3305f4460ced9f71c56bfec51f，10模型、2Python、628060计账token；自然选择串行，挑战后曾继续下一STEP_EXECUTE，随后Reasoner timeout/unknown_outcome，最终star_needs_review。未耗尽2097152根token额度，无完整答案；原未知调用不重发。来源权威定点双轴复查原3P1已解除，仍不证明真实能力跑通。
+
+Planner版本后续Spec发现P2：非checkpoint concurrent-aprs分支在const后复制schema，误约束备选Plan独立版本。公共InternPort反例planner-alternative-red为有效主版本1/备选2被拒；已将const赋值放到所有备选复制之后，仅主计划绑定版本。planner-alternative-green原负例对既有wire minimum支持作了错误假设而失败；没有扩展共享validator，修正用例后green2为19/19通过，主版本错仍拒绝、备选独立正版本接受；最终执行器原正整数检查保留。原失败记录均保留，待该P2定点复查。
+
+下一live13代表题保持8位数位和36且模7，普通用户表达愿意额外成本、尽量两个数学方向同时推进、任一完整即可交付。Spec只读核对确认可标“普通输入下偏好驱动、模型选择的自然路线决策”，不能标“无提示自主选择”。实际选择、准入、并发派发、正确交付分别判定；参考625579不送模型，没有强制技术mode参数。当前仅准备，实际结果另记。
+
+
+live13已实际终态failed：run_214bfb62cd3849e380e71e3961c264b2，8模型、2Python、451493计账token；Explore有已知invalid_json及有界修复，随后Planner timeout/unknown，最终star_needs_review，无完整答案及自然并发。两次超时的原unknown均不重发。
+
+live12最后Reasoner调用的680条审计事件起止约181秒；内容一直输出到截止前，公请求effective_timeout_seconds=180，根2400秒与2097152 token未耗尽。request-timeout-diagnosis.json保留具体时刻及流量；这支持单次等待为瓶颈之一，不证明延长必然成功。新服务配置可选request_timeout_seconds省略仍180、显式正且不超过根时限，Population可独立更短且不超过适配器。新验收profile仅新任务用360，根48/48/8、2097152/2400及模型/thinking/32768输出/重试不变；12配置项与2个既有根截止/unknown边界通过，红入口失败仍保留。定点审查另在reviews/*-request-timeout.md。
+
+live14准备复用live07真实旧会话/数据库，仅新建两个普通Job：先证明恒等式并明确讨论可用历史的取舍，再通过公开控制关闭注入后解另一恒等式。每项结果独立记录，不因经验未报告而跳过撤销继续检查；若出现服务器自身的机器要求来源问题，代表输入明确无该要求，以实际浏览器回答no继续，不补数学假设。此时尚未启动，不宣称通过。
+
+## live14/15 实际结果与提示合同修正
+
+live14首题run_112f23abbcf034cccd4458e732013963，4次模型请求，正确恒等式证明且Job succeeded。三条经验正文实际存在，模型返回三条reject，却将session_history为空解释成没有任何观察；理由与advisory供给矛盾，不能判经验有效取舍。memory-payload-diagnosis.md核对匹配源码、持久正文及纯消息重建，未取得历史完整HTTP逐字回放或provider理解证据。
+
+公开撤销后第二题run_771e83d08769b9b9986e074cd7e5f51d遇到机器要求来源澄清。原观察器错误进入只读Run页，原failed保留；主聊天页实际有澄清框。live14-recovery通过真实UI答no并收到202，但立即把滞后的waiting_input当终态，提前停服；后续恢复发现第二次intake仅派发预留、无响应，进入unknown/needs_review。此为观察脚本中断，不能升级为撤销继续成功；live14-followup只读接续未重答、未重发。旧Run、unknown及原失败保留。
+
+live15为run_eab367e30f7f4e2aeef41a7ec0d0bfc7，14模型、3Python、1001037计账token、2222.789秒。实际算出5123724123，与既有独立参考相符；enumeration/completeness两个义务及两个步骤审查通过，但交付format义务尚未完成，最后StepVerifier在360秒超时，Job failed/star_needs_review，无完整答案。单次216/240/246/313秒请求确曾完整返回，证明180秒限制会截断部分请求，不证明360秒保证成功。原unknown不重发。
+
+planner-choice-analysis.md只读核对：live15首轮选择population但WorkUnit自/前向依赖导致绑定失败；第二轮修复后主动改serial。第二轮DP和配对方法的受控分类序列相同，合法计划frontier相同；未放宽去重或增设方法来制造准入。用户偏好原文保留，不能归因于序列化丢失。
+
+三个提示修正仅澄清既有合同：区分对话history和投影advisory、让Meta协议服从当前动态schema、将时间成本/先完成偏好留给执行而非数学义务，保留真实格式及明确双证明要求。meta-protocol-red.log稳定复现两种特殊请求被旧四动作协议冲突；green移除无条件冲突，普通Meta保持既有schema。prompt-contract-green.json为41项相关回归、0失败/错误/跳过；这不证明模型语义改善。审查在reviews/*-memory-source.md、*-meta-contract.md、*-intake-preference.md及应用后复查中。尚无本轮最终全仓门禁结论。
+
+live16/17/18仅准备，分别用于真实经验取舍后撤销继续、固定普通输出要求的缓存来源/当前重验、归纳与双射方向的普通方法建议。脚本回答澄清时改用主聊天页、等待202、忽略已答问题的滞后投影；未见公共终态时不因观察器异常直接停服。live18新profile主/Population单次等待均360，根仍2097152/2400、48/48/8；现有Run不改。未执行项继续not_run。
+
+### 10:56 更新：live16 结果与两项最小补丁
+
+上述准备状态为历史快照。live16 两题已 succeeded：run_53c12c174185fc098680687d4ea03d55 为4请求、run_09d5b58f30efa2d37e153246fa908122 为5请求，数学恒等式正确。首题4条 reject 仍声称空 session_history 中没有观察，理由与实际 advisory 不符，不能视为有效经验取舍。次题公开撤销后未注入记录并继续正确。监控及测试服务已清理，旧 unknown 保留。
+
+离线见证另发现 skills/persistent_sessions 同关时正文被无条件删除。补丁将当前有效 advisory 保留于最终用户请求，仅删除深拷贝投影中的副本，保留旧嵌套输入；不从对话恢复经验、不扩大权限。稳定红覆盖四种开关，最终5项及相关50项通过，双轴无待办。实际语义效果待 live19 新建两题检验，不追改 live16。
+
+本地延迟补丁 A 仅在原事务筛选 receipt 候选，Python 最终解码、完整公共历史、当前证明来源及 CAS/控制/期限检查保留。相关38项通过、双轴无待办。三组交替的固定离线剖析均值2.708268秒至2.190730秒，约19.1%改善；原不利单组结果仍保留，不能据此宣称真实服务或模型提速。证据见 artifacts/issue-183/latency-A-delivery.md、memory-placement-delivery.md 及 reviews。当前源码仍须最终全仓门禁。
+
+### 11:03 更新：live19 内容取舍、撤销及只读重启
+
+两题均 succeeded、各5请求：run_708ca947725efef197b838cfa95ff851 证明 x+x=2x；run_279b6bcdbc580efe82d0f6d9d76f4c38 证明 x+0=x。首题5条当前记录确实只有运行状态、来源和成本等诊断信息，模型逐条据此 reject，明确不含可用数学方法，理由与公开 observation 相符；不再声称没有记录。未知结果仅作诊断，未升为可信经验或正确答案。第二题公开撤销后所有调用 record_ids 为空，继续正确交付。此为内容有效拒绝及撤销继续证据，不是正向数学经验采用或性能提升证据。
+
+测试服务正常终止后以相同源码/配置/数据库、SHOWCASE_WORKER_ENABLED=False 重启，只读浏览器刷新无写请求、无页面错误；两题 status、答案及其余持久结果（含完整请求账本、预算）一致，撤销状态保留。首题在第二题建立修订后派生 revision_allowed/revision_to 变化属当前链接视图，最初逐字比较因此失败，原失败保留；只排除这两个派生字段后其余结果完全相等。证据 artifacts/issue-183/live19/{outcomes,readonly-observation}.json 及截图。两次服务与临时30分钟检查均已结束；旧 unknown 不重发。缓存、自然并发/切换和 F4 仍未由本轮证明。
+
+### 11:06 更新：live17 来源未准入
+
+中断命令实际已启动 live17。首题 run_b4e1a87e66c7eef96795c597d86c7a95 succeeded、5请求、数学恒等式正确；形式生成返回 unsupported/spec_target_mismatch，无 Lean Attempt、无可信缓存条目。按事先合同不提交第二题，脚本保留 failed 原因 First task has no admissible source。服务与临时监控已清理。此轮不能证明缓存命中或当前 Lean 重验；不重发原任务，不放宽完整身份。继续只读诊断形式目标与规格差异，同时按既有合同启动 live18 数学计数代表题。
+
+### 11:27 更新：live18 绑定拒绝与 live20 未命中
+
+live18 run_cd1cb96fbfefc43184da053555bef7f6 为5请求/1Python，原任务 failed/invalid_problem_spec_work_units。两轮均主动选择 population，但把有先后依赖的 count_exact、proof_completeness 放入同一步；实际请求和修复反馈已明确禁止，自依赖拒绝正确。独立只读诊断未发现可解释该行为的产品缺陷，不增加 Planner 修复或同题重试。截图等待字体超时是独立观察错误，原失败保留。真实路线未执行。
+
+live17 保存的两个原始 target 均为规范 forall x/equality；规格量词和方向确实都不同。仅补规范字段提示，公开 Intern 消息见证红绿及41项回归通过，两轴复查无待办。初次模块选择错误、0用例报告保留为失败。guard/权限/完整缓存身份未改。
+
+live20 使用相同普通输入、最多两新题：run_b38cb641cbf3272128a912b524b88aec 正确交付，并有 formal_5b984557bedc446eb4371a37a1c7f031 的当前 Lean L2 回执、recursive_passed 来源审查和 active 缓存 eeace38bc1074402828d594183616b82；run_ac6d5a8ebf1516ad235b0d4dd5897007 正确交付但没有 receipt_rechecked。原验收 failed 保留，不能用两题正确冒充缓存命中。服务和临时监控已清理；身份差异只读诊断见 artifacts/issue-183/live20/。
+
+所有代码修复聚焦证据与双轴报告复用，fbbb8e1 是本轮最终产品字节，须执行新的 gate-03。提交拆分时索引无上下文应用使部分提示位置与工作树不同，已用独立跟进提交对齐审查/测试过的最终文件；不声称各中间提交都经过门禁。最终门禁仍不能替代未实证能力。

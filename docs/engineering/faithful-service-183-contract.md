@@ -9,3 +9,51 @@
 5. 退出集中Standards/Spec审查；源码无变化时复用#182冻结e62d145门禁，仅检查文档。产品变更先保存公共失败见证，最小修复与受影响回归后依[工程门禁](development-gates.md)冻结检查。
 
 证据artifacts/issue-183/。长运行唯一后台，30分钟临时检查，终态删除；旧unknown不恢复不重发。tests/test.md禁止读取改动。
+
+## 新任务资源授权（2026-11-15）
+
+用户明确答复“授权新任务使用该上限”：仅新建代表任务允许2097152 token、2400秒，模型/HTTP/工具次数仍48/48/8。旧Run、预算、deadline及unknown保持原样。live05复用live04普通分步计划及独立求和输入，仅改变新任务资源配置，先诊断预算障碍；自然路线仍由模型决定。证据artifacts/issue-183/live05/。
+
+## 真实失败后的最小修复边界
+
+live06重复挑战草稿直接结束，须在不接受重复checkpoint的前提下进入既有有界Meta升级，并保留单次升级/原预算；仅修复实际挑战入口，不顺带改写单步状态机。live08同一有理数域的rationals/rational numbers措辞差异导致经验未检索；仅对已证实同义域进行advisory相关性匹配，不改原ProblemSpec或缓存完整身份。使用既有公共Job挑战及经验pipeline测试留存红绿，实际新任务复验，最终集中双轴审查和门禁。
+
+
+## 下一代表输入与形式要求来源
+
+live05/06/10仍未取得自然并发/推进，换为8位正整数、数位和36且模7的精确计数，普通数学题要求数位DP与前后四位枚举两个独立完整方法相互核对。独立参考625579不送模型；仍由模型选择执行方式，不强制内部路由，未触发项继续not_run。仅一轮新任务，使用已授权预算。
+
+live09模型将普通proof升级为硬形式要求，须在现有intake选择冻结前核对原用户来源。显式客户端硬策略及明确机器验证请求保持硬要求；不削弱L3、对应范围、合法假设或unsupported。无法确定来源时复用现有必要澄清，而非默认降级或由模型布尔值授予权威。公共红见证、明确请求/unsupported与否定/引用/澄清反例先红后绿；已有Run不重判。窄实现合同及证据见artifacts/issue-183/formal-fix-contract.md。
+
+
+live11实际第一Plan发生WorkUnit自依赖，第二轮修改时将plan.version从请求冻结1误改为2，旧wire schema只要求正整数而放过，随后执行前拒绝。仅把当前primary Plan版本绑定到已有request.plan_version，并同步提示；保留最终版本检查、独立alternative版本和有界格式修复。InternPort公共红见证planner-version-red2、绿planner-version-green留存。原Run及失败截图超时不改判。
+
+
+live12因Reasoner timeout/unknown结束，不重发。live13改为普通用户时间/成本偏好驱动的8位计数，允许任一独立完整方法交付而非要求两个都完成，仍不传技术mode或固定模型选择；不得称无提示自主选择。参考625579不送模型。Planner版本P2仅移动const赋值到所有备选schema复制之后，保持主版本冻结及备选独立版本，公开红绿见planner-alternative-*。
+
+## 根时限内的单次等待
+
+live12在持续收到内容时被单次180秒时限截断，原事件范围181秒，根token与2400秒尚未耗尽；live13又在Planner发生unknown。旧unknown不重发。仅扩展现有faithful-service-v1可选request_timeout_seconds：省略保持180；显式值须为有限正数、非bool且不超过根max_runtime_seconds。Population独立等待可更短，省略继承适配器上限，不得超过它。实际派发仍受原根剩余deadline裁剪；不增加模型/HTTP/工具次数或token，模型、thinking、输出预留和重试策略不变。
+
+新任务配置可用360秒单次等待，但根仍2097152 token/2400秒、48/48/8。公共CLI红见证request-timeout-red先保留，再验证默认兼容、根边界、Population边界及原截止检查。该调整不保证外部请求完成，也不追改旧Run；证据request-timeout-diagnosis.json及request-timeout-contract.md。
+
+
+live14只复用旧会话的合法观察，不恢复旧Run；新建最多两个Job，第一题明确讨论历史取舍，之后公开撤销注入再解第二题，分别核对实际模型选择与关闭后无注入。若新Job收到服务器机器要求来源澄清，代表题未提出机器要求，使用真实UI答no；不改规格中的数学条件、不跳过最终核验。profile单次360，根授权保持2097152/2400及48/48/8。
+
+## 已证实的提示冲突与后续最小补验
+
+live14的三条reject理由误把空session_history当无advisory；live15的特殊Meta请求经公共组合仍注入不允许的旧四动作协议，另将先完成交付偏好建成format数学根。仅补已有提示中的来源区分、当前schema优先及执行偏好/数学义务区分，保留可选取舍、只读权限、真实格式和明确双证明要求，不重写旧规格、schema或控制器。公开失败和应用后41项回归详见阶段记录；语义改善须由实际后续模型结果判断。
+
+原live14观察错误中断后的unknown不重发。live16以两个新Job补实际内容取舍与公开撤销后正确继续；live17最多一组固定普通输出要求的同题输入，保留真实intake、完整缓存身份与当前Lean，首题无可信来源时不提交第二题。未命中诚实保留，不实现规格继承或删除身份字段。live18采用真实前缀归纳与数字块双射的数学建议，保持模型自主选择及实际方法标签；不扩大方法词表。其主/Population单次等待均360，仅作用于新任务并裁剪至既有根截止。普通方法建议下的选择不称无提示自主发现。所有实际闭环和最终门禁达到前，本票不完成。
+
+## 流式成本及经验正文位置的最小修复
+
+live16两题均正确交付，公开撤销后新题无经验注入；第一题四条reject仍误称空history，无有效内容取舍。离线公共消息见证还确认skills与persistent_sessions均关闭时，序列化删除唯一advisory正文。仅在最终消息构造中把已刷新授权的同一advisory正文保留为user context数据，移除复制projection/role_context中的重复正文；不从旧history补回、不改来源/权限/相关性/schema或可选决策，不复制模型prompt或扩充观察。旧的仅嵌套输入若没有当前顶层正文，不得被移除造成新丢失。四种开关组合、正文相等/仅一份、禁用及陈旧历史清除、原计费/上下文准入为聚焦合同；模型是否理解仍须一轮新代表任务验证，不改判live14/16。设计见artifacts/issue-183/memory-message-placement.md。
+
+latency-diagnosis.md以同一12次真实保存重放确认历史增加导致重复解码成本。仅先做latency-fix-contract.md的A片：同一当前事务内筛选proof graph所需receipt事件，减少无关audit/activity的Python解码。保留完整公共历史、当前receipt来源重验、CAS/控制/路由、事件数量及演化调用；畸形和非对象记录不得被过滤隐藏，重复字段/receipt序列语义保持。无缓存、快照API、批处理、索引或依赖改动。先公共红绿和来源反例，再同条件重放测量；不设新墙钟门槛，不从局部改善推断整段远端耗时或数学能力。未消除的全历史读取明确保留。
+
+## live17/18 后的有限接续
+
+live18 两轮自然选择 population，却重复将 count_exact 与依赖它的 proof_completeness 归同一步，绑定拒绝符合已传入规则，无证据支持改控制器或放宽依赖。先停止同题追加调用，不把截图超时改成模型失败原因；自然并发/F4仍未完成。后续换代表题需另写普通数学输入及具体诊断目的，不强制技术路由。
+
+live17 原始持久 intake 提议 target=[forall x]/equality，规格却为 [forall x in Q]/自然语言方向。仅补规范表达提示：对真实支持的无条件有理数多项式全称等式，规格/目标共用规范量词及 equality 方向，保留原题、根和所有真实附加要求，不改最终精确检查或缓存身份。消息见证先红后绿，41项回归通过（初次模块选择错误的0用例失败保留）。双轴复查后 live20 最多两题复用 live17 普通输入，保留实际 intake；首题无可信来源即停止，不重发原Run，不预置规格或制造命中。
