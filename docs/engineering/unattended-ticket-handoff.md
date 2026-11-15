@@ -49,3 +49,21 @@ native进一步因果探针在真实freeze提交后释放原挂起调用，并�
 15:26最新：live22在8848338运行，run_4c03a083b38c55f6601cbded768aa528 succeeded，正确625579及两法完备证明，6请求/2工具/343868计账token/289.868秒；Explore直接完成，无Planner/Population。真实worker=False同DB重启页面、刷新答案可见，完整result与6Attempt相等，零写/页面错误；服务和监控清理。当前无离线测试运行，旧8100保留、8103空闲。
 
 live23已准备不同双参数四次式分类输入，必要/充分及全部等号分支，仍不强制模式/规格/计划；独立解析参考只存live23/independent-reference.md不发模型。按新用户优先级只做实际效果，冻结源码/HEAD/dist后最多1新Job、同资源2m/2400和48/48/8、主/Population360。启动后沿用live23/check.ps1和30分钟临时检查转移所有权，不重复启动，不读tests/test.md。所有writer仍停，最终门禁仅退出前再做必要一次；gate05 canceled和原失败保持。
+
+### 15:48 最终记录：live23 失败，按用户要求停止
+
+冻结源码 ad356042c9bd652fd9e66a792d7a5d4db6d6f840；run_728ebfabf590b69b68c0a4ccc0bc834b 于15:45终态 failed/job_execution_failed，solver partial_aborted/incomplete，原因 route_duplicate_route_frontier；没有完整 final_response，5个根义务覆盖0。12模型/12HTTP/1工具、897168本地估算计账token、1190.688秒；12请求均success/completed，provider用量仍未知，不把计量未知误报为请求失败。根限额2097152/2400及48/48/8未耗尽，直接终止原因不是超时或根预算耗尽。
+
+Planner合法绑定并自主提出population（3独立路线）；准入因root_budget_insufficient选择serial。该并发准入拒绝与最后重复路线前沿终止是两个事件，不能混称。没有实际自然并发或热切换；Meta有intervene提议，但serial_intervention.status=skipped、pair_id=null、adoptions=[]，不计F4闭环。其假设把参数分区阈值对调：例如a=0,b=0被假设排除，实际x^4+1恒正；a=6,b=14被假设纳入，取x+1/x=-3则P/x²=-3<0。这是中间假设错误，尚未成为最终交付；独立参考始终未发模型。不据终态码猜测重复前沿的更深实现根因。
+
+证据：artifacts/issue-183/live23/run1-final.json、run1-report.json、run1-terminal.png、source-identity.json及independent-reference.md。已核对本轮wrapper2760、observer14868、服务36180和uv17548均退出，8103无监听，MathAgent-Issue183-live23临时任务已删除；旧8100展示服务保留。截图失败提示与实际Job终态一致。
+
+用户明确要求“等待live23结果然后停滞”，本轮至此停止：不修复、不新建模型任务、不再跑离线测试或门禁、不推送关票、不接续新session。#183/#168保持开放，自然并发/切换、F4、缓存当前重验及最终源码必要门禁仍缺；gate-05 canceled及此前失败保持原判。继续时沿用当前所选模型，具体继承型号无法确认，不猜测。这里只完成结果归档与清理，不宣称本票验收完成。
+
+### 16:00 接续：用户授权3600秒及路线身份最小修复
+
+用户进一步要求提高总时间并解决失败，恢复本轮工作。仅新live24根/Population时限3600秒，其余2097152 token、48/48/8及单请求360秒不变；全部旧Run不改。live23准入时原计账153131，加两路线与收尾1786422共1939553，未超2097152；实际时间要求2880秒，根总限2400、前置约221秒，时间检查必不通过。提高至3600能容纳该已观察计划，不能保证任意新计划。
+
+已复现live23终止机制：Meta CONTINUE将action attempt0→1，计划版本1和frontier不变；sync_plan_route却要求路线初始attempt也相同，误登记后被合法的duplicate guard终止。修复39ca1e9仅移除复用检查的attempt条件；路线计账/原attempt/谱系和新求解动作身份都保留，替代新计划同前沿仍拒绝。真实run_meta→新attempt→重开DB→sync的一项回归先红STEP_EXECUTE!=TERMINAL，后绿；新版本重复反例仍拒绝。最初命令误用--output-dir只产生CLI参数错误，不算红证据；有效红绿见route-continue-red/green.json及log。37项受影响路线/恢复回归65.362秒通过、1skip未计覆盖；ruff通过，独立Standards Kuhn/Spec Ramanujan均clear，审查未自行重跑测试。
+
+live24仅准备普通输入的新Job，沿用live23数学题，唯一诊断目的为实际准入及完整正确交付；若未触发CONTINUE则不冒称真实再次验证旧分支。参考不发模型、不固定计划/模式、未新跑整仓测试；源码/HEAD/dist/配置冻结后唯一启动并安排30分钟临时检查。当前not_run；启动后由live24/check.ps1提供实际PID/创建时间/阶段/计数/日志。旧8100保留，#183退出仍未满足。
