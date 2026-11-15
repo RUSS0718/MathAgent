@@ -186,6 +186,12 @@ def response_instructions(request, schema):
         instructions += (
             " Review step_goal rather than completion of later steps. answer_claim is optional, "
             "step_review_scope lists this WorkUnit's actual objectives. If the report establishes "
+            " session_history contains prior dialogue and is distinct from advisory observations "
+            "in the request's population_memory_advisory.observations; an empty "
+            "dialogue history does not imply those observations are absent. If you emit optional "
+            "memory_decisions, base each brief adopt/reject reason on the corresponding observation "
+            "actually present in the request rather than dialogue-history availability; failure and "
+            "unknown observations remain diagnostics, never proof."
             "those objectives with valid reasoning and recorded evidence, use YES/PASS/ACCEPT "
             "even while later steps and the final output remain unfinished. Leave later roots "
             "undeclared; their absence is not an objection to this step. The independent "
