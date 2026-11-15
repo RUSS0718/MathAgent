@@ -39,7 +39,7 @@ def load_faithful_config(path):
     value = json.loads(path.read_text(encoding="utf-8-sig"), object_pairs_hook=_unique_object)
     _object(value, {"version", "python_image_id", "context_capacity", "budget"},
             {"population", "formal", "population_memory", "request_timeout_seconds",
-             "stream_timeout_policy_version"})
+             "stream_timeout_policy_version", "adaptive_solving"})
     if value["version"] != "faithful-service-v1":
         raise ValueError("faithful_config_version_invalid")
     image = value["python_image_id"]
@@ -51,6 +51,10 @@ def load_faithful_config(path):
         "auto_problem_spec",
     }, True)
     frozen_policy({"features": features, "context_capacity": value["context_capacity"]})
+    if type(value.get("adaptive_solving", False)) is not bool:
+        raise ValueError("faithful_adaptive_solving_invalid")
+    if value.get("adaptive_solving") is True:
+        features["adaptive_solving"] = True
     memory = value.get("population_memory", False)
     if type(memory) is not bool:
         raise ValueError("faithful_population_memory_invalid")

@@ -46,7 +46,7 @@ def validate_route_frontier(state: dict[str, Any], plan: Any) -> str | None:
     method_error = route_plan_error(plan)
     if method_error is not None:
         return method_error
-    frontier = plan_frontier(plan, state.get("problem_spec"))
+    frontier = search_frontier(state, plan)
     if not frontier:
         return "empty_route_frontier"
     digest = frontier_digest(frontier)
@@ -232,6 +232,17 @@ def plan_frontier(plan: Any, specification: Any = None) -> list[dict[str, Any]]:
     return [json.loads(item) for item in sorted(targets)]
 
 
+def search_frontier(state, plan):
+    """Bind new adaptive serial frontiers to full scope and feedback identity."""
+    frontier = plan_frontier(plan, state.get("problem_spec"))
+    if state.get("adaptive_solving"):
+        from .adaptive_solving import search_context
+
+        context = search_context(state)
+        return [{**item, "search_context": context} for item in frontier]
+    return frontier
+
+
 def _route_id(routes: list[dict[str, Any]], parent: str | None, digest: str) -> str:
     seed = f"{parent or 'root'}:{digest}:{len(routes)}"
     return "route_" + hashlib.sha256(seed.encode()).hexdigest()[:20]
@@ -344,13 +355,15 @@ def sync_plan_route(harness, run: dict[str, Any]) -> dict[str, Any]:
     plan = state.get("plan")
     if not isinstance(plan, dict):
         return run
-    frontier = plan_frontier(plan, state.get("problem_spec"))
+    frontier = search_frontier(state, plan)
     digest = frontier_digest(frontier)
     routes = state.get("route_registry") or []
     # CONTINUE and trace-back create new action attempts within the same plan,
     # not new search routes. Keep the route's original accounting and lineage.
     if any(
-        item.get("frontier_digest") == digest
+        (item.get("frontier_digest") == digest or (
+            state.get("adaptive_solving")
+            and item.get("specification_version") == state.get("specification_version")))
         and item.get("plan_version") == state.get("plan_version")
         for item in routes
     ):

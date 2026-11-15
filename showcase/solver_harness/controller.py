@@ -97,6 +97,12 @@ def run_exploration_phase(harness, run: dict[str, Any], problem: str) -> dict[st
 
 
 def advance(harness, run, metadata, problem):
+    if (run["state"]["phase"] == "PLAN" and run["state"].get("adaptive_solving")
+            and len(run["state"].get("whole_solution_reviews", [])) >
+            run["state"]["adaptive_solving"].get("processed_reviews", 0)):
+        from .adaptive_solving import explore_direct
+
+        run = explore_direct(harness, run, problem)
     from .autonomous_routes import advance_switch
     from .serial_intervention import advance as advance_intervention
 

@@ -179,6 +179,13 @@ def repair_request(request, *, instruction=REPAIR_INSTRUCTION, failed_call=None)
         except ValueError:
             return repaired
         errors = _schema_diagnostics(parsed, response_schema(failed_call.get("request", request)))
+        if not errors and request.get("role") == "problem_intake":
+            from .specification import normalize_problem_spec
+
+            try:
+                normalize_problem_spec(parsed)
+            except (TypeError, ValueError) as exc:
+                errors = [{"path": "$.root_obligations", "message": str(exc)}]
         if not errors:
             return repaired
         repaired["format_repair"] = {"previous_response": text, "schema_errors": errors}

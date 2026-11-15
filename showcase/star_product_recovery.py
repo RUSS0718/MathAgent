@@ -273,6 +273,10 @@ def resume_solver(harness, problem, run_id, retry):
             harness, run, problem, {"plan": run["state"]["plan"]}
         )
     if run["state"]["phase"] in {"SETUP", "EXPLORE", "EXPLORE_REVIEW"}:
+        if run["state"].get("adaptive_solving"):
+            from .solver_harness.adaptive_solving import explore_direct
+
+            return explore_direct(harness, run, problem)
         from .solver_harness.calls import pending_call
         from .solver_harness.review import review_solution
 

@@ -12,7 +12,12 @@ def action_keys(state, step_id):
                  if item.get("step_id") == step_id), {})
     method = normalize_method(step.get("method_id"))
     roots = step.get("obligation_ids", []) or step.get("auxiliary_goal_ids", []) or ["unknown_target"]
-    return [f"{root}:{method}" for root in sorted(roots)]
+    suffix = ""
+    if state.get("adaptive_solving"):
+        from .adaptive_solving import search_context
+
+        suffix = ":" + search_context(state)
+    return [f"{root}:{method}{suffix}" for root in sorted(roots)]
 
 
 def review_progress(state, event, updates):

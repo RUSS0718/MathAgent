@@ -45,6 +45,12 @@ def invalid_intake_phase_reply(reply, request):
     """Check the phase-specific combination after structural schema validation."""
     if request["role"] != "problem_intake":
         return False
+    from .specification import normalize_problem_spec
+
+    try:
+        normalize_problem_spec(reply)
+    except (TypeError, ValueError):
+        return True
     submitted = request.get("clarification_input")
     condition = reply.get("applicable_condition")
     followup = reply.get("clarification")

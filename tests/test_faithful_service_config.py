@@ -50,6 +50,14 @@ class FaithfulServiceConfigTest(unittest.TestCase):
         self.path.write_text(json.dumps(self.value), encoding="utf-8")
         return load_faithful_config(self.path)
 
+    def test_adaptive_solving_is_explicit_and_strictly_boolean(self):
+        self.assertNotIn("adaptive_solving", self.load()["SHOWCASE_STAR_FULL_FEATURES"])
+        self.value["adaptive_solving"] = True
+        self.assertIs(True, self.load()["SHOWCASE_STAR_FULL_FEATURES"]["adaptive_solving"])
+        self.value["adaptive_solving"] = 1
+        with self.assertRaisesRegex(ValueError, "faithful_adaptive_solving_invalid"):
+            self.load()
+
     def test_serial_features_are_added_to_core(self):
         from showcase.star_product_config import CORE_FEATURES
 

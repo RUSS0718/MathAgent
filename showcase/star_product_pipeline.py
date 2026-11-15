@@ -630,6 +630,10 @@ def projection(run, *, answer=None, verification_mode="auto", include_prover_rou
         result['serial_intervention'] = public_projection(state['serial_intervention'])
     if state.get("execution_selection"):
         result["execution_selection"] = state["execution_selection"]
+    if state.get("adaptive_solving"):
+        result["adaptive_solving"] = {
+            key: state["adaptive_solving"][key] for key in ("version", "reason", "corrections")
+        }
     if state.get("execution_switch"):
         result["execution_switch"] = state["execution_switch"]
         result["execution_switch_history"] = state.get("execution_switch_history", [])

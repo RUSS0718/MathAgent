@@ -278,7 +278,7 @@ class SolverHarness:
             from .problem_intake import POLICY
 
             state["problem_intake"] = dict(POLICY)
-            if effective_metadata.get("formal_generation_required") is True:
+            if (effective_metadata or {}).get("formal_generation_required") is True:
                 state["problem_intake"]["formal_generation_required"] = True
             if self._intervention_enabled:
                 state["serial_intervention_permission"] = {

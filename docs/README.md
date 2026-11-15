@@ -1,5 +1,7 @@
 # MathAgent 文档索引
 
+- [#185 按需求解阶段记录](evals/adaptive-solving-185-20261115.md)：直接候选、一次数学修正、恢复及规格协议修复；[策略合同](engineering/adaptive-solving-185-contract.md)。简单题真实交付5；第二题规格失败保留，针对修复的真实复验及深度案例、最终门禁待完成，#185保持开放。
+
 - [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：live27已失败，约922秒、8次完成请求、0未决，预算未耗尽；质疑后被历史规格变更保护误终止。新路线绑定规格版本的最小修复及针对性验证见阶段记录；旧Run不回填、不自动追加live28，未证明完整正确交付。live26根超时及1未知保持。#183/#168开放。见[当前交接](engineering/unattended-ticket-handoff.md)。
 
 - [#182 状态与控制组合验收](evals/faithful-service-182-20261115.md)：[G2合同](engineering/faithful-service-182-contract.md)。冻结e62d145的gate-01六阶段通过（2105项、0failure/error、42skip、source_changed=false），双轴复查解除；真实旧Run刷新/重启保持原预算、4次Attempt和输出身份。仅整合已有能力，#168完整服务仍未完成，按[交接](engineering/unattended-ticket-handoff.md)继续#183。
