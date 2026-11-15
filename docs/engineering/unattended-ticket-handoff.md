@@ -85,3 +85,13 @@ live24仅准备普通输入的新Job，沿用live23数学题，唯一诊断目�
 live24草稿端点2b系数与a=±4边界错误已确认；同冻结状态按compose_request重建含Explore已计算端点输出，未发现漏传，consumed_receipt_ids空仅是无report直接引用。草稿不完整JSON且0accepted步骤，未执行其提出的工具请求，不能计正确交付。本次不把独立参考、反例或正确判据写入模型提示，真实运行仍须现有工具与Verifier纠正并完成全题。
 
 live25已准备唯一新普通Job，沿用live24输入，显式faithful-stream-v1；新根3600秒/2097152及48/48/8、旧request配置360保持。旧360配置在新策略下不是活跃流整次硬截止，原phase/batch/Run截止仍优先。上线前preflight确认映射，新Job后核对账本及attempt的策略身份，实际是否越过360及完整正确答案以真实结果为准。启动时源码/HEAD/dist/scripts/config全部冻结，唯一后台与30分钟临时检查；不重试旧unknown。当前准备not_run，状态见artifacts/issue-183/live25/status.json；旧8100展示仍保留，#183/#168未完成，不在此切片重跑全仓门禁。
+
+### 17:12 live25 结果：长流与自然并发实证，版本冲突失败
+
+冻结源码1cfdc603d3ae37d1ec8a70c170ce4593cc5b2461（产品efff923），配置SHA256 1065c88735a534a0631ce5d1c8f97612ff2601e6fb54f4cde4dcde0bc59fddfd。新普通Job run_dc0853536d2dc1a7ec2bf23c8b21809e，遇真实机器证明来源澄清时按普通证明意图经UI答no（202），规格/输入v2，未预置Spec/Plan或数学参考。实际账本冻结faithful-stream-v1/effective_idle30/soft_prompt1200；物理请求记录call_policy_evidence同版，根3600/2097152及48/48/8不变，旧Run未迁移。真实Planner自主population，2独立路线获independent_routes_admitted，Reasoner于16:36:00.405835和16:36:00.467062启动，约61毫秒间隔、实际重叠。两者完成604.560/769.735秒，StepVerifier完成530.426/855.904秒，均超过旧360硬截止。证明此轮活跃长流接线与真实并发执行，不代表并发正确交付或数学能力提升。
+
+两个Reasoner初版草稿仍错：倒数路线把参数分类大小区间倒置且写出b>=2+2|a|，SOS路线系数匹配错误、错误宣称边界b=a²/2-2。StepVerifier均CHALLENGE，没有完整答案或根义务接受；SOS质询引用实际展开正确指出x³=2p、x=2p+2qr及常数r²+1，不能忽略r=0。倒数路线质询虽然判FAIL，其修正说明仍把顶点是否在允许域及区间判据倒置，不能将LLM质询当独立正确证明。数学错误未被本次配置修复解决，独立参考仍未发模型。现有零点/分类正确性门槛不降低。
+
+17:09左右公共Job终态failed/job_execution_failed；根耗时2244.455秒、计账1276195（本地估算，provider用量未知）、2工具，4根覆盖0，无完整final_response。账本logical_calls/http_attempts各13，公开request_attempts10条，不能直接说13次已完成物理请求。最后StepVerifier记录unknown/348.881秒，非timeout分类、无finish_reason；unresolved_attempts1。服务错误日志第745行记录SolverRevisionConflictError，调用栈指向star_product_pipeline.py:510提交formal_generation_unavailable→storage.py CAS拒绝，邻近同时有Population流活动。确认新的工程失败位置，不冒称已最小复现完整竞态或已修复；并发成功不等于完整F2退出。公共Job已失败而Solver快照仍running/POPULATION的不一致保留，不改写旧现场。失败后本轮服务退出，在途核验结算unknown；无自动重发，不把unknown归咎于新策略有效idle超时。
+
+终态证据：run1-final.json、run1-report.json、run1-terminal.png、service.stderr.log及source-identity.json。主agent终态后identity.py退出0；wrapper19048（08:31:45.190047Z）、observer7908（08:31:52.7450859Z）、服务40932（08:31:46.5882329Z）、uv34652（08:31:46.516061Z）均退出，8103无监听、MathAgent-Issue183-live25已删除，旧8100展示保留。本轮唯一新Job已完成观察，无live26或额外门禁/模型任务；39相关离线检查复用，不再扩增测试。#183/#168开放，仍缺完整正确并发交付/切换/F4/缓存当前重验及最终必要门禁。当前选择模型保持，具体Codex继承型号未知。
