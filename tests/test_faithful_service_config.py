@@ -64,6 +64,44 @@ class FaithfulServiceConfigTest(unittest.TestCase):
         self.assertNotIn("SHOWCASE_FORMAL_BACKEND", config)
         self.assertFalse(config["SHOWCASE_POPULATION_MEMORY_ENABLED"])
 
+    def test_explicit_request_wait_preserves_root_limits_and_adapter_settings(self):
+        from showcase.server_cli import parse_server_args
+
+        before = self.load()["SHOWCASE_STAR_ADAPTER"]
+        self.assertEqual(180, before.client_timeout)
+        self.value["budget"].update(max_tokens=2097152, max_runtime_seconds=2400)
+        self.value["request_timeout_seconds"] = 360
+        self.load()
+        _, config = parse_server_args(["--mode", "live", "--faithful-config", str(self.path)])
+        adapter = config["SHOWCASE_STAR_ADAPTER"]
+        self.assertEqual(360, adapter.client_timeout)
+        self.assertEqual((before.model_id, before.thinking_mode, before.max_tokens, before.client_retry),
+                         (adapter.model_id, adapter.thinking_mode, adapter.max_tokens, adapter.client_retry))
+        budget = config["SHOWCASE_STAR_FULL_BUDGET"]
+        self.assertEqual((48, 48, 8, 2097152, 2400), (budget.max_model_calls,
+            budget.max_http_attempts, budget.max_tool_calls, budget.max_tokens, budget.max_runtime_seconds))
+
+    def test_request_wait_and_population_wait_respect_explicit_bounds(self):
+        self.value["request_timeout_seconds"] = 360
+        self.value["population"] = {"capacity": {
+            "service_id": "intern", "max_inflight": 2, "worker_slots": 2,
+            "evidence_ref": "existing-two-slot-observation", "status": "verified"},
+            "budget": self.value["budget"]}
+        self.assertEqual(360, self.load()["SHOWCASE_STAR_POPULATION_REQUEST_TIMEOUT_SECONDS"])
+        self.value["population"]["request_timeout_seconds"] = 30
+        config = self.load()
+        self.assertEqual(30, config["SHOWCASE_STAR_POPULATION_REQUEST_TIMEOUT_SECONDS"])
+        self.assertEqual(360, config["SHOWCASE_STAR_ADAPTER"].client_timeout)
+        self.value["population"]["request_timeout_seconds"] = 361
+        with self.assertRaisesRegex(ValueError, "population_request_timeout_invalid"):
+            self.load()
+        self.value["population"]["request_timeout_seconds"] = 30
+        for invalid in (0, -1, True, "360", 1101, float("inf"), float("nan")):
+            self.value["request_timeout_seconds"] = invalid
+            with self.subTest(timeout=invalid), self.assertRaisesRegex(
+                    ValueError, "faithful_request_timeout_invalid"):
+                self.load()
+
     def test_missing_or_invalid_prerequisites_are_rejected(self):
         for field in ("budget", "python_image_id", "context_capacity"):
             with self.subTest(field=field):
