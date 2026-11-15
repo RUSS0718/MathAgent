@@ -364,7 +364,7 @@ class FaithfulProtocolHandoffTest(StarJobFixture, unittest.TestCase):
         second_review = deepcopy(review)
         second_review["obligation_evidence"][0]["obligation_id"] = "root:explain"
         stream_requests = [
-            {"role": "planner", "checkpoint_protocol": True, "problem_spec": spec,
+            {"role": "planner", "checkpoint_protocol": True, "problem_spec": spec, "plan_version": 1,
              "progress_policy": {"enabled": True}, "autonomous_routes": {"enabled": True}},
             *({"role": "step_verifier", "problem_spec": spec, "step": step} for step in plan["steps"]),
             *({"role": "reasoner", "checkpoint_protocol": True, "current_goal": step["objective"]}
@@ -437,7 +437,7 @@ class FaithfulProtocolHandoffTest(StarJobFixture, unittest.TestCase):
                 "tool_request": {"tool": "polynomial_check", "arguments": {"coefficients": [1]},
                                  "scope": "finite_computation"}}, reviewed_with_receipt]
         stream_requests = [
-            {"role": "planner", "checkpoint_protocol": True, "problem_spec": spec,
+            {"role": "planner", "checkpoint_protocol": True, "problem_spec": spec, "plan_version": 1,
              "progress_policy": {"enabled": True}, "autonomous_routes": {"enabled": True}},
             *({"role": "step_verifier", "problem_spec": spec, "step": step} for step in plan["steps"]),
             *({"role": "reasoner", "checkpoint_protocol": True, "current_goal": step["objective"]}
