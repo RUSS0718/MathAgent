@@ -1,6 +1,6 @@
 # MathAgent 文档索引
 
-- [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：live22正确交付；live23失败后，按新授权将后续新任务总时限提高至3600秒，39ca1e9修复同计划CONTINUE新attempt误注册路线。红绿/37项相关回归（1skip）及双轴检查通过，live24准备真实观察；旧失败及门禁记录不改判，自然并发/切换、F4及缓存当前重验仍缺，#183/#168开放。见[当前交接](engineering/unattended-ticket-handoff.md)。
+- [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：39ca1e9修复同计划CONTINUE新attempt误注册路线，红绿/37项相关回归（1skip）及双轴检查通过。新任务3600秒总时限在live24生效，但单请求360秒超时留下1调用未知，无完整答案且未触发CONTINUE；服务/监控已清理，未自动重试。自然并发/切换、F4及缓存当前重验仍缺，#183/#168开放。见[当前交接](engineering/unattended-ticket-handoff.md)。
 
 - [#182 状态与控制组合验收](evals/faithful-service-182-20261115.md)：[G2合同](engineering/faithful-service-182-contract.md)。冻结e62d145的gate-01六阶段通过（2105项、0failure/error、42skip、source_changed=false），双轴复查解除；真实旧Run刷新/重启保持原预算、4次Attempt和输出身份。仅整合已有能力，#168完整服务仍未完成，按[交接](engineering/unattended-ticket-handoff.md)继续#183。
 

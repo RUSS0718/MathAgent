@@ -67,3 +67,13 @@ Planner合法绑定并自主提出population（3独立路线）；准入因root_
 已复现live23终止机制：Meta CONTINUE将action attempt0→1，计划版本1和frontier不变；sync_plan_route却要求路线初始attempt也相同，误登记后被合法的duplicate guard终止。修复39ca1e9仅移除复用检查的attempt条件；路线计账/原attempt/谱系和新求解动作身份都保留，替代新计划同前沿仍拒绝。真实run_meta→新attempt→重开DB→sync的一项回归先红STEP_EXECUTE!=TERMINAL，后绿；新版本重复反例仍拒绝。最初命令误用--output-dir只产生CLI参数错误，不算红证据；有效红绿见route-continue-red/green.json及log。37项受影响路线/恢复回归65.362秒通过、1skip未计覆盖；ruff通过，独立Standards Kuhn/Spec Ramanujan均clear，审查未自行重跑测试。
 
 live24仅准备普通输入的新Job，沿用live23数学题，唯一诊断目的为实际准入及完整正确交付；若未触发CONTINUE则不冒称真实再次验证旧分支。参考不发模型、不固定计划/模式、未新跑整仓测试；源码/HEAD/dist/配置冻结后唯一启动并安排30分钟临时检查。当前not_run；启动后由live24/check.ps1提供实际PID/创建时间/阶段/计数/日志。旧8100保留，#183退出仍未满足。
+
+### 16:16 live24 实际结果：总时限生效，单请求超时未知
+
+冻结源码8d60bb7ad40e6be41c4b400aa9b94c9660698159（含修复39ca1e9），配置SHA256 7a36aaa9553da35c78e2d443474c47f894514437c7bbaab58e2dbce48e774cdd；唯一普通输入Job run_d1f7f56213dbceee5eb28b1cb4f046a1，16:00:37–16:14:54，终态failed/star_needs_review，faithful.phase=unknown。6模型/6HTTP/1工具、364419本地估算计账token、856.955秒；账本确认根时限3600、tokens2097152及48/48/8，未耗尽总时限。第6次Reasoner已收到HTTP200但未完整完成，360.345秒timeout，1 unresolved_attempt；provider usage未知与该实际未知调用分别保留，不填零或自动重发。
+
+模型提出population，实际仅1个符合独立性判定的路线，因independent_frontiers_required选择serial；该分支先于预算检查，不得声称新时限已通过并发预算准入，亦不能以模型文字“两个独立方向”代替合法独立前沿。4个根覆盖0，没有完整答案；未进入Meta CONTINUE，未再次触发旧重复路线错误，因此39ca1e9仅有确定性红绿/恢复回归支持，不能冒称此次真实运行验证了旧分支或完整服务。
+
+启动首次误传短SHA触发HEAD mismatch，未建worker/Job；改传完整HEAD后唯一启动成功，旧guard及旧Run未重用。唯一后台wrapper22440(08:00:22.350784Z)、observer41940(08:00:30.9072647Z)、服务37012(08:00:24.6519484Z)、uv10552(08:00:24.5586256Z)均退出，8103无监听，MathAgent-Issue183-live24检查已自动删除。终态后identity.py检查通过，确认运行中源码/配置/dist未变；旧8100服务保留且未加载本轮修复。run1-final.json、run1-report.json、run1-terminal.png及source-identity.json均保留。
+
+本轮只完成新任务总时限授权落实及已复现路线身份缺陷的最小修复；实际正确交付仍未达到。当前无新运行，不自动重试该unknown，不增请求timeout或继续随机换题；如后续显式处置未知调用，仍走既有新调用身份/原根剩余额度及deadline合同。#183/#168保持开放，必要最终门禁尚未执行；本次未重复离线全仓测试，未推送或关票。当前选择模型保持，具体Codex型号继承未知。
