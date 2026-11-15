@@ -87,7 +87,7 @@ def decision_fields(event, state, invocations=()):
                 "step_verifier", "final_generator", "whole_solution_verifier", "meta", "controller"}:
         fields["role"] = role
     upgrade_reason = event.get("upgrade_reason")
-    if upgrade_reason in {"round_limit_reached", "meta_escalation_limit_reached"}:
+    if upgrade_reason in {"round_limit_reached", "checkpoint_no_progress", "meta_escalation_limit_reached"}:
         fields["upgrade_reason"] = upgrade_reason
     if event["type"] == "protocol_failure_unrepaired" and isinstance(event.get("error_category"), str):
         fields["error_category"] = event["error_category"]

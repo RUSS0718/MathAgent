@@ -41,6 +41,7 @@ def run_challenges(
         ),
         default=0,
     )
+    upgrade_reason = "round_limit_reached"
     for number in range(completed_rounds + 1, max_rounds + 1):
         state = run["state"]
         if state["phase"] != "CHALLENGE":
@@ -191,12 +192,14 @@ def run_challenges(
                 return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", "invalid_reasoner_checkpoint_objective")
             if any(item.get("checkpoint_id") == checkpoint["checkpoint_id"]
                    for item in checkpoints):
-                return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", "reasoner_checkpoint_no_progress")
+                upgrade_reason = "checkpoint_no_progress"
+                break
             if parent_checkpoint is not None and (
                 checkpoint["checkpoint_id"] == parent_checkpoint["checkpoint_id"]
                 or reasoner_checkpoint.same_draft(checkpoint, parent_checkpoint)
             ):
-                return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", "reasoner_checkpoint_no_progress")
+                upgrade_reason = "checkpoint_no_progress"
+                break
             report = reasoner_checkpoint.to_report(checkpoint, step)
             if checkpoint["status"] in {"BLOCKED", "FAILED"}:
                 report["blocked"] = True
@@ -323,7 +326,7 @@ def run_challenges(
             "type": "challenge_stalemate",
             "trigger": "STALEMATE",
             "action": "META_DECIDE",
-            "upgrade_reason": "round_limit_reached",
+            "upgrade_reason": upgrade_reason,
             "role": "controller",
         },
         state_updates={
@@ -338,7 +341,7 @@ def run_challenges(
                     "trigger": "STALEMATE",
                     "meta_trigger": "challenge_round_limit",
                     "action": "META_DECIDE",
-                    "upgrade_reason": "round_limit_reached",
+                    "upgrade_reason": upgrade_reason,
                     "plan_version": plan_version,
                     "attempt_index": attempt,
                     "step_id": step_id,

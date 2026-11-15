@@ -154,7 +154,8 @@ function starSummary(event: DecodedSseEvent, solverEvent: string): string {
     return `${number}${roleLabel(event.data.role)} · 已回应异议${usageSummary(event)}`
   }
   if (solverEvent === 'challenge_stalemate') {
-    return `达到质询轮数上限 · ${upgradeReasonLabel(event.data.upgrade_reason)} · 已升级 Meta`
+    const cause = event.data.upgrade_reason === 'checkpoint_no_progress' ? '质询草稿重复' : '达到质询轮数上限'
+    return `${cause} · ${upgradeReasonLabel(event.data.upgrade_reason)} · 已升级 Meta`
   }
   if (solverEvent === 'meta_dispatched') {
     return `${roleLabel(event.data.role)} 已收到质询升级 · ${upgradeReasonLabel(event.data.upgrade_reason)}`
@@ -208,6 +209,7 @@ function validRound(value: unknown): number | null {
 }
 
 function upgradeReasonLabel(value: unknown): string {
+  if (value === 'checkpoint_no_progress') return '升级原因：检查点无进展'
   if (value === 'round_limit_reached') return '升级原因：轮数上限'
   if (value === 'meta_escalation_limit_reached') return '升级原因：Meta 升级次数上限'
   return '升级原因未知'

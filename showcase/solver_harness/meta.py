@@ -109,6 +109,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
             ),
             None,
         )
+    upgrade_reason = upgrade.get("upgrade_reason", "round_limit_reached") if upgrade else "round_limit_reached"
     if trigger is None and upgrade is not None:
         trigger = upgrade.get("meta_trigger", "challenge_round_limit")
     if guidance is None and trigger is None and state["phase"] != "META_DECIDE":
@@ -179,7 +180,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
             "event_id": f"meta-dispatched-{revision}",
             "type": "meta_dispatched",
             "role": "meta",
-            **({"upgrade_reason": "round_limit_reached"} if upgrade is not None else {}),
+            **({"upgrade_reason": upgrade_reason} if upgrade is not None else {}),
         },
         state_updates={
             "counters": {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1}
@@ -254,7 +255,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
                 "type": "meta_invalid",
                 "reason": "invalid_or_failed_response",
                 "role": "meta",
-                **({"upgrade_reason": "round_limit_reached"} if upgrade is not None else {}),
+                **({"upgrade_reason": upgrade_reason} if upgrade is not None else {}),
             },
             state_updates=updates,
         )
@@ -321,7 +322,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
                 **({
                     "trigger": trigger,
                     "meta_trigger": trigger,
-                    "upgrade_reason": "round_limit_reached",
+                    "upgrade_reason": upgrade_reason,
                 } if upgrade is not None else {}),
                 **decision,
             },
@@ -371,7 +372,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
                 "use_pure_reasoning": decision["use_pure_reasoning"],
             } if guidance_event else {"decision": decision}),
             **({"attempt_index": updates["attempt_index"]} if new_action else {}),
-            **({"trigger": trigger, "upgrade_reason": "round_limit_reached", "role": "meta"} if upgrade is not None else {}),
+            **({"trigger": trigger, "upgrade_reason": upgrade_reason, "role": "meta"} if upgrade is not None else {}),
             **({"role": "meta"} if guidance_event else {}),
         },
         state_updates=updates,

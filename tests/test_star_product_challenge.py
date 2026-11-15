@@ -35,10 +35,10 @@ STEP_ACCEPT = {**VERDICT, "verdict": "ACCEPT", "objection": ""}
 
 
 class StarProductChallengeTest(StarJobFixture, unittest.TestCase):
-    def run_challenge(self, replies, *, budget=16):
+    def run_challenge(self, replies, *, budget=16, features=None):
         self.open_star(
             replies,
-            SHOWCASE_STAR_FEATURES=FEATURES,
+            SHOWCASE_STAR_FEATURES=features or FEATURES,
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(
                 max_model_calls=budget, max_http_attempts=budget
             ),
@@ -53,6 +53,30 @@ class StarProductChallengeTest(StarJobFixture, unittest.TestCase):
             if line.startswith("data: ")
         ]
         return job_id, job, events
+
+    def test_repeated_checkpoint_escalates_once_without_accepting_the_duplicate(self):
+        from tests.test_solver_harness_reasoner_checkpoint import checkpoint
+
+        for decision in (META_ABORT, META_CONTINUE):
+            with self.subTest(decision=decision["decision"]):
+                reply = checkpoint("FINAL", marker="repeated")
+                reply["checkpoint"]["objective"] = PLAN["steps"][0]["objective"]
+                replies = [NEED_PLAN, PLAN, reply, CHALLENGE, reply, decision]
+                if decision["decision"] == "CONTINUE":
+                    replies.append(reply)
+                _, job, events = self.run_challenge(
+                    replies, budget=8, features={**FEATURES, "reasoner_checkpoints": True},
+                )
+                self.assertEqual("failed", job["status"])
+                self.assertEqual(1, sum(r["role"] == "meta" for r in self.outbound))
+                self.assertEqual(1, sum(r["role"] == "step_verifier" for r in self.outbound))
+                escalation = next(e for e in events if e.get("solver_event_type") == "challenge_stalemate")
+                self.assertEqual("checkpoint_no_progress", escalation["upgrade_reason"])
+                meta = next(e for e in events if e.get("solver_event_type") == "meta_decided")
+                self.assertEqual("checkpoint_no_progress", meta["upgrade_reason"])
+                self.assertFalse(any(e.get("verdict") == "ACCEPT" for e in events))
+                if decision["decision"] == "CONTINUE":
+                    self.assertEqual("reasoner_checkpoint_no_progress", job["result"]["solver"]["result_reason"])
 
     def test_three_rounds_keep_latest_history_and_accept_only_after_verifier(self):
         objections = [
