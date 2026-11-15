@@ -21,6 +21,53 @@ class FakeClient:
 
 
 class InternPortTest(unittest.TestCase):
+    def test_population_alternative_keeps_independent_positive_version(self):
+        from copy import deepcopy
+
+        from showcase.solver_harness.intern_port import InternModelPort, InternPortError
+        from tests.test_faithful_s09_public_job import SPEC
+
+        request = {"role": "planner", "plan_version": 1,
+                   "problem": SPEC["original_problem"], "problem_spec": SPEC,
+                   "population_policy": {"version": "concurrent-aprs-v1"}}
+        plan = {"version": 1, "steps": [{"step_id": "S1", "title": "Prove",
+            "objective": "Prove the identity", "depends_on": [],
+            "obligation_ids": ["root:identity"], "auxiliary_goal_ids": []}]}
+        for primary, alternative, accepted in ((1, 2, True), (2, 2, False)):
+            with self.subTest(primary=primary, alternative=alternative):
+                reply = deepcopy(plan)
+                other = {**deepcopy(plan), "version": alternative}
+                reply.update(version=primary, alternative_plans=[other])
+                client = FakeClient([{"content": json.dumps(reply), "finish_reason": "stop"}])
+                port = InternModelPort(adapter=InternModelAdapter(client=client))
+                if accepted:
+                    self.assertEqual(alternative, port.complete(request)["alternative_plans"][0]["version"])
+                else:
+                    with self.assertRaises(InternPortError) as raised:
+                        port.complete(request)
+                    self.assertEqual("invalid_role_schema", raised.exception.category)
+
+    def test_planner_checkpoint_revision_keeps_requested_plan_version(self):
+        from showcase.solver_harness.intern_port import InternModelPort, InternPortError
+        from tests.test_faithful_s09_public_job import SPEC
+        from tests.test_solver_harness_planner_checkpoint import checkpoint
+
+        request = {"role": "planner", "checkpoint_protocol": True,
+                   "problem": SPEC["original_problem"],
+                   "plan_version": 1, "problem_spec": SPEC, "checkpoint_round": 2}
+        plan = {"version": 2, "steps": [{"step_id": "S1", "title": "Prove",
+            "objective": "Prove the identity", "depends_on": [],
+            "obligation_ids": ["root:identity"], "auxiliary_goal_ids": []}]}
+        reply = {"checkpoint": checkpoint("FINAL"), "plan": plan}
+        client = FakeClient([{"content": json.dumps(reply), "finish_reason": "stop"}])
+        port = InternModelPort(adapter=InternModelAdapter(client=client))
+        with self.assertRaises(InternPortError) as raised:
+            port.complete(request)
+        self.assertEqual("invalid_role_schema", raised.exception.category)
+        plan["version"] = 1
+        client.replies.append({"content": json.dumps(reply), "finish_reason": "stop"})
+        self.assertEqual(1, port.complete(request)["plan"]["version"])
+
     def test_partial_exploration_accepts_only_registered_handoff_fields(self):
         from showcase.solver_harness.intern_schemas import response_schema
         from showcase.tool_schemas import schema_error

@@ -372,4 +372,6 @@ def _response_schema(request):
                 nested_plan = branch["properties"].get("plan")
                 if nested_plan:
                     nested_plan["oneOf"][0] = planner
+        if type(request.get("plan_version")) is int:
+            planner["properties"]["version"] = {"type": "integer", "const": request["plan_version"]}
     return schema
