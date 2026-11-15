@@ -22,7 +22,8 @@ def recorded_call(state: Mapping, call_id: object, role: str) -> Mapping | None:
     if not isinstance(call_id, str) or not isinstance(calls, Mapping):
         return None
     call = calls.get(call_id)
-    if (not isinstance(call, Mapping) or call.get("role") != role
+    allowed_roles = {"reasoner", "reason_noncoding"} if role == "reasoner" else {role}
+    if (not isinstance(call, Mapping) or call.get("role") not in allowed_roles
             or call.get("run_id") != state.get("run_id")
             or call.get("problem_hash") != state.get("problem_hash")
             or call.get("config_hash") != state.get("config_hash")):
@@ -46,7 +47,7 @@ def local_reasoner_report_call(state: Mapping, step_id: str, report: Mapping,
         response_claims = [item.get("statement") for item in response.get("claims", [])
                            if isinstance(item, Mapping) and isinstance(item.get("statement"), str)] \
             if isinstance(response, Mapping) and isinstance(response.get("claims"), list) else None
-        if (isinstance(call, Mapping) and call.get("role") == "reasoner"
+        if (isinstance(call, Mapping) and call.get("role") in {"reasoner", "reason_noncoding"}
                 and call.get("status") in {"completed", "recovered_pending_validation"}
                 and call.get("run_id") == state.get("run_id")
                 and call.get("problem_hash") == state.get("problem_hash")
