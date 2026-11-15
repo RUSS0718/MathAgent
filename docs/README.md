@@ -1,5 +1,9 @@
 # MathAgent 文档索引
 
+2026-11-16 接续状态：#185 已按用户确认关闭，交付 `0d9f86d` 已推送至
+`faithful-autonomous-population`。其增量验收不替代仍开放的 #183/#168；
+下列旧状态描述按各记录的源码与日期理解。
+
 - [#185 按需求解阶段验收](evals/adaptive-solving-185-20261115.md)：本票增量工程退出完成；[策略合同](engineering/adaptive-solving-185-contract.md)。轻量交付、一次数学修正、反馈调度、Meta 防循环与协议接缝修复均有证据；真实先单题再16题扩展，17个新 Job 独立核对正确（源码 `dfe8018`）。最终检查源码 `7b9962c` 的后端离线3/3通过（2196项、0 failure/error、42skip；发布27项；无源码漂移），baseline 11文件字节一致。完整深度交付、历史SQLite/并发间歇故障及数学误判仍有限制；不替代#183/#157，GitHub状态未自动变更。
 
 - [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：live27已失败，约922秒、8次完成请求、0未决，预算未耗尽；质疑后被历史规格变更保护误终止。新路线绑定规格版本的最小修复及针对性验证见阶段记录；旧Run不回填、不自动追加live28，未证明完整正确交付。live26根超时及1未知保持。#183/#168开放。见[当前交接](engineering/unattended-ticket-handoff.md)。
