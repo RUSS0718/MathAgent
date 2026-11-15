@@ -1,6 +1,6 @@
 # #183 当前机器真实服务阶段记录
 
-当前状态（2026-11-15，live26后维护）：live26真实109次等待未重现旧64轮提前收尾，最终3600秒根截止失败；无完整答案，1未知。已最小修复本地流式保存重复读取/复制热点，21相关检查/双轴通过，同现场无profiler成对重放开销约减37%。仅准备一个新live27验证实际效果，未据局部提速宣称整题成功；#183/#168仍开放。
+当前状态（2026-11-15，live27后维护）：live27约922秒提前失败，8次完成请求、0未决、预算未耗尽；错误草稿经过质疑后被历史规格变更条件误终止。已收窄到新路线绑定的当前规格及原图证据校验；旧Run不回填、不自动追加live28。live26根超时与1未知保持，未证明整题成功；#183/#168仍开放。
 
 日期：2026-11-15（Asia/Shanghai）。源码HEAD `c01683ddf5cc526d0b5c61f2bac11f8f677975e9`，与origin一致；初轮真实求解时产品未修改；随后发现并修复缓存前端可空字段合同。适用[本票合同](../engineering/faithful-service-183-contract.md)。具体模型继承未知，保持当前设置。#183/#168仍开放，完整服务未通过。
 
@@ -254,3 +254,19 @@ live25已准备唯一新普通Job，沿用live24输入，显式faithful-stream-v
 同现场无profiler、相同projection observer、交替baseline/fixed/fixed/baseline成对重放：四次保存中位2.435602→1.542778秒，约减36.66%；route-save-paired.json及paired-route-save.py保留命令，基线取固定9808696两个产品文件，原现场只读。profile下2.35→0.90秒不是无profiler真实收益数字；不据此推断远端生成耗时或整题墙钟。剩余完整历史读取仍有开销，不宣称全部消除。
 
 维护后至多一个普通新live27核对实际效果；准备与实际运行分开，以该目录status及后续终态记录为准。无完整正确并发交付、切换/F4/可信缓存当前重验及最终门禁前不关闭#183/#168。
+
+## live27 真实失败及历史规格保护修复
+
+源码305949010daf45974c26af82110050f60d971be1；配置SHA1065c88735a534a0631ce5d1c8f97612ff2601e6fb54f4cde4dcde0bc59fddfd。run_60cf13e04847a4ac0703f73eacb533d9于18:58:51至19:14:13运行921.891937秒，failed/star_needs_review、partial_aborted/route_requires_reevaluation；496617本地估计/预留token、8逻辑/8HTTP且8实际公开请求均success，2工具约5.437秒，0未决。unknown_attempts=8为provider用量缺失计量，不能误报8次未知调用。模型自主选择串行，不能直接和并行live26比较整题提速。
+
+顺序：Intake21.636秒→用户no澄清→Intake39.339秒、规格v1→v2→Explore5.872秒→Planner124.763秒后checkpoint校验失败→第二Planner206.971秒→Reasoner263.801秒→两次Python→StepVerifier147.179秒请求反例→Researcher86.669秒NOT_FOUND→CHALLENGE/Conjecture→上述保护终止。Planner和Reasoner的参数边界公式错误；Python完成有效符号计算但未证明最终结论，NOT_FOUND也不能替代证明。质疑应当保留。没有进入Meta/后续步骤/整题审查，未形成完整答案。
+
+故障：route_graph_refresh原先遇任何历史problem_spec_change即拒绝重评，未区分澄清发生在路线创建之前。现场路线建立于v2，后续图仅新增未导入Conjecture，原支持未撤回，却被历史v1→v2记录永久阻断。最小修复为新路线冻结可选specification_version，存储校验禁止改写/删除/旧路线回填，且新绑定必须来自当前ProblemSpec；同版本才可继续原有加性图检查。旧路线无法可靠恢复绑定时保留原阻断，跨规格、冲突和支持撤回仍拒绝。
+
+证据artifacts/issue-183/route-spec-red.log为修复前4项回归的7个失败断言（首次测试调用签名错误已纠正，日志保留有效红见证）；route-spec-green.log为新4项及原路线/派发保护22项，共26项通过。route-spec-public.log另2项公共串行Lemma/Conjecture接缝通过，20.772秒。ruff及git diff --check通过。live27/replay-spec-refresh.py只读原SQLite并在内存用生产注册入口新建同规格路线：新路线能重评、原无绑定路线仍阻断、图内容及原数据库未改；属于故障接缝重放，不能称原Run恢复或新增真实成功。
+
+终态后identity.py返回0才进行产品修改。wrapper37716、observer39528、service31648均已退出；8103未监听，MathAgent-Issue183-live27定时检查已移除。原status、日志及terminal截图保留。修复尚未做新provider-live验证，不自动追加同题调用，也未执行本轮最终全仓门禁。
+
+首次双轴独立审查未完成：Spec Ptolemy（01a1def8-c1c5-7231-bb7f-58e8b0debf22）与Standards Meitner（01a1def8-c2f3-7732-ac30-89ee1bd97242）均因本地代理/上游503、request recording storage unavailable退出，不能记为clear。两代理已关闭，此失败历史保留。
+
+用户随后要求修小bug并提交推送。新Spec Russell（01a1df01-dc55-73c2-bce3-b4f4cba41bc5）及Standards Singer（01a1df01-dda8-7fe1-a2b7-cf53f92a3761）均发现等值异类型可绕过既有身份比较；修复为同时比较字段存在性、类型和值。route-spec-bool-red.json/.log保留1→True红见证；最终route-spec-recheck.json/.log为30项、0失败/错误/跳过，19.660秒。新增2→2.0和1→True拒绝（含有效lineage）、合法绑定注册/流转、无规格变更历史的旧路线兼容检查；其余复用相关公共回归。仅随后调整测试导入换行，ruff与diff检查通过；官方baseline共11文件SHA256保持。两轴定向静态复查均无剩余发现。此次为小范围修复提交，不是#183阶段退出，不重复全仓门禁或新增provider-live。

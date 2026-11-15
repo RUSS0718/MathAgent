@@ -1,6 +1,6 @@
 # MathAgent 文档索引
 
-- [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：live26真实109次等待未重现旧64轮故障，最终根3600秒截止失败，1未知、无正确交付。流式保存热点最小修复通过21相关检查及双轴审查，无profiler同现场成对重放局部开销约减37%；仅准备一个新live27真实验证，未据此宣称整题成功。#183/#168开放。见[当前交接](engineering/unattended-ticket-handoff.md)。
+- [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：live27已失败，约922秒、8次完成请求、0未决，预算未耗尽；质疑后被历史规格变更保护误终止。新路线绑定规格版本的最小修复及针对性验证见阶段记录；旧Run不回填、不自动追加live28，未证明完整正确交付。live26根超时及1未知保持。#183/#168开放。见[当前交接](engineering/unattended-ticket-handoff.md)。
 
 - [#182 状态与控制组合验收](evals/faithful-service-182-20261115.md)：[G2合同](engineering/faithful-service-182-contract.md)。冻结e62d145的gate-01六阶段通过（2105项、0failure/error、42skip、source_changed=false），双轴复查解除；真实旧Run刷新/重启保持原预算、4次Attempt和输出身份。仅整合已有能力，#168完整服务仍未完成，按[交接](engineering/unattended-ticket-handoff.md)继续#183。
 

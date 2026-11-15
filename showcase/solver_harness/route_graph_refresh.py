@@ -7,13 +7,24 @@ def refreshed_routes(state):
     graph = state.get("proof_graph") or {}
     snapshots = {item["graph_version"]: item for item in graph.get("snapshots", [])}
     current = snapshots.get(graph.get("current_version"))
-    if current is None or any(item.get("kind") == "problem_spec_change"
-                              for item in state.get("failure_records", [])):
+    if current is None:
         return None
+    specification_version = (state.get("problem_spec") or {}).get("specification_version")
+    specification_changed = any(item.get("kind") == "problem_spec_change"
+                                for item in state.get("failure_records", []))
     routes = deepcopy(state.get("route_registry", []))
     changed = False
     for route in routes:
         if not route.get("needs_reevaluation") or route.get("status") != "active":
+            continue
+        if "specification_version" in route:
+            version = route["specification_version"]
+            if (type(version) is not int or version <= 0
+                    or type(specification_version) is not int
+                    or version != specification_version):
+                continue
+        elif specification_changed:
+            # Legacy routes have no trustworthy specification binding.
             continue
         previous = snapshots.get(route.get("graph_version"))
         if previous is None:

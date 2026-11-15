@@ -22,7 +22,7 @@ _ROUTE_REQUIRED_FIELDS = set(_ROUTE_IMMUTABLE_FIELDS) | {
     "status", "stop_reason", "elimination_reason", "verified_gain",
     "unknown_observations",
 }
-_ROUTE_OPTIONAL_FIELDS = {"needs_reevaluation"}
+_ROUTE_OPTIONAL_FIELDS = {"needs_reevaluation", "specification_version"}
 
 
 def _canonical(value: Any) -> str:
@@ -124,7 +124,10 @@ def _validate_route_registry(previous: dict[str, Any], new_routes: Any) -> None:
     if new_ids[:len(old_ids)] != old_ids or len(new_ids) > len(old_ids) + 1:
         raise ValueError("route_history_rewrite")
     for old, new in zip(old_routes, new_routes):
-        if any(new.get(field) != old.get(field) for field in _ROUTE_IMMUTABLE_FIELDS):
+        if (any(new.get(field) != old.get(field) for field in _ROUTE_IMMUTABLE_FIELDS)
+                or ("specification_version" in old) != ("specification_version" in new)
+                or type(new.get("specification_version")) is not type(old.get("specification_version"))
+                or new.get("specification_version") != old.get("specification_version")):
             raise ValueError("route_identity_rewrite")
         if set(new) - _ROUTE_REQUIRED_FIELDS - _ROUTE_OPTIONAL_FIELDS:
             raise ValueError("route_fields_invalid")
@@ -132,6 +135,13 @@ def _validate_route_registry(previous: dict[str, Any], new_routes: Any) -> None:
             raise ValueError("route_status_invalid")
     if len(new_routes) == len(old_routes) + 1:
         added = new_routes[-1]
+        version = (previous.get("problem_spec") or {}).get("specification_version")
+        if type(version) is int and version > 0:
+            if (type(added.get("specification_version")) is not int
+                    or added.get("specification_version") != version):
+                raise ValueError("route_specification_version_invalid")
+        elif "specification_version" in added:
+            raise ValueError("route_specification_version_invalid")
         if (set(added) - _ROUTE_REQUIRED_FIELDS - _ROUTE_OPTIONAL_FIELDS
                 or not _ROUTE_REQUIRED_FIELDS.issubset(added)):
             raise ValueError("route_creation_shape_invalid")
@@ -281,6 +291,9 @@ def register_route(
     }
     from .aprs import verified_gain
 
+    version = (state.get("problem_spec") or {}).get("specification_version")
+    if type(version) is int and version > 0:
+        route["specification_version"] = version
     route["credit_at_start"] = verified_gain(state)
     lineage = deepcopy(state.get("route_lineage") or [])
     lineage.append({"event": "route_created", "route_id": route_id,

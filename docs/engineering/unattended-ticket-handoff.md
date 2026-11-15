@@ -1,5 +1,9 @@
 # 无人值守交接：#183 当前持有，继续真实闭环
 
+最新补充（2026-11-15，live27终态后）：以本段和阶段记录为准。live27已failed/route_requires_reevaluation，921.892秒，8实际请求均完成、0未决，预算未耗尽；Reasoner草稿错误，质疑合理。确认历史v1→v2澄清发生在路线创建之前，却被全局历史保护永久阻断后续加性图重评。新路线冻结当前specification_version，旧绑定不可修改/删除/回填；同规格才继续原有证据检查，旧无版本且存在规格变更历史仍拒绝。26针对性路线/保护检查及2公共串行检查通过，真实图只读内存重放通过；未有新provider-live成功。原Run不修改，不自动追加live28。live27 wrapper/observer/service已退出，8103空闲，临时ScheduledTask已清理。live26的1未知仍保持。当前源码与双轴结果见本次提交及阶段记录，#183/#168仍开放，不沿用旧全仓门禁。
+
+补充审查状态（用户要求提交推送后）：首轮两个独立审查因上游503退出的历史保留；后续Spec Russell与Standards Singer发现并复查关闭等值异类型版本改写漏洞，现无剩余发现。最终30项相关回归、ruff、diff及11文件baseline哈希通过；证据route-spec-recheck.json/.log。本次仅修小bug，不是#183阶段退出，未新增provider-live或全仓门禁。用户要求另建Issue记录分层求解/难题充足预算及可用策略，发布不代表实现，不改变预算默认值或旧Run。
+
 更新时间：2026-11-15 15:06（Asia/Shanghai）。用户明确要求完成#183；继续[接续合同](unattended-ticket-loop.md)，未达必要闭环前不关闭#183/#168、不创建接班会话。继续当前模型；具体型号和继承未知，不主动改设置。
 
 当前checkout为D:/project/工程化MathAgent/Challenge-Cup-2026，分支faithful-autonomous-population，origin仍47b83cdf；修复已独立提交到4d0f851，后续门禁修复见本文末尾及git当前HEAD。复用本工作树，不切分支、不建worktree。保护tests/test.md：不读取、修改、暂存或删除。
