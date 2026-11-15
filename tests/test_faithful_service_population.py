@@ -15,6 +15,7 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
     def run_plain_submission(self, *, runtime=7200, timeout=15, capacity=CAPACITY,
                              selection_mode="population", multi_step=False, fault=None, modes=None, step_count=3, job_timeout=20):
         entered = threading.Barrier(2)
+        initial_reasoner_steps = set()
         concurrent = []
         failed_once = set()
 
@@ -57,7 +58,10 @@ class FaithfulPopulationJobTest(StarJobFixture, unittest.TestCase):
                 return {"mode": next(decisions, "keep"), "reason": "Current fronts and progress justify this mode."}
             if role == "reasoner":
                 try:
-                    entered.wait(timeout=2)
+                    step_id = request["step"]["step_id"]
+                    if (not multi_step or step_id.endswith("-0")) and step_id not in initial_reasoner_steps:
+                        initial_reasoner_steps.add(step_id)
+                        entered.wait(timeout=2)
                     concurrent.append(request)
                 except threading.BrokenBarrierError:
                     pass
