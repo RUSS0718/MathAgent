@@ -95,3 +95,10 @@ live25已准备唯一新普通Job，沿用live24输入，显式faithful-stream-v
 17:09左右公共Job终态failed/job_execution_failed；根耗时2244.455秒、计账1276195（本地估算，provider用量未知）、2工具，4根覆盖0，无完整final_response。账本logical_calls/http_attempts各13，公开request_attempts10条，不能直接说13次已完成物理请求。最后StepVerifier记录unknown/348.881秒，非timeout分类、无finish_reason；unresolved_attempts1。服务错误日志第745行记录SolverRevisionConflictError，调用栈指向star_product_pipeline.py:510提交formal_generation_unavailable→storage.py CAS拒绝，邻近同时有Population流活动。确认新的工程失败位置，不冒称已最小复现完整竞态或已修复；并发成功不等于完整F2退出。公共Job已失败而Solver快照仍running/POPULATION的不一致保留，不改写旧现场。失败后本轮服务退出，在途核验结算unknown；无自动重发，不把unknown归咎于新策略有效idle超时。
 
 终态证据：run1-final.json、run1-report.json、run1-terminal.png、service.stderr.log及source-identity.json。主agent终态后identity.py退出0；wrapper19048（08:31:45.190047Z）、observer7908（08:31:52.7450859Z）、服务40932（08:31:46.5882329Z）、uv34652（08:31:46.516061Z）均退出，8103无监听、MathAgent-Issue183-live25已删除，旧8100展示保留。本轮唯一新Job已完成观察，无live26或额外门禁/模型任务；39相关离线检查复用，不再扩增测试。#183/#168开放，仍缺完整正确并发交付/切换/F4/缓存当前重验及最终必要门禁。当前选择模型保持，具体Codex继承型号未知。
+
+
+### live25 后控制器等待维护（当前）
+
+从0c751b8接续修复用户要求的工程故障：原live25恰64次last_observed_at，仍POPULATION/running且StepVerifier流活动，控制器阶段计数却耗尽并进入formal收尾，过期CAS失败。只改controller.py不把在途Population/converging等待计入64次推进；每轮控制/原deadline、非等待上限、终态迟到结算和unknown不自动重发保持。公共loopback HTTP Job红绿、3边界和8受影响回归（12项不同用例）、ruff/diff通过，双轴clear，证据population-wait-*。原题难度无标准标签，人工判断高中竞赛代数中等偏难，不作官方难度声称。
+
+原live25失败与1未知原样；修复后没有live26或额外provider调用，8100仍旧服务。完整正确并发交付/切换/F4/可信缓存当前重验和最终必要门禁仍未完成，#183/#168开放。继续同一当前模型，具体继承型号未知。当前无本次运行/监控需交接，不重复启动旧任务。

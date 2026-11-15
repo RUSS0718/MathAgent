@@ -260,7 +260,8 @@ def advance_product(harness, run, problem):
     from .clarification import waiting_for_clarification
     from .problem_intake import intake_pending
 
-    for _ in range(64):
+    transitions = 0
+    while transitions < 64:
         if waiting_for_clarification(run["state"]) or intake_pending(run):
             return run
         if run["state"]["phase"] == "TERMINAL" or run["state"]["status"] in {
@@ -278,9 +279,13 @@ def advance_product(harness, run, problem):
             latest = harness.get_run(run["run_id"])
             terminated = protocol_failure_exit(harness, latest, exc)
             return latest if terminated is None else terminated
+        # Population ticks wait for a bounded interval, not a complete action.
+        # Do not enter product finalization while those workers still own work.
+        if (harness._population_futures and (
+                run["state"]["phase"] == "POPULATION"
+                or (run["state"].get("execution_switch") or {}).get("status") == "converging")):
+            continue
+        transitions += 1
         if run["state_revision"] == revision:
-            if ((run["state"].get("execution_switch") or {}).get("status") == "converging"
-                    and harness._population_futures):
-                continue
             return run
     return run  # Explicitly incomplete; bridge never calls this a reviewed success.

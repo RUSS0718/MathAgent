@@ -265,6 +265,46 @@ class PopulationLoopbackJobTest(StarJobFixture, unittest.TestCase):
         self.assertFalse(tampered["population"]["replay_matches"])
         self.assertEqual(count, len(self.requests))
 
+    def test_more_than_64_pending_ticks_do_not_end_the_public_job(self):
+        from showcase.solver_harness import population_runtime
+
+        release = threading.Event()
+        self.addCleanup(release.set)
+        work = population_runtime._work
+        wait = population_runtime.wait
+        ticks = 0
+        pending = set()
+
+        def held_work(*args, **kwargs):
+            if not release.wait(timeout=10):
+                raise AssertionError("controller left workers pending")
+            return work(*args, **kwargs)
+
+        def fast_wait(futures, **kwargs):
+            nonlocal ticks
+            pending.update(futures)
+            ticks += 1
+            if ticks <= 65:
+                if ticks == 65:
+                    release.set()
+                return set(), set(futures)
+            return wait(futures, **kwargs)
+
+        with patch.object(population_runtime, "_work", side_effect=held_work), patch.object(
+                population_runtime, "wait", side_effect=fast_wait):
+            try:
+                job_id = self.create_population_job()
+                final = self.terminal(job_id, timeout=15)
+                self.assertGreaterEqual(ticks, 65, final)
+                self.assertEqual("succeeded", final["status"], final)
+                self.assertEqual("1+1=2 by addition.", final["result"]["final_response"])
+                self.assertEqual(2, self.reasoners)
+                self.assertEqual(2, self.verifiers)
+            finally:
+                release.set()
+                for future in pending:
+                    future.result(timeout=15)
+
     def test_delivery_can_settle_before_late_request_without_resending_or_changing_math(self):
         self.provider.timeout = 12
         self.server_delay = 5

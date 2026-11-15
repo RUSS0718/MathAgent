@@ -1,6 +1,6 @@
 # #183 当前机器真实服务阶段记录
 
-当前状态（2026-11-15 17:12）：efff923流式策略接线修复通过39相关检查及双轴审查；live25真实冻结新策略，2路线自主并发且多次请求超过360秒完整返回。最终因formal状态提交SolverRevisionConflictError失败，1在途调用未知、无正确交付；数学草稿及部分核验说明仍有错误。进程/监控已清理，未重试unknown，#183/#168仍开放。
+当前状态（2026-11-15，live25故障维护）：已定位64次并发等待耗尽控制器阶段轮数，提前收尾导致formal状态提交版本冲突；最小修复通过公共Job红绿、3边界及8相关回归。原live25仍失败、1未知且无正确交付，修复后真实原题未重跑。此前efff923流式接线已由真实长流及自然并发验证；#183/#168仍开放。
 
 日期：2026-11-15（Asia/Shanghai）。源码HEAD `c01683ddf5cc526d0b5c61f2bac11f8f677975e9`，与origin一致；初轮真实求解时产品未修改；随后发现并修复缓存前端可空字段合同。适用[本票合同](../engineering/faithful-service-183-contract.md)。具体模型继承未知，保持当前设置。#183/#168仍开放，完整服务未通过。
 
@@ -224,3 +224,16 @@ live25已准备唯一新普通Job，沿用live24输入，显式faithful-stream-v
 17:09左右公共Job终态failed/job_execution_failed；根耗时2244.455秒、计账1276195（本地估算，provider用量未知）、2工具，4根覆盖0，无完整final_response。账本logical_calls/http_attempts各13，公开request_attempts10条，不能直接说13次已完成物理请求。最后StepVerifier记录unknown/348.881秒，非timeout分类、无finish_reason；unresolved_attempts1。服务错误日志第745行记录SolverRevisionConflictError，调用栈指向star_product_pipeline.py:510提交formal_generation_unavailable→storage.py CAS拒绝，邻近同时有Population流活动。确认新的工程失败位置，不冒称已最小复现完整竞态或已修复；并发成功不等于完整F2退出。公共Job已失败而Solver快照仍running/POPULATION的不一致保留，不改写旧现场。失败后本轮服务退出，在途核验结算unknown；无自动重发，不把unknown归咎于新策略有效idle超时。
 
 终态证据：run1-final.json、run1-report.json、run1-terminal.png、service.stderr.log及source-identity.json。主agent终态后identity.py退出0；wrapper19048（08:31:45.190047Z）、observer7908（08:31:52.7450859Z）、服务40932（08:31:46.5882329Z）、uv34652（08:31:46.516061Z）均退出，8103无监听、MathAgent-Issue183-live25已删除，旧8100展示保留。本轮唯一新Job已完成观察，无live26或额外门禁/模型任务；39相关离线检查复用，不再扩增测试。#183/#168开放，仍缺完整正确并发交付/切换/F4/缓存当前重验及最终必要门禁。当前选择模型保持，具体Codex继承型号未知。
+
+
+### live25 后维护：并发等待误耗阶段轮数
+
+本题为代表性双参数互反四次式非负分类，没有标准题库难度标签或已核实竞赛出处；高中竞赛代数中等偏难仅为人工判断，不作评测等级依据。
+
+以维护前源码0c751b882f1f46800a934d5cc90bcdbeaa867b12只读分析live25原SQLite：population_updated共68次，其中last_observed_at恰64次，另外2次closing_reserve及2次调度变化。最后观察09:09:22.061821Z，持久状态仍POPULATION/running；同一时刻StepVerifier仍有流活动，随后pipeline.py:510的formal_generation_unavailable过期快照CAS失败。控制器advance_product原for range(64)将每个最长30秒的等待tick当成阶段推进，耗尽后返回给结果构建，形成提前收尾。见artifacts/issue-183/population-wait-diagnosis.json及原service.stderr.log:745。无数据库改写。
+
+公共真实loopback HTTP Job见证test_more_than_64_pending_ticks_do_not_end_the_public_job：仅将等待加速并将真实worker延迟至第65次，保留真实控制器/存储/模型HTTP/审查/交付链。修复前star_needs_review、无完整答案；首个red另有未结束worker持有临时DB的清理error，保留不计独立产品故障，测试随后增加finally释放并等待worker。最小产品修改仅controller.py：在途POPULATION或converging等待不计64次上限，每轮仍check_control；非等待保留原上限，TERMINAL允许迟到结算，不抑制CAS冲突或重新派发unknown。修复后同一公共见证5.613秒通过并交付受控1+1答案；不是原题数学效果证据。
+
+证据：population-wait-red.json/.log、population-wait-green.json/.log；3项边界最终population-wait-boundaries-final.json/.log通过（无revision等待、非等待64上限、取消/原deadline停止）；8项受影响回归population-wait-regression.json/.log在43.238秒全部通过，覆盖普通自主并发、转串行、未知不重发、原deadline、取消、完成后迟到结算、CAS保护及完成回执恢复。合计12项不同用例，ruff与diff检查通过；不重复全仓门禁。Standards审查Mill（01a1de85-e108-7973-abb1-ff8973411768）、Spec审查Godel（01a1de85-e250-7a00-8882-853f173b399d）均clear，只读且未运行测试；报告population-wait-review.md。产品维护提交SHA见git fix(showcase)并发等待提交，不以文档HEAD替代原live源码。
+
+原live25失败与1未知仍原样；本次没有live26、额外provider请求、服务8100更新或#183完成声明。数学草稿错误、完整正确并发交付/切换/F4/缓存当前重验和阶段最终必要门禁仍未完成。
