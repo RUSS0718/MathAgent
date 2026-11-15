@@ -1,8 +1,8 @@
 # 无人值守交接：#183 当前持有，继续真实闭环
 
-更新时间：2026-11-15 11:22（Asia/Shanghai）。用户明确要求完成#183；继续[接续合同](unattended-ticket-loop.md)，未达必要闭环前不关闭#183/#168、不创建接班会话。继续当前模型；具体型号和继承未知，不主动改设置。
+更新时间：2026-11-15 12:19（Asia/Shanghai）。用户明确要求完成#183；继续[接续合同](unattended-ticket-loop.md)，未达必要闭环前不关闭#183/#168、不创建接班会话。继续当前模型；具体型号和继承未知，不主动改设置。
 
-当前checkout为D:/project/工程化MathAgent/Challenge-Cup-2026，分支faithful-autonomous-population，HEAD/origin为47b83cdf20c509699b73953e4a57704bba86f5d2。复用本工作树，不切分支、不建worktree。保护tests/test.md：不读取、修改、暂存或删除。
+当前checkout为D:/project/工程化MathAgent/Challenge-Cup-2026，分支faithful-autonomous-population，origin仍47b83cdf；修复已独立提交到4d0f851，后续门禁修复见本文末尾及git当前HEAD。复用本工作树，不切分支、不建worktree。保护tests/test.md：不读取、修改、暂存或删除。
 
 用户授权仅新任务2097152 token/2400秒，模型/HTTP/工具48/48/8。旧Run及unknown不重发、不重置根截止。新profile可显式单次360秒，受根剩余deadline裁剪；默认仍180。live18准备主/Population均360，不追改旧任务。
 
@@ -29,3 +29,7 @@ live17 已结束：首题 run_b4e1a87e66c7eef96795c597d86c7a95 正确、5请求�
 阶段展示服务8100仍是旧源码/旧live02数据：Python15376、创建2026-11-14T22:06:26.3836952Z，uv wrapper27280；记录delivery-*.json/log。保留给用户查看，不能声称后续修复已加载。停止前校验PID/创建时间及是否有新活跃任务。
 
 最终门禁入口artifacts/issue-183/gate-control/start.ps1 -RunId gate-03，worker已恢复调用仓库scripts/run_final_gate.py。待源码及审查冻结后运行一次，不与真实模型/前端构建并行；旧gate-01失败及gate-02组合证据仅适用旧源码。完成最终门禁、必要真实能力、文档和提交推送后才按合同关闭本票。F3已有真实Lean L2边界，不额外强求一般L3；F2/F4/F5核心真实闭环仍不可用接线替代。
+
+gate-03已失败终止并清理监控：4d0f851，2127项5fail/2err/42skip、无漂移。实际缺陷const可选读取已最小修复，15聚焦/ruff通过、双轴clear；测试精确指纹夹具两处增加plan_version1，4失败先红后绿/模块21绿、两轴clear。取消用例原unknown失败隔离通过，未证明取消已提交，不改生产逻辑，gate-cancel-diagnosis.md保留边界。接下来提交当前修复并唯一后台gate-04，沿用gate-control/check.ps1和30分钟检查；旧结果不改判，期间所有源码/文档/HEAD冻结。
+
+live20两题正确但次题未查缓存：规格规范字段不一致且v1/v2不同，诊断已归档；不追加缓存碰运气运行。live21仅准备更小8位计数、结果及完备性分节普通输入，不强制路由、不改绑定，最多1新题，gate-04结束前不启动。F2/F4自然成功及可信缓存当前重验仍缺。当前无真实模型任务，8103空闲；8100旧服务保留。

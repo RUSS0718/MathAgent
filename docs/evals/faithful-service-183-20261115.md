@@ -134,3 +134,15 @@ live17 保存的两个原始 target 均为规范 forall x/equality；规格量�
 live20 使用相同普通输入、最多两新题：run_b38cb641cbf3272128a912b524b88aec 正确交付，并有 formal_5b984557bedc446eb4371a37a1c7f031 的当前 Lean L2 回执、recursive_passed 来源审查和 active 缓存 eeace38bc1074402828d594183616b82；run_ac6d5a8ebf1516ad235b0d4dd5897007 正确交付但没有 receipt_rechecked。原验收 failed 保留，不能用两题正确冒充缓存命中。服务和临时监控已清理；身份差异只读诊断见 artifacts/issue-183/live20/。
 
 所有代码修复聚焦证据与双轴报告复用，fbbb8e1 是本轮最终产品字节，须执行新的 gate-03。提交拆分时索引无上下文应用使部分提示位置与工作树不同，已用独立跟进提交对齐审查/测试过的最终文件；不声称各中间提交都经过门禁。最终门禁仍不能替代未实证能力。
+
+### 12:19 更新：gate-03 失败及最小修复
+
+上述“最终”产品状态为门禁前快照。gate-03 在4d0f851执行2127项，5fail/2error/42skip，source_changed=false；快速阶段通过，全仓阶段失败后未运行后续阶段。报告 artifacts/issue-183/gate-control/runs/gate-03/，原失败保留。
+
+两处 error 是版本提示直接读取可选 schema.const：无 plan_version 的兼容请求触发 KeyError。复用公开示例测试先红1项/2子错误，再仅按 const 是否存在选择已有固定版本/正整数提示，未改schema或最终检查。15项相关回归及ruff通过，两轴复查无待办。
+
+四处 provider_profile_unverified 由两条测试夹具 Planner 请求未登记 plan_version=1，仍为旧正整数schema指纹；实际请求已有const1。只补这两个夹具值，保留精确传输准入及所有断言，原4红/新4绿、完整模块21绿。独立两轴检查后冻结下一源码。
+
+另1处取消/收敛用例原失败记录 reasoner client_exception/unknown，但未保留其发起 cancel 的原始响应，不能确认取消已提交；隔离1项5.847秒通过。故记未复现，不声称已修好、不更改生产取消/unknown策略；详见 artifacts/issue-183/gate-cancel-diagnosis.md。后续门禁若复现，先补原异常和取消事务顺序证据，不延长等待或放宽终态断言。
+
+live20 未命中诊断进一步确认次题在缓存查找前已被形式准入拒绝，且首题来源澄清使规格v2、次题v1；full spec hash和量词/方向/根方向均不同，不删除身份字段或宣称提示保证一致。少量新代表题 live21 仅准备：8位/数位和36/模7计数、归纳与双射普通建议，数值和完备性分节，降低算术负担并分清两者。独立参考625579不送模型；不强制模式、不改WorkUnit绑定，最多1新题，须待最终门禁结束、实际启动时另记录身份，当前 not_run。
