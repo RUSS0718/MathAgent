@@ -8,6 +8,7 @@ from .adapters import InternStreamAdapter
 from .run_budget import RunBudgetLimits
 from .solver_harness.context_pack import frozen_policy
 from .star_product_config import CORE_FEATURES, population_config
+from .stream_timeout_policy import policy_for_version
 
 
 def _unique_object(pairs):
@@ -37,7 +38,8 @@ def load_faithful_config(path):
     path = Path(path)
     value = json.loads(path.read_text(encoding="utf-8-sig"), object_pairs_hook=_unique_object)
     _object(value, {"version", "python_image_id", "context_capacity", "budget"},
-            {"population", "formal", "population_memory", "request_timeout_seconds"})
+            {"population", "formal", "population_memory", "request_timeout_seconds",
+             "stream_timeout_policy_version"})
     if value["version"] != "faithful-service-v1":
         raise ValueError("faithful_config_version_invalid")
     image = value["python_image_id"]
@@ -53,6 +55,7 @@ def load_faithful_config(path):
     if type(memory) is not bool:
         raise ValueError("faithful_population_memory_invalid")
     root_budget = _budget(value["budget"])
+    stream_policy = policy_for_version(value.get("stream_timeout_policy_version"))
     request_timeout = value.get("request_timeout_seconds", 180)
     if "request_timeout_seconds" in value and (
         type(request_timeout) not in {int, float}
@@ -76,6 +79,8 @@ def load_faithful_config(path):
         "SHOWCASE_FAITHFUL_INTERVENTION_ENABLED": True,
         "SHOWCASE_F7_SYSTEM_VIEW_ENABLED": True,
     }
+    if stream_policy is not None:
+        config["SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION"] = stream_policy["policy_version"]
     if "population" in value:
         population = _object(value["population"], {"capacity", "budget"},
                              {"request_timeout_seconds"})

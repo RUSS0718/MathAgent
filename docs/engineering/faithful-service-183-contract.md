@@ -78,3 +78,10 @@ live22正确完成625579及两法证明，但Explore直接解出，未进入Plan
 live23失败见证为同一plan_version=1、相同frontier，Meta CONTINUE令attempt从0增至1，sync_plan_route因attempt不同再次登记而触发duplicate_route_frontier。最小修复只将同计划同前沿识别为既有路线；保留原路线身份、初始attempt、计账起点和谱系，不回写旧Run、不取消新求解动作独立attempt及调用身份，不放宽替代计划去重、停滞授权、方法/根绑定或预算。聚焦案例先红后绿：实际run_meta CONTINUE→新attempt→关闭/重开DB→路线同步保持STEP_EXECUTE/路线不变/不新增事件；新版本同前沿仍拒绝。涉及恢复与调用身份，补受影响模块回归和双轴检查即可，不在此切片重复整仓门禁。
 
 之后最多一轮新普通数学任务live24，沿用live23输入，未发送的独立参考仍只用于事后核对；不得提供内部计划或强制并发/模式。新时限与源码联合变化，不能将结果变化单因归于任一因素。源码/HEAD/dist及运行脚本冻结，唯一后台实例并有30分钟临时检查；真实结果和最终门禁分别记载。失败保留实际原因，未触发旧失败路径不冒称真实复现已验证；无完整正确交付不关闭#183。
+
+
+## live24 后的流式策略接线修复（用户要求修复并再跑一次）
+
+新增服务JSON可选 stream_timeout_policy_version，复用既有policy_for_version严格校验并映射SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION；仅显式faithful-stream-v1启用，省略/null保持原关闭，不改全局默认或旧Job/Run。既有Job创建→冻结identity→ledger→adapter策略链和effective-idle/soft-warning/根deadline/unknown语义不改；新live25显式启用，新根3600/2097152及48/48/8、adapter及Population请求配置360保持，不能把旧请求字段360误报为新策略活跃流硬截止。新策略可能让较长调用消耗更多原根时间，不扩大原根或自动重发unknown。
+
+live24 Reasoner草稿的端点系数和边界错误真实保留；同冻结状态经compose_request重建，已有Explore工具输出端点表达式存在于未验证探索投影，consumed_receipt_ids为空只表示没有report直接引用，不能推断工具输出漏传。本切片不新增数学判据/答案提示或把草稿标为正确；继续依靠现有真实工具/StepVerifier/整题同artifact审查，live25事后按独立参考核对参数区间和全部零点。未完成或错误答案不得计成功。仅做配置接线红绿、相关S01和配置回归及双轴审查，再最多一个普通新Job；旧live24未知不重试。源码/HEAD/dist/config冻结、唯一后台及30分钟检查，终态清理并记录真实效果，不重复整仓离线测试。

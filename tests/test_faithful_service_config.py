@@ -63,6 +63,26 @@ class FaithfulServiceConfigTest(unittest.TestCase):
         self.assertTrue(config["SHOWCASE_F7_SYSTEM_VIEW_ENABLED"])
         self.assertNotIn("SHOWCASE_FORMAL_BACKEND", config)
         self.assertFalse(config["SHOWCASE_POPULATION_MEMORY_ENABLED"])
+        self.assertNotIn("SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION", config)
+        self.value["stream_timeout_policy_version"] = None
+        self.assertNotIn("SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION", self.load())
+
+    def test_explicit_stream_timeout_policy_reaches_cli_config(self):
+        from showcase.server_cli import parse_server_args
+
+        self.value["stream_timeout_policy_version"] = "faithful-stream-v1"
+        self.load()
+        _, config = parse_server_args(["--mode", "live", "--faithful-config", str(self.path)])
+        self.assertEqual("faithful-stream-v1", config["SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION"])
+        self.assertEqual(180, config["SHOWCASE_STAR_ADAPTER"].client_timeout)
+        self.assertEqual(1100, config["SHOWCASE_STAR_FULL_BUDGET"].max_runtime_seconds)
+
+    def test_invalid_stream_timeout_policy_is_rejected(self):
+        for invalid in ("future", "", False, 1, {}, []):
+            self.value["stream_timeout_policy_version"] = invalid
+            with self.subTest(version=invalid), self.assertRaisesRegex(
+                    ValueError, "stream_timeout_policy_unsupported"):
+                self.load()
 
     def test_explicit_request_wait_preserves_root_limits_and_adapter_settings(self):
         from showcase.server_cli import parse_server_args
