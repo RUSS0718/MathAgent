@@ -220,7 +220,11 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
                 dispatch_event={"event_id": f"meta-dispatched-{revision}-repair-1",
                                 "type": "meta_dispatched", "role": "meta"},
             )
-            request = protocol_repair.repair_request(request)
+            from .intern_instructions import META_TRACE_INSTRUCTION
+
+            request = protocol_repair.repair_request(
+                request, instruction=protocol_repair.REPAIR_INSTRUCTION + " " + META_TRACE_INSTRUCTION,
+                failed_call=failed)
             response = dict(harness.dispatch(run, meta_port.complete, request))
         call = harness.get_run(run["run_id"])["state"].get("calls", {}).get(request["call_id"])
         transport = call.get("transport_decision") if isinstance(call, dict) else None

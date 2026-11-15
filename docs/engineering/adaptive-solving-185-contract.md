@@ -72,6 +72,11 @@ Meta 切换到 `reason_noncoding` 时仍遵守已启用的同一 checkpoint 协�
 已审查检查点和本地报告的来源允许 `reasoner` 与 `reason_noncoding`；其他角色不能冒充。
 原 Run、问题、配置、计划、attempt、实际响应及独立审查身份校验继续执行。
 
+Meta 的普通裁决及 Guidance 在 provider schema 同时绑定动作和回退目标：仅
+`TRACE_BACK` / `trace_back` 携带正整数 `trace_back_to`，其余动作必须为 null。
+完整但关联字段冲突的响应进入已有一次协议修复，保留原任务与预算并取得新调用身份；
+不静默删除目标、不改变裁决或重规划授权。第二次失败及 unknown 仍不自动续修。
+
 ## 退出
 
 必要离线反例覆盖直接检查、修正后新身份检查、无具体异议升级、第二次拒绝升级、

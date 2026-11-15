@@ -8,6 +8,12 @@ from graphlib import TopologicalSorter
 from .faithful_memory_injection import has_population_memory
 from .roles import definition
 
+META_TRACE_INSTRUCTION = (
+    "trace_back_to must be a positive step index only for decision=TRACE_BACK or "
+    "action_type=trace_back; every other action, including APPROVE_REPLAN and replan, "
+    "must set trace_back_to=null. Replanning is not a traceback. "
+)
+
 
 def objective_dependencies(specification):
     """Expose declared logical inputs without inventing owners or a Plan."""
@@ -132,6 +138,8 @@ def response_instructions(request, schema):
             "Use only runtime allowed_tools. A tool_request is a proposed local computation, not evidence. "
             "Never fabricate tool receipts. "
         )
+    if role in {"meta", "meta_strategist"} and "trace_back_to" in schema.get("properties", {}):
+        instructions += META_TRACE_INSTRUCTION
     if role == "problem_intake":
         instructions += (
             "Optionally return formalization with status proposed/unsupported/not_selected, reason, "

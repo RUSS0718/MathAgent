@@ -256,6 +256,21 @@ def response_schema(request):
                           "reason": {"type": "string", "minLength": 1, "maxLength": 500,
                                      "pattern": r"[\s\S]{1,500}"}}),
         }
+    # Build complete branches after optional extensions; the boundary validator
+    # checks oneOf branches independently, including their strict field sets.
+    if request["role"] in {"meta", "meta_strategist"} and "trace_back_to" in schema["properties"]:
+        schema = deepcopy(schema)
+        action, trace = ("action_type", "trace_back") if request.get("guidance_request") else (
+            "decision", "TRACE_BACK")
+        actions = schema["properties"][action]["enum"]
+        schema["oneOf"] = [
+            obj({**schema["properties"], action: {"enum": choices}, "trace_back_to": target},
+                schema["required"])
+            for choices, target in (
+                ([trace], {"type": "integer", "minimum": 1}),
+                ([choice for choice in actions if choice != trace], {"enum": [None]}),
+            )
+        ]
     return schema
 
 
