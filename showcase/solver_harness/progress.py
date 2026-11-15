@@ -1,7 +1,8 @@
 """S04 policy primitives; method names are a closed controller vocabulary."""
 
 METHOD_IDS = frozenset({"direct", "contradiction", "induction", "construction", "computation", "unknown"})
-ADAPTIVE_SEARCH_VERSION = "adaptive-search-v1"
+ADAPTIVE_SEARCH_VERSION = "adaptive-search-v2"
+_ADAPTIVE_SEARCH_VERSIONS = {"adaptive-search-v1", ADAPTIVE_SEARCH_VERSION}
 
 
 def normalize_method(value):
@@ -43,7 +44,7 @@ def review_progress(state, event, updates):
     fresh = satisfied - seen
     counts = dict(previous.get("action_failures", {}))
     blocked = set(previous.get("blocked_actions", []))
-    adaptive_search = state.get("adaptive_search_policy") == ADAPTIVE_SEARCH_VERSION
+    adaptive_search = state.get("adaptive_search_policy") in _ADAPTIVE_SEARCH_VERSIONS
     keys = action_keys({**state, **updates} if adaptive_search else state, event.get("step_id"))
     changed_targets = fresh | new_goals | {
         root for root, goals in prerequisite_goals(state).items() if goals & new_goals
@@ -162,6 +163,16 @@ def guard_action(harness, run):
         if reason is None:
             return run
         if active.get("kind") == "primary":
+            from .traceback import transition_decision
+
+            decision = state.get("meta_decision") or {}
+            context = scheduler_context(state)
+            if (context is not None and decision.get("decision") == "CONTINUE"
+                    and transition_decision(run, state, decision)
+                    and decision.get("scheduler_context") == context):
+                from .finalize import finish
+
+                return finish(harness, run, "partial_aborted", reason)
             return harness.commit_event(
                 run["run_id"], expected_revision=run["state_revision"],
                 event={"event_id": f"route-stagnation-guard-{run['state_revision']}",
@@ -201,12 +212,45 @@ def guard_action(harness, run):
 
 def _new_search_feedback(state, progress):
     """New actual feedback permits an attempt, without granting proof credit."""
-    if (state.get("adaptive_search_policy") != ADAPTIVE_SEARCH_VERSION
+    if (state.get("adaptive_search_policy") not in _ADAPTIVE_SEARCH_VERSIONS
             or "search_context" not in progress):
         return False
     from .adaptive_solving import search_context
 
     return progress["search_context"] != search_context(state)
+
+
+def scheduler_context(state):
+    """Bind one Meta ruling to its actual guard state, excluding Meta activity."""
+    if (state.get("adaptive_search_policy") != ADAPTIVE_SEARCH_VERSION
+            or state.get("route_policy", {}).get("enabled") is not True):
+        return None
+    route = next((item for item in state.get("route_registry", [])
+                  if item.get("route_id") == state.get("active_route_id")), None)
+    if route is None or route.get("status") != "active":
+        return None
+    from .adaptive_solving import search_context
+
+    progress = state.get("progress", {})
+    local = progress.get("route_progress", {})
+    if local.get("route_id") != route["route_id"]:
+        local = {}
+    keys = action_keys(state, state.get("current_step"))
+    rounds = local.get("no_feedback_rounds", local.get("no_evidence_rounds", 0))
+    blocked = any(local.get("action_failures", {}).get(key, 0) >= 2 for key in keys)
+    reason = ("progress_stagnation_stop" if rounds >= 3 else
+              "progress_action_blocked" if blocked else None)
+    if _new_search_feedback(state, progress):
+        reason = None
+    return {
+        "route_id": route["route_id"], "plan_version": state.get("plan_version"),
+        "specification_version": state.get("specification_version"),
+        "step_id": state.get("current_step"), "action_keys": keys,
+        "search_context": search_context(state), "review_rounds": progress.get("rounds", 0),
+        "work_calls": sorted([call_id, call.get("status")] for call_id, call in
+                             state.get("calls", {}).items() if call.get("role") not in {"meta", "meta_strategist"}),
+        "continue_allowed": reason is None, "reason": reason,
+    }
 
 
 def accepted_prerequisite_goals(state, event, updates):

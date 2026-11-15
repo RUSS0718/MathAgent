@@ -163,6 +163,16 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         **({"pending_replan_request": redact(deepcopy(pending_replan))}
            if pending_replan is not None else {}),
     }
+    from .progress import scheduler_context
+
+    guard_context = scheduler_context(state) if guidance is None else None
+    if guard_context is not None:
+        request["scheduler_context"] = guard_context
+        request["instruction"] = (
+            "Respect scheduler_context.continue_allowed. CONTINUE does not change the plan "
+            "or bypass a blocked action; choosing it while false ends this route. Use a legal "
+            "TRACE_BACK, APPROVE_REPLAN for a substantively different executable plan, or ABORT. "
+            "Unreviewed self-corrections and NOT_FOUND are not verified proof.")
     if harness._config.get("features", {}).get("reasoner_checkpoints") is True:
         from .reasoner_checkpoint import current_checkpoints
 
@@ -308,6 +318,8 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         "decided_at_revision": run["state_revision"] + 1,
         "consumed": None,
     }
+    if guard_context is not None:
+        identity["scheduler_context"] = guard_context
     updates = {
         "phase": phase,
         "meta_history": history,

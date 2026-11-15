@@ -26,7 +26,7 @@ class AdaptiveProgressTest(unittest.TestCase):
                     run = harness.solve(PROBLEM, {"problem_spec": spec, "plan": plan})
         self.assertEqual("adaptive-solving-v1", run["state"]["adaptive_solving"]["version"])
         self.assertEqual("supplied_plan", run["state"]["adaptive_solving"]["reason"])
-        self.assertEqual("adaptive-search-v1", run["state"]["adaptive_search_policy"])
+        self.assertEqual("adaptive-search-v2", run["state"]["adaptive_search_policy"])
 
     def test_old_run_keeps_its_frozen_stagnation_policy(self):
         state = self.prepare()
@@ -41,7 +41,7 @@ class AdaptiveProgressTest(unittest.TestCase):
     def initial(self, *, routes=False):
         state = legacy_progress.ProgressTest().state()
         state["adaptive_solving"] = {"version": "adaptive-solving-v1"}
-        state["adaptive_search_policy"] = "adaptive-search-v1"
+        state["adaptive_search_policy"] = "adaptive-search-v2"
         if routes:
             state.update(route_policy={"enabled": True}, active_route_id="primary",
                          route_registry=[{"route_id": "primary", "status": "active", "kind": "primary"}])
