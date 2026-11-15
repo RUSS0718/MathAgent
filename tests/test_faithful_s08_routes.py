@@ -12,6 +12,67 @@ from showcase.solver_harness.routes import (
 
 
 class FaithfulS08RoutesTest(unittest.TestCase):
+    def test_meta_continue_reuses_route_across_new_attempt_and_restart(self):
+        import tempfile
+        from pathlib import Path
+
+        from showcase.solver_harness import SolverHarness
+        from showcase.solver_harness.meta import ScriptedMetaPort, run_meta
+        from showcase.solver_harness.routes import sync_plan_route
+        from tests.test_faithful_s03_job import SPEC
+
+        config = {"features": {"serial_routes": True, "problem_spec": True,
+                               "progress_scheduling": True, "final_generation": True,
+                               "final_solution_review": True}}
+        plan = {"version": 1, "steps": [{"step_id": "s1", "objective": "prove value",
+                                          "method_id": "direct",
+                                          "obligation_ids": ["root:value"]}]}
+        decision = {"decision": "CONTINUE", "reason_summary": "Continue the same plan",
+                    "plan_summary": "Derive the remaining result", "forbidden_directions": [],
+                    "reusable_results": [], "trace_back_to": None}
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "continue.db"
+            with SolverHarness(database_path=database, config=config) as harness:
+                run = harness.solve(SPEC["original_problem"],
+                                    {"run_id": "continue-route", "problem_spec": SPEC})
+                run = harness.commit_event(
+                    run["run_id"], expected_revision=run["state_revision"],
+                    event={"event_id": "plan", "type": "initial_plan_generated"},
+                    state_updates={"phase": "STEP_EXECUTE", "plan": plan,
+                                   "plan_version": 1, "current_step": "s1"},
+                )
+                run = sync_plan_route(harness, run)
+                routes = run["state"]["route_registry"]
+                run = harness.commit_event(
+                    run["run_id"], expected_revision=run["state_revision"],
+                    event={"event_id": "blocked", "type": "plan_blocked"},
+                    state_updates={"phase": "META_DECIDE"},
+                )
+                attempt = run["state"]["attempt_index"]
+                run = run_meta(harness, run, meta_port=ScriptedMetaPort([decision]),
+                               metadata={}, max_model_calls=8, max_runtime_seconds=300)
+                self.assertEqual(attempt + 1, run["state"]["attempt_index"])
+                self.assertEqual("STEP_EXECUTE", run["state"]["phase"])
+            with SolverHarness(database_path=database, config=config) as harness:
+                restored = harness.get_run("continue-route")
+                run = sync_plan_route(harness, restored)
+                self.assertEqual("STEP_EXECUTE", run["state"]["phase"])
+                self.assertEqual(routes, run["state"]["route_registry"])
+                self.assertEqual(restored["state_revision"], run["state_revision"])
+                self.assertEqual(attempt + 1, run["state"]["attempt_index"])
+                self.assertEqual(run["state_revision"],
+                                 sync_plan_route(harness, run)["state_revision"])
+                # A replacement plan is still subject to frontier deduplication.
+                replaced = harness.commit_event(
+                    run["run_id"], expected_revision=run["state_revision"],
+                    event={"event_id": "replacement", "type": "plan_replaced"},
+                    state_updates={"plan_version": 2, "plan": {**plan, "version": 2}},
+                )
+                rejected = sync_plan_route(harness, replaced)
+                self.assertEqual("TERMINAL", rejected["state"]["phase"])
+                self.assertEqual("route_duplicate_route_frontier",
+                                 rejected["state"]["result_reason"])
+
     def test_frontier_equivalence_is_order_and_duplicate_insensitive(self):
         self.assertEqual(frontier_digest([{"goal": "a"}, {"goal": "b"}, {"goal": "a"}]),
                          frontier_digest([{"goal": "b"}, {"goal": "a"}]))

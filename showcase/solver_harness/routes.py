@@ -334,10 +334,11 @@ def sync_plan_route(harness, run: dict[str, Any]) -> dict[str, Any]:
     frontier = plan_frontier(plan, state.get("problem_spec"))
     digest = frontier_digest(frontier)
     routes = state.get("route_registry") or []
+    # CONTINUE and trace-back create new action attempts within the same plan,
+    # not new search routes. Keep the route's original accounting and lineage.
     if any(
         item.get("frontier_digest") == digest
         and item.get("plan_version") == state.get("plan_version")
-        and item.get("attempt_index") == state.get("attempt_index")
         for item in routes
     ):
         return run
