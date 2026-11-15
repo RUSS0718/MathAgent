@@ -47,16 +47,38 @@ class NativePopulationBudgetTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(1, sum(request["call_id"] == conflicted[0] for request in self.outbound))
 
     def test_inflight_transport_audit_can_settle_after_another_route_freezes(self):
+        import traceback
+
         from showcase.solver_harness.calls import _save
+        from showcase.solver_harness.intern_port import InternModelPort
         from showcase.solver_harness.population_store import command
+
+        original_complete = InternModelPort.complete
+        completion_errors = []
+        def complete(port, request):
+            try:
+                return original_complete(port, request)
+            except BaseException:
+                completion_errors.append({
+                    "request": {key: request.get(key) for key in (
+                        "run_id", "role", "call_id", "route_id", "population_action_id",
+                    )},
+                    "traceback": traceback.format_exc(chain=True),
+                })
+                raise
 
         frozen = threading.Event()
         held = []
+        held_lock = threading.Lock()
         def save(harness, run, record, **kwargs):
-            if (kwargs.get("event_type") == "transport_selected" and not held
-                    and record["role"] == "step_verifier"
-                    and record["request"].get("checkpoint", {}).get("status") == "FINAL"):
-                held.append(record["call_id"])
+            should_hold = False
+            with held_lock:
+                if (kwargs.get("event_type") == "transport_selected" and not held
+                        and record["role"] == "step_verifier"
+                        and record["request"].get("checkpoint", {}).get("status") == "FINAL"):
+                    held.append(record["call_id"])
+                    should_hold = True
+            if should_hold:
                 self.assertTrue(frozen.wait(10), "independent route did not reach finalization")
             return _save(harness, run, record, **kwargs)
 
@@ -66,10 +88,19 @@ class NativePopulationBudgetTest(StarJobFixture, unittest.TestCase):
                 frozen.set()
             return run
 
-        with patch("showcase.solver_harness.calls._save", save), patch(
-                "showcase.solver_harness.population_runtime.command", freeze):
-            self.run_checkpoint_routes(continuation=True)
-        self.assertEqual(1, len(held))
+        try:
+            with patch("showcase.solver_harness.calls._save", save), patch(
+                    "showcase.solver_harness.population_runtime.command", freeze), patch.object(
+                    InternModelPort, "complete", complete):
+                self.run_checkpoint_routes(continuation=True)
+            self.assertEqual(1, len(held))
+        except AssertionError as exc:
+            exc.add_note(
+                "InternModelPort.complete failure snapshot; inflight calls may not have raised "
+                "yet, so an empty capture does not establish absence of errors:\n"
+                + json.dumps(list(completion_errors), ensure_ascii=False, indent=2)
+            )
+            raise
 
     def test_long_checkpoint_reaches_verifier_and_delivers_under_original_budget(self):
         self.run_checkpoint_routes(long_checkpoint=True)
