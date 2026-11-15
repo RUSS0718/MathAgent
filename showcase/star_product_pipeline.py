@@ -634,6 +634,8 @@ def projection(run, *, answer=None, verification_mode="auto", include_prover_rou
         result["adaptive_solving"] = {
             key: state["adaptive_solving"][key] for key in ("version", "reason", "corrections")
         }
+        if state.get("adaptive_resource_policy"):
+            result["adaptive_solving"]["resource_policy"] = state["adaptive_resource_policy"]
     if state.get("execution_switch"):
         result["execution_switch"] = state["execution_switch"]
         result["execution_switch_history"] = state.get("execution_switch_history", [])

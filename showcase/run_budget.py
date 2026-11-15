@@ -197,6 +197,11 @@ class RunBudgetLedger:
             closing_call = role in {"final_generator", "whole_solution_verifier"}
             floor = (population.get("closing_reserve", {})
                      if population is not None and not closing_call else {})
+            from .solver_harness.adaptive_resources import current_floor
+
+            adaptive_floor = current_floor(run_id)
+            floor = {key: max(floor.get(key, 0), adaptive_floor.get(key, 0))
+                     for key in set(floor) | set(adaptive_floor)}
             if time.time() >= state["deadline_at"]:
                 raise BudgetExhausted("run_deadline_exhausted")
             if kind == "http":
@@ -252,12 +257,12 @@ class RunBudgetLedger:
             if kind == "logical" and population_action_id is not None:
                 raise BudgetExhausted("population_model_reservation_exhausted")
             if kind == "logical":
-                held = floor.get("model_calls", 0) if population is not None else 0
+                held = floor.get("model_calls", 0)
                 if summary["logical_calls"] + 1 + held > limits["max_model_calls"]:
                     raise BudgetExhausted("run_model_budget_exhausted")
             elif kind == "http":
-                held_http = floor.get("http_attempts", 0) if population is not None else 0
-                held_tokens = floor.get("tokens", 0) if population is not None else 0
+                held_http = floor.get("http_attempts", 0)
+                held_tokens = floor.get("tokens", 0)
                 if (
                     summary["http_attempts"] + 1 + held_http > limits["max_http_attempts"]
                     or summary["charged_tokens"] + input_estimate + output_cap + held_tokens

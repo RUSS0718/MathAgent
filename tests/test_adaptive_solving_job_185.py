@@ -6,12 +6,36 @@ from unittest.mock import patch
 
 from showcase.run_budget import RunBudgetLimits
 from showcase.star_product_config import CORE_FEATURES
-from tests.star_product_support import ACCEPT, SOLVED, StarJobFixture
+from tests.star_product_support import ACCEPT, SOLVED, RawProviderContent, StarJobFixture
 from tests.test_faithful_s03_job import CAPACITY_POLICY, ENDPOINT, SPEC
 
 
 class AdaptiveJobTest(StarJobFixture, unittest.TestCase):
-    def open_adaptive(self, replies, *, calls=3):
+    def test_empty_candidate_repairs_once_and_spends_preserved_review_slot(self):
+        self.open_adaptive([SPEC, RawProviderContent(""),
+                           {**SOLVED, "solution_candidate": "1+1=2 by integer addition."}, ACCEPT])
+        response = self.client.post("/api/agent/jobs", headers=self.headers(),
+            json={"message": "1+1", "session_id": self.session})
+        final = self.terminal(response.get_json()["job_id"])
+        self.assertEqual("succeeded", final["status"], final.get("error"))
+        self.assertEqual(["problem_intake", "explore", "explore", "whole_solution_verifier"],
+                         [r["role"] for r in self.outbound])
+        self.assertTrue(self.outbound[2]["call_id"].endswith(":repair-1"))
+
+    def test_direct_dispatch_preserves_review_and_repair_slots(self):
+        self.open_adaptive([SPEC, SOLVED, ACCEPT], calls=3)
+        response = self.client.post("/api/agent/jobs", headers=self.headers(),
+            json={"message": "1+1", "session_id": self.session})
+        job_id = response.get_json()["job_id"]
+        final = self.terminal(job_id)
+        self.assertEqual("failed", final["status"])
+        self.assertEqual(1, len(self.outbound))
+        self.assertEqual("adaptive_closing_reserve_required",
+                         final["result"]["solver"]["budget_exhaustion_reason"])
+        self.job(job_id)
+        self.assertEqual(1, len(self.outbound))
+
+    def open_adaptive(self, replies, *, calls=4):
         """Wire the real public pipeline with finitely scripted HTTP responses."""
         self.enterContext(patch.dict(os.environ, {"INTERN_API_BASE": ENDPOINT}))
         self.open_star(replies,
@@ -47,7 +71,7 @@ class AdaptiveJobTest(StarJobFixture, unittest.TestCase):
         invalid = deepcopy(SPEC)
         invalid["root_obligations"][0]["prerequisite_ids"] = ["missing_auxiliary"]
         self.open_adaptive([invalid, SPEC,
-                           {**SOLVED, "solution_candidate": "1+1=2 by integer addition."}, ACCEPT], calls=4)
+                           {**SOLVED, "solution_candidate": "1+1=2 by integer addition."}, ACCEPT], calls=5)
         response = self.client.post("/api/agent/jobs", headers=self.headers(),
             json={"message": "1+1", "session_id": self.session})
         final = self.terminal(response.get_json()["job_id"])

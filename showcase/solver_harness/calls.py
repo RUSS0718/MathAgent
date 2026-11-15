@@ -181,6 +181,14 @@ def dispatch(harness, run, operation, request, session_dispatch):
             raise CallInterrupted(run["run_id"])
         if latest["state"]["phase"] == "TERMINAL":
             raise CallInterrupted(run["run_id"])
+        from .adaptive_resources import allocate, bind_allocation
+
+        allocation, allocation_error = allocate(harness, latest, prepared)
+        if allocation_error:
+            from .budget import HardBudgetStop, stop
+
+            stop(harness, latest, allocation_error)
+            raise HardBudgetStop(run["run_id"])
         report = prepared.get("report")
         receipts = report.get("tool_receipts", []) if isinstance(report, Mapping) else []
         record = {
@@ -213,6 +221,8 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "partial_text": "",
             "usage": None,
         }
+        if allocation:
+            record["resource_allocation"] = allocation
         if prepared.get("retry_of"):
             record["retry_of_internal"] = prepared["retry_of"]
         activity_enabled = harness._config.get("features", {}).get("stream_activity") is True
@@ -403,7 +413,12 @@ def dispatch(harness, run, operation, request, session_dispatch):
             _save(harness, run, record)
 
         try:
-            response = _consume(operation(deepcopy(prepared)), partial, checkpoint)
+            if allocation:
+                deadline = prepared.get("phase_deadline_at")
+                prepared["phase_deadline_at"] = min(
+                    deadline, allocation["work_deadline_at"]) if deadline is not None else allocation["work_deadline_at"]
+            with bind_allocation(run["run_id"], allocation):
+                response = _consume(operation(deepcopy(prepared)), partial, checkpoint)
         except Exception as exc:
             if (getattr(exc, "no_dispatch", False) is True
                     and not getattr(exc, "transport_decision", None)):
