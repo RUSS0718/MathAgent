@@ -3,6 +3,7 @@
 import json
 from collections.abc import Mapping
 from copy import deepcopy
+from graphlib import TopologicalSorter
 
 from .faithful_memory_injection import has_population_memory
 from .roles import definition
@@ -18,6 +19,36 @@ def objective_dependencies(specification):
             ("auxiliary_goals", "goal_id", "dependencies", "auxiliary"))
         for item in specification.get(field, []) if id_field in item
     ]
+
+
+def _planner_example_steps(request):
+    """Illustrate ownership of the frozen root prerequisite closure, without executing it."""
+    spec = request["problem_spec"]
+    objectives = {item["objective_id"]: item for item in objective_dependencies(spec)}
+    required = {key for key, item in objectives.items() if item["kind"] == "root"}
+    pending = list(required)
+    while pending:
+        for prerequisite in objectives[pending.pop()]["prerequisite_ids"]:
+            if prerequisite not in required:
+                required.add(prerequisite)
+                pending.append(prerequisite)
+    graph = {key: item["prerequisite_ids"] for key, item in objectives.items() if key in required}
+    ordered = list(TopologicalSorter(graph).static_order())
+    owners = {key: f"S{index}" for index, key in enumerate(ordered, 1)}
+    statements = {item[id_field]: item.get("statement", item.get("description", item[id_field]))
+                  for field, id_field in (("root_obligations", "obligation_id"),
+                                          ("auxiliary_goals", "goal_id"))
+                  for item in spec.get(field, []) if id_field in item}
+    steps = []
+    for key in ordered:
+        root = objectives[key]["kind"] == "root"
+        step = {"step_id": owners[key], "title": statements[key], "objective": statements[key],
+                "depends_on": [owners[prerequisite] for prerequisite in graph[key]],
+                "obligation_ids": [key] if root else [], "auxiliary_goal_ids": [] if root else [key]}
+        if request.get("progress_policy", {}).get("enabled") is True:
+            step["method_id"] = "direct"
+        steps.append(step)
+    return steps
 
 
 def step_review_scope(request):
@@ -226,15 +257,14 @@ def response_instructions(request, schema):
                 {"step_id": "S2", "title": "Derive B", "objective": "Derive B using A", "depends_on": ["S1"]},
             ]
             if isinstance(request.get("problem_spec"), Mapping):
-                for step, objective in zip(example_steps, ("example:A", "example:B")):
-                    step.update(obligation_ids=[objective], auxiliary_goal_ids=[])
-                    if request.get("progress_policy", {}).get("enabled") is True:
-                        step["method_id"] = "direct"
+                example_steps = _planner_example_steps(request)
+            version = request.get("plan_version")
             example = {
                 "checkpoint": {"protocol_version": 1, "checkpoint_id": "example",
                     "status": "FINAL", "objective": "Plan the solution", "dependencies": [],
                     "evidence": [], "gaps": [], "next_action": "Execute S1"},
-                "plan": {"version": 1, "steps": example_steps},
+                "plan": {"version": version if type(version) is int and version > 0 else 1,
+                         "steps": example_steps},
             }
             illustrations = example
             if request.get("autonomous_routes"):
@@ -242,7 +272,8 @@ def response_instructions(request, schema):
                     "mode": "serial", "reason": "One coherent method suffices"}, alternative_plans=[])
                 population = deepcopy(example)
                 alternative_steps = deepcopy(example_steps)
-                alternative_steps[0].update(title="Establish A independently", objective="Prove A by contradiction")
+                if not isinstance(request.get("problem_spec"), Mapping):
+                    alternative_steps[0].update(title="Establish A independently", objective="Prove A by contradiction")
                 if "method_id" in alternative_steps[0]:
                     alternative_steps[0]["method_id"] = "contradiction"
                 population["plan"].update(execution_selection={
@@ -272,9 +303,12 @@ def response_instructions(request, schema):
                 "otherwise leave it unclaimed. Use auxiliary_goal_ids for needed non-root preparation, "
                 "leaving obligation_ids empty and respecting those dependencies. "
                 "Do not repeat method selection already completed by Explore unless further work is needed. "
+                "Examples are not mathematical method recommendations; choose your own legal plan and methods. "
                 + ("Illustrative instances " if request.get("autonomous_routes") else "Illustrative instance ")
-                + "(fictional IDs only; use current objective_dependencies IDs "
-                "in your actual plan): " + json.dumps(illustrations, ensure_ascii=False)
+                + ("(current objective IDs; illustrative ownership only): "
+                   if isinstance(request.get("problem_spec"), Mapping) else
+                   "(fictional IDs only; use current objective_dependencies IDs in your actual plan): ")
+                + json.dumps(illustrations, ensure_ascii=False)
             )
         else:
             instructions += (
