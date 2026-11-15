@@ -64,8 +64,9 @@ def response_instructions(request, schema):
             "dependencies, evidence and gaps are arrays of strings. FINAL has gaps=[] and a complete plan; "
             "YIELD has nonempty planning gaps and may use plan=null; BLOCKED/FAILED retain unresolved gaps. "
             "plan allows only " + ", ".join(fields) + "; required: " + ", ".join(plan["required"]) + ". "
-            f"version must equal the requested plan_version integer constant {fields['version']['const']}; "
-            "steps is a nonempty array of objects allowing only "
+            + (f"version must equal the requested plan_version integer constant {fields['version']['const']}; "
+               if "const" in fields["version"] else "version is a positive integer; ")
+            + "steps is a nonempty array of objects allowing only "
             + ", ".join(step["properties"]) + "; required: " + ", ".join(step["required"]) + ". "
             "step_id, title and objective are strings; depends_on is an array of earlier step IDs. "
             "obligation_ids and auxiliary_goal_ids are arrays of runtime objective IDs. "
