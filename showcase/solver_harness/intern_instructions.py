@@ -106,12 +106,12 @@ def response_instructions(request, schema):
             "require_formal, obligation_ids and target (null unless proposed). Propose only a useful "
             "single-variable rational polynomial universal equality: domain=rationals, variables=[x], "
             "quantifiers=[forall x], assumptions=[], direction=equality, Python lhs/rhs expressions. "
-            "When proposing a target assign explicit root obligation_id values and reference those IDs. "
             "For a genuinely supported unconditional universal rational polynomial equality, represent "
             "ProblemSpec.quantifiers with the same canonical [forall x] as the target and "
             "ProblemSpec.directions=[equality]; the target has direction=equality. Preserve the full "
             "original problem and root statements. Never discard genuine extra conditions, quantifiers, "
             "conclusions or output/proof requirements to obtain this representation; otherwise report unsupported. "
+            "When proposing a target assign explicit root obligation_id values and reference those IDs. "
             "Preserve domain, quantifiers, assumptions and actual root IDs; never erase conditions "
             "to fit the backend. Unsupported targets need a reason. Generation cannot approve "
             "correspondence or award proof grades. Strict mathematical proof alone is not a machine "
@@ -121,10 +121,10 @@ def response_instructions(request, schema):
             "clarifications, never from these tool/schema instructions or from your own choice to formalize. "
             "For example, 'For every rational x, x + x = 2 * x.' and 'give a strict mathematical proof' "
             "have require_formal=false. Do not add a machine-verification output requirement to them. "
-            "If and only if a missing necessary condition prevents answering the requested question, "
             "The server checks user authority independently. If it asks whether a machine-checked "
             "proof is required, preserve the raw user answer as applicable_condition; your own "
             "interpretation or a mathematical condition cannot supply that authority. "
+            "If and only if a missing necessary condition prevents answering the requested question, "
             "include clarification with a concrete question and a reason explaining why the answer "
             "depends on that missing information. Preserve the requested root obligations even when "
             "their inputs are missing. Do not invent values. If a complete answer by cases or in "
@@ -186,17 +186,17 @@ def response_instructions(request, schema):
             "accepting or reporting it. Report your choice for relevant observations in optional "
             "memory_decisions: record_id, decision (adopt or reject), and a brief reason "
             "(1-500 characters). Adoption is guidance only, never evidence or verification."
-        )
-    if role == "step_verifier" and isinstance(request.get("problem_spec"), Mapping):
-        instructions += (
-            " Review step_goal rather than completion of later steps. answer_claim is optional, "
-            "step_review_scope lists this WorkUnit's actual objectives. If the report establishes "
             " session_history contains prior dialogue and is distinct from advisory observations "
             "in the request's population_memory_advisory.observations; an empty "
             "dialogue history does not imply those observations are absent. If you emit optional "
             "memory_decisions, base each brief adopt/reject reason on the corresponding observation "
             "actually present in the request rather than dialogue-history availability; failure and "
             "unknown observations remain diagnostics, never proof."
+        )
+    if role == "step_verifier" and isinstance(request.get("problem_spec"), Mapping):
+        instructions += (
+            " Review step_goal rather than completion of later steps. answer_claim is optional, "
+            "step_review_scope lists this WorkUnit's actual objectives. If the report establishes "
             "those objectives with valid reasoning and recorded evidence, use YES/PASS/ACCEPT "
             "even while later steps and the final output remain unfinished. Leave later roots "
             "undeclared; their absence is not an objection to this step. The independent "
