@@ -22,13 +22,14 @@ class RouteHarness(SolverHarness):
         """Read a branch without marking other live workers as abandoned."""
         parent = self._state_store.get_run(run_id)
         route = parent["state"]["population"]["routes"][self._route_id]
-        state = deepcopy(route["snapshot"])
+        # get_run decoded a fresh, private parent; its branch has no shared owner.
+        state = route["snapshot"]
         revision = route.get("revision", 0)
         state["state_revision"] = revision
         if parent["state"]["phase"] == "TERMINAL":
             state.update(phase="TERMINAL", status=parent["state"]["status"])
         return {"run_id": run_id, "state": state, "state_revision": revision,
-                "events": deepcopy(route.get("events", []))}
+                "events": route.get("events", [])}
 
     def _commit_event(self, run_id, *, expected_revision, event, state_updates=None,
                       current=None, route_authorized=False):
@@ -40,7 +41,8 @@ class RouteHarness(SolverHarness):
         from .progress import review_progress
 
         updates = deepcopy(state_updates or {})
-        progress = review_progress(self.get_run(run_id)["state"], event, updates)
+        current = self.get_run(run_id) if current is None else current
+        progress = review_progress(current["state"], event, updates)
         updates.update(progress)
         command(self._parent, run_id, "route_commit", route_id=self._route_id,
                 action_id=self._action_id, expected_route_revision=expected_revision,

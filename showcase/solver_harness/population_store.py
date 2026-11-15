@@ -40,7 +40,11 @@ def command(harness, run_id, operation, **args):
             if row is None:
                 raise PopulationConflict("population_run_missing")
             state = json.loads(row["state_json"])
-            population = deepcopy(state.get("population"))
+            population = state.get("population")
+            # route_commit owns this freshly decoded candidate and never needs
+            # the old population after mutation; other transitions still do.
+            if operation != "route_commit":
+                population = deepcopy(population)
             if not isinstance(population, dict) or state.get("population_policy", {}).get("enabled") is not True:
                 raise PopulationConflict("population_policy_missing")
             event, updates = _transition(

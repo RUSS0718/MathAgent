@@ -102,3 +102,10 @@ live25已准备唯一新普通Job，沿用live24输入，显式faithful-stream-v
 从0c751b8接续修复用户要求的工程故障：原live25恰64次last_observed_at，仍POPULATION/running且StepVerifier流活动，控制器阶段计数却耗尽并进入formal收尾，过期CAS失败。只改controller.py不把在途Population/converging等待计入64次推进；每轮控制/原deadline、非等待上限、终态迟到结算和unknown不自动重发保持。公共loopback HTTP Job红绿、3边界和8受影响回归（12项不同用例）、ruff/diff通过，双轴clear，证据population-wait-*。原题难度无标准标签，人工判断高中竞赛代数中等偏难，不作官方难度声称。
 
 原live25失败与1未知原样；修复后没有live26或额外provider调用，8100仍旧服务。完整正确并发交付/切换/F4/可信缓存当前重验和最终必要门禁仍未完成，#183/#168开放。继续同一当前模型，具体继承型号未知。当前无本次运行/监控需交接，不重复启动旧任务。
+
+
+### live26 后热点维护及 live27 准备（当前）
+
+live26=run_665ec8174ffb4d4b7418fe99cfa27e01，9808696源码，109次等待证明旧64轮故障未重现；3600根deadline失败、1未知，无正确交付，后台/8103/检查清理。随后按用户健壮修复要求，只去掉流式保存中重复读取/深拷贝，21聚焦与两轴clear；同现场无profiler成对重放局部开销约减37%，非整题提速保证。证据live26/route-save-*及route-stream-*。
+
+仅准备一个新live27，同原题/3600/2097152/48/48/8和faithful-stream-v1、独立参考不入模；源码/config/dist冻结后后台运行，30分钟检查所有权见live27/owner.json和status.json，不重复启动。原Run/unknown不重发、不续截止；失败后不随机追加。待实际结果再更新。8100仍旧服务，#183/#168开放；继续当前模型，具体继承型号未知。

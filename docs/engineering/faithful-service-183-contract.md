@@ -89,3 +89,10 @@ live23失败见证为同一plan_version=1、相同frontier，Meta CONTINUE令att
 新增服务JSON可选 stream_timeout_policy_version，复用既有policy_for_version严格校验并映射SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION；仅显式faithful-stream-v1启用，省略/null保持原关闭，不改全局默认或旧Job/Run。既有Job创建→冻结identity→ledger→adapter策略链和effective-idle/soft-warning/根deadline/unknown语义不改；新live25显式启用，新根3600/2097152及48/48/8、adapter及Population请求配置360保持，不能把旧请求字段360误报为新策略活跃流硬截止。新策略可能让较长调用消耗更多原根时间，不扩大原根或自动重发unknown。
 
 live24 Reasoner草稿的端点系数和边界错误真实保留；同冻结状态经compose_request重建，已有Explore工具输出端点表达式存在于未验证探索投影，consumed_receipt_ids为空只表示没有report直接引用，不能推断工具输出漏传。本切片不新增数学判据/答案提示或把草稿标为正确；继续依靠现有真实工具/StepVerifier/整题同artifact审查，live25事后按独立参考核对参数区间和全部零点。未完成或错误答案不得计成功。仅做配置接线红绿、相关S01和配置回归及双轴审查，再最多一个普通新Job；旧live24未知不重试。源码/HEAD/dist/config冻结、唯一后台及30分钟检查，终态清理并记录真实效果，不重复整仓离线测试。
+
+
+## live26 后流式保存维护与单次 live27
+
+用户授权若再次失败则给出健壮方案并解决。live26为根3600秒耗尽，109次等待未重现旧64轮CAS故障。只读原现场、隔离副本重放确认本地每次保存重复读取/复制全历史；本次仅削减population_route中新解码独占对象的重复复制、复用同一次调用的current，以及population_store仅route_commit不再复制事务独占候选。保留所有完整历史读取、最终数据库重读、回调异常传播、CAS/owner/冻结/控制、当前来源重验、原预算和unknown零自动重发；无新快照API、缓存、批处理或依赖。
+
+验证限于真实保存接缝红绿、返回隔离/observer实际写入与载荷修改、冲突后完整回滚、受影响公共并发/恢复及固定现场成对重放；不把局部提速当整题成功。双轴复查后仅再创建一个普通新live27，同live26数学输入、faithful-stream-v1、3600/2097152及48/48/8，无参考注入或强制Spec/Plan。冻结源码/HEAD/dist/config，单后台与30分钟检查，观察到终态并按独立参考核验；失败不随机追加同题任务。原Run及未知不修改。

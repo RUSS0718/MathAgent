@@ -1,6 +1,6 @@
 # MathAgent 文档索引
 
-- [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：efff923接通显式流式超时策略，39相关检查/两轴通过；live25真实2路线自主并发，多次长请求越过360秒并完成，但formal状态提交版本冲突导致失败，1调用未知、数学未正确交付。进程/监控清理、未自动重试。后续已最小修复64次并发等待误耗阶段轮数，公共Job红绿、12相关检查及双轴审查通过，修复后原题未重跑；#183/#168开放。见[当前交接](engineering/unattended-ticket-handoff.md)。
+- [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：live26真实109次等待未重现旧64轮故障，最终根3600秒截止失败，1未知、无正确交付。流式保存热点最小修复通过21相关检查及双轴审查，无profiler同现场成对重放局部开销约减37%；仅准备一个新live27真实验证，未据此宣称整题成功。#183/#168开放。见[当前交接](engineering/unattended-ticket-handoff.md)。
 
 - [#182 状态与控制组合验收](evals/faithful-service-182-20261115.md)：[G2合同](engineering/faithful-service-182-contract.md)。冻结e62d145的gate-01六阶段通过（2105项、0failure/error、42skip、source_changed=false），双轴复查解除；真实旧Run刷新/重启保持原预算、4次Attempt和输出身份。仅整合已有能力，#168完整服务仍未完成，按[交接](engineering/unattended-ticket-handoff.md)继续#183。
 

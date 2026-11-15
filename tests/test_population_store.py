@@ -93,6 +93,78 @@ class PopulationStoreTests(unittest.TestCase):
             dependencies=[],
         )
 
+    def test_stream_save_avoids_redundant_parent_read_and_keeps_complete_history(self):
+        from unittest.mock import patch
+
+        from showcase.solver_harness.calls import _save
+        from showcase.solver_harness.population_route import RouteHarness
+
+        self._admit()
+        local = RouteHarness(self.harness, RUN_ID, "route-a", "action-a")
+        run = local.get_run(RUN_ID)
+        record = {"call_id": "stream-call", "status": "streaming", "partial_text": "partial"}
+        observed = []
+        self.harness._event_observer = lambda parent, event: observed.append((parent, event))
+        with patch.object(self.state_store, "get_run", wraps=self.state_store.get_run) as read:
+            _save(local, run, record)
+        self.assertLessEqual(read.call_count, 3)
+        self.assertEqual(1, len(observed))
+        self.assertEqual("partial", run["state"]["calls"]["stream-call"]["partial_text"])
+        self.assertEqual("call_audit", run["events"][-1]["type"])
+        parent = self.state_store.get_run(RUN_ID)
+        self.assertEqual(observed[0][0]["events"], parent["events"])
+        run["state"]["calls"]["stream-call"]["partial_text"] = "mutated"
+        run["events"][-1]["type"] = "mutated"
+        fresh = local.get_run(RUN_ID)
+        self.assertEqual("partial", fresh["state"]["calls"]["stream-call"]["partial_text"])
+        self.assertEqual("call_audit", fresh["events"][-1]["type"])
+
+    def test_route_save_rereads_observer_changes_and_ignores_payload_mutation(self):
+        from showcase.solver_harness.calls import _save
+        from showcase.solver_harness.population_route import RouteHarness
+
+        self._admit()
+        local = RouteHarness(self.harness, RUN_ID, "route-a", "action-a")
+        run = local.get_run(RUN_ID)
+
+        def observe(parent, event):
+            self.state_store.commit_event(
+                RUN_ID, expected_revision=parent["state_revision"],
+                event={"event_id": "observer-stopped", "type": "run_stopped"},
+                state_updates={"phase": "TERMINAL", "status": "partial_aborted"},
+                request_hash="observer-stopped", population_owner=self.harness._population_owner,
+            )
+            parent["state"]["population"]["routes"]["route-a"]["snapshot"]["status"] = "forged"
+
+        self.harness._event_observer = observe
+        _save(local, run, {"call_id": "stream-call", "status": "streaming"})
+        self.assertEqual("TERMINAL", run["state"]["phase"])
+        self.assertEqual("partial_aborted", run["state"]["status"])
+        self.assertEqual("call_audit", run["events"][-1]["type"])
+
+    def test_route_call_identity_conflict_rolls_back_mutated_candidate(self):
+        from showcase.solver_harness.calls import _save
+        from showcase.solver_harness.population_route import RouteHarness
+
+        self._admit()
+        before = self.state_store.get_run(RUN_ID)
+        self.state_store.commit_event(
+            RUN_ID, expected_revision=before["state_revision"],
+            event={"event_id": "foreign-call", "type": "call_audit"},
+            state_updates={"calls": {"collision": {"call_id": "collision",
+                           "route_id": "another-route", "action_id": "another-action"}}},
+            request_hash="foreign-call", population_owner=self.harness._population_owner,
+        )
+        before = self.state_store.get_run(RUN_ID)
+        observed = []
+        self.harness._event_observer = lambda *args: observed.append(args)
+        local = RouteHarness(self.harness, RUN_ID, "route-a", "action-a")
+        run = local.get_run(RUN_ID)
+        with self.assertRaisesRegex(PopulationConflict, "population_call_identity_conflict"):
+            _save(local, run, {"call_id": "collision", "status": "streaming"})
+        self.assertEqual(before, self.state_store.get_run(RUN_ID))
+        self.assertEqual([], observed)
+
     def test_identical_rating_in_consecutive_rounds_retains_both_rounds(self):
         from showcase.solver_harness.population_schedule import round_schedule
 

@@ -1,6 +1,6 @@
 # #183 当前机器真实服务阶段记录
 
-当前状态（2026-11-15，live25故障维护）：已定位64次并发等待耗尽控制器阶段轮数，提前收尾导致formal状态提交版本冲突；最小修复通过公共Job红绿、3边界及8相关回归。原live25仍失败、1未知且无正确交付，修复后真实原题未重跑。此前efff923流式接线已由真实长流及自然并发验证；#183/#168仍开放。
+当前状态（2026-11-15，live26后维护）：live26真实109次等待未重现旧64轮提前收尾，最终3600秒根截止失败；无完整答案，1未知。已最小修复本地流式保存重复读取/复制热点，21相关检查/双轴通过，同现场无profiler成对重放开销约减37%。仅准备一个新live27验证实际效果，未据局部提速宣称整题成功；#183/#168仍开放。
 
 日期：2026-11-15（Asia/Shanghai）。源码HEAD `c01683ddf5cc526d0b5c61f2bac11f8f677975e9`，与origin一致；初轮真实求解时产品未修改；随后发现并修复缓存前端可空字段合同。适用[本票合同](../engineering/faithful-service-183-contract.md)。具体模型继承未知，保持当前设置。#183/#168仍开放，完整服务未通过。
 
@@ -237,3 +237,20 @@ live25已准备唯一新普通Job，沿用live24输入，显式faithful-stream-v
 证据：population-wait-red.json/.log、population-wait-green.json/.log；3项边界最终population-wait-boundaries-final.json/.log通过（无revision等待、非等待64上限、取消/原deadline停止）；8项受影响回归population-wait-regression.json/.log在43.238秒全部通过，覆盖普通自主并发、转串行、未知不重发、原deadline、取消、完成后迟到结算、CAS保护及完成回执恢复。合计12项不同用例，ruff与diff检查通过；不重复全仓门禁。Standards审查Mill（01a1de85-e108-7973-abb1-ff8973411768）、Spec审查Godel（01a1de85-e250-7a00-8882-853f173b399d）均clear，只读且未运行测试；报告population-wait-review.md。产品维护提交SHA见git fix(showcase)并发等待提交，不以文档HEAD替代原live源码。
 
 原live25失败与1未知仍原样；本次没有live26、额外provider请求、服务8100更新或#183完成声明。数学草稿错误、完整正确并发交付/切换/F4/缓存当前重验和阶段最终必要门禁仍未完成。
+
+
+### live26 终态及流式保存热点维护
+
+冻结源码9808696dedbf3359b062bb1eef81635ad900593e，配置SHA256 1065c88735a534a0631ce5d1c8f97612ff2601e6fb54f4cde4dcde0bc59fddfd，普通新Job run_665ec8174ffb4d4b7418fe99cfa27e01。实际模型自然选择2独立路线population，109次last_observed_at后仍未提前结果收尾，无SolverRevisionConflictError，旧64轮故障未复现。18:30左右按原根3600截止，公共failed/run_deadline_exhausted，耗时3605.661秒、计账1668311本地估算、1工具/2.375秒、unresolved_attempts1，无final_response。账本预留logical/http各15，公开attempts6，不能说15次实际完成请求。
+
+物理记录：intake17.266秒、Explore4.300秒、Planner79.783秒完成；一Reasoner1026.899秒、4610字节/501事件完成，StepVerifier2449.208秒、4439字节/531事件到根截止timeout且无finish_reason。另一Reasoner物理记录success/stop、13742字节/1789事件但duration缺失，持久逻辑call仍streaming；原差异保留，不冒认已提交数学成果。完成的Reasoner草稿仍错误：把|a|≤4的不可达顶点当可用，又把|a|>4的可达顶点排除；其小分支宣称b≥a²/4−2，(a,b)=(2,−1)会被错误纳入而P(−1)=−3。尚无四个根义务的接受或最终审查。
+
+唯一后台已结束；wrapper32712（09:29:55.7075408Z）、observer24084（09:30:03.5787014Z）、服务32900（09:29:57.3900690Z）、uv31216（09:29:57.3128952Z）均已退出，8103无监听，MathAgent-Issue183-live26删除；原8100未动。终态后、产品修改前identity.py无异常通过（同批命令最终exit1来自无监听查询，非身份错误）。原预检首次缺少同配置相对引用lean-manifest.json，未启动服务/模型；补复制原manifest后通过、只提交一个新Job。原失败/unknown无重试。
+
+性能定位：原SQLite只读；get_run-profile.txt显示8498历史事件的单次读取约0.113秒。profile-route-save.py将原DB备份到内存，仅在副本调整停止状态/过期deadline以重放纯本地保存，无模型工具端口；真实RouteHarness/calls._save/population_store路径，两次保存原profile约2.35秒，主要为重复读取及深拷贝。最小修复仅population_route.py及population_store.py；复用本次current、交接新解码独占的snapshot/events、仅route_commit使用事务新解码独占population候选。保留最终数据库重读以看见observer写入并隔离载荷修改；不省略历史、receipt校验或CAS，不用长期缓存或批处理。
+
+证据route-stream-red.json/.log（4次读取超过3的红见证）、route-stream-green.json/.log；最终route-stream-store-final.json/.log为15项，route-stream-public-regression.json/.log为6项（33.219秒），21项不同用例通过，ruff/diff通过。覆盖复制隔离、回调实际终止及载荷修改、候选修改后身份冲突回滚、owner/冻结/未知/预算、真实loopback并发交付、迟到结算、原deadline、取消、转串行及只读不重发。独立Spec Kepler（01a1deca-9351-79e0-aa2a-88d29a87038c）与Standards Darwin（01a1ded6-ef84-7af0-9570-79622f0acc33）均clear、只读未跑测试。
+
+同现场无profiler、相同projection observer、交替baseline/fixed/fixed/baseline成对重放：四次保存中位2.435602→1.542778秒，约减36.66%；route-save-paired.json及paired-route-save.py保留命令，基线取固定9808696两个产品文件，原现场只读。profile下2.35→0.90秒不是无profiler真实收益数字；不据此推断远端生成耗时或整题墙钟。剩余完整历史读取仍有开销，不宣称全部消除。
+
+维护后至多一个普通新live27核对实际效果；准备与实际运行分开，以该目录status及后续终态记录为准。无完整正确并发交付、切换/F4/可信缓存当前重验及最终门禁前不关闭#183/#168。
