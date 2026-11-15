@@ -192,8 +192,12 @@ def response_instructions(request, schema):
             "clarification_input; do not preserve blank placeholders or generic sufficiency claims."
         )
     if role in {"explore", "reasoner", "reason_noncoding", "step_verifier", "whole_solution_verifier"}:
+        pending_status = (
+            "still state your provisional enum verdict" if role in {"step_verifier", "whole_solution_verifier"}
+            else "still state your provisional assessment" if role == "explore"
+            else "retain the claim as an unverified local computation")
         instructions += (
-            "While a tool_request is pending, still state your provisional enum verdict — "
+            f"While a tool_request is pending, {pending_status} — "
             "the runtime withholds any acceptance until the real receipt exists. "
             "Every pending tool_request MUST use label easy-verify, never verified. "
             "Group candidate substitutions into one request when possible. Omit expected_output unless "
@@ -202,12 +206,12 @@ def response_instructions(request, schema):
             "If a report already contains tool_receipts, review those actual inputs/outputs and continue "
             "the review; the runtime executed them, not you. If a receipt reports tool_error or an "
             "error_category, inspect tool_argument_schemas and correct the arguments in a different "
-            "request, or return a verdict retaining the unresolved objection. Never repeat an identical "
+            "request, or retain the unresolved objection in your response. Never repeat an identical "
             "failed request. polynomial_check accepts only numeric rational strings in coefficients "
             "and candidates, never symbolic parameters; use python_math for a permitted symbolic "
             "computation or review the symbolic argument without a tool. "
-            "A reviewer may propose at most one tool_request per reply while its verdict is still "
-            "pending; judge only from recorded receipts, never from assumed outputs."
+            "Propose at most one tool_request per reply and keep the result provisional; "
+            "judge only from recorded receipts, never from assumed outputs."
         )
     if has_population_memory(request):
         instructions += (
@@ -320,5 +324,9 @@ def response_instructions(request, schema):
                 "steps are not gaps in this step. Return FINAL with empty gaps when this step's "
                 "argument is ready. YIELD requires at least one explicit current-step gap. "
                 "Observe checkpoint_remaining_rounds; a proposed tool request is still not evidence."
+                " Put each proposed tool_request and its tool_evidence_refs only on the relevant "
+                "checkpoint.claims item, with label easy-verify. Never put tool_request or "
+                "tool_evidence_refs directly on checkpoint; those are not checkpoint fields. "
+                "Do not add a verdict field to a Reasoner checkpoint."
             )
     return instructions
