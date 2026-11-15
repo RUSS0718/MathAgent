@@ -235,6 +235,12 @@ def _valid_provenance(connection, provenance, observation, owner_id, session_id)
     )
 
 
+def _domain_key(value: str) -> str:
+    """Match the two conventional rational-domain names without rewriting specs."""
+    value = value.strip().casefold()
+    return "rationals" if value == "rational numbers" else value
+
+
 def load_population_memory(
     connection, *, run_id: str, problem_spec: Mapping | None
 ) -> dict:
@@ -289,7 +295,7 @@ def load_population_memory(
             observed_domain = applicability.get("domain") if isinstance(applicability, dict) else None
             if (
                 not isinstance(observed_domain, str)
-                or observed_domain.strip().casefold() != domain.casefold()
+                or _domain_key(observed_domain) != _domain_key(domain)
                 or not isinstance(observation, dict)
                 or observation.get("outcome") not in {"success", "failure", "unknown"}
                 or any(not isinstance(observation.get(key), dict)
