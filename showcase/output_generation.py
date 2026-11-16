@@ -17,6 +17,20 @@ def initialize_generation(store):
             request_id TEXT NOT NULL, detail_json TEXT NOT NULL)''')
         # A previously dispatched request has an unknown outcome. Never replay it.
         store._connection.execute("UPDATE output_generations SET status='unknown' WHERE status='generating'")
+        # Terminal jobs present at startup without a claim were interrupted before
+        # dispatch. Seal a conservative fallback rather than silently retrying.
+        rows = store._connection.execute("SELECT job_id,user_id FROM workspace_jobs WHERE status IN ('succeeded','failed','canceled') AND job_id NOT IN (SELECT job_id FROM output_generations)").fetchall()
+        for row in rows:
+            job = store.get_job(row[0], row[1])
+            if not (job.get('result') or {}).get('presentation_rule'):
+                continue
+            from .star_product_modes import STAR_MODES
+            if job['result'].get('solver_mode') in STAR_MODES:
+                from .star_product_projection import current_solver
+                job['result']['solver'] = current_solver(store._connection, row[0])
+            snapshot = presentation_snapshot(job)
+            store._connection.execute('INSERT OR IGNORE INTO output_generations VALUES(?,?,?,?,?)',
+                (row[0], snapshot['fingerprint'], 'unknown', 'output:' + snapshot['fingerprint'], '{}'))
         store._connection.commit()
 
 
@@ -94,8 +108,9 @@ def generate_terminal(service, job_id):
                        'answer': snapshot['answer'], 'scope': snapshot['scope'],
                        'whole_review': snapshot['whole_review'],
                        'job_status': snapshot['job_status'],
-                       'evidence_summary': {'sources': snapshot['sources'],
-                                            'verified_claims': snapshot.get('verified_claims', []),
+                       'evidence_summary': {'sources': [{key: source[key] for key in ('scope', 'grade', 'status') if key in source}
+                                                        for source in snapshot['sources']],
+                                            'verified_claims': [{'text': claim['text']} for claim in snapshot.get('verified_claims', [])],
                                             'formal_verification': snapshot['formal_verification']}}
             context_text = json.dumps(context, ensure_ascii=False)
             if len(context_text.encode('utf-8')) > 65536:

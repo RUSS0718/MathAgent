@@ -15,10 +15,10 @@ const auth = useAuthStore()
 const sessions = useSessionsStore()
 const route = ref<DashboardRoute>(readDashboardRoute(globalThis.location.pathname))
 const ready = ref(false)
-const restricted = computed(() => route.value.view !== 'workspace' && !auth.reviewer)
+const restricted = computed(() => route.value.view === 'reviewer' || (route.value.view !== 'workspace' && !auth.reviewer))
 const reviewerSecret = ref('')
 const grantError = ref('')
-async function grant() { try { await (await import('./api/client')).api.grantReviewer(reviewerSecret.value); reviewerSecret.value = ''; await auth.check() } catch { reviewerSecret.value = ''; grantError.value = '无法取得审阅权限，请检查授权信息。' } }
+async function grant() { try { await (await import('./api/client')).api.grantReviewer(reviewerSecret.value); reviewerSecret.value = ''; await auth.check(); globalThis.location.assign('/dashboard/settings') } catch { reviewerSecret.value = ''; grantError.value = '无法取得审阅权限，请检查授权信息。' } }
 const error = ref('')
 async function initialize(): Promise<void> {
   error.value = ''

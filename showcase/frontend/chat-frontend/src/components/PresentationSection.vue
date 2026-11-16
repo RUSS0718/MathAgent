@@ -11,6 +11,7 @@ import StatusBadge from './ui/StatusBadge.vue'
 import UiButton from './ui/UiButton.vue'
 
 const props = defineProps<{
+  automatic?: boolean
   jobId: string
   mode?: PresentationMode
   jobStatus: string
@@ -23,7 +24,7 @@ const props = defineProps<{
 const selectedMode = ref<PresentationMode>(props.mode ?? 'teach')
 watch(() => [props.jobId, props.mode], () => { selectedMode.value = props.mode ?? 'teach' })
 const systemViewEnabled = import.meta.env.VITE_F7_SYSTEM_VIEW_ENABLED === 'true'
-const view = ref<'answer' | 'presentation'>('answer')
+const view = ref<'answer' | 'presentation'>(props.automatic ? 'presentation' : 'answer')
 const response = ref<PresentationResponse | null>(null)
 const loading = ref(false)
 const loadError = ref('')
@@ -81,7 +82,7 @@ async function load(generate = false): Promise<void> {
 }
 watch(() => [props.jobId, selectedMode.value, props.jobStatus, props.sourceVersion], () => {
   response.value = null
-  view.value = 'answer'
+  view.value = props.automatic ? 'presentation' : 'answer'
   void load()
 }, { immediate: true })
 </script>
@@ -105,10 +106,11 @@ watch(() => [props.jobId, selectedMode.value, props.jobStatus, props.sourceVersi
           <option value="teach">教学</option><option value="report">报告</option>
         </select>
       </label>
-      <UiButton :disabled="loading || !['succeeded', 'failed', 'canceled'].includes(jobStatus)" @click="load(true)">生成模板{{ modeLabels[selectedMode] }}</UiButton>
+      <UiButton v-if="!automatic" :disabled="loading || !['succeeded', 'failed', 'canceled'].includes(jobStatus)" @click="load(true)">生成模板{{ modeLabels[selectedMode] }}</UiButton>
       <a v-if="systemHref()" :href="systemHref()">查看版本化输出证据</a>
     </div>
-    <p class="presentation-note">实验性模板整理：复用已有答案与证据，不是模型新讲解，不升级证明等级。</p>
+    <p v-if="automatic" class="presentation-note">版本化规则答复 · 只读恢复 · 表达模型调用 {{ artifact?.output_request?.model_calls ?? '待核对' }} 次；不升级证明等级。</p>
+    <p v-else class="presentation-note">实验性模板整理：复用已有答案与证据，不是模型新讲解，不升级证明等级。</p>
     <dl class="data-list" aria-label="答案验证边界">
       <dt>验证方式</dt><dd>{{ answerReport?.checks?.checker ?? '未知 / 未记录' }}</dd>
       <dt>验证范围</dt><dd>{{ answerReport?.checks?.scope ?? '未知 / 未记录' }}</dd>

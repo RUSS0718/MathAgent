@@ -53,7 +53,7 @@ export const presentationArtifactSchema = z.object({
   revalidation_reason: z.string().nullable(),
   renderer: z.string(),
   output_request: z.object({
-    id: z.string(), kind: z.literal('presentation_only'), model_calls: z.literal(0), solver_resumed: z.literal(false),
+    id: z.string(), kind: z.literal('presentation_only'), model_calls: z.union([z.literal(0), z.literal(1)]), solver_resumed: z.literal(false),
   }).optional(),
   delivery: z.object({
     source_fingerprint: z.string(), source_versions: z.record(z.string(), z.unknown()),

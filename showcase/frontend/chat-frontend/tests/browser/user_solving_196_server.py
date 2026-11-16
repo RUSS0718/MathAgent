@@ -2,8 +2,10 @@
 import sys
 import tempfile
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[5]))
-from showcase.flask_app import create_app
+from showcase.flask_app import create_app  # noqa: E402
+
 with tempfile.TemporaryDirectory() as directory:
     app = create_app({'TESTING': True, 'SHOWCASE_DATA_DIR': directory,
         'SHOWCASE_PRESENTATION_ENABLED': True, 'SHOWCASE_JOB_DELAY_SECONDS': 0,

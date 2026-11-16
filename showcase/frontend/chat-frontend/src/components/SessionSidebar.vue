@@ -51,7 +51,7 @@ const emit = defineEmits<{
       </div>
     </nav>
     </div>
-    <div class="sidebar-footer"><UiButton v-if="auth.reviewer" variant="ghost" @click="emit('settings')"><UiIcon name="settings" />设置</UiButton><span class="profile-label">本机用户</span></div>
+    <div class="sidebar-footer"><UiButton v-if="auth.reviewer" variant="ghost" @click="emit('settings')"><UiIcon name="settings" />设置</UiButton><a v-if="!auth.reviewer" href="/dashboard/reviewer">技术审阅授权</a><span class="profile-label">本机用户</span></div>
   </aside>
   </ResponsivePanel>
 </template>
