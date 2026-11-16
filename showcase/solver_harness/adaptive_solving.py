@@ -75,7 +75,12 @@ def explore_direct(harness, run, problem):
         if run["state"]["phase"] == "TERMINAL":
             return run
         if run["state"]["phase"] != "EXPLORE_REVIEW":
-            return _route(harness, run, "complete_candidate_unavailable")
+            reason = "complete_candidate_unavailable"
+            finding = run["state"].get("exploration_findings", [])[-1]
+            if finding.get("initial_explore"):
+                reason = ("initial_explore_output_limit" if finding.get("end_reason") == "truncated_response"
+                          else "initial_explore_incomplete")
+            return _route(harness, run, reason)
         run = review_solution(
             harness, run, problem=problem, verifier_port=harness._verifier_port,
             max_model_calls=config.get("max_model_calls", 2),

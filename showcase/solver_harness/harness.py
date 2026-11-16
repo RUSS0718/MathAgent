@@ -84,6 +84,9 @@ class SolverHarness:
         from .dependency_routing import validate_config
 
         validate_config(self._config)
+        from .initial_explore import validate_config as validate_initial_explore
+
+        validate_initial_explore(self._config)
         if self._config.get("features", {}).get("auto_problem_spec") is True and any(
             self._config.get("features", {}).get(key) is not True
             for key in ("problem_spec", "stream_recovery")
@@ -275,6 +278,10 @@ class SolverHarness:
                                   effective_metadata.get("population_memory_advisory")
                                   if isinstance(effective_metadata, Mapping) else None
                               ))
+        if "initial_explore_policy_version" in self._config:
+            from .initial_explore import POLICY as INITIAL_POLICY
+
+            state["initial_explore_policy"] = dict(INITIAL_POLICY)
         pending_intake = auto_spec and supplied_spec is None
         if "routing_policy_version" in self._config:
             from .dependency_routing import POLICY
@@ -493,6 +500,8 @@ class SolverHarness:
             raise SolverValidationError("route_state_requires_internal_commit")
         if "route_policy" in normalized_updates:
             raise SolverValidationError("route_policy_is_run_frozen")
+        if "initial_explore_policy" in normalized_updates:
+            raise SolverValidationError("initial_explore_policy_is_run_frozen")
         if "routing_policy" in normalized_updates:
             raise SolverValidationError("routing_policy_is_run_frozen")
 

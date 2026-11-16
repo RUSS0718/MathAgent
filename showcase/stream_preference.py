@@ -105,7 +105,7 @@ def profile_set_fingerprint(profiles=None):
     return _fingerprint(identities)
 
 
-def _payload_details(adapter, messages):
+def _payload_details(adapter, messages, *, max_output_tokens=None):
     """Return the serialized stream fields used by the existing stream adapter."""
     client = adapter._get_client()
     model = getattr(client, "model", None) or adapter.model_id
@@ -117,7 +117,7 @@ def _payload_details(adapter, messages):
         "messages": messages,
         "stream": True,
         "temperature": adapter.temperature,
-        "max_tokens": adapter.max_tokens,
+        "max_tokens": adapter.max_tokens if max_output_tokens is None else max_output_tokens,
     }
     if thinking_mode is not None:
         payload["thinking_mode"] = thinking_mode
@@ -125,12 +125,20 @@ def _payload_details(adapter, messages):
 
 
 def select_transport(adapter, messages, *, policy="legacy", native_tools=False, profiles=None,
-                     schema_fingerprint=None):
+                     schema_fingerprint=None, max_output_tokens=None, transport_override=None):
     """Choose one transport before dispatch and return safe audit metadata."""
     if policy not in {"legacy", "stream_first"}:
         raise ValueError("star_transport_policy_invalid")
     configured_profiles = VERIFIED_STREAM_PROFILES if profiles is None else profiles
     profile_set_id = profile_set_fingerprint(configured_profiles)
+    if transport_override == "nonstream":
+        _, payload, _ = _payload_details(adapter, messages, max_output_tokens=max_output_tokens)
+        payload.pop("stream", None)
+        return {"policy": policy, "transport": "nonstream",
+                "reason": "initial_explore_explicit_nonstream", "evidence_kind": "documented",
+                "payload_fingerprint": _fingerprint(payload),
+                "effective_max_tokens": payload["max_tokens"],
+                "profile_set_fingerprint": profile_set_id}
     if policy == "legacy":
         if native_tools:
             return {
@@ -149,7 +157,7 @@ def select_transport(adapter, messages, *, policy="legacy", native_tools=False, 
             "profile_set_fingerprint": profile_set_id,
         }
 
-    client, payload, thinking_mode = _payload_details(adapter, messages)
+    client, payload, thinking_mode = _payload_details(adapter, messages, max_output_tokens=max_output_tokens)
     endpoint = getattr(client, "api_base", None)
     model = payload["model"]
     shape = _message_shape(messages)
@@ -191,7 +199,7 @@ def select_transport(adapter, messages, *, policy="legacy", native_tools=False, 
             endpoint == profile.endpoint
             and model == profile.model
             and adapter.temperature == profile.temperature
-            and adapter.max_tokens == profile.max_tokens
+            and payload["max_tokens"] == profile.max_tokens
             and (type(thinking_mode) is bool or thinking_mode is None)
             and thinking_mode == profile.thinking_mode
             and messages_match
