@@ -54,6 +54,9 @@ class ShowcaseClient:
         self.csrf_token = str(payload.get("csrf_token", ""))
         if not self.csrf_token:
             raise CliError("csrf_token_missing")
+        secret = os.environ.get("SHOWCASE_CLIENT_REVIEWER_SECRET")
+        if secret:
+            self.request("POST", "/api/reviewer/grant", payload={"secret": secret})
         return payload
 
     def request(
@@ -298,7 +301,7 @@ def _run_probe(client: ShowcaseClient, args: argparse.Namespace) -> None:
     for event in client.events(job_id):
         if event.get("event") != "heartbeat":
             _print(event)
-    _print({"phase": "report", "report": client.request("GET", f"/api/agent/jobs/{job_id}/report")})
+    _print({"phase": "report", "report": client.request("GET", f"/api/agent/jobs/{job_id}/answer")})
 
 
 def _parse_sse(raw: str) -> list[dict[str, Any]]:

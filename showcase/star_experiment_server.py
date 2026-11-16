@@ -1,6 +1,7 @@
 """Two trusted local product instances, authenticated public Job/Run requests."""
 
 import json
+import secrets
 import sqlite3
 import time
 import uuid
@@ -30,7 +31,8 @@ class ExperimentServer:
         self._previous_observer = adapter.outbound_observer
         adapter.outbound_observer = self._capture_outbound
         self.check_conditions()
-        self.app = create_app({"SHOWCASE_DATA_DIR": str(path), "SHOWCASE_JOB_DELAY_SECONDS": 0,
+        reviewer_secret = secrets.token_urlsafe(32)
+        self.app = create_app({"SHOWCASE_REVIEWER_SECRET": reviewer_secret,"SHOWCASE_DATA_DIR": str(path), "SHOWCASE_JOB_DELAY_SECONDS": 0,
             "SHOWCASE_STAR_FULL_ENABLED": True, "SHOWCASE_STAR_ADAPTER": adapter,
             "SHOWCASE_STAR_PYTHON_IMAGE_ID": CONTRACT_PYTHON_IMAGE_ID,
             "SHOWCASE_STAR_EXPERIMENT_POLICY": policy, "SHOWCASE_STAR_EVIDENCE_KIND": evidence_kind})
@@ -41,6 +43,10 @@ class ExperimentServer:
         )
         self.client = self.app.test_client()
         self.csrf = self.get("/api/check_auth")["csrf_token"]
+        granted = self.client.post("/api/reviewer/grant", json={"secret": reviewer_secret},
+            headers={"X-CSRF-Token": self.csrf})
+        if granted.status_code != 200:
+            raise RuntimeError("experiment_reviewer_admission_failed")
 
     def _capture_outbound(self, messages):
         context = json.loads(messages[-1]["content"])
