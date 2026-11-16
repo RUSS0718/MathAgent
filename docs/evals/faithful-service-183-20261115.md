@@ -1,5 +1,29 @@
 # #183 当前机器真实服务阶段记录
 
+## 2026-11-16：格式验收与重启中断
+
+用户将本票退出条件改为完整流程、正确格式及稳定答案读取；不再独立核对
+数学内容。适用[合同当前口径](../engineering/faithful-service-183-contract.md)，
+历史失败不升级、未触发不算通过，#183/#168 仍开放。
+
+live31 冻结源码 `19ef7881dd286b5584e70b162fb4a5596e3b5e04`，配置 SHA256
+`df24b52eac4bad622ac108883b94c6f3fd01ffb2adf1a46703ec528e2b36f42c`，
+Job `run_cc46710e947a82cfa5b57a2cf900a797`。原始 SQLite 最后事件8876，
+北京时间09:48:10.669815，Planner streaming；系统启动时间09:48:44。
+未发现本轮旧进程或临时检查仍在运行。`identity.py` 返回0，无源码/配置漂移。
+观察器 exited_without_final_status，不能冒认为正常终态或模型超时。
+
+同库以 `SHOWCASE_WORKER_ENABLED=False` 恢复后，真实 HTTP `/health` 200；
+公共 Job failed/needs_review，最后 Planner Attempt unknown，前10次已返回，
+共11次请求、4次工具、675874本地计账token、1个未决。原 deadline 与授权
+上限保持，未重新提交或重发未知。恢复投影 wall_time 包含停机至恢复的间隔，
+不当作模型实际执行耗时。无完整最终答案，不通过完整流程验收。
+证据 `artifacts/issue-183/live31/{recovery-job.json,recovery-report.json,
+service.stderr.log,source-identity.json}`。恢复服务仅供只读核对，另记进程身份。
+
+新场景 live32 仅计划验证短恒等式交付、可信缓存来源及条件性第二次自然命中；
+不再追加四次多项式数学试错。真实结果另记，当前不算通过。
+
 ## 2026-11-16：#185 交付后接续及 live28
 
 用户确认 #185 增量验收后，`0d9f86d` 已推送，#185 已关闭；本票和 #168 保持开放。

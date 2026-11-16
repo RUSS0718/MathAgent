@@ -1,5 +1,11 @@
 # MathAgent 文档索引
 
+2026-11-16 最新：#183 改按完整流程、格式传递及持久答案稳定读取验收，
+不独立核对数学内容。live31 在本机09:48重启时中断，恢复为failed/needs_review，
+最后Planner未知且未重发；不属于已证实的预算耗尽或模型超时。准备以短恒等式
+补交付/缓存/恢复证据，其他未触发能力仍未完成。以[当前合同](engineering/faithful-service-183-contract.md)、
+[阶段记录](evals/faithful-service-183-20261115.md)和[最新交接](engineering/unattended-ticket-handoff.md)首节为准。
+
 2026-11-16 接续状态：#185 已按用户确认关闭，交付 `0d9f86d` 已推送至
 `faithful-autonomous-population`。其增量验收不替代仍开放的 #183/#168；
 下列旧状态描述按各记录的源码与日期理解。
