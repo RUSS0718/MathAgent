@@ -39,7 +39,7 @@ def load_faithful_config(path):
     value = json.loads(path.read_text(encoding="utf-8-sig"), object_pairs_hook=_unique_object)
     _object(value, {"version", "python_image_id", "context_capacity", "budget"},
             {"population", "formal", "population_memory", "request_timeout_seconds",
-             "stream_timeout_policy_version", "adaptive_solving"})
+             "stream_timeout_policy_version", "adaptive_solving", "routing_policy_version"})
     if value["version"] != "faithful-service-v1":
         raise ValueError("faithful_config_version_invalid")
     image = value["python_image_id"]
@@ -55,6 +55,11 @@ def load_faithful_config(path):
         raise ValueError("faithful_adaptive_solving_invalid")
     if value.get("adaptive_solving") is True:
         features["adaptive_solving"] = True
+    if "routing_policy_version" in value:
+        from .solver_harness.dependency_routing import VERSION
+
+        if value["routing_policy_version"] != VERSION or value.get("adaptive_solving") is not True:
+            raise ValueError("routing_policy_version_invalid")
     memory = value.get("population_memory", False)
     if type(memory) is not bool:
         raise ValueError("faithful_population_memory_invalid")
@@ -85,6 +90,8 @@ def load_faithful_config(path):
     }
     if stream_policy is not None:
         config["SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION"] = stream_policy["policy_version"]
+    if "routing_policy_version" in value:
+        config["SHOWCASE_STAR_ROUTING_POLICY_VERSION"] = value["routing_policy_version"]
     if "population" in value:
         population = _object(value["population"], {"capacity", "budget"},
                              {"request_timeout_seconds"})
