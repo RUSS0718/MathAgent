@@ -128,3 +128,11 @@ blocked by policy；保留ignored目录，不绕过审批，主控可按自身�
 
 下一步：主控fresh merger审阅本票及公开合同，合并到integration，再由193消费原因和
 真实角色事件；阶段全仓/provider/browser不属于本次执行授权，不冒称完成#189整体。
+
+## 2026-11-17 主控集成与独立审阅
+
+fresh merger已合入 `5582e86419f0b806ab0d8d5ed72337cb242c3cfb`，合并树与来源9ff3db9完全一致，68个ignored证据文件复制至root `artifacts/issue192/` 并核对哈希一致。集成快速检查5/5通过，baseline/官方导入/JSON/Demo合同保持，日志摘要 `artifacts/issue189/backend-preflight.json`；可信JSON新键经实际loader离线准入通过，未创建app或发送provider请求。
+
+固定比较1307aab…5582e86的独立规范轴为0硬规范/0smell/0阻断，规格轴0已确认实现缺陷/0新增阻断。两轴报告为仓库外 `C:/Users/CQX/.codex/tmp/189-backend-review-{standards,spec}-20261117.md`。规格轴另保留两处证据限制：公共工具续接缺完整payload/serialized/fingerprint相等检查；同进程恢复不能证明跨进程公开Job恢复。主控已交唯一fresh实现者补齐检查及必要最小修复，尚未将这些空位视为已通过。
+
+接续顺序以当前任务图为准：191/192代码集成和上述补证审阅完成后，冻结源码/配置执行唯一自然S/D/U；再由193消费保存的真实结果作普通UI及只读刷新验收。自然运行和最终UI分别记录适用源码SHA，不为UI重复派发模型。整体验收及门禁仍待完成，本票保持open。原192工作树因自动审批拒绝删除自建ignored `.venv`（`blocked by policy`）暂保留，不绕过清理拒绝。
