@@ -178,7 +178,7 @@ function observeJob(jobId: string): void {
   void jobController.subscribe(jobId).then(async () => {
     await loadReport(jobId)
     const record = jobs.byId(jobId)
-    if (record?.error && selectedJob.value?.jobId === jobId) notice.value = record.error
+    if (record?.error && selectedJob.value?.jobId === jobId) notice.value = '进展连接暂不可用，请刷新任务状态；不会自动重发求解。'
   })
 }
 async function refreshActive(): Promise<void> {

@@ -32,6 +32,7 @@ for (const mode of ['solve', 'teach', 'report']) test(`196 ${mode} freezes comma
     count++; submitted = true
     return route.fulfill({ json: { success: true, job_id: 'run-demo', status: 'succeeded' } })
   })
+  await page.route('**/api/agent/submissions/*', route => route.fulfill({ json: { success: true, job_id: 'run-demo', session_id: 'session-demo', status: 'succeeded', result: { presentation_mode: mode } } }))
   await page.route('**/api/agent/jobs/run-demo', route => route.fulfill({ json: { success: true, job_id: 'run-demo', session_id: 'session-demo', status: 'succeeded', result: { presentation_mode: mode } } }))
   await page.route('**/api/agent/jobs/run-demo/answer', route => route.fulfill({ json: { job_id: 'run-demo', status: 'succeeded', mode, answer: '唯一答复', presentation_status: 'ready', notice: '' } }))
   await page.goto('/dashboard-assets/session/session-demo')
