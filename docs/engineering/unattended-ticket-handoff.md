@@ -1,10 +1,12 @@
-# 无人值守交接：#188已关闭，当前#190
+# 无人值守交接：#188/#190已关闭，当前#191
 
 ## 2026-11-17 当前授权与所有权
 
-用户授权完成当前ticket后推送并关闭，再领取剩余ticket；实现尽量交给子智能体，主控分派、等待及整合，不催促。#188及子票#194/#195/#196已工程验收退出、推送并经GitHub复核关闭，交付 `1307aab40b8788cc408ef65fc94dfc7f2b1dc1f8`，PR #197已ready，未合入main。当前已领取#190，按 `#190 → {#191, #192} → #193` 接续#189；较早父票及未实证能力保持各自边界。
+用户授权完成当前ticket后推送并关闭，再领取剩余ticket；实现尽量交给子智能体，主控分派、等待及整合，不催促。#188及子票#194/#195/#196已工程验收退出、推送并经GitHub复核关闭，交付 `1307aab40b8788cc408ef65fc94dfc7f2b1dc1f8`，PR #197已ready，未合入main。#190独立纵切已推送 `975560a9bd9c546d7e7b1ae7e8133071c3a41cf4` 并复核关闭；当前领取#191，按 `#190 → {#191, #192} → #193` 接续#189。#189整体仍未退出，较早父票及未实证能力保持各自边界。
 
-集成root为 `D:/project/工程化MathAgent/Challenge-Cup-2026`，新分支 `dependency-routing-189`，起点为上述#188交付，后续PR堆叠于 `user-solving-188`。#190实现者Sartre（01a1e5fb-0127-7550-b768-3b260834fd0a）独占 `D:/project/mathagent-190`、`feat/dependency-routing-190`，先提交任务设计，再按公共Job红绿实现。主控不重复其实现；待完成后由fresh merger集成。原四项用户dirt仍保留。#188门禁源码为 `8db100636a117c7219d10dfeb7c974f505819e2b`，与文档交付SHA区别记录。
+集成root为 `D:/project/工程化MathAgent/Challenge-Cup-2026`，分支 `dependency-routing-189`，起点为上述#188交付，PR #198堆叠于 `user-solving-188` 且保持draft。#190聚焦45项和集成快速5项通过，独立两轴0阻断，见[本票记录](dependency-routing-190-handoff.md)；60个证据文件复制校验一致后，已清理其工作树/实现者/merger/审查者。当前#191实现者Hooke（01a1e625-5916-7662-8b78-bc01bf8d72da）独占 `D:/project/mathagent-191`、`feat/natural-intake-191`，负责Intake指令及公共合同，先完成代码/受控检查；真实自然验收由主控在#191/#192集成冻结后唯一运行。#192实现尚未启动，避免共享指令文件并发。主控不重复实现，等待后由fresh merger集成。原四项用户dirt仍保留。#188门禁源码为 `8db100636a117c7219d10dfeb7c974f505819e2b`，与文档交付SHA区别记录。
+
+自然S/D题干已预登记于忽略目录 `artifacts/issue189/preregistration/natural-cases-v1.json`，当前 `registered_not_run`；题干SHA在该文件，实际源码/配置在运行前另行冻结。参考答案与观察预期不得进入Job或任何角色/验证器上下文，D未产生实际依赖记not_triggered，不补Spec或计划。当前无本轮live/长测试进程及临时检查。
 
 最终门禁 `artifacts/final-gates/user-solving-188-final-02/status.json`：北京时间2026-11-17 04:08:05启动，2123.609秒、passed 6/6、source_changed=false。完整测试2241项、0 failure/0 error/42 skip、1963.492秒；发布27项通过；前端精确日志79项全部通过、typecheck/build通过、audit 0漏洞，既有chunk warning非失败。fast包含baseline_snapshot及官方import/JSON合同；manifest前后指纹相同但不记录Git SHA，源码SHA与最终文档SHA分别登记。阶段、baseline验证流程及证据见[验收记录](../evals/user-solving-188-20261116.md)。不重复启动门禁或因纯文档修改重跑产品检查。
 
