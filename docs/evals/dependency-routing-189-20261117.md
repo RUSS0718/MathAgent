@@ -1,6 +1,6 @@
 # #189 目标依赖分流阶段验收
 
-2026-11-17，Asia/Shanghai。状态：190开发纵切已退出；191/192代码已集成，审查补证中；自然验收、193与整体门禁未完成。能力与效率不作外推。
+2026-11-17，Asia/Shanghai。状态：190开发纵切已退出；191/192代码与审查修复已集成，受影响两轴复查零阻断；自然验收、193与整体门禁未完成。能力与效率不作外推。
 
 ## 源码与边界
 
@@ -15,9 +15,9 @@
 | 依赖目标先规划，SOLVED不能短路 | Job/Run/当前Spec；Planner、依赖WorkUnits、Reasoner/Verifier实际派发；未验证材料不进已证账本 | 190最终45项、集成快速5项；[190记录](../engineering/dependency-routing-190-handoff.md) | 受控pass，190已关闭 |
 | 自然Intake依赖及Verifier实际作用 | 自然message→Spec→Plan→步骤反馈→最终答复，不能注入Spec/Plan | 191公共12项、角色14项、Intake9项，共35个不同方法、零skip；受控CHALLENGE后重做和后继门控 | 受控pass；自然not_run，191开放 |
 | 无依赖简单题有界直解 | 首次2048后独立整题审查，实际payload/Attempt/预算相符，其他角色基础cap不变 | 192最终21项；[192记录](../engineering/initial-explore-192-handoff.md) | 受控pass；自然not_run |
-| 未完成/已知截断转规划，unknown不自动派发 | Job及HTTP计数、公开原因、未验证来源；工具/有限修复同语义轮次 | 192最终21项及归档红绿；工具续接完整payload/指纹和公开跨进程恢复另补证 | 已有范围pass，补证中 |
+| 未完成/已知截断转规划，unknown不自动派发 | Job及HTTP计数、公开原因、未验证来源；工具/有限修复同语义轮次 | 192最终21项及归档红绿；reviewfix工具续接完整payload/指纹和公开跨进程恢复 | 受控pass；自然not_run |
 | 具体数学异议一次修正及后续规划 | 同Run审查反馈、原容量与来源，二次拒绝/无具体异议沿既有规划 | 190/191公共组与192修正用例 | 受控pass，不称自然稳定性 |
-| 原预算/截止/旧Run及默认路径 | 新策略仅新Run冻结；旧无策略/190-only/新容量恢复，GET零新增调用 | 190恢复组、192配置/transport/ledger；集成fast5/5 | 已有范围pass；跨进程补证中 |
+| 原预算/截止/旧Run及默认路径 | 新策略仅新Run冻结；旧无策略/190-only/新容量恢复，GET零新增调用 | 190恢复组、192配置/transport/ledger；reviewfix跨进程三场景、集成fast5/5 | 受控pass |
 | 普通用户真实路径与权限 | 普通投影/SSE/角色生命周期/唯一answer；ID、用量、hash不进普通DOM | 193仅只读设计 | not_run，193开放 |
 | 数学、测量、阶段退出 | 登记题逐角色duration/HTTP计数、来源/反馈/答案与独立人审；双轴及冻结最终门禁 | 下述自然登记与后续记录 | not_run，189开放 |
 
@@ -25,7 +25,11 @@
 
 ## 独立审查与准入
 
-固定比较1307aab…5582e86的规范轴0硬规范/0smell/0阻断；规格轴0已确认缺陷/0新增阻断，另提出工具续接完整payload/serialized/fingerprint和公开跨进程恢复两项证据限制。唯一fresh实现者正在补证及处理必要修复，未将空位算作通过。报告：`C:/Users/CQX/.codex/tmp/189-backend-review-{standards,spec}-20261117.md`。
+固定比较1307aab…5582e86的规范轴0硬规范/0smell/0阻断；规格轴提出工具续接完整payload/serialized/fingerprint和公开跨进程恢复两项证据限制。唯一fresh实现者补证时复现并修复显式非流指纹漏tools、工具续接协议失败恢复后额外repair两处缺陷，51个不同测试通过、零失败/错误/跳过；生产与测试源码1037ec9，集成0b92236。详见[补证记录](dependency-routing-review-20261117.md)，40份ignored证据已复制root并逐文件校验一致。
+
+两位fresh审阅者对5582e86…0b92236的受影响差异独立复查，规范轴0硬规范/0smell/0阻断，规格轴0已确认缺陷/0阻断，两项受控证据限制解除。原报告及复查报告均保留在仓库外 `C:/Users/CQX/.codex/tmp/189-backend-{review,rereview}-{standards,spec}-20261117.md`；后者已复制到ignored `artifacts/issue189/reviewfix/independent-review/`。自然及193不在此次结论范围。
+
+0b92236上主控复核快速检查5/5、3.097秒、fast_check=PASS，日志及执行源码见 `artifacts/issue189/backend-preflight-reviewfix.json`。先前快速检查的工具返回在交接中未保留结果，因此本次仅重新执行快速入口，不重复51项或最终全仓门禁。
 
 集成快速检查5/5、3.344秒、`fast_check=PASS`；可信JSON新策略经实际loader准入通过，摘要 `artifacts/issue189/backend-preflight.json`。独立临时库、worker关闭且禁止socket出站的运行时检查为ready=true，star_reference enabled、missing_capabilities为空，见 `artifacts/issue189/runtime-preflight-01.json`。没有创建题目或发送provider请求，不称线上能力验收。
 

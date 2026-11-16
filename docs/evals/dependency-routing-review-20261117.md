@@ -78,3 +78,14 @@ focus-06 为三项转绿；最终 merged-final 在合并源码复验。所有组
 单组测试最长27.609秒，无预期长测试、无创建的定时检查需要清理或转移。
 保留当前同一模型选择，具体型号与跨session继承无法独立确认；接续不得覆盖模型。
 未读 tests/test.md 或 root 用户未跟踪合同，未删除其他 worktree。
+
+## 集成后独立复查
+
+fresh merger集成至0b92236adb8bd6f7892dea8091cc661d89fcd0b1，tree与来源da87637一致。
+两位fresh审阅者固定检查5582e86…0b92236：规范轴0硬规范、0smell、0阻断；
+规格轴0已确认缺陷、0阻断，原两项受控证据限制解除。未重新运行provider或测试。
+报告保留于 `artifacts/issue189/reviewfix/independent-review/`，仓库外原件为
+`C:/Users/CQX/.codex/tmp/189-backend-rereview-{standards,spec}-20261117.md`。
+主控于0b92236运行 `uv run --no-sync python scripts/check_fast.py`，5项通过、3.097秒，
+fast_check=PASS；摘要和原输出保留在 `artifacts/issue189/backend-preflight-reviewfix.json`。
+这些证据不代表自然S/D/U、193或189整体退出。
