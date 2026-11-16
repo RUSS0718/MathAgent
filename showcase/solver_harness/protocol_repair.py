@@ -196,6 +196,30 @@ def repair_request(request, *, instruction=REPAIR_INSTRUCTION, failed_call=None)
                 normalize_problem_spec(parsed)
             except (TypeError, ValueError) as exc:
                 errors = [{"path": "$.root_obligations", "message": str(exc)}]
+            if not errors:
+                submitted = request.get("clarification_input")
+                condition = parsed.get("applicable_condition")
+                followup = parsed.get("clarification")
+                if submitted is None and condition is not None:
+                    errors = [{"path": "$.applicable_condition", "message":
+                               "intake phase: initial intake requires null applicable_condition"}]
+                elif submitted is not None:
+                    if condition is None and followup is None:
+                        message = ("intake phase: with clarification_input, applicable_condition and "
+                                   "clarification cannot both be null; return a condition taken from "
+                                   "the submitted answer with null clarification, or a followup "
+                                   "clarification with null applicable_condition; do not invent facts")
+                        errors = [{"path": path, "message": message} for path in
+                                  ("$.applicable_condition", "$.clarification")]
+                    elif condition is not None:
+                        if followup is not None:
+                            errors.append({"path": "$.clarification", "message":
+                                           "intake phase: clarification must be null when "
+                                           "applicable_condition is supplied"})
+                        if condition.strip() not in submitted["answer"]:
+                            errors.append({"path": "$.applicable_condition", "message":
+                                           "intake phase: applicable_condition must be taken "
+                                           "from the submitted clarification_input.answer"})
         if not errors:
             return repaired
         repaired["format_repair"] = {"previous_response": text, "schema_errors": errors}

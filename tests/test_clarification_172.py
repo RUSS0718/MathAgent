@@ -173,6 +173,8 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
                 def repair_initial(context):
                     self.assertIn("repair_instruction", context)
                     self.assertNotIn("clarification_input", context)
+                    self.assertIn("$.applicable_condition", [error["path"] for error in
+                                  context["format_repair"]["schema_errors"]])
                     return SPEC
 
                 initial = index == 0
@@ -184,6 +186,12 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
                 def repair(context):
                     self.assertIn("repair_instruction", context)
                     self.assertEqual(ANSWER, context["clarification_input"]["answer"])
+                    if index in (1, 2):
+                        diagnostics = context.get("format_repair", {}).get("schema_errors", [])
+                        self.assertIn("$.applicable_condition", [e["path"] for e in diagnostics])
+                        if index == 2:
+                            self.assertIn("$.clarification", [e["path"] for e in diagnostics])
+                            self.assertTrue(all("phase" in e["message"] for e in diagnostics))
                     return {**REASSESSED, "clarification": None} if initial else REASSESSED
 
                 def solve(context):
