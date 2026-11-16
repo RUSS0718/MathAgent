@@ -17,6 +17,18 @@ partial_aborted/unsupported_graph_step_dependency，零晋升、不猜选、不�
 artifacts/issue-183/gate-control/runs/gate-06/及gate06-failure-recheck.*。
 不追加provider试跑，门禁复验完成前不标退出。
 
+后续d1169ee（集成709bdb5）仅修正两行multistep受控回复：未完成证明应返回
+CHALLENGE/PARTIAL，避免非法ACCEPT触发修复并错位消费NOT_FOUND。原搜索和
+成功修正断言保持，运行时schema未放宽。红绿及最终7项聚焦通过，双轴复查
+clear，证据gate06-recheck/及gate06-review/。native原用例在worker隔离两次、
+整文件6项及组合7项均通过；主checkout诊断观察到冻结事件1.735秒到达，但
+未确认原失败根因，不声称修复并发或SQLite锁。诊断性30秒等待不作为原测试通过。
+
+按接续合同的失败定点复验规则，冻结当前源码运行gate-07：复查native全6项、
+修改的multistep及原SQLite失败用例共8项，补六组mutation、两个CLI、发布及
+前端阶段，并复核与gate-06间仅文档和上述测试夹具有差异、产品字节相同。
+这是保留原失败的组合门禁，不宣称单次2214项全仓通过；期间源码保持冻结。
+
 用户最新明确允许受控路由、以尽早结束为目标，覆盖较早的自然选择要求。
 本票不再追加provider试跑，按当前[合同](../engineering/faithful-service-183-contract.md)
 修复已知工程异常并验收接线。下表复用历史证据，最终源码回归由本轮唯一门禁
