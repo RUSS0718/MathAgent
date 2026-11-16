@@ -1098,6 +1098,7 @@ class WorkspaceService:
         experiment_binding: Mapping[str, Any] | None = None,
         problem_spec: Mapping[str, Any] | None = None,
         presentation_mode: str | None = None,
+        automatic_presentation: bool = True,
         formal_policy: Mapping[str, Any] | None = None,
         clarification_source: Mapping[str, Any] | None = None,
         revision_source: Mapping[str, Any] | None = None,
@@ -1114,7 +1115,7 @@ class WorkspaceService:
             "presentation_schema_version": SCHEMA_VERSION,
             "presentation_policy_version": POLICY_VERSION,
             "presentation_rule": frozen_rule(requested_presentation_mode),
-        })
+        } if automatic_presentation and experiment_binding is None else {})
         selected = self.star_pipeline if solver_mode in STAR_MODES else self.pipeline
         from .solver_harness.formal_policy import FormalPolicyError, normalize_formal_policy
 
