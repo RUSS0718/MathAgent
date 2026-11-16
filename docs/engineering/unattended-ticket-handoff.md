@@ -2,13 +2,15 @@
 
 ## 2026-11-17 当前授权与所有权
 
-用户授权完成当前ticket后推送并关闭，再领取剩余ticket；实现尽量交给子智能体，主控分派、等待及整合，不催促。#188及子票#194/#195/#196已工程验收退出、推送并经GitHub复核关闭，交付 `1307aab40b8788cc408ef65fc94dfc7f2b1dc1f8`，PR #197已ready，未合入main。#190独立纵切已推送 `975560a9bd9c546d7e7b1ae7e8133071c3a41cf4` 并复核关闭；当前领取#191，按 `#190 → {#191, #192} → #193` 接续#189。#189整体仍未退出，较早父票及未实证能力保持各自边界。
+用户授权完成当前ticket后推送并关闭，再领取剩余ticket；实现尽量交给子智能体，主控分派、等待及整合，不催促。#188及子票#194/#195/#196已工程验收退出、推送并经GitHub复核关闭，交付 `1307aab40b8788cc408ef65fc94dfc7f2b1dc1f8`，PR #197已ready，未合入main。#190独立纵切已推送 `975560a9bd9c546d7e7b1ae7e8133071c3a41cf4` 并复核关闭；当前#191代码已集成、#192实施中，按 `#190 → {#191, #192} → #193` 接续#189。#189整体仍未退出，较早父票及未实证能力保持各自边界。
 
 集成root为 `D:/project/工程化MathAgent/Challenge-Cup-2026`，分支 `dependency-routing-189`，起点为上述#188交付，PR #198堆叠于 `user-solving-188` 且保持draft。#190聚焦45项和集成快速5项通过，独立两轴0阻断，见[本票记录](dependency-routing-190-handoff.md)。#191代码切片由fresh merger集成至 `147f8eacb87ece8e77d7512dff61a1161ed9e517`，随后 `adc01500a6bdfae8c76bdcd8ed6f0871663de6b0` 仅清理新增测试末尾空行；生产Intake指令增加7行，35个不同聚焦方法通过、零跳过，见[受控记录](../evals/natural-intake-191-20261117.md)。20个ignored证据文件已复制至root `artifacts/issue191/` 并校验哈希一致，干净且已合并的191工作树和相关代理已清理。#191仍open，不能把受控HTTP当作自然模型成功。
 
 #192已指派RUSS0718，claim comment `6930238848`。Hume（01a1e621-e66f-7413-87fa-a01ba643ad89）独占 `D:/project/mathagent-192`、`feat/initial-explore-192`，基于adc0150；负责首次Explore的2048/请求、1语义轮次、新Run独立冻结及请求/预算/Attempt/transport一致性，先合同后公共红绿。2048是工程假设，已有usage缺失，不能声称实测token分位数。不得修改共享adapter属性、根预算、其他角色容量或unknown不自动重发边界；原191 Intake指引保留。无provider/服务/整仓门禁授权给实现者，主控不重复实施、不催促。#193的Copernicus（01a1e648-36e6-7f83-8b80-36f3071b6c70）仅完成只读设计，待192事件合同稳定后再给独立工作树。原四项用户dirt仍保留。
 
-自然S/D题干已预登记于忽略目录 `artifacts/issue189/preregistration/natural-cases-v1.json`，新增单目标题U登记于同目录 `natural-U-v1.json`，均为 `registered_not_run`；题干SHA在相应文件。U的人审参考另存仓库外，主控独立有理数枚举核对21组；答案不得进入运行器或模型。D未产生实际依赖，或U自然产生依赖/首次完整完成，均按相应路径记not_triggered，不注入Spec/计划或诱导重跑。真实运行等191/192/193代码集成后冻结同一源码/配置，S/D/U每题一次，由主控唯一启动。Boyle（01a1e649-3731-70d1-b853-bff46093cef9）仅准备ignored `artifacts/issue189/live01/` 运行器，独立端口8119和data，不触碰用户8103；未启动provider、服务或定时检查。当前无本轮live/长测试进程。#188门禁源码为 `8db100636a117c7219d10dfeb7c974f505819e2b`，与文档交付SHA区别记录。
+自然S/D题干已预登记于忽略目录 `artifacts/issue189/preregistration/natural-cases-v1.json`，新增单目标题U登记于同目录 `natural-U-v1.json`，均为 `registered_not_run`；题干SHA在相应文件。U的人审参考另存仓库外，主控独立有理数枚举核对21组；答案不得进入运行器或模型。D未产生实际依赖，或U自然产生依赖/首次完整完成，均按相应路径记not_triggered，不注入Spec/计划或诱导重跑。先在191/192代码集成及独立审阅通过后冻结同一源码/配置，由主控唯一启动S/D/U每题一次；实际退出后才实施193，复用保存结果做只读UI/刷新验收，分别记录自然运行与UI源码SHA，不为UI重新派发模型。Boyle已完成运行器及公共Flask/Job受控离线smoke，真实provider为0，核心HTTP读取/分页通过；自然验收仍NOT_RUN。Dalton（01a1e659-e22f-7940-9b17-6d08464af0ea）仅在ignored `artifacts/issue189/live01/` 修简有效配置审计与冻结时序：独立服务配置快照，不修改受验公共Run响应。独立端口8119和data，不触碰用户8103；未启动provider、服务或定时检查。当前无本轮live/长测试进程。#188门禁源码为 `8db100636a117c7219d10dfeb7c974f505819e2b`，与文档交付SHA区别记录。
+
+独立只读审阅另确认#130按开发前决策地图范围完成交接，已由主控于2026-11-17关闭并重读确认；结案评论 `6930388527`。原五类待明确事项由146/156/157/168等执行票承接，不视为产品或实验完成；审阅报告 `C:/Users/CQX/.codex/tmp/130-closure-audit-20261117.md`。Boole（01a1e656-6341-7143-8c05-53c5b9fdcdd5）仅只读核对157旧批次证据，不启动或重试实验。
 
 最终门禁 `artifacts/final-gates/user-solving-188-final-02/status.json`：北京时间2026-11-17 04:08:05启动，2123.609秒、passed 6/6、source_changed=false。完整测试2241项、0 failure/0 error/42 skip、1963.492秒；发布27项通过；前端精确日志79项全部通过、typecheck/build通过、audit 0漏洞，既有chunk warning非失败。fast包含baseline_snapshot及官方import/JSON合同；manifest前后指纹相同但不记录Git SHA，源码SHA与最终文档SHA分别登记。阶段、baseline验证流程及证据见[验收记录](../evals/user-solving-188-20261116.md)。不重复启动门禁或因纯文档修改重跑产品检查。
 
