@@ -168,6 +168,7 @@ class FaithfulF6OutputApiTest(unittest.TestCase):
     def setUp(self):
         self.fixture = s06.PublicPresentationApiTest("test_explicit_outputs_keep_answer_and_persist_artifact")
         self.fixture.legacy_policy = "faithful-output-v2"
+        self.addCleanup(self.fixture.doCleanups)
         self.fixture.setUp()
         self.addCleanup(self.fixture.tearDown)
 
