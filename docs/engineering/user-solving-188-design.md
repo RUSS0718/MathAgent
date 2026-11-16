@@ -19,7 +19,7 @@
 
 项目内版本化 solve/teach/report 规则作为受控输入。新任务冻结新策略和规则版本，旧 Run 不回填、不自动生成；旧结果可只读展示并说明历史格式。新终态由工作线程触发生成及持久保存，GET、刷新、视图切换不触发工作。按 Job、模式、规则和来源快照幂等占位，提交前校验来源；进程中断或未知远端结果保留失败/待复核，禁止自动重发。来源失效不冒认当前结果。
 
-默认求解可直接采用已经生成的原答案并应用默认规则的保守边界，零额外调用。教学/报告使用一次有界表达调用（无工具、无求解重启、无自动重试），独立记录输出成本，不提高原 Run 预算。最大输出 4096 token、请求期限不超过 120 秒；使用现有模型适配器的超时/未知语义。离线 fake 使用显式标注的确定性生成接缝，只证明工程合同。缺少模型、容量不足、超时、协议无效或来源失效均保存失败并回退已有原答案；不得称为格式成功。生成身份、规则版本、来源指纹和成本保存在 PresentationArtifact，普通结果不暴露内部身份。改写数学段落保持未验证，不继承原答案文字审查等级。
+默认求解可直接采用已经生成的原答案并应用默认规则的保守边界，零额外调用。教学/报告使用一次有界表达调用（无工具、无求解重启、无自动重试），独立记录输出成本，不提高原 Run 预算。最大输出 4096 token、请求期限不超过 120 秒；使用现有模型适配器的超时/未知语义。离线 fake 明确显示模拟执行；未提供模型时教学/报告诚实回退，受控模型响应仅用于工程合同测试。缺少模型、容量不足、超时、协议无效或来源失效均保存失败并回退已有原答案；不得称为格式成功。生成身份、规则版本、来源指纹和成本保存在 PresentationArtifact，普通结果不暴露内部身份。改写数学段落保持未验证，不继承原答案文字审查等级。
 
 ## 验收
 
@@ -29,6 +29,6 @@
 
 规则由 output_rules.py 版本化；每个新 Job（含省略 mode 的 solve）冻结规则正文、版本、SHA256、4096 输出 token、120 秒及一次 attempt。来源指纹包含冻结规则；_presentation_identity 在结果替换时保留它。solve 原文交付零新增调用；teach/report 复用现有 InternModelAdapter 及独立输出预算，客户端副本限制一次 attempt，不修改求解器客户端。上下文仅含脱敏原题、当前答案、范围及公开证据摘要，超过 64KiB 保存失败，不截断来源。
 
-output_generations 在网络前持久占位，每个 Job 不自动重发；启动时 generating 转 unknown。生成不修改 Job status/updated_at，不新增来源事件；保存产物沿用来源 CAS，附加规则身份比较。来源变化保留 stale 回退。产物记录独立模型、角色、attempt、usage 和预算；数学表达无 claim refs，保持 not_verified。
+output_generations 在网络前持久占位，每个 Job 不自动重发；启动时 generating 转 unknown，新规则终态任务尚无占位也封存为待复核回退。生成不修改 Job status/updated_at；保存产物沿用来源 CAS，附加规则身份比较，表达保存事件不进入求解来源指纹。来源变化保留 stale 回退。产物记录独立模型、角色、attempt、usage 和预算；数学表达无 claim refs，保持 not_verified。实验 campaign 创建入口不启用普通自动表达，避免改变其终态归档身份；旧任务不回填规则。
 
 #195 调用 presentation_api.get_final_answer(workspace_service,user_id,job_id,public_report=None)，注册只读 /answer。helper 使用 store Job + current_solver，避免读接口执行恢复对账；public_report 参数仅为兼容保留。pending 正文为空；ready 唯一正文；failed/stale/legacy 使用当前原答案。新规则任务的旧技术输出 POST/GET 也仅读取已保存自动产物；历史无规则任务保留旧显式技术接口。
