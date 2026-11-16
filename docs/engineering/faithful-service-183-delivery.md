@@ -1,5 +1,32 @@
 # #183 当前机器阶段交付
 
+## 2026-11-16 当前入口（最终门禁后核验）
+
+用户最新允许受控路由工程验收并要求尽早收尾。能力映射及实际限制见
+[阶段记录](../evals/faithful-service-183-20261115.md)首节，退出要求见
+[当前合同](faithful-service-183-contract.md)。受控接线不等于自然触发稳定性，
+不声明数学正确率或F8通过。live33已有两份真实模型答案、首题真实Lean L2、
+真实UI/刷新及独立禁worker重启一致证据；自然缓存未命中，旧失败保持。
+
+当前机器使用以下命令；8103已监听时复用实例，不重复启动：
+
+```powershell
+Set-Location -LiteralPath 'D:\project\工程化MathAgent\Challenge-Cup-2026'
+uv run --env-file .env python showcase_server.py --mode live --host 127.0.0.1 --port 8103 --faithful-config artifacts/issue-183/live33/service.json --data-dir artifacts/issue-183/live33/data
+```
+
+需要既有.env、uv依赖、Docker及固定Python/Lean镜像、已构建前端和上述持久目录。
+不部署公网，不把本机配置当作干净环境安装包。新任务保持48模型/48HTTP/8工具、
+2097152 token/3600秒、faithful-stream-v1；Lean90秒、1CPU/1024MB。
+
+访问[工作区](http://127.0.0.1:8103/dashboard)或
+[已保存首题](http://127.0.0.1:8103/dashboard/run/run_d44ac65dbda220c5020399de4047f1b8)。
+检查`/health`返回ok。前台用Ctrl+C停止；后台进程记录将保存在
+artifacts/issue-183/delivery-current-process.json，停止前须核对PID和创建时间。
+重启使用同一data目录，已有答案通过原深链读取，不重新提交历史题目；unknown不自动重发。
+
+## 历史入口（2026-11-15，非本轮当前配置）
+
 日期2026-11-15；[阶段验收](../evals/faithful-service-183-20261115.md)。当前服务仅为阶段交付；#183/#168仍开放，不能称完整自主能力已通过。运行需要本机既有.env凭证、uv环境、Docker及已核验Python/Lean镜像、artifacts/issue-183/live02/配置/manifest/持久数据和已构建前端。运行产物按仓库规则不提交；本说明适用于当前机器，不是干净环境安装包。
 
 在仓库根目录启动（端口已监听时先使用现有实例）：
