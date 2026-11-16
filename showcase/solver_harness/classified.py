@@ -172,6 +172,11 @@ def build_entries(state, reply, *, step_id, report, review_call_id, suffix,
                     reason = "cyclic_dependency"
                 elif value not in known:
                     reason = "unknown_dependency"
+                elif (state.get("proof_graph_policy", {}).get("enabled") is True
+                      and value in state.get("steps", {})):
+                    # A step can establish several propositions. Never guess a
+                    # result identity for a graph edge from a step-level alias.
+                    reason = "unsupported_graph_step_dependency"
                 if reason:
                     break
         if reason is not None:

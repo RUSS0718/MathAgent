@@ -50,6 +50,38 @@ class FaithfulGraphPublicIntegrationTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(calls, len(self.outbound))
         self.assertEqual(graph, self.report(job_id)["solver"]["solver"]["progress"]["proof_graph"])
 
+    def test_step_dependency_is_known_protocol_failure_not_job_execution_failure(self):
+        report = {"argument": "proof", "claims": [
+            {"statement": "A", "label": "hard-verify"}], "blocked": False}
+        review = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
+                  "objection": "", "classified_outcomes": [
+                      {"category": "Lemma", "statement": "A", "scope": "base",
+                       "claim_indexes": [0]}]}
+        dependent = {**review, "classified_outcomes": [
+            {"category": "Lemma", "statement": "B", "scope": "next",
+             "claim_indexes": [0], "dependencies": ["S1"]}]}
+        self.open_star([
+            NEED_PLAN,
+            {"version": 1, "steps": [
+                {"step_id": "S1", "title": "Base", "objective": "base"},
+                {"step_id": "S2", "title": "Next", "objective": "next",
+                 "depends_on": ["S1"]}]},
+            report, review, report, dependent,
+        ], SHOWCASE_STAR_FEATURES={**FEATURES, "proof_graph": True},
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8))
+        job_id = self.create_job()
+        terminal = self.terminal(job_id)
+        self.assertNotEqual("job_execution_failed", terminal.get("error_code"), terminal)
+        result = self.report(job_id)["solver"]["solver"]
+        self.assertEqual("partial_aborted", result["status"])
+        self.assertEqual("unsupported_graph_step_dependency", result["result_reason"])
+        self.assertEqual([], result["recovery"]["unknown_calls"])
+        graph = result["progress"]["proof_graph"]
+        self.assertEqual(1, sum(item["status"] == "accepted" for item in graph["attempts"]))
+        calls = len(self.outbound)
+        self.report(job_id)
+        self.assertEqual(calls, len(self.outbound))
+
     def test_default_job_does_not_add_graph_projection(self):
         job_id = self.run_graph_job(False)
         self.assertNotIn("proof_graph", self.report(job_id)["solver"]["solver"]["progress"])

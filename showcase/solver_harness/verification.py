@@ -429,6 +429,11 @@ def verify_step(
             state, reply, step_id=step_id, report=report, review_call_id=call_id,
             suffix=suffix, plan_version=plan["version"], attempt_index=attempt,
         )
+    if any(item["reason"] == "unsupported_graph_step_dependency" for item in rejections):
+        # The completed review is known, but cannot be admitted to this graph.
+        # Fail before promoting any part of this ruling or its obligations.
+        verification.update(valid=False, reason="unsupported_graph_step_dependency")
+        outcomes = []
     obligation_evidence, obligation_rejections = [], []
     if (verification["valid"] and verification["verdict"] == "ACCEPT"
             and (not checkpoint_mode or checkpoint_status == "FINAL")
@@ -563,8 +568,10 @@ def verify_step(
             )
     if not verification["valid"] and not checkpoint_accepted:
         state_updates["status"] = "partial_aborted"
-        if verification.get("reason") == "invalid_verifier_verdict":
-            state_updates["result_reason"] = "invalid_verifier_verdict"
+        if verification.get("reason") in {
+            "invalid_verifier_verdict", "unsupported_graph_step_dependency",
+        }:
+            state_updates["result_reason"] = verification["reason"]
     event = {
         "event_id": f"step-reviewed-{step_id}{suffix}",
         "type": "step_reviewed",
