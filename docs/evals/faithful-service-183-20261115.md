@@ -1,5 +1,34 @@
 # #183 当前机器真实服务阶段记录
 
+## 2026-11-16：live32 局部通过，按用户要求终止
+
+冻结源码 `3c0b3432a57ad439b1637735fc7d2213c7008a6f`，配置 SHA256
+`e00d8711ade0349e2d006cfcd0f12ceedf7ec2377fb4a76d5d95e47b8027025d`。
+普通浏览器 Job `run_e0016275a9077b4bb03b43f8521a9714` succeeded，
+87.427秒，4次模型/HTTP、1次真实Lean工具、179868本地计账token，0未决。
+Intake→必要授权澄清及第二次Intake→Explore→整题审查→答案交付；
+457字符非空 final_response，真实审查与绑定照实保留，不独立复算数学。
+前端原答案区域实际可见；刷新零写、零页面错误，答案/预算/Attempt均一致。
+
+可信缓存闭环失败：Lean Attempt `formal_1d8b4636bbf94522954de6fdabcd88a3`
+实际执行55.718秒，退出码152，stderr明确 `CPU time limit exceeded`，
+工具状态error、无grade，清理已确认；配置限制1 CPU、1024MB、90秒。
+记录的CPU使用25.558秒、内存峰值1073741824字节，不将内存峰值冒认为
+已证实的OOM根因。无可信回执、缓存entries为空，观察器按预定前提停止，
+第二次提交没有发生；这不是主任务答案交付失败，也不是总预算耗尽。
+没有证据据此认定#185增量修复失效，完整深度稳定性仍未证明。
+
+证据 `artifacts/issue-183/live32/{run1-final.json,run1-report.json,
+run1-cache.json,run1-ui.json,run1-refresh.json,run1-terminal.png,status.json,
+source-identity.json}`；终态后identity.py返回0。浏览器观察器、wrapper、
+服务PID6132均已退出，8103无监听，MathAgent-Issue183-live32临时任务已删除。
+未停止其他项目容器，未操作旧8100。只读重启、缓存自然命中、自然并发/
+热切换及F4等本轮未执行，不能由首题通过替代。
+
+用户要求“live32再失败的话就终止”，本轮至此停止：不再修复、提高限额、
+新建模型任务、运行门禁或自动接续。#183/#168保持开放；#185增量交付
+保持原验收结论。只归档本次证据，不改历史失败、unknown或受保护文件。
+
 ## 2026-11-16：格式验收与重启中断
 
 用户将本票退出条件改为完整流程、正确格式及稳定答案读取；不再独立核对
