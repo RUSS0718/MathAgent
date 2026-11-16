@@ -50,37 +50,61 @@ class FaithfulGraphPublicIntegrationTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(calls, len(self.outbound))
         self.assertEqual(graph, self.report(job_id)["solver"]["solver"]["progress"]["proof_graph"])
 
-    def test_step_dependency_is_known_protocol_failure_not_job_execution_failure(self):
+    def run_dependency_job(self, dependency="S1", *, multiple=False, enabled=True):
         report = {"argument": "proof", "claims": [
             {"statement": "A", "label": "hard-verify"}], "blocked": False}
         review = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
                   "objection": "", "classified_outcomes": [
                       {"category": "Lemma", "statement": "A", "scope": "base",
                        "claim_indexes": [0]}]}
+        if multiple:
+            report["claims"].append({"statement": "C", "label": "hard-verify"})
+            review["classified_outcomes"].append(
+                {"category": "Lemma", "statement": "C", "scope": "base", "claim_indexes": [1]})
         dependent = {**review, "classified_outcomes": [
             {"category": "Lemma", "statement": "B", "scope": "next",
-             "claim_indexes": [0], "dependencies": ["S1"]}]}
+             "claim_indexes": [0], "dependencies": [dependency]}]}
         self.open_star([
             NEED_PLAN,
             {"version": 1, "steps": [
                 {"step_id": "S1", "title": "Base", "objective": "base"},
                 {"step_id": "S2", "title": "Next", "objective": "next",
                  "depends_on": ["S1"]}]},
-            report, review, report, dependent,
-        ], SHOWCASE_STAR_FEATURES={**FEATURES, "proof_graph": True},
+            report, review, {**report, "claims": [{"statement": "B", "label": "hard-verify"}]}, dependent, {"final_response": "2"}, ACCEPT,
+        ], SHOWCASE_STAR_FEATURES={**FEATURES, "proof_graph": enabled},
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=8, max_http_attempts=8))
         job_id = self.create_job()
         terminal = self.terminal(job_id)
+        return terminal, self.report(job_id)["solver"]["solver"]
+
+    def test_unique_step_dependency_completes(self):
+        terminal, result = self.run_dependency_job()
+        self.assertEqual("succeeded", terminal["status"], result)
+        graph = result["progress"]["proof_graph"]
+        self.assertEqual(2, sum(item["status"] == "accepted" for item in graph["attempts"]))
+        child = next(item for item in graph["attempts"] if item["dependencies"])
+        parent = next(item for item in graph["attempts"] if not item["dependencies"])
+        self.assertEqual([parent["conclusion"]], child["dependencies"])
+
+    def test_step_dependency_is_known_protocol_failure_not_job_execution_failure(self):
+        terminal, result = self.run_dependency_job(multiple=True)
         self.assertNotEqual("job_execution_failed", terminal.get("error_code"), terminal)
-        result = self.report(job_id)["solver"]["solver"]
         self.assertEqual("partial_aborted", result["status"])
         self.assertEqual("unsupported_graph_step_dependency", result["result_reason"])
         self.assertEqual([], result["recovery"]["unknown_calls"])
         graph = result["progress"]["proof_graph"]
-        self.assertEqual(1, sum(item["status"] == "accepted" for item in graph["attempts"]))
-        calls = len(self.outbound)
-        self.report(job_id)
-        self.assertEqual(calls, len(self.outbound))
+        self.assertEqual(2, sum(item["status"] == "accepted" for item in graph["attempts"]))
+
+    def test_exact_result_dependency_completes(self):
+        terminal, result = self.run_dependency_job("S1:outcome-1")
+        self.assertEqual("succeeded", terminal["status"], result)
+        self.assertEqual(2, sum(item["status"] == "accepted"
+                               for item in result["progress"]["proof_graph"]["attempts"]))
+
+    def test_legacy_step_dependency_completes(self):
+        terminal, result = self.run_dependency_job(enabled=False)
+        self.assertEqual("succeeded", terminal["status"], result)
+        self.assertNotIn("proof_graph", result["progress"])
 
     def test_default_job_does_not_add_graph_projection(self):
         job_id = self.run_graph_job(False)

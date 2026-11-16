@@ -7,7 +7,7 @@ import re
 import unicodedata
 from collections.abc import Mapping
 
-from .classified import PROVEN_CATEGORIES, _complete_receipt_ids
+from .classified import PROVEN_CATEGORIES, _complete_receipt_ids, graph_step_result
 from .counterexample import consumed_result
 
 
@@ -129,7 +129,8 @@ def _verify_record(state: Mapping, record: Mapping) -> tuple[dict | None, str | 
         and item.get("scope") == scope
         and item.get("claim_indexes", []) == record.get("claim_indexes", [])
         and item.get("receipt_ids", []) == record.get("receipt_ids", [])
-        and item.get("dependencies", []) == record.get("dependencies", [])
+        and [graph_step_result(state, dep) if dep in state.get("steps", {}) else dep
+             for dep in item.get("dependencies", [])] == record.get("dependencies", [])
         for item in response.get("classified_outcomes", [])
     ):
         return None, "review_did_not_accept_record"
