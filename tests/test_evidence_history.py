@@ -9,7 +9,10 @@ from showcase.flask_app import create_app
 
 
 class EvidenceHistoryContractTest(unittest.TestCase):
-    setUp = workspace_contracts.WorkspaceJobsContractTest.setUp
+    def setUp(self):
+        workspace_contracts.WorkspaceJobsContractTest.setUp(self)
+        from tests.reviewer_support import reviewer_client
+        reviewer_client(self.app, self.client)
     def tearDown(self):
         if hasattr(self, "second_app"):
             for name in ("showcase_workspace_service", "showcase_run_service", "loopback_store"):
@@ -38,6 +41,8 @@ class EvidenceHistoryContractTest(unittest.TestCase):
         self.addCleanup(second_app.extensions["showcase_workspace_service"].close)
         def append(index):
             with (self.app if index == 0 else second_app).test_client() as client:
+                from tests.reviewer_support import reviewer_client
+                reviewer_client(client.application, client)
                 csrf = client.get("/api/check_auth").get_json()["csrf_token"]
                 return client.post(f"/api/agent/jobs/{job_id}/polynomial-check", json=payload, headers={"X-CSRF-Token": csrf}).status_code
         with ThreadPoolExecutor(max_workers=2) as executor:
@@ -58,7 +63,8 @@ class EvidenceHistoryContractTest(unittest.TestCase):
         for name in ("showcase_workspace_service", "showcase_run_service", "loopback_store"):
             self.app.extensions[name].close()
         self.app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(self.root)})
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.client.get("/api/check_auth")
         self.assertEqual(before, self.client.get(f"/api/runs/{job_id}/evidence").get_json())
         self.assertEqual(before, self.client.get(f"/api/runs/{job_id}/evidence").get_json())
@@ -67,7 +73,8 @@ class EvidenceHistoryContractTest(unittest.TestCase):
         for name in ("showcase_workspace_service", "showcase_run_service", "loopback_store"):
             self.app.extensions[name].close()
         self.app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(self.root), "SHOWCASE_WORKER_ENABLED": False})
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         session = self.client.post("/api/new_chat", headers=self._headers()).get_json()["new_session_id"]
         job_id = self.client.post("/api/agent/jobs", json={"message": "x-1=0", "session_id": session}, headers=self._headers(**{"Idempotency-Key": "00000000-0000-4000-8000-000000000025"})).get_json()["job_id"]

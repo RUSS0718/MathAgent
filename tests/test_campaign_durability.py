@@ -20,7 +20,8 @@ class CampaignDurabilityTest(CampaignFixture):
                 "SHOWCASE_WORKER_ENABLED": False,
             }
         )
-        client = reader.test_client()
+        from tests.reviewer_support import reviewer_client
+        client, _ = reviewer_client(reader)
         client.get("/api/check_auth")
         creator_workspace = self.app.extensions["showcase_workspace_service"]
         reader_workspace = reader.extensions["showcase_workspace_service"]

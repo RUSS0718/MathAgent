@@ -1,6 +1,7 @@
 """Report service admission without confusing configuration with live acceptance."""
 
 import json
+import secrets
 import tempfile
 from pathlib import Path
 
@@ -18,7 +19,17 @@ def run_runtime_check(config):
 def check_runtime(app):
     """Inspect public capabilities; never dispatch a mathematical task."""
     try:
-        capabilities = app.test_client().get("/api/capabilities").get_json()
+        # This trusted local diagnostic owns the app and explicitly enters the
+        # same reviewer boundary as technical clients; ordinary HTTP stays scoped.
+        secret = app.config.get("SHOWCASE_REVIEWER_SECRET") or secrets.token_urlsafe(32)
+        app.config["SHOWCASE_REVIEWER_SECRET"] = secret
+        client = app.test_client()
+        csrf = client.get("/api/check_auth").get_json()["csrf_token"]
+        granted = client.post("/api/reviewer/grant", json={"secret": secret},
+                              headers={"X-CSRF-Token": csrf})
+        if granted.status_code != 200:
+            raise RuntimeError("runtime_check_reviewer_admission_failed")
+        capabilities = client.get("/api/capabilities").get_json()
         requested = {"star_reference"}
         if app.config.get("SHOWCASE_STAR_POPULATION_ENABLED"):
             requested.add("star_population")

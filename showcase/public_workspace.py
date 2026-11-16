@@ -34,6 +34,11 @@ def solver_view(value):
 def result_view(value):
     value = obj(value)
     result = fields(value, ('presentation_mode',))
+    mode = value.get('execution_mode')
+    if mode in {'fake', 'live', 'unavailable'}:
+        result['execution_mode'] = mode
+    elif isinstance(mode, str) and mode.startswith('star'):
+        result['execution_mode'] = 'live'
     if isinstance(value.get('solver'), Mapping):
         result['solver'] = solver_view(value['solver'])
     faithful = obj(value.get('faithful'))

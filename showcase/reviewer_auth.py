@@ -17,6 +17,8 @@ PUBLIC_RULES = {
     '/api/agent/jobs/<job_id>/clarifications/<request_id>',
     '/api/agent/jobs/<job_id>/clarifications/<request_id>/new-task',
     '/api/agent/jobs/<job_id>/revisions',
+    '/api/agent/jobs/<job_id>/interventions/pause',
+    '/api/agent/jobs/<job_id>/interventions/resume',
 }
 
 
@@ -27,7 +29,7 @@ def technical_request(request):
         return asset in {'system','campaigns','settings','run'} or asset.startswith(('run/','runs/','system/','campaigns/'))
     if rule == '/dashboard/<path:subpath>':
         subpath = request.view_args.get('subpath', '')
-        return not (subpath in {'chat', 'workspace'} or re.fullmatch(r'session/[A-Za-z0-9._-]{1,64}', subpath))
+        return not (subpath in {'chat', 'workspace', 'reviewer'} or re.fullmatch(r'session/[A-Za-z0-9._-]{1,64}', subpath))
     return rule not in PUBLIC_RULES
 
 

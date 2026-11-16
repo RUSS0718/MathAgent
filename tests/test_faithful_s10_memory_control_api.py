@@ -118,8 +118,10 @@ class FaithfulMemoryControlAPITest(StarJobFixture, unittest.TestCase):
                 "INSERT INTO auth_sessions VALUES (?,?,?,?,?,?)",
                 ("other-auth", "other-user", "csrf", now, now, None),
             )
-        foreign = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        foreign, _ = reviewer_client(self.app)
         foreign.set_cookie("auth_session", "other-auth")
+        reviewer_client(self.app, foreign)
         self.assertEqual(
             404,
             foreign.get(self.path(self.session, "population", self.session)).status_code,
@@ -208,7 +210,8 @@ class FaithfulMemoryControlAPITest(StarJobFixture, unittest.TestCase):
         )
         for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(restarted.extensions[name].close)
-        client = restarted.test_client()
+        from tests.reviewer_support import reviewer_client
+        client, _ = reviewer_client(restarted)
         client.set_cookie("auth_session", self.client.get_cookie("auth_session").value)
         after_response = client.get(audit_url)
         self.assertEqual(200, after_response.status_code, after_response.get_json())

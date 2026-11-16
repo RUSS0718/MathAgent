@@ -81,7 +81,8 @@ class RunControlContractTest(unittest.TestCase):
         for key in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(self.app.extensions[key].close)
         self.addCleanup(self.release.set)
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         self.session = self.client.post("/api/new_chat", headers=self.headers()).get_json()[
             "new_session_id"
@@ -203,7 +204,8 @@ class RunControlContractTest(unittest.TestCase):
         for key in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(recovered.extensions[key].close)
         self.addCleanup(self.release.set)
-        client = recovered.test_client()
+        from tests.reviewer_support import reviewer_client
+        client, _ = reviewer_client(recovered)
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
         job = client.get(f"/api/agent/jobs/{job_id}").get_json()
         self.assertEqual("needs_review", job["error"])
@@ -238,7 +240,8 @@ class RunControlContractTest(unittest.TestCase):
         )
         for key in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(recovered.extensions[key].close)
-        client = recovered.test_client()
+        from tests.reviewer_support import reviewer_client
+        client, _ = reviewer_client(recovered)
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
         response = client.post(
             f"/api/agent/jobs/{job_id}/resume",
@@ -369,7 +372,8 @@ class RunControlContractTest(unittest.TestCase):
         barrier = threading.Barrier(2)
 
         def resume():
-            client = self.app.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, _ = reviewer_client(self.app)
             csrf = client.get("/api/check_auth").get_json()["csrf_token"]
             barrier.wait(2)
             return client.post(

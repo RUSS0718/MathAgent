@@ -21,7 +21,7 @@ const label = computed(() => props.clarification ? '需要澄清：请补充下�
 
     <div class="action-row">
       <UiButton v-if="state.allowed_actions.includes('pause')" :disabled="busy" @click="emit('pause')">请求安全暂停</UiButton>
-      <UiButton v-if="!clarification && state.allowed_actions.includes('resume')" :disabled="busy" @click="emit('resume')">恢复执行</UiButton>
+      <UiButton v-if="!clarification && (state.allowed_actions.includes('resume') || state.allowed_actions.includes('resume_intervention'))" :disabled="busy" @click="emit('resume')">恢复执行</UiButton>
       <UiButton v-if="!clarification && state.allowed_actions.includes('cancel')" :disabled="busy" @click="emit('cancel')">取消任务</UiButton>
       <UiButton v-if="['unknown', 'pause_requested'].includes(state.phase)" :disabled="busy" @click="emit('refresh')">刷新任务状态</UiButton>
     </div>

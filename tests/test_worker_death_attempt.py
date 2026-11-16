@@ -30,7 +30,8 @@ app = create_app({'SHOWCASE_MODE':'live', 'SHOWCASE_DATA_DIR':str(root), 'SHOWCA
 def killed_http(*args, **kwargs):
     os._exit(73)
 patch('llm_client.requests.post', side_effect=killed_http).start()
-browser = app.test_client()
+from tests.reviewer_support import reviewer_client
+browser, _ = reviewer_client(app)
 csrf = browser.get('/api/check_auth').get_json()['csrf_token']
 headers = {'X-CSRF-Token':csrf}
 session = browser.post('/api/new_chat', headers=headers).get_json()['new_session_id']
@@ -43,7 +44,8 @@ time.sleep(20)
             job_id = json.loads((Path(directory) / 'job.json').read_text())
             app = create_app({'SHOWCASE_MODE': 'fake', 'SHOWCASE_DATA_DIR': directory, 'SHOWCASE_WORKER_ENABLED': False})
             try:
-                browser = app.test_client()
+                from tests.reviewer_support import reviewer_client
+                browser, _ = reviewer_client(app)
                 browser.get('/api/check_auth')
                 report = browser.get(f'/api/agent/jobs/{job_id}/report').get_json()
                 evidence = browser.get(f'/api/runs/{job_id}/evidence').get_json()

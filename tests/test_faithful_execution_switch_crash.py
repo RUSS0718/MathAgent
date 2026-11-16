@@ -40,7 +40,8 @@ class ExecutionSwitchCrashTest(unittest.TestCase):
             ):
                 app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": directory})
                 try:
-                    client = app.test_client()
+                    from tests.reviewer_support import reviewer_client
+                    client, _ = reviewer_client(app)
                     client.get("/api/check_auth")
                     for _ in range(2):
                         response = client.get(f'/api/agent/jobs/{saved["job_id"]}')

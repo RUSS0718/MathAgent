@@ -44,7 +44,8 @@ class LiveCampaignContractTest(CampaignFixture):
                 "SHOWCASE_CAMPAIGNS_LIVE_ENABLED": True,
             }
         )
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
 
     def test_capabilities_identify_fake_provider_in_live_orchestration(self):
@@ -60,7 +61,8 @@ class LiveCampaignContractTest(CampaignFixture):
         job_id = created["pairs"][0]["arms"]["candidate"]["job_id"]
         second = create_app({**self.app.config, "SHOWCASE_WORKER_ENABLED": False})
         try:
-            browser = second.test_client()
+            from tests.reviewer_support import reviewer_client
+            browser, _ = reviewer_client(second)
             browser.get("/api/check_auth")
             job = browser.get(f"/api/agent/jobs/{job_id}").get_json()
             self.assertEqual("needs_review", job["error"])
@@ -112,6 +114,9 @@ class LiveCampaignContractTest(CampaignFixture):
         payload["budget"].update(max_model_calls=6, max_http_attempts=6, max_tokens=20_000)
         with patch("llm_client.requests.post", return_value=Response()):
             before = self.finished(self.submit(payload).get_json()["campaign_id"])
+            for arm in before["pairs"][0]["arms"].values():
+                job = self.client.get(f"/api/agent/jobs/{arm['job_id']}").get_json()
+                self.assertNotIn("presentation_rule", job["result"])
         with patch("showcase.run_budget.time.time", return_value=time.time() + 3600):
             after = self.detail(before["campaign_id"])
         self.assertEqual(before, after)

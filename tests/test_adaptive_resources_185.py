@@ -3,6 +3,7 @@
 import time
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from showcase.run_budget import BudgetExhausted, RunBudgetLedger, RunBudgetLimits, bind_budget
 from showcase.solver_harness.adaptive_resources import allocate, bind_allocation
@@ -39,7 +40,9 @@ class AdaptiveResourceTest(unittest.TestCase):
         self.assertEqual(self.budget.snapshot()["deadline_at"] - 1080,
                          floor["work_deadline_at"])
 
-    def test_work_deadline_leaves_final_pair_and_repair_without_resetting_root(self):
+    @patch("showcase.run_budget.time.time", return_value=2_000_000_000.0)
+    def test_work_deadline_leaves_final_pair_and_repair_without_resetting_root(self, clock):
+        clock.return_value = self.budget.snapshot()["started_at"]
         original = self.budget.snapshot()
         with bind_budget(self.budget):
             floor, error = allocate(self.harness, self.run, {

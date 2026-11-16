@@ -11,6 +11,7 @@ import { useJobsStore } from '../stores/jobs.store'
 import { useSessionsStore } from '../stores/sessions.store'
 import { useFilesStore } from '../stores/files.store'
 import FinalAnswer from './FinalAnswer.vue'
+import { isApiError } from '../api/errors'
 import { JobController } from '../runtime/jobs/job-controller'
 import { parsePresentationInput } from '../runtime/presentation/mode'
 import type { PresentationMode } from '../runtime/presentation/mode'
@@ -22,6 +23,11 @@ import UiIcon from './ui/UiIcon.vue'
 import ConversationWorkbench from './ConversationWorkbench.vue'
 import ClarificationPanel from './ClarificationPanel.vue'
 import TaskRevisionPanel from './TaskRevisionPanel.vue'
+
+function ordinaryError(error: unknown, fallback: string): string {
+  if (isApiError(error) && (error.code === 'csrf_invalid' || error.code === 'auth_required')) return '会话已失效，请刷新后重试。'
+  return fallback
+}
 
 const auth = useAuthStore()
 const sessions = useSessionsStore()
@@ -106,7 +112,7 @@ async function cancelCurrent(): Promise<void> {
     if (result.status && !['canceled', 'failed', 'succeeded'].includes(result.status)) void jobController.subscribe(target.jobId)
     await loadReport(target.jobId)
     notice.value = result.existing ? '已重放取消结果。' : '任务已取消。'
-  } catch (error) { notice.value = error instanceof Error ? error.message : '取消失败。' }
+  } catch (error) { notice.value = ordinaryError(error, '取消请求未能确认，请刷新任务状态。') }
 }
 async function refreshTask(): Promise<void> {
   const target = selectedJob.value
@@ -119,7 +125,7 @@ async function pauseCurrent(): Promise<void> {
   if (!target || submitting.value || !taskState.value?.allowed_actions.includes('pause')) return
   submitting.value = true
   try { await api.requestInterventionPause(target.jobId); await refreshTask() }
-  catch (error) { notice.value = error instanceof Error ? error.message : '暂停请求未能确认。' }
+  catch (error) { notice.value = ordinaryError(error, '暂停请求未能确认，请刷新任务状态。') }
   finally { submitting.value = false }
 }
 async function resumeCurrent(): Promise<void> {
@@ -127,7 +133,9 @@ async function resumeCurrent(): Promise<void> {
   if (!target || submitting.value) return
   submitting.value = true
   try {
-    const result = await api.resumeJob(target.jobId, '', createIdempotencyKey())
+    const result = taskState.value?.allowed_actions.includes('resume_intervention')
+      ? await api.resumeInterventionParent(target.jobId, createIdempotencyKey())
+      : await api.resumeJob(target.jobId, '', createIdempotencyKey())
     if (!result.success) throw new Error(result.error ?? '恢复失败。')
     jobs.confirmResume(target.jobId)
     if (reportDisposed || sessions.currentId !== target.sessionId) return
@@ -142,7 +150,7 @@ async function resumeCurrent(): Promise<void> {
     }
     if (!observed || observed.status === 'queued' || observed.status === 'running') observeJob(target.jobId)
     else if (observed.status === 'succeeded') await loadReport(target.jobId)
-  } catch (error) { notice.value = error instanceof Error ? error.message : '恢复失败。' }
+  } catch (error) { notice.value = ordinaryError(error, '恢复请求未能确认，请刷新任务状态。') }
   finally { submitting.value = false }
 }
 async function clarificationChanged(jobId: string, nextJobId?: string): Promise<void> {
@@ -322,7 +330,7 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
         <article class="workbench-problem"><small>当前题干 · {{ { solve: '求解', teach: '教学', report: '报告' }[presentationMode ?? 'solve'] }}</small><p>{{ selectedProblem }}</p></article>
         <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" :resuming="submitting" @resume="resumeCurrent" @changed="clarificationChanged" @cancel="cancelCurrent" />
         <TaskRevisionPanel :key="selectedJob.jobId + ':revision'" :job-id="selectedJob.jobId" :session-id="selectedJob.sessionId" :owner="auth.username" :mode="solverMode" :state="selectedJob.result?.faithful" :disabled="submitting || checkingSubmission" @changed="clarificationChanged" />
-        <FinalAnswer :key="selectedJob.jobId" :job-id="selectedJob.jobId" />
+        <FinalAnswer :status="selectedJob.status" :key="selectedJob.jobId" :job-id="selectedJob.jobId" />
         <details :open="!['succeeded', 'failed', 'canceled'].includes(selectedJob.status)" class="execution-process"><summary>求解过程</summary>
         <ConversationWorkbench :key="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" :animate-live="locallyStartedJob === selectedJob.jobId" ordinary />
         </details>

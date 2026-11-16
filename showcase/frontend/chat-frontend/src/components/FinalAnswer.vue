@@ -2,7 +2,7 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api/client'
 import { renderSafeMarkdown } from '../renderers/markdown-adapter'
-const props = defineProps<{ jobId: string }>()
+const props = defineProps<{ jobId: string; status?: string }>()
 const answer = ref<Awaited<ReturnType<typeof api.finalAnswer>> | null>(null)
 const error = ref('')
 const waiting = ref(true)
@@ -26,13 +26,13 @@ async function load(id: string, token: number, attempt = 0): Promise<void> {
   if (waiting.value) timer = setTimeout(() => { void load(id, token, attempt + 1) }, 2000)
 }
 function refresh() { clearTimeout(timer); answer.value = null; error.value = ''; waiting.value = true; void load(props.jobId, ++generation) }
-watch(() => props.jobId, refresh, { immediate: true })
+watch(() => [props.jobId, props.status], refresh, { immediate: true })
 onUnmounted(() => { generation++; clearTimeout(timer) })
 </script>
 <template>
   <section class="report-section" aria-label="最终答复" :aria-busy="waiting">
     <h2>最终答复<span v-if="answer"> · {{ labels[answer.mode] }}</span></h2>
-    <p v-if="answer && boundaries[answer.presentation_status]" role="status">{{ boundaries[answer.presentation_status] }}</p>
+    <p v-if="answer && !answer.notice && boundaries[answer.presentation_status]" role="status">{{ boundaries[answer.presentation_status] }}</p>
     <p v-if="answer?.notice">{{ answer.notice }}</p>
     <div v-if="html" class="report-content" v-html="html"></div>
     <p v-if="!answer" role="status">{{ error || '正在读取答复…' }}</p>

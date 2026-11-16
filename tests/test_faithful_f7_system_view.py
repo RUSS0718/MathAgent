@@ -27,7 +27,8 @@ class FaithfulF7SystemViewApiTest(unittest.TestCase):
             "SHOWCASE_PRESENTATION_ENABLED": True,
             "SHOWCASE_F7_SYSTEM_VIEW_ENABLED": True,
         })
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.headers = {"X-CSRF-Token": self.client.get("/api/check_auth").get_json()["csrf_token"],
                         "Idempotency-Key": str(uuid.uuid4())}
         self.session_id = self.client.post("/api/new_chat", headers=self.headers).get_json()["new_session_id"]
@@ -60,7 +61,8 @@ class FaithfulF7SystemViewApiTest(unittest.TestCase):
             "SHOWCASE_WORKER_ENABLED": False,
         })
         try:
-            response = default_app.test_client().get("/api/faithful/runs")
+            from tests.reviewer_support import reviewer_client
+            response = reviewer_client(default_app)[0].get("/api/faithful/runs")
             self.assertEqual(404, response.status_code)
         finally:
             default_app.extensions["showcase_workspace_service"].close()
@@ -133,8 +135,10 @@ class FaithfulF7SystemViewApiTest(unittest.TestCase):
                 "second-session", "second-user", "csrf", "2026-11-11T00:00:00Z",
                 "2026-11-11T00:00:00Z", None,
             ))
-        stranger = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        stranger, _ = reviewer_client(self.app)
         stranger.set_cookie("auth_session", "second-session")
+        reviewer_client(self.app, stranger)
         self.assertEqual([], stranger.get("/api/faithful/runs").get_json()["items"])
         self.assertEqual(404, stranger.get(
             f"/api/faithful/runs/{self.run_id}?scheme=f7-deeplink-v1",
@@ -189,6 +193,11 @@ class FaithfulF7SystemViewApiTest(unittest.TestCase):
 
 
 class FaithfulF7PersistedSolverTest(StarJobFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        from tests.test_s06_presentation import seed_legacy_jobs
+        seed_legacy_jobs(self)
+
     def test_budget_stopped_persisted_candidate_keeps_best_effort_without_a_review_upgrade(self):
         self.open_star([SOLVED],
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=1, max_http_attempts=1, max_tool_calls=0),

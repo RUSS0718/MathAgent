@@ -47,7 +47,8 @@ class LiveWorkspacePipelineTest(unittest.TestCase):
                 "SHOWCASE_DATA_DIR": str(Path(directory) / "showcase"),
                 "SHOWCASE_LIVE_PIPELINE": StubLivePipeline(),
             })
-            client = app.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, _ = reviewer_client(app)
             csrf = client.get("/api/check_auth").get_json()["csrf_token"]
             session_id = client.post("/api/new_chat", headers={"X-CSRF-Token": csrf}).get_json()["new_session_id"]
             response = client.post(

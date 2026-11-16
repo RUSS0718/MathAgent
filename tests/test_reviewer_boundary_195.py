@@ -9,7 +9,7 @@ class ReviewerBoundaryTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.config = {"TESTING": True, "SHOWCASE_DATA_DIR": self.tmp.name,
-                       "SHOWCASE_WORKER_ENABLED": False, "SHOWCASE_REVIEWER_SECRET": "test-review-secret"}
+                       "SHOWCASE_WORKER_ENABLED": False, "SHOWCASE_FAITHFUL_INTERVENTION_ENABLED": True, "SHOWCASE_REVIEWER_SECRET": "test-review-secret"}
         self.apps = []
         self.app = self.make_app()
         self.client = self.app.test_client()
@@ -160,3 +160,15 @@ class ReviewerBoundaryTest(unittest.TestCase):
         self.assertTrue(answer.json['answer'])
         self.assertNotIn('final_response', client.get('/api/agent/jobs/'+job).json.get('result',{}))
         self.assertEqual(answer.json, client.get('/api/agent/jobs/'+job+'/answer').json)
+
+    def test_public_grant_entry_and_ordinary_controls_reach_handlers(self):
+        self.assertEqual(200, self.client.get('/dashboard/reviewer').status_code)
+        for action in ('pause', 'resume'):
+            response = self.client.post('/api/agent/jobs/missing/interventions/' + action,
+                json={}, headers={'X-CSRF-Token': self.csrf, 'Idempotency-Key': '90a50d53-904f-4453-845a-61f15f27acc5'})
+            self.assertEqual(404, response.status_code)
+        self.assertEqual(403, self.client.get('/api/agent/jobs/missing/interventions').status_code)
+
+    def test_ordinary_progress_preserves_safe_execution_mode(self):
+        from showcase.public_workspace import result_view
+        self.assertEqual('fake', result_view({'execution_mode': 'fake'})['execution_mode'])

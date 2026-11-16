@@ -1,7 +1,7 @@
 import { expect, test, type Page, type APIRequestContext } from '@playwright/test'
 
 const publicOrigin = 'http://127.0.0.1:18090'
-const appOrigin = process.env.S09_BROWSER_APP_ORIGIN ?? 'http://127.0.0.1:5176'
+const appOrigin = process.env.S09_BROWSER_APP_ORIGIN ?? 'http://127.0.0.1:5189'
 const expectedGrade = process.env.S09_BROWSER_FORMAL_GRADE
 const expectedAnswer = 'x + x = 2 * x'
 
@@ -25,12 +25,16 @@ async function publicHeaders(page: Page) {
   const response = await page.request.get(`${publicOrigin}/api/check_auth`)
   expect(response.ok()).toBe(true)
   const auth = await response.json()
+  const granted = await page.request.post(`${publicOrigin}/api/reviewer/grant`, {
+    headers: { 'X-CSRF-Token': auth.csrf_token }, data: { secret: 'local-s09-browser-fixture' },
+  })
+  expect(granted.status()).toBe(200)
   return { 'X-CSRF-Token': auth.csrf_token, 'Idempotency-Key': crypto.randomUUID() }
 }
 
 async function createFormalJob(page: Page) {
-  const fixture = await loadFormalFixture(page.request)
   const headers = await publicHeaders(page)
+  const fixture = await loadFormalFixture(page.request)
   const sessionResponse = await page.request.post(`${publicOrigin}/api/new_chat`, { headers })
   expect(sessionResponse.ok()).toBe(true)
   const session = await sessionResponse.json()
@@ -63,10 +67,16 @@ for (const viewport of [
   test(`real public formal report is read-only on ${viewport.name}`, async ({ page }, testInfo) => {
     const pageErrors: string[] = []
     const consoleErrors: string[] = []
+    const missingResources: string[] = []
     const posts: string[] = []
     page.on('pageerror', error => pageErrors.push(error.message))
     page.on('console', message => {
-      if (message.type() === 'error') consoleErrors.push(message.text())
+      if (message.type() === 'error' && !message.text().includes('status of 404')) consoleErrors.push(message.text())
+    })
+    // Disabled optional reviewer sections have a documented 404 contract.
+    // Keep every other missing resource fatal, including assets and core APIs.
+    page.on('response', response => {
+      if (response.status() === 404 && !/\/api\/(agent\/jobs\/[^/]+\/(memory|population-memory|interventions|outputs\/solve)|sessions\/[^/]+\/(goal-cache|population-memory|memory\/population\/[^/]+))(\/control)?$/.test(new URL(response.url()).pathname)) missingResources.push(response.url())
     })
     page.on('request', request => {
       if (request.method() === 'POST') posts.push(new URL(request.url()).pathname)
@@ -137,6 +147,7 @@ for (const viewport of [
 
     expect(pageErrors).toEqual([])
     expect(consoleErrors).toEqual([])
+    expect(missingResources).toEqual([])
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     await page.screenshot({
       path: testInfo.outputPath(`faithful-s09-formal-${viewport.name}.png`),

@@ -90,7 +90,8 @@ class LiveToolWorkspaceContractTest(unittest.TestCase):
             cleanup.callback(app.extensions["showcase_workspace_service"].close)
             cleanup.callback(app.extensions["showcase_run_service"].close)
             cleanup.callback(app.extensions["loopback_store"].close)
-            client = app.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, _ = reviewer_client(app)
             csrf = client.get("/api/check_auth").get_json()["csrf_token"]
             session_id = client.post(
                 "/api/new_chat", headers={"X-CSRF-Token": csrf}

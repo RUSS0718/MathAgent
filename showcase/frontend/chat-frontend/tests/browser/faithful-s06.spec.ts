@@ -1,187 +1,63 @@
 import { expect, test, type Page } from '@playwright/test'
 
-const modes = [
-  { command: '/solve', label: '求解' },
-  { command: '/teach', label: '教学' },
-  { command: '/report', label: '报告' },
-]
+const origin = 'http://127.0.0.1:8091'
+async function grant(page: Page) {
+  const auth = await (await page.request.get(`${origin}/api/check_auth`)).json()
+  const response = await page.request.post(`${origin}/api/reviewer/grant`, {
+    headers: { 'X-CSRF-Token': auth.csrf_token }, data: { secret: 'local-browser-fixture' },
+  })
+  expect(response.status()).toBe(200)
+  return { 'X-CSRF-Token': auth.csrf_token, 'Idempotency-Key': crypto.randomUUID() }
+}
 
-test('S06 parses Composer output commands and restores each independent artifact', async ({ page }) => {
-  const submissions: Array<{ body: Record<string, unknown>; key: string; jobId: string }> = []
-  let presentationPosts = 0
-  page.on('request', request => {
-    if (request.method() === 'POST' && /\/api\/agent\/jobs\/[^/]+\/(solve|teach|report)$/.test(new URL(request.url()).pathname)) presentationPosts++
-  })
-  await page.route('**/api/agent/jobs', async (route) => {
-    if (route.request().method() !== 'POST') return route.continue()
-    const body = route.request().postDataJSON() as Record<string, unknown>
-    const key = route.request().headers()['idempotency-key'] ?? ''
-    const submission = { body, key, jobId: '' }
-    submissions.push(submission)
-    const response = await route.fetch()
-    const accepted = await response.json() as { job_id?: string }
-    submission.jobId = accepted.job_id ?? ''
-    await route.fulfill({ response })
-  })
+for (const mode of ['solve', 'teach', 'report']) test(`S06 ${mode} restores one automatic answer without manual generation`, async ({ page }) => {
+  let sessionId = ''
+  page.on('request', r => { if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/agent/jobs') sessionId = r.postDataJSON().session_id })
+  const mutations: string[] = []
+  page.on('request', r => { if (r.method() === 'POST' && /\/jobs\/[^/]+\/(solve|teach|report)$/.test(new URL(r.url()).pathname)) mutations.push(r.url()) })
   await page.goto('/dashboard-assets/')
-  const artifactIds: string[] = []
-
-  for (const { command, label } of modes) {
-    await page.getByRole('button', { name: '新建会话', exact: true }).click()
-    await expect(page.getByText('正在加载工作台…', { exact: true })).toHaveCount(0)
-    const problem = `S06 browser ${label}`
-    await page.getByLabel('数学问题').fill(`${command} ${problem}`)
-    await page.getByLabel('数学问题').press('Enter')
-
-    await expect.poll(() => submissions.filter((item) => item.body.presentation_mode === command.slice(1) && item.body.message === problem && item.jobId).length).toBeGreaterThan(0)
-    const output = page.getByLabel('S06 输出模式')
-    await expect(output).toBeVisible({ timeout: 20000 })
-    const submitted = submissions.findLast((item) => item.body.presentation_mode === command.slice(1) && item.body.message === problem && item.jobId)
-    expect(submitted?.body.message).toBe(problem)
-    expect(submitted?.body.presentation_mode).toBe(command.slice(1))
-    expect(submitted?.jobId).toMatch(/^run_/)
-    await expect(output).toHaveAttribute('data-presentation-mode', command.slice(1))
-    await expect(output).toContainText('尚未保存')
-    expect(presentationPosts).toBe(artifactIds.length)
-    await output.getByRole('button', { name: '生成模板' + label, exact: true }).click()
-    await expect(output).toHaveAttribute('data-source-job-id', submitted!.jobId)
-    await expect(output).toHaveAttribute('data-presentation-mode', command.slice(1))
-    await expect(output).toContainText(label)
-    await expect(output).toContainText('Fake Agent completed a deterministic showcase run.')
-    await expect(output.getByRole('button', { name: '原答案' })).toBeVisible()
-    await expect(output.getByRole('button', { name: '表达内容' })).toBeVisible()
-    await expect(output).toContainText('验证状态')
-    await expect(output).toHaveAttribute('data-artifact-id', /^presentation:/)
-    artifactIds.push((await output.getAttribute('data-artifact-id')) ?? '')
-    await output.getByRole('button', { name: '表达内容' }).click()
-    await expect(output).toContainText('已验证范围')
-    await expect(output).toContainText('当前来源')
-
-    const sessionId = String(submitted?.body.session_id)
-    await page.goto(`/dashboard-assets/session/${sessionId}`)
-    await page.reload()
-    const restored = page.getByLabel('S06 输出模式')
-    await expect(restored).toBeVisible({ timeout: 20000 })
-    await expect(restored).toHaveAttribute('data-source-job-id', submitted!.jobId)
-    await expect(restored).toHaveAttribute('data-presentation-mode', command.slice(1))
-    await expect(restored).toContainText(label)
-    await expect(restored).toContainText('表达内容')
-    await expect(restored).toContainText('已验证范围')
-    await expect(restored).toContainText(problem)
-    expect(await restored.getAttribute('data-artifact-id')).toBe(artifactIds.at(-1))
-    expect(presentationPosts).toBe(artifactIds.length)
-  }
-  expect(new Set(artifactIds).size).toBe(3)
-
-  await page.getByRole('button', { name: '新建会话', exact: true }).click()
-    await expect(page.getByText('正在加载工作台…', { exact: true })).toHaveCount(0)
-  await page.getByLabel('数学问题').fill('S06 browser ordinary legacy path')
+  await page.getByLabel('数学问题').fill(`/${mode} S06 browser ${mode}`)
   await page.getByLabel('数学问题').press('Enter')
-  await expect.poll(() => submissions.at(-1)?.jobId).toMatch(/^run_/)
-  await expect(page.getByRole('region', { name: '数学报告', exact: true })).toBeVisible()
+  const answer = page.getByRole('region', { name: '最终答复' })
+  await expect(answer).toContainText('Fake Agent completed', { timeout: 20000 })
   await expect(page.getByLabel('S06 输出模式')).toHaveCount(0)
-  expect(submissions.at(-1)?.body.message).toBe('S06 browser ordinary legacy path')
-  expect(submissions.at(-1)?.body).not.toHaveProperty('presentation_mode')
+  if (mode !== 'solve') await expect(answer).toContainText('所选格式生成失败')
+  const text = await answer.locator('.report-content').innerText()
+  await page.goto(`/dashboard-assets/session/${sessionId}`)
+  await page.reload()
+  await expect(answer.locator('.report-content')).toHaveText(text)
+  expect(mutations).toEqual([])
 })
 
-test('late presentation responses cannot overwrite a newer Job', async ({ page }) => {
-  let teachRequests = 0
-  let deliveredTeach = 0
-  let releaseFirstTeach!: () => void
-  const firstTeachReleased = new Promise<void>((resolve) => { releaseFirstTeach = resolve })
-  await page.route('**/api/agent/jobs/*/teach', async (route) => {
-    teachRequests += 1
-    const response = await route.fetch()
-    await firstTeachReleased
-    await route.fulfill({ response })
-    deliveredTeach += 1
+test('late answer cannot replace the next conversation answer', async ({ page }) => {
+  const headers = await grant(page)
+  const sessions: string[] = []; const jobs: string[] = []
+  for (const problem of ['S06 old A', 'S06 current B']) {
+    const session = (await (await page.request.post(`${origin}/api/new_chat`, { headers })).json()).new_session_id
+    const response = await page.request.post(`${origin}/api/agent/jobs`, { headers: { ...headers, 'Idempotency-Key': crypto.randomUUID() }, data: { session_id: session, message: problem } })
+    expect(response.status()).toBe(202); sessions.push(session); jobs.push((await response.json()).job_id)
+  }
+  let release!: () => void; let held = false; let delivered = false
+  const pending = new Promise<void>(resolve => { release = resolve })
+  await page.route(`**/api/agent/jobs/${jobs[0]}/answer`, async route => {
+    held = true; await pending
+    await route.fulfill({ json: { job_id: jobs[0], status: 'succeeded', mode: 'solve', presentation_status: 'ready', notice: null, answer: 'OLD_A_ANSWER' } }); delivered = true
   })
-
-  await page.goto('/dashboard-assets/')
-  await page.getByLabel('数学问题').fill('/teach S06 browser delayed A')
-  await page.getByLabel('数学问题').press('Enter')
-  await page.getByRole('button', { name: '生成模板教学', exact: true }).click()
-  await expect.poll(() => teachRequests > 0).toBe(true)
-
-  await page.getByRole('button', { name: '新建会话', exact: true }).click()
-    await expect(page.getByText('正在加载工作台…', { exact: true })).toHaveCount(0)
-  await page.getByLabel('数学问题').fill('/report S06 browser current B')
-  await page.getByLabel('数学问题').press('Enter')
-  const output = page.getByLabel('S06 输出模式')
-  await expect(output).toContainText('报告', { timeout: 20000 })
-  await expect(output).toContainText('S06 browser current B')
-  await output.getByRole('button', { name: '生成模板报告', exact: true }).click()
-  await expect(output).toHaveAttribute('data-source-job-id', /^run_/)
-  const currentJobId = await output.getAttribute('data-source-job-id')
-
-  const heldRequests = teachRequests
-  releaseFirstTeach()
-  await expect.poll(() => deliveredTeach >= heldRequests).toBe(true)
-  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
-  await expect(output).toContainText('报告')
-  await expect(output).toContainText('S06 browser current B')
-  await expect(output).not.toContainText('S06 browser delayed A')
-  await expect(output).toHaveAttribute('data-source-job-id', currentJobId!)
+  await page.route(`**/api/agent/jobs/${jobs[1]}/answer`, route => route.fulfill({ json: { job_id: jobs[1], status: 'succeeded', mode: 'solve', presentation_status: 'ready', notice: null, answer: 'CURRENT_B_ANSWER' } }))
+  await page.goto(`/dashboard-assets/session/${sessions[0]}`)
+  await expect.poll(() => held).toBe(true)
+  await page.locator('.session-main').first().click()
+  await expect(page.getByRole('region', { name: '最终答复' })).toContainText('CURRENT_B_ANSWER')
+  release(); await expect.poll(() => delivered).toBe(true)
+  await expect(page.getByRole('region', { name: '最终答复' })).not.toContainText('OLD_A_ANSWER')
 })
 
 async function seedOutput(page: Page, problem: string, mode: string): Promise<{ session: string; job: string }> {
-  const origin = 'http://127.0.0.1:8091'
-  const auth = await (await page.request.get(`${origin}/api/check_auth`)).json()
-  const headers = { 'X-CSRF-Token': auth.csrf_token, 'Idempotency-Key': crypto.randomUUID() }
-  const session = (await (await page.request.post(`${origin}/api/new_chat`, { headers })).json()).new_session_id as string
-  const response = await page.request.post(`${origin}/api/agent/jobs`, { headers,
-    data: { session_id: session, message: problem, presentation_mode: mode } })
-  expect(response.status()).toBe(202)
-  const job = (await response.json()).job_id as string
-  await expect.poll(async () => (await (await page.request.get(`${origin}/api/agent/jobs/${job}`)).json()).status).toBe('succeeded')
-  const generated = await page.request.post(`${origin}/api/agent/jobs/${job}/${mode}`, { headers, data: {} })
-  expect(generated.status()).toBe(200)
-  return { session, job }
+  const headers = await grant(page)
+  const response = await page.request.post(`${origin}/__test__/legacy-output`, { headers, data: { problem, mode } })
+  expect(response.status()).toBe(200)
+  return response.json()
 }
-
-test('late report cannot become another Jobs original-answer fallback', async ({ page }) => {
-  const first = await seedOutput(page, 'S06 old report A', 'teach')
-  let held = false
-  let delivered = false
-  let aReads = 0
-  let bReads = 0
-  let release!: () => void
-  let releaseB!: () => void
-  const released = new Promise<void>(resolve => { release = resolve })
-  const bReleased = new Promise<void>(resolve => { releaseB = resolve })
-  await page.route('**/api/agent/jobs/*/outputs/*', route => route.fulfill({ status: 503, body: '{}' }))
-  await page.route('**/api/agent/jobs/*/report', async route => {
-    if (route.request().method() === 'POST') return route.fulfill({ status: 503, body: '{}' })
-    const response = await route.fetch()
-    const body = await response.json()
-    const isA = route.request().url().includes(first.job)
-    if (isA) {
-      body.report.answer = 'OLD_A_ANSWER'
-      if (++aReads > 1) { held = true; await released }
-    } else {
-      body.report.answer = 'CURRENT_B_ANSWER'
-      if (++bReads > 1) await bReleased
-    }
-    await route.fulfill({ response, json: body })
-    if (isA && aReads > 1) delivered = true
-  })
-  await page.goto(`/dashboard-assets/session/${first.session}`)
-  await expect.poll(() => held).toBe(true)
-  await page.getByRole('button', { name: '新建会话', exact: true }).click()
-    await expect(page.getByText('正在加载工作台…', { exact: true })).toHaveCount(0)
-  await page.getByLabel('数学问题').fill('/report S06 current report B')
-  await page.getByLabel('数学问题').press('Enter')
-  const output = page.getByLabel('S06 输出模式')
-  await expect(output).toContainText('S06 current report B')
-  await expect(output).toContainText('CURRENT_B_ANSWER')
-  release()
-  try {
-    await expect.poll(() => delivered).toBe(true)
-    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
-    await expect(output).not.toContainText('OLD_A_ANSWER')
-    await expect(output).toContainText('CURRENT_B_ANSWER')
-  } finally { releaseB() }
-})
 
 test('refreshing a terminal report rechecks a changed presentation source', async ({ page }) => {
   const seeded = await seedOutput(page, 'S06 refreshed source', 'teach')

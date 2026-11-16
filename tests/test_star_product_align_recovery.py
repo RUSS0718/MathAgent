@@ -73,7 +73,8 @@ class StarAlignChainRecoveryTest(unittest.TestCase):
         # process restart between the crash and the operator's inspection.
         with patch.dict(os.environ, {"INTERN_API_KEY": "scripted-only"}):
             app = create_app(worker_config(folder))
-        self.client = app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         try:
             yield app
@@ -120,7 +121,7 @@ class StarAlignChainRecoveryTest(unittest.TestCase):
     def test_chain_resume_crosses_every_new_persistent_boundary(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
-            log = folder / "requests.jsonl"
+            _log = folder / "requests.jsonl"
 
             # 1) 干预消费边界：die right after the Guidance commits, before any
             #    executor consumes it.
@@ -506,7 +507,8 @@ class StarAlignHistoryCompatibilityTest(unittest.TestCase):
                 "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection",
                 "SHOWCASE_STAR_BUDGET": RunBudgetLimits(
                     max_model_calls=8, max_http_attempts=8)})
-        self.client = app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         try:
             yield app

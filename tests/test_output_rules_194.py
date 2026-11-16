@@ -33,7 +33,8 @@ class OutputRulesTest(unittest.TestCase):
             app = create_app({'TESTING': True, 'SHOWCASE_DATA_DIR': directory,
                               'SHOWCASE_PRESENTATION_ENABLED': True, 'SHOWCASE_WORKER_ENABLED': False})
             try:
-                client = app.test_client()
+                from tests.reviewer_support import reviewer_client
+                client, _ = reviewer_client(app)
                 headers = {'X-CSRF-Token': client.get('/api/check_auth').get_json()['csrf_token'],
                            'Idempotency-Key': '147142a4-1cbd-455b-9fe6-553045472693'}
                 session = client.post('/api/new_chat', headers=headers).get_json()['new_session_id']
@@ -61,7 +62,8 @@ class TerminalOutputContractTest(unittest.TestCase):
         for key in ('showcase_workspace_service', 'showcase_run_service', 'loopback_store'):
             self.addCleanup(self.app.extensions[key].close)
         self.service = self.app.extensions['showcase_workspace_service']
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.headers = {'X-CSRF-Token': self.client.get('/api/check_auth').get_json()['csrf_token']}
         self.session = self.client.post('/api/new_chat', headers=self.headers).get_json()['new_session_id']
 
@@ -251,3 +253,36 @@ class TerminalOutputContractTest(unittest.TestCase):
         self.assertEqual(0, post.call_count)
         with self.assertRaises(WorkspaceError):
             get_final_answer(self.service, 'another-user', job_id)
+
+    def test_partial_answer_notice_preserves_scope_without_duplicate_body(self):
+        job_id = self.job('solve')
+        self.complete(job_id)
+        self.generate(job_id)
+        answer = self.answer(job_id)
+        self.assertEqual('1+1=2', answer['answer'])
+        self.assertIn('未完成', answer['notice'])
+        self.assertIn('未验证', answer['notice'])
+
+    def test_restart_orphaned_terminal_answer_falls_back_without_dispatch(self):
+        from showcase.output_generation import initialize_generation
+        job_id = self.job('teach')
+        self.complete(job_id)
+        post = self.model()
+        initialize_generation(self.service.store)
+        for _ in range(2):
+            answer = self.client.get(f'/api/agent/jobs/{job_id}/answer').get_json()
+            self.assertEqual('failed', answer['presentation_status'])
+            self.assertEqual('1+1=2', answer['answer'])
+        self.generate(job_id)
+        self.assertEqual(0, post.call_count)
+
+    def test_empty_source_is_unavailable_through_public_answer_http(self):
+        job_id = self.job('solve')
+        self.service.store.start_job(job_id)
+        self.service.store.complete_job(job_id, '', 'no answer')
+        self.generate(job_id)
+        response = self.client.get(f'/api/agent/jobs/{job_id}/answer')
+        self.assertEqual(200, response.status_code)
+        self.assertEqual('unavailable', response.json['presentation_status'])
+        self.assertEqual('', response.json['answer'])
+        self.assertNotIn('显示原答案', response.json['notice'])

@@ -19,3 +19,12 @@ test('keeps ordinary text on the legacy submission path', () => {
     problem: '', presentationMode: 'teach',
   })
 })
+
+import { presentationArtifactSchema } from '../src/api/presentation.schemas.ts'
+test('output request accepts legacy zero and bounded one call while forbidding solver resume', () => {
+  const schema = presentationArtifactSchema.shape.output_request.unwrap()
+  const request = { id: 'output:test', kind: 'presentation_only', solver_resumed: false }
+  for (const model_calls of [0, 1]) assert.equal(schema.safeParse({ ...request, model_calls }).success, true)
+  for (const model_calls of [-1, 2, 1.5]) assert.equal(schema.safeParse({ ...request, model_calls }).success, false)
+  assert.equal(schema.safeParse({ ...request, model_calls: 1, solver_resumed: true }).success, false)
+})

@@ -338,7 +338,8 @@ class StarFullUnavailableTest(StarJobFixture, unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder:
             app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": folder})
-            client = app.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, _ = reviewer_client(app)
             try:
                 modes = client.get("/api/capabilities").get_json()["solver_modes"]
                 for mode in ("star_limited", "star_limited_best_effort"):

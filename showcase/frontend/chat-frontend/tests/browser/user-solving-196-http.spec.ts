@@ -14,7 +14,7 @@ test('196 real Flask ordinary solve and read-only history', async ({ page }) => 
   expect(errors).toEqual([])
 })
 test('196 real Flask reviewer denial and grant', async ({ page }) => {
-  await page.goto('/dashboard-assets/settings')
+  await page.goto('http://127.0.0.1:8096/dashboard/reviewer')
   await expect(page.getByRole('heading', { name: '技术审阅需要授权' })).toBeVisible()
   await page.getByLabel('审阅密钥').fill('local-browser-fixture')
   await page.getByRole('button', { name: '授权审阅' }).click()

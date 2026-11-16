@@ -21,10 +21,10 @@ from showcase.final_evidence import artifact_identity
 from showcase.run_budget import RunBudgetLimits
 from showcase.tools import ToolRegistry
 from tests.star_product_support import ACCEPT, StarJobFixture
+from tests.star_recovery_worker import CLASSIFIED_LEMMA
 from tests.test_star_product_challenge import META_ABORT
 from tests.test_star_product_planning import FEATURES
 from tests.test_star_product_tools import NEED_PLAN
-from tests.star_recovery_worker import CLASSIFIED_LEMMA
 
 PLAN = {"version": 1, "steps": [
     {"step_id": "s1", "title": "Base", "objective": "Establish the base fact"},
@@ -450,7 +450,8 @@ class StarClassifiedRecoveryTest(StarJobFixture, unittest.TestCase):
                 app = create_app(config(folder))
                 try:
                     self.app = app
-                    self.client = app.test_client()
+                    from tests.reviewer_support import reviewer_client
+                    self.client, _ = reviewer_client(app)
                     self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
                     response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={},
                                                 headers=self.headers())

@@ -19,7 +19,8 @@ class StarProductJobsTest(unittest.TestCase):
                           "SHOWCASE_JOB_DELAY_SECONDS": 0, **config})
         for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(app.extensions[name].close)
-        client = app.test_client()
+        from tests.reviewer_support import reviewer_client
+        client, _ = reviewer_client(app)
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
         headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
         session = client.post("/api/new_chat", headers=headers).get_json()["new_session_id"]
@@ -93,7 +94,8 @@ class StarProductJobsTest(unittest.TestCase):
         self.assertEqual(result["solver"], evidence["solver"]["solver"])
         reopened = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": directory.name})
         try:
-            other = reopened.test_client()
+            from tests.reviewer_support import reviewer_client
+            other, _ = reviewer_client(reopened)
             other.get("/api/check_auth")
             persisted = other.get(f"/api/agent/jobs/{run_id}").get_json()
             self.assertEqual(result["solver"], persisted["result"]["solver"])

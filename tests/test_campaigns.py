@@ -51,7 +51,8 @@ class CampaignFixture(unittest.TestCase):
                 "SHOWCASE_JOB_DELAY_SECONDS": 0,
             }
         )
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
 
     def tearDown(self):
@@ -189,6 +190,7 @@ class CampaignContractTest(CampaignFixture):
         try:
             created = subprocess.run(
                 [*command, "create", str(payload_path), "--idempotency-key", str(uuid.uuid4())],
+                env={**os.environ, "SHOWCASE_CLIENT_REVIEWER_SECRET": self.app.config["SHOWCASE_REVIEWER_SECRET"]},
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -198,6 +200,7 @@ class CampaignContractTest(CampaignFixture):
             campaign_id = json.loads(created.stdout)["campaign_id"]
             detail = subprocess.run(
                 [*command, "detail", campaign_id],
+                env={**os.environ, "SHOWCASE_CLIENT_REVIEWER_SECRET": self.app.config["SHOWCASE_REVIEWER_SECRET"]},
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -230,7 +233,8 @@ class CampaignContractTest(CampaignFixture):
             }
         )
         try:
-            client = second.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, _ = reviewer_client(second)
             client.get("/api/check_auth")
             report = client.get(f"/api/experiments/campaigns/{campaign_id}").get_json()
             self.assertEqual("canceled", report["pairs"][0]["arms"]["baseline"]["status"])

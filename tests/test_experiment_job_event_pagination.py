@@ -21,7 +21,8 @@ class ExperimentJobEventPaginationTest(unittest.TestCase):
                 }
             )
             try:
-                client = app.test_client()
+                from tests.reviewer_support import reviewer_client
+                client, _ = reviewer_client(app)
                 csrf = client.get("/api/check_auth").get_json()["csrf_token"]
                 session_id = client.post(
                     "/api/new_chat", headers={"X-CSRF-Token": csrf}
@@ -80,7 +81,8 @@ class ExperimentJobEventPaginationTest(unittest.TestCase):
                 }
             )
             try:
-                client = app.test_client()
+                from tests.reviewer_support import reviewer_client
+                client, _ = reviewer_client(app)
                 csrf = client.get("/api/check_auth").get_json()["csrf_token"]
                 session_id = client.post(
                     "/api/new_chat", headers={"X-CSRF-Token": csrf}
@@ -119,7 +121,8 @@ class ExperimentJobEventPaginationTest(unittest.TestCase):
                 }
             )
             try:
-                client = app.test_client()
+                from tests.reviewer_support import reviewer_client
+                client, _ = reviewer_client(app)
                 csrf = client.get("/api/check_auth").get_json()["csrf_token"]
                 session_id = client.post(
                     "/api/new_chat", headers={"X-CSRF-Token": csrf}
@@ -218,7 +221,8 @@ class ExperimentJobEventPaginationTest(unittest.TestCase):
                 }
             )
             try:
-                client = app.test_client()
+                from tests.reviewer_support import reviewer_client
+                client, _ = reviewer_client(app)
                 csrf = client.get("/api/check_auth").get_json()["csrf_token"]
                 session_id = client.post(
                     "/api/new_chat", headers={"X-CSRF-Token": csrf}
