@@ -38,6 +38,7 @@ const visionEnabled = ref(false)
 const presentationEnabled = ref(false)
 const solverMode = ref('legacy')
 const faithful = ref<CapabilitiesResponse['faithful']>()
+const locallyStartedJob = ref<string | null>(null)
 const faithfulBlocked = computed(() => faithful.value?.enabled === true && !faithful.value.ready)
 const autonomous = computed(() => faithful.value?.enabled === true && solverMode.value === faithful.value.solver_mode)
 const solverModes = ref<Array<{ solver_mode: string; enabled: boolean }>>([])
@@ -94,6 +95,7 @@ async function send(): Promise<void> {
     if (!result.success || !result.job_id || !result.status) throw new Error(typeof result.error === 'string' ? result.error : '任务未被接受')
     if (sessions.currentId !== sessionId || reportDisposed) return
     jobs.start(result.job_id, sessionId, result.status, 0, parsed.presentationMode ?? null)
+    locallyStartedJob.value = result.job_id
     observeJob(result.job_id)
     sessions.addUser(message, result.job_id)
     report.value = null
@@ -323,7 +325,7 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
     <main id="main-content" tabindex="-1" class="constellation-page">
       <header class="constellation-topbar">
         <UiButton icon-only variant="ghost" class="mobile-only" aria-label="打开会话栏" @click="sidebarOpen = true"><UiIcon name="menu" /></UiButton>
-        <div><small>MATHAGENT · 数学推理工作台</small><h1>{{ selectedJob ? '对话式求解工作台' : '新建求解 · 输入题干' }}</h1></div>
+        <div><small>因果推理智能体</small><h1>{{ selectedJob ? '因果推理智能体 · 求解工作台' : '新建求解 · 输入题干' }}</h1></div>
         <div class="constellation-actions"><span v-if="!taskState">{{ current?.status === 'waiting_input' ? '等待输入' : current ? '任务执行中' : selectedJob ? '持久运行记录' : '准备提交' }}</span><UiButton v-if="!taskState && current && clarification?.clarification.status !== 'waiting'" variant="danger" @click="cancelCurrent">取消任务</UiButton><UiButton v-if="selectedJob" @click="newSession">新建求解</UiButton><UiButton v-if="selectedJob || notice" :disabled="submitting || checkingSubmission || !!current" @click="solveAgain">再次求解</UiButton><a v-if="selectedJob" :href="`/dashboard/run/${selectedJob.jobId}`">运行详情</a></div>
       </header>
       <p v-if="notice" class="notice" role="status">{{ notice }}<UiButton v-if="!loadFailed && !submitting && !checkingSubmission" @click="recoverSubmission">核对原提交</UiButton><UiButton v-if="loadFailed" @click="initialize">重新加载</UiButton></p>
@@ -331,17 +333,19 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
       <FaithfulTaskStatus v-if="taskState" :state="taskState" :busy="submitting" :clarification="clarification?.clarification.status === 'waiting'" @pause="pauseCurrent" @resume="resumeCurrent" @cancel="cancelCurrent" @refresh="refreshTask" />
       <div v-if="loading" class="loading-state" role="status">正在加载工作台…</div>
       <section v-else-if="!selectedJob" class="workbench-entry" aria-label="提交数学题干">
-        <div class="entry-heading"><small>{{ faithful ? 'FAITHFUL AGENT' : 'PLANNER → REASONER → GATE' }}</small><h2>{{ faithful ? 'Faithful 自主求解' : '把题干交给一组会互相质疑的子智能体' }}</h2><p>{{ faithful ? '直接输入数学题，Faithful 自主选择已配置能力与求解步骤。提交后可查看公开执行摘要、实时计划与协作星图。' : '提交后查看公开执行摘要、实时计划与协作星图。运行能力取决于所选模式；模拟数据和历史回放始终单独标记。' }}</p></div>
-        <ComposerBar :submit-label="checkingSubmission ? '正在核对…' : submitting ? '正在提交…' : autonomous ? 'Faithful 自主求解' : '开始求解'" v-model="draft" :disabled="loadFailed || submitting || checkingSubmission" :busy="submitting || checkingSubmission" :submit-disabled="faithfulBlocked" :running="false" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><FaithfulEntryControls v-if="faithful" v-model="solverMode" :faithful="faithful" :modes="solverModes" :disabled="submitting" /><StarModeSelector v-else v-model="solverMode" :modes="solverModes" :disabled="submitting" /><PresentationCommandHint :enabled="presentationEnabled" /></template></ComposerBar>
+        <div class="entry-heading"><small>因果推理智能体</small><h2>因果推理智能体</h2><p>{{ faithful ? '直接输入数学题，智能体自主选择已配置能力与求解步骤。提交后可查看公开执行摘要、实时计划与协作星图。' : '提交后查看公开执行摘要、实时计划与协作星图。运行能力取决于所选模式；模拟数据和历史回放始终单独标记。' }}</p></div>
+        <ComposerBar :submit-label="checkingSubmission ? '正在核对…' : submitting ? '正在提交…' : autonomous ? '开始自主求解' : '开始求解'" v-model="draft" :disabled="loadFailed || submitting || checkingSubmission" :busy="submitting || checkingSubmission" :submit-disabled="faithfulBlocked" :running="false" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><FaithfulEntryControls v-if="faithful" v-model="solverMode" :faithful="faithful" :modes="solverModes" :disabled="submitting" /><StarModeSelector v-else v-model="solverMode" :modes="solverModes" :disabled="submitting" /><PresentationCommandHint :enabled="presentationEnabled" /></template></ComposerBar>
         <div class="entry-examples"><span>示例题干 · 点击回填</span><button type="button" @click="useStarter('解方程 x² − 5x + 6 = 0，并验证候选根。')">方程与候选根</button><button type="button" @click="useStarter('分步推导 1 + 2 + … + n 的求和公式，n 为正整数。')">数列求和</button></div>
       </section>
       <section v-else class="active-workbench">
         <article class="workbench-problem"><small>当前题干</small><p>{{ selectedProblem }}</p></article>
         <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" :resuming="submitting" @resume="resumeCurrent" @changed="clarificationChanged" @cancel="cancelCurrent" />
         <TaskRevisionPanel :key="selectedJob.jobId + ':revision'" :job-id="selectedJob.jobId" :session-id="selectedJob.sessionId" :owner="auth.username" :mode="solverMode" :state="selectedJob.result?.faithful" :disabled="submitting || checkingSubmission" @changed="clarificationChanged" />
-        <ConversationWorkbench :key="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" />
         <PresentationSection :source-version="showReport" v-if="showReport && (presentationMode || (selectedJob.status === 'succeeded' && selectedJob.result?.faithful && (selectedJob.result.faithful as { version?: string }).version === 'faithful-task-v1'))" :job-id="selectedJob.jobId" :mode="presentationMode ?? undefined" :answer-report="showReport.report" :job-status="selectedJob.status" :problem="selectedProblem" :fallback-answer="showReport.report.answer" />
         <ReportSection v-if="showReport" :mode="showReport.mode" :status="showReport.status" :report="showReport.report" />
+        <details :open="!['succeeded', 'failed', 'canceled'].includes(selectedJob.status)" class="execution-process"><summary>求解过程</summary>
+        <ConversationWorkbench :key="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" :animate-live="locallyStartedJob === selectedJob.jobId" />
+        </details>
       </section>
     </main>
   </div>

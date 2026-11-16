@@ -22,11 +22,11 @@ const modes = computed(() => [
   <div class="faithful-entry">
     <p>实验性能力 · 根据当前任务的配置与准入条件使用；不代表数学效果已验收。</p>
     <p v-if="faithful.optional_limitations?.length">可选能力限制：{{ faithful.optional_limitations.join('；') }}</p>
-    <p v-if="!faithful.ready" role="alert">Faithful 尚未就绪，暂不能提交。{{ faithful.unavailable_reasons.join('；') || '服务未提供缺失原因，请检查服务配置。' }}</p>
-    <p v-else role="status">{{ modelValue === faithful.solver_mode ? 'Faithful 自主求解：根据题目自主选择已配置能力；简单题可直接完成。' : '已手选高级求解模式。' }}</p>
+    <p v-if="!faithful.ready" role="alert">因果推理智能体 尚未就绪，暂不能提交。{{ faithful.unavailable_reasons.join('；') || '服务未提供缺失原因，请检查服务配置。' }}</p>
+    <p v-else role="status">{{ modelValue === faithful.solver_mode ? '因果推理智能体 自主求解：根据题目自主选择已配置能力；简单题可直接完成。' : '已手选高级求解模式。' }}</p>
     <details>
       <summary>高级选项</summary>
-      <UiButton v-if="modelValue !== faithful.solver_mode" :disabled="disabled || !faithful.ready" @click="emit('update:modelValue', faithful.solver_mode)">使用 Faithful 自主求解</UiButton>
+      <UiButton v-if="modelValue !== faithful.solver_mode" :disabled="disabled || !faithful.ready" @click="emit('update:modelValue', faithful.solver_mode)">使用 因果推理智能体 自主求解</UiButton>
       <StarModeSelector :model-value="modelValue" :modes="modes" :disabled="disabled || !faithful.ready" @update:model-value="emit('update:modelValue', $event)" />
     </details>
   </div>

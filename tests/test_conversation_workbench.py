@@ -68,6 +68,9 @@ class WorkbenchPublicJobTests(StarJobFixture, unittest.TestCase):
         text = self.client.get(f"/api/agent/jobs/{run_id}/events").get_data(as_text=True)
         events = [json.loads(line[6:]) for line in text.splitlines() if line.startswith("data: ")]
         messages = [event["workbench"] for event in events if "workbench" in event]
+        audited = [event for event in events if event.get("solver_event_type") == "call_audit"]
+        self.assertTrue(any(event.get("call_lifecycle") == "running" for event in audited))
+        self.assertTrue(any(event.get("call_lifecycle") == "completed" for event in audited))
         self.assertEqual([item["kind"] for item in messages], ["challenge", "reply"])
         self.assertEqual(messages[0]["thread_id"], messages[1]["thread_id"])
         self.assertNotIn(HIDDEN_ARGUMENT, text)

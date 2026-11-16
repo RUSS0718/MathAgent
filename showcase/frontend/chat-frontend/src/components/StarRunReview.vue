@@ -34,8 +34,8 @@ async function loadReplay(): Promise<void> {
 <template>
   <template v-if="report.solver?.solver_mode?.startsWith('star_')">
     <ProofGraphView v-if="solver?.progress?.proof_graph" :graph="solver.progress.proof_graph" :run-id="jobId" />
-    <section class="evidence-section" aria-label="STAR 持久进展">
-      <h2>STAR 持久进展</h2>
+    <section class="evidence-section" aria-label="求解持久进展">
+      <h2>求解持久进展</h2>
       <div class="review-meta"><StatusBadge :value="report.solver.solver_mode" /><StatusBadge :value="report.solver.evidence_kind ?? 'unknown'" /></div>
       <p>以下状态来自同一 Run 的持久记录；工程注入与回放不代表真实模型效果。</p>
       <dl class="data-list"><template v-for="field in ['run_id', 'state_revision', 'phase', 'status']" :key="field"><dt>{{ field }}</dt><dd>{{ display(solver?.[field]) }}</dd></template></dl>

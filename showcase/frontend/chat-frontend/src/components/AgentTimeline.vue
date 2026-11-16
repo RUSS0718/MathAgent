@@ -11,24 +11,12 @@ import {
   timelineTitle,
 } from '../runtime/jobs/star-event-presentation'
 import UiIcon from './ui/UiIcon.vue'
+import { roleLabels } from '../runtime/jobs/causal-progress'
 
 const props = defineProps<{ events: DecodedSseEvent[] }>()
-const expanded = ref(true)
+const expanded = ref(false)
 const expandedSteps = ref<Record<string, boolean>>({})
-const roleLabels: Record<string, string> = {
-  reasoner: 'Reasoner',
-  reason_noncoding: 'Reasoner（非编码）',
-  explore: 'Explore',
-  explore_polish: 'Explore 整理',
-  planner: 'Planner',
-  researcher: 'Researcher',
-  step_verifier: 'Verifier',
-  final_generator: '答案生成',
-  whole_solution_verifier: '整题审查',
-  meta: 'Meta',
-  meta_strategist: 'Meta 策略',
-  controller: '控制器',
-}
+
 
 interface TimelineStep {
   nodeName: string
@@ -84,13 +72,13 @@ function toggleStep(node: string): void {
 </script>
 
 <template>
-  <section v-if="events.length" class="agent-timeline" aria-live="polite">
-    <section v-if="roleActivity.length" class="timeline-role-view" aria-label="角色活动">
+  <section v-if="events.length" class="agent-timeline" >
+    <section v-if="expanded && roleActivity.length" class="timeline-role-view" aria-label="角色活动">
       <h3>角色活动</h3>
       <ul><li v-for="item in roleActivity" :key="item.role">{{ item.label }} · {{ item.count }} 个持久事件</li></ul>
     </section>
     <button class="timeline-header" type="button" :aria-expanded="expanded" @click="expanded = !expanded">
-      <span><strong>Agent 执行节点</strong><small>{{ steps.length }} 个节点 · {{ events.length }} 个事件</small></span>
+      <span><strong>执行技术记录</strong><small>{{ steps.length }} 个节点 · {{ events.length }} 个事件</small></span>
       <UiIcon :name="expanded ? 'chevronDown' : 'chevronRight'" />
     </button>
     <ol v-if="expanded" class="timeline-steps">

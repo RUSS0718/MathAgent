@@ -63,7 +63,7 @@ test('Population report exposes mathematical delivery separately from request se
       modes: [{ solver_mode: 'star_population', enabled: true }],
       disabled: false,
     }))
-    assert.match(selector, /STAR 并发 Population\/APRS/)
+    assert.match(selector, /多路线并发求解/)
   } finally {
     await server.close()
   }

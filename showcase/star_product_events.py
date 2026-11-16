@@ -157,6 +157,12 @@ def decision_fields(event, state, invocations=()):
                 "solver_call_id": public_solver_call_id(run_id, call_id),
                 "run_id": run_id,
                 "call_status": call_status,
+                "call_lifecycle": (
+                    "running" if raw_status == "dispatched"
+                    else "completed" if raw_status == "completed"
+                    else "failed" if raw_status in _FAILED_CALL_STATUSES or raw_status == "provider_failed"
+                    else "unknown"
+                ),
                 "consumed_receipt_ids": consumed_receipt_ids,
             }
             for identity_field in ("plan_version", "attempt_index"):
