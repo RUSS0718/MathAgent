@@ -6,7 +6,7 @@ export class JobController {
   private generation = 0
   private activeAbort: AbortController | null = null
 
-  constructor(private readonly jobs: ReturnType<typeof useJobsStore>) {}
+  constructor(private readonly jobs: ReturnType<typeof useJobsStore>, private readonly ordinary = false) {}
 
   async subscribe(jobId: string): Promise<void> {
     const generation = ++this.generation
@@ -17,6 +17,7 @@ export class JobController {
     if (!record) return
     try {
       await readJobEvents(jobId, record.lastEventId, {
+        ordinary: this.ordinary,
         signal: abort.signal,
         terminalSeen: ['succeeded', 'failed', 'canceled'].includes(record.status),
         onEvent: (event: DecodedSseEvent) => {

@@ -10,17 +10,13 @@ import { sessionHref, settingsHref, workspaceHref } from '../runtime/navigation/
 import { useJobsStore } from '../stores/jobs.store'
 import { useSessionsStore } from '../stores/sessions.store'
 import { useFilesStore } from '../stores/files.store'
-import ReportSection from './ReportSection.vue'
-import PresentationSection from './PresentationSection.vue'
+import FinalAnswer from './FinalAnswer.vue'
 import { JobController } from '../runtime/jobs/job-controller'
 import { parsePresentationInput } from '../runtime/presentation/mode'
 import type { PresentationMode } from '../runtime/presentation/mode'
 import SessionSidebar from './SessionSidebar.vue'
 import ComposerBar from './ComposerBar.vue'
-import StarModeSelector from './StarModeSelector.vue'
-import FaithfulEntryControls from './FaithfulEntryControls.vue'
 import FaithfulTaskStatus from './FaithfulTaskStatus.vue'
-import PresentationCommandHint from './PresentationCommandHint.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
 import ConversationWorkbench from './ConversationWorkbench.vue'
@@ -30,7 +26,7 @@ import TaskRevisionPanel from './TaskRevisionPanel.vue'
 const auth = useAuthStore()
 const sessions = useSessionsStore()
 const jobs = useJobsStore()
-const jobController = new JobController(jobs)
+const jobController = new JobController(jobs, true)
 const files = useFilesStore()
 const draft = ref('')
 const notice = ref('')
@@ -40,8 +36,6 @@ const solverMode = ref('legacy')
 const faithful = ref<CapabilitiesResponse['faithful']>()
 const locallyStartedJob = ref<string | null>(null)
 const faithfulBlocked = computed(() => faithful.value?.enabled === true && !faithful.value.ready)
-const autonomous = computed(() => faithful.value?.enabled === true && solverMode.value === faithful.value.solver_mode)
-const solverModes = ref<Array<{ solver_mode: string; enabled: boolean }>>([])
 const selectedFile = ref<string | undefined>()
 const selectedFileName = ref<string | undefined>()
 const sidebarOpen = ref(false)
@@ -49,7 +43,6 @@ const submitting = ref(false)
 const checkingSubmission = ref(false)
 const loading = ref(true)
 const loadFailed = ref(false)
-const report = ref<Awaited<ReturnType<typeof api.jobReport>> | null>(null)
 let reportDisposed = false
 const props = defineProps<{ path: string; sessionId: string | null }>()
 const current = computed(() => sessions.currentId ? jobs.activeForSession(sessions.currentId) : undefined)
@@ -61,14 +54,11 @@ const selectedJob = computed(() => {
 const presentationMode = computed(() => selectedJob.value?.presentationMode ?? null)
 const taskState = computed(() => faithfulTaskStateSchema.safeParse(selectedJob.value?.result?.faithful).data)
 const clarification = computed(() => clarificationStateSchema.safeParse(selectedJob.value?.result?.faithful).data)
-const showReport = computed(() => !clarification.value ||
-  (clarification.value.clarification.status === 'answered' && !current.value) ? report.value : null)
 const selectedProblem = computed(() => {
   const jobId = selectedJob.value?.jobId
   return [...sessions.messages].reverse().find((message) => message.analysis_job_id === jobId && message.sender === 'user')?.text ?? ''
 })
-const workbenchResult = computed(() => ({ ...selectedJob.value?.result,
-  ...(report.value?.mode === 'fake' ? { execution_mode: 'fake' } : {}) }))
+const workbenchResult = computed(() => selectedJob.value?.result)
 
 async function send(): Promise<void> {
   if (loading.value || loadFailed.value || faithfulBlocked.value) return
@@ -76,7 +66,7 @@ async function send(): Promise<void> {
   const parsed = parsePresentationInput(draft.value)
   const message = parsed.problem
   if (parsed.presentationMode && !presentationEnabled.value) {
-    notice.value = 'S06 输出模式当前不可用；原题未提交。'
+    notice.value = '所选答复规则当前不可用；题目未提交。'
     return
   }
   if (!message || current.value || !sessions.currentId || submitting.value) {
@@ -98,7 +88,6 @@ async function send(): Promise<void> {
     locallyStartedJob.value = result.job_id
     observeJob(result.job_id)
     sessions.addUser(message, result.job_id)
-    report.value = null
     draft.value = ''
     selectedFile.value = undefined
     selectedFileName.value = undefined
@@ -159,7 +148,6 @@ async function resumeCurrent(): Promise<void> {
 async function clarificationChanged(jobId: string, nextJobId?: string): Promise<void> {
   const sessionId = sessions.currentId
   if (!sessionId || selectedJob.value?.jobId !== jobId || reportDisposed) return
-  report.value = null
   try {
     if (nextJobId) await sessions.select(sessionId)
     if (nextJobId) jobs.observe(await api.getJob(jobId))
@@ -182,15 +170,9 @@ async function chooseFile(event: Event): Promise<void> { const input = event.tar
 function clearFile(): void { selectedFile.value = undefined; selectedFileName.value = undefined }
 async function loadReport(jobId: string): Promise<void> {
   if (sessions.messages.at(-1)?.analysis_job_id !== jobId) return
-  const sessionId = sessions.currentId
-  const isCurrent = () => !reportDisposed && sessions.currentId === sessionId
-    && sessions.messages.at(-1)?.analysis_job_id === jobId
   try {
     jobs.observe(await api.getJob(jobId))
-    const loaded = await api.jobReport(jobId)
-    if (isCurrent() && loaded.evidence_id === jobId
-        && (loaded.solver?.solver?.state_revision ?? 0) >= (report.value?.solver?.solver?.state_revision ?? 0)) report.value = loaded
-  } catch { if (isCurrent()) report.value = null }
+  } catch { /* A later read can restore the saved task. */ }
 }
 function observeJob(jobId: string): void {
   void jobController.subscribe(jobId).then(async () => {
@@ -271,7 +253,6 @@ async function initialize(): Promise<void> {
     if (capabilities.execution?.mode === 'live' && capabilities.execution.status !== 'configured') {
       notice.value = 'live 模式未检测到 Intern API 凭证。'
     }
-    solverModes.value = capabilities.solver_modes ?? []
     presentationEnabled.value = capabilities.presentation?.enabled ?? false
     visionEnabled.value = capabilities.files.upload.enabled
     if (visionEnabled.value) await files.load()
@@ -326,25 +307,24 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
       <header class="constellation-topbar">
         <UiButton icon-only variant="ghost" class="mobile-only" aria-label="打开会话栏" @click="sidebarOpen = true"><UiIcon name="menu" /></UiButton>
         <div><small>因果推理智能体</small><h1>{{ selectedJob ? '因果推理智能体 · 求解工作台' : '新建求解 · 输入题干' }}</h1></div>
-        <div class="constellation-actions"><span v-if="!taskState">{{ current?.status === 'waiting_input' ? '等待输入' : current ? '任务执行中' : selectedJob ? '持久运行记录' : '准备提交' }}</span><UiButton v-if="!taskState && current && clarification?.clarification.status !== 'waiting'" variant="danger" @click="cancelCurrent">取消任务</UiButton><UiButton v-if="selectedJob" @click="newSession">新建求解</UiButton><UiButton v-if="selectedJob || notice" :disabled="submitting || checkingSubmission || !!current" @click="solveAgain">再次求解</UiButton><a v-if="selectedJob" :href="`/dashboard/run/${selectedJob.jobId}`">运行详情</a></div>
+        <div class="constellation-actions"><span v-if="!taskState">{{ current?.status === 'waiting_input' ? '等待输入' : current ? '任务执行中' : selectedJob ? '持久运行记录' : '准备提交' }}</span><UiButton v-if="!taskState && current && clarification?.clarification.status !== 'waiting'" variant="danger" @click="cancelCurrent">取消任务</UiButton><UiButton v-if="selectedJob" @click="newSession">新建求解</UiButton><UiButton v-if="selectedJob || notice" :disabled="submitting || checkingSubmission || !!current" @click="solveAgain">再次求解</UiButton><a v-if="selectedJob && auth.reviewer" :href="`/dashboard/run/${selectedJob.jobId}`">运行详情</a></div>
       </header>
       <p v-if="notice" class="notice" role="status">{{ notice }}<UiButton v-if="!loadFailed && !submitting && !checkingSubmission" @click="recoverSubmission">核对原提交</UiButton><UiButton v-if="loadFailed" @click="initialize">重新加载</UiButton></p>
       <p v-if="!taskState && current?.status === 'waiting_input' && !clarification" class="notice notice--warning" role="status">运行已暂停。恢复执行不会追加新约束。<UiButton :disabled="submitting" @click="resumeCurrent">恢复执行</UiButton></p>
       <FaithfulTaskStatus v-if="taskState" :state="taskState" :busy="submitting" :clarification="clarification?.clarification.status === 'waiting'" @pause="pauseCurrent" @resume="resumeCurrent" @cancel="cancelCurrent" @refresh="refreshTask" />
       <div v-if="loading" class="loading-state" role="status">正在加载工作台…</div>
       <section v-else-if="!selectedJob" class="workbench-entry" aria-label="提交数学题干">
-        <div class="entry-heading"><small>因果推理智能体</small><h2>因果推理智能体</h2><p>{{ faithful ? '直接输入数学题，智能体自主选择已配置能力与求解步骤。提交后可查看公开执行摘要、实时计划与协作星图。' : '提交后查看公开执行摘要、实时计划与协作星图。运行能力取决于所选模式；模拟数据和历史回放始终单独标记。' }}</p></div>
-        <ComposerBar :submit-label="checkingSubmission ? '正在核对…' : submitting ? '正在提交…' : autonomous ? '开始自主求解' : '开始求解'" v-model="draft" :disabled="loadFailed || submitting || checkingSubmission" :busy="submitting || checkingSubmission" :submit-disabled="faithfulBlocked" :running="false" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><FaithfulEntryControls v-if="faithful" v-model="solverMode" :faithful="faithful" :modes="solverModes" :disabled="submitting" /><StarModeSelector v-else v-model="solverMode" :modes="solverModes" :disabled="submitting" /><PresentationCommandHint :enabled="presentationEnabled" /></template></ComposerBar>
+        <div class="entry-heading"><h2>输入数学问题</h2></div>
+        <ComposerBar :command-enabled="presentationEnabled" :submit-label="checkingSubmission ? '正在核对…' : submitting ? '正在提交…' : '发送'" v-model="draft" :disabled="loadFailed || submitting || checkingSubmission" :busy="submitting || checkingSubmission" :submit-disabled="faithfulBlocked" :running="false" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"></ComposerBar>
         <div class="entry-examples"><span>示例题干 · 点击回填</span><button type="button" @click="useStarter('解方程 x² − 5x + 6 = 0，并验证候选根。')">方程与候选根</button><button type="button" @click="useStarter('分步推导 1 + 2 + … + n 的求和公式，n 为正整数。')">数列求和</button></div>
       </section>
       <section v-else class="active-workbench">
-        <article class="workbench-problem"><small>当前题干</small><p>{{ selectedProblem }}</p></article>
+        <article class="workbench-problem"><small>当前题干 · {{ { solve: '求解', teach: '教学', report: '报告' }[presentationMode ?? 'solve'] }}</small><p>{{ selectedProblem }}</p></article>
         <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" :resuming="submitting" @resume="resumeCurrent" @changed="clarificationChanged" @cancel="cancelCurrent" />
         <TaskRevisionPanel :key="selectedJob.jobId + ':revision'" :job-id="selectedJob.jobId" :session-id="selectedJob.sessionId" :owner="auth.username" :mode="solverMode" :state="selectedJob.result?.faithful" :disabled="submitting || checkingSubmission" @changed="clarificationChanged" />
-        <ReportSection v-if="showReport" :mode="showReport.mode" :status="showReport.status" :report="showReport.report" />
-        <PresentationSection :source-version="showReport" v-if="showReport && (presentationMode || (selectedJob.status === 'succeeded' && selectedJob.result?.faithful && (selectedJob.result.faithful as { version?: string }).version === 'faithful-task-v1'))" :job-id="selectedJob.jobId" :mode="presentationMode ?? undefined" :answer-report="showReport.report" :job-status="selectedJob.status" :problem="selectedProblem" :fallback-answer="showReport.report.answer" />
+        <FinalAnswer :key="selectedJob.jobId" :job-id="selectedJob.jobId" />
         <details :open="!['succeeded', 'failed', 'canceled'].includes(selectedJob.status)" class="execution-process"><summary>求解过程</summary>
-        <ConversationWorkbench :key="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" :animate-live="locallyStartedJob === selectedJob.jobId" />
+        <ConversationWorkbench :key="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" :animate-live="locallyStartedJob === selectedJob.jobId" ordinary />
         </details>
       </section>
     </main>

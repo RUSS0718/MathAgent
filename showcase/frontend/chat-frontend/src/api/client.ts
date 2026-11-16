@@ -1,5 +1,6 @@
 import { campaignSchema, campaignsSchema } from './campaigns.schemas'
 import { z } from 'zod'
+import { finalAnswerSchema } from './answer.schemas'
 import { ApiError } from './errors'
 import { checkAuthResponseSchema, logoutResponseSchema } from './auth.schemas'
 import { activeJobsResponseSchema, jobActionResponseSchema, jobResponseSchema } from './jobs.schemas'
@@ -46,6 +47,8 @@ const json = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Cont
 export const api = {
   campaigns: (offset = 0) => requestJson('/api/experiments/campaigns?offset=' + offset + '&limit=20', {}, campaignsSchema),
   campaign: (id: string) => requestJson('/api/experiments/campaigns/' + encodeURIComponent(id), {}, campaignSchema),
+  finalAnswer: (id: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(id)}/answer`, {}, finalAnswerSchema),
+  grantReviewer: (secret: string) => requestJson('/api/reviewer/grant', json({ secret }), z.object({ success: z.boolean(), reviewer: z.boolean() })),
   checkAuth: () => requestJson('/api/check_auth', {}, checkAuthResponseSchema),
   logout: () => requestJson('/api/logout', json({}), logoutResponseSchema),
   listSessions: () => requestJson('/api/sessions', {}, sessionsResponseSchema),
