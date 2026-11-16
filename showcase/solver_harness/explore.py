@@ -169,6 +169,10 @@ def run_exploration(
             if (current["state"].get("initial_explore_policy")
                     and failed.get("error_category") == "truncated_response"):
                 raise
+            # Resume must preserve the tool continuation's normal no-repair outcome.
+            if (is_initial(current["state"]) and protocol_repair.known_protocol_failure(failed)
+                    and failed.get("request", {}).get("report", {}).get("tool_receipts")):
+                raise
             current = protocol_repair.reserve_repair(
                 harness, state["run_id"], exc,
                 failure_event=lambda latest, failed: {
