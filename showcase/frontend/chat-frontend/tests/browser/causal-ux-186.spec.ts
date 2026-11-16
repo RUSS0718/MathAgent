@@ -25,6 +25,7 @@ for (const width of [390, 1440]) {
         await expect(process).not.toHaveAttribute('open')
         if (status === 'succeeded') {
           await expect(page.getByRole('region', { name: '数学报告' })).toBeVisible()
+          await expect(page.locator('.report-meta')).not.toContainText('succeeded')
           expect(await page.locator('.report-section').evaluate(el => Boolean(el.compareDocumentPosition(document.querySelector('.presentation-section') ?? document.querySelector('.execution-process')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true)
           expect(await page.locator('.report-section').evaluate(el => Boolean(el.compareDocumentPosition(document.querySelector('.execution-process')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true)
         }
