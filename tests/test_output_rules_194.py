@@ -263,6 +263,59 @@ class TerminalOutputContractTest(unittest.TestCase):
         self.assertIn('未完成', answer['notice'])
         self.assertIn('未验证', answer['notice'])
 
+    def test_fallback_notices_use_current_scope_through_ordinary_answer_http(self):
+        import json
+        from unittest.mock import patch
+
+        from showcase.presentation import presentation_snapshot
+
+        ordinary = self.app.test_client()
+        ordinary.get('/api/check_auth')
+        with patch('llm_client.requests.post', side_effect=AssertionError('GET must not dispatch')) as post:
+            for state, expected, complete in (
+                ('failed', 'failed', False), ('unknown', 'failed', False),
+                ('stale', 'stale', False), ('source_changed', 'stale', False),
+                ('ready', 'unavailable', False), ('legacy', 'legacy', False),
+                ('failed', 'failed', True),
+            ):
+                with self.subTest(state=state, complete=complete):
+                    job_id = self.job('teach')
+                    self.complete(job_id)
+                    store = self.service.store
+                    result = store.job_identity(job_id)
+                    result['solver'] = {
+                        'semantics': {'whole_review': 'accepted' if complete else 'not_reviewed',
+                                      'binding': 'same_artifact'},
+                        'progress': {'root_obligations': {
+                            'covered': 2 if complete else 1, 'total': 2,
+                            'items': [{'ordinal': 1, 'status': 'satisfied'},
+                                      {'ordinal': 2, 'status': 'satisfied' if complete else 'unresolved'}],
+                        }},
+                    }
+                    if state == 'legacy':
+                        result.pop('presentation_rule')
+                    with store._lock:
+                        store._connection.execute('UPDATE workspace_jobs SET result_json=? WHERE job_id=?',
+                                                  (json.dumps(result), job_id))
+                        snapshot = presentation_snapshot(store.get_job(job_id, 'local-user'))
+                        source = 'older-source' if state == 'source_changed' else snapshot['fingerprint']
+                        store._connection.execute('INSERT INTO output_generations VALUES(?,?,?,?,?)',
+                            (job_id, source, 'ready' if state == 'source_changed' else state, 'saved-request', '{}'))
+                        store._connection.commit()
+                    response = ordinary.get(f'/api/agent/jobs/{job_id}/answer')
+                    self.assertEqual(200, response.status_code)
+                    self.assertEqual(expected, response.json['presentation_status'])
+                    self.assertEqual('1+1=2', response.json['answer'])
+                    self.assertNotIn('1+1=2', response.json['notice'])
+                    if complete:
+                        self.assertNotIn('未完成', response.json['notice'])
+                        self.assertNotIn('未验证', response.json['notice'])
+                    else:
+                        self.assertIn('已覆盖 1/2', response.json['notice'])
+                        self.assertEqual(1, response.json['notice'].count('未完成目标'))
+                        self.assertEqual(1, response.json['notice'].count('未验证'))
+            self.assertEqual(0, post.call_count)
+
     def test_restart_orphaned_terminal_answer_falls_back_without_dispatch(self):
         from showcase.output_generation import initialize_generation
         job_id = self.job('teach')
@@ -281,8 +334,15 @@ class TerminalOutputContractTest(unittest.TestCase):
         self.service.store.start_job(job_id)
         self.service.store.complete_job(job_id, '', 'no answer')
         self.generate(job_id)
-        response = self.client.get(f'/api/agent/jobs/{job_id}/answer')
-        self.assertEqual(200, response.status_code)
-        self.assertEqual('unavailable', response.json['presentation_status'])
-        self.assertEqual('', response.json['answer'])
-        self.assertNotIn('显示原答案', response.json['notice'])
+        for state in ('failed', 'unknown', 'stale', 'ready'):
+            with self.subTest(state=state):
+                with self.service.store._lock:
+                    self.service.store._connection.execute('UPDATE output_generations SET status=? WHERE job_id=?',
+                                                          (state, job_id))
+                    self.service.store._connection.commit()
+                response = self.client.get(f'/api/agent/jobs/{job_id}/answer')
+                self.assertEqual(200, response.status_code)
+                self.assertEqual('unavailable', response.json['presentation_status'])
+                self.assertEqual('', response.json['answer'])
+                self.assertNotIn('原答案', response.json['notice'])
+                self.assertNotIn('未完成', response.json['notice'])

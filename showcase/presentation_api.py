@@ -116,6 +116,7 @@ def get_final_answer(workspace_service, user_id, job_id, public_report=None):
     snapshot = presentation_snapshot(job)
     mode = result.get('presentation_mode', 'solve')
     answer = snapshot['answer']
+    artifact = None
     status, notice = 'legacy', '历史答复，保留原有格式。'
     if result.get('presentation_rule'):
         state = generation_state(workspace_service, job_id)
@@ -132,16 +133,19 @@ def get_final_answer(workspace_service, user_id, job_id, public_report=None):
                 if artifact and artifact['status'] == 'ready':
                     answer = '\n\n'.join(p['text'] for p in artifact['paragraphs'])
                     status, notice = 'ready', '答复表达不代表新增数学验证。'
-                    scope = snapshot['scope']
-                    if artifact.get('completion') != 'complete' or scope['unresolved']:
-                        notice += f" 当前仅为部分结果，仍有未完成目标；已覆盖 {scope['covered']}/{scope['total']} 项目标。"
-                    if snapshot['whole_review'] != 'accepted' or artifact.get('delivery', {}).get('grade') == 'not_verified':
-                        notice += ' 当前答复未验证，不代表整题证明。'
                 else:
+                    artifact = None
                     status, notice = 'unavailable', '答复暂不可用，显示原答案。'
             if status not in {'ready', 'pending'}:
                 answer = snapshot['answer']
     if status != 'pending' and not answer:
         status, notice = 'unavailable', '当前没有可用答复，请核对任务状态。'
+    if answer:
+        scope = snapshot['scope']
+        completion = artifact.get('completion') if artifact else (snapshot.get('selection') or {}).get('completeness')
+        if completion in {'partial', 'incomplete'} or scope['unresolved'] or scope['covered'] < scope['total']:
+            notice += f" 当前仅为部分结果，仍有未完成目标；已覆盖 {scope['covered']}/{scope['total']} 项目标。"
+        if snapshot['whole_review'] != 'accepted' or (artifact and artifact.get('delivery', {}).get('grade') == 'not_verified'):
+            notice += ' 当前答复未验证，不代表整题证明。'
     return {'job_id': job_id, 'status': job['status'], 'mode': mode, 'answer': answer,
             'presentation_status': status, 'notice': notice}
