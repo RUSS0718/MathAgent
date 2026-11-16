@@ -133,4 +133,3 @@ class NaturalIntakeJobTest(StarJobFixture, unittest.TestCase):
         self.assertEqual("accepted", report["semantics"]["whole_review"])
         self.assertEqual("same_artifact", report["semantics"]["binding"])
         self.assertEqual(10, len(self.outbound))
-
