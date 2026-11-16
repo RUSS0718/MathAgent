@@ -1,6 +1,6 @@
 # #189 目标依赖分流阶段验收
 
-2026-11-17，Asia/Shanghai。状态：190开发纵切已退出；191/192代码与审查修复已集成，受影响两轴复查零阻断；自然验收、193与整体门禁未完成。能力与效率不作外推。
+2026-11-17，Asia/Shanghai。状态：190开发纵切已退出；191/192代码与审查修复已集成，受影响两轴复查零阻断；自然首题S失败，离线诊断中，D/U未提交；193与整体门禁未完成。能力与效率不作外推。
 
 ## 源码与边界
 
@@ -90,6 +90,25 @@ native-smoke-result.json、static-check.json、syntax-powershell.json；仓库�
 自然冻结，真实容量/题目不变；live03准备not_run0/3、无正式freeze/guards/data/进程/任务，
 主控负责后续唯一冻结和启动。以上检查不代表自然求解或数学效果。
 
+### live03 首题自然失败
+
+冻结源码316eaba8c681bb928f2d49ea14581db9f7617363，
+北京时间2026-11-17 07:01启动；公开Job `run_bd94bd70b28a651ec30ebc2f66d97c52`。
+S在194.885秒后failed，solver为partial_aborted/result_reason=route_requires_reevaluation，
+无最终答案。无Explore，实际Intake、Planner、Reasoner和StepVerifier参与；不能作为
+简单题有界直解通过，也不能仅凭多角色出现判为191自然成功。实际依赖与失败因果待离线诊断。
+
+8次HTTP全部已返回，角色次数/物理耗时和分别为Intake 1/5.702s、Planner 1/5.423s、
+Reasoner 3/94.898s、StepVerifier 3/82.594s；3次工具、未决请求0，recovery unknown_calls为空。
+Reasoner存在invalid_role_schema、1次repair记录。预算未耗尽，原48模型/48HTTP/8工具、
+2097152 token/3600秒不变；484483为本地UTF8估算计账，不是真实provider token用量。
+provider usage缺失8项不能误写成8次未决调用。
+
+证据 `artifacts/issue189/live03/S-{job,run,report,evidence,events,measurements,answer,terminal,identity}.json`。
+S失败后停止，D/U未提交；原失败/guards/冻结不覆盖、不自动重发。主控按原PID/创建时间
+释放服务，cleanup-verification.json确认原进程退出、8119无监听、临时任务已删除。
+fresh只读诊断者负责仓库外最小离线回放与明确修复建议，零新增provider；尚未作代码修复或新自然运行。
+
 ## 尚未退出
 
-自然题数学与逐角色测量、191/192真实AC、193普通投影/浏览器与恢复、整体双轴和冻结最终门禁均待完成。2048是工程假设，usage缺失不捏造token测量；没有耗时基线，不声称更快。188门禁只适用于188源码，不能代替本阶段。192工作树清理因自动审批拒绝删除自建ignored `.venv`（`blocked by policy`）暂保留。
+自然S已失败并留存角色测量，D/U及191/192真实AC、193普通投影/浏览器与恢复、整体双轴和冻结最终门禁仍待完成。2048是工程假设，usage缺失不捏造token测量；没有耗时基线，不声称更快。188门禁只适用于188源码，不能代替本阶段。192工作树清理因自动审批拒绝删除自建ignored `.venv`（`blocked by policy`）暂保留。
