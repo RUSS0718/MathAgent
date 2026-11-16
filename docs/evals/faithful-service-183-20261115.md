@@ -2,6 +2,16 @@
 
 ## 2026-11-16 重新接续：Lean 限额传递
 
+live34 源码0875c7d，Job run_5fe2dcf3fa23f324b0551c1281033068，最终
+failed/protocol_error，4次请求均返回，未进入规划/并发，无最终答案。
+Intake首次依赖引用未知目标，有界修复通过；普通形式要求授权澄清答no后，
+第二次Intake及其修复均返回applicable_condition=null、clarification=null。
+结构schema及normalize均通过，但违反已有阶段组合规则。修复请求未带对应
+schema_errors，故不能把本次失败归为JSON无法解析或模型超时。
+intake-diagnostics02.json保留有限诊断，不导出完整prompt。终态identity通过，
+8103及临时检查已清理；不改旧Run。新增最小维护仅补阶段组合的准确修复诊断，
+保留接受条件/一次修复/原根和unknown边界，先红绿及聚焦回归，再审查决定新案例。
+
 live33 源码1cef5ec，两个普通Job分别为 run_d44ac65dbda220c5020399de4047f1b8
 和 run_e5bfdf59abdd02a11ac2a1c90e314c95，均 succeeded、4次模型请求及非空答案
 （412/334字符），实际UI及刷新无写/无脚本错误。首题真实Lean6.391秒、L2，
