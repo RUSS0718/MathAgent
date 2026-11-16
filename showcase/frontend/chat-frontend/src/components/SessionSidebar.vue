@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useAuthStore } from '../stores/auth.store'
+const auth = useAuthStore()
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
 import ResponsivePanel from './ui/ResponsivePanel.vue'
@@ -34,7 +36,7 @@ const emit = defineEmits<{
       <div><strong>因果推理智能体</strong><small>数学推理工作区</small></div>
       <UiButton icon-only variant="ghost" class="mobile-only" aria-label="关闭会话栏" @click="emit('close')"><UiIcon name="close" /></UiButton>
     </div>
-    <nav class="sidebar-nav" aria-label="主导航"><UiButton variant="primary" @click="emit('new')"><UiIcon name="plus" />新建会话</UiButton><a class="ui-button ui-button--ghost" href="/dashboard/campaigns"><UiIcon name="experiments" />配对实验</a></nav>
+    <nav class="sidebar-nav" aria-label="主导航"><UiButton variant="primary" @click="emit('new')"><UiIcon name="plus" />新建会话</UiButton><a v-if="auth.reviewer" class="ui-button ui-button--ghost" href="/dashboard/campaigns"><UiIcon name="experiments" />配对实验</a></nav>
     <div class="sidebar-section"><div class="sidebar-section-label"><span>最近会话</span><span>{{ items.length }}</span></div>
     <div v-if="!items.length" class="sidebar-empty">还没有数学题记录</div>
     <nav v-else class="session-list" aria-label="数学会话">
@@ -49,7 +51,7 @@ const emit = defineEmits<{
       </div>
     </nav>
     </div>
-    <div class="sidebar-footer"><UiButton variant="ghost" @click="emit('settings')"><UiIcon name="settings" />设置</UiButton><span class="profile-label">本机用户</span></div>
+    <div class="sidebar-footer"><UiButton v-if="auth.reviewer" variant="ghost" @click="emit('settings')"><UiIcon name="settings" />设置</UiButton><span class="profile-label">本机用户</span></div>
   </aside>
   </ResponsivePanel>
 </template>

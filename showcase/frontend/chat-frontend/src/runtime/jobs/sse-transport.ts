@@ -1,6 +1,7 @@
 import { decodeSseBlock, isTerminalEvent, SseParser, SseProtocolError, type DecodedSseEvent } from '../../api/events.schemas.ts'
 
 export interface ReadJobEventsOptions {
+  ordinary?: boolean
   signal?: AbortSignal
   onEvent?: (event: DecodedSseEvent) => void | Promise<void>
   maxRetries?: number
@@ -59,15 +60,15 @@ async function consumeResponse(
       if (chunk.done) break
       const text = decoder.decode(chunk.value, { stream: true })
       for (const block of parser.push(text)) {
-        if (await accept(decodeSseBlock(block))) return true
+        if (await accept(decodeSseBlock(block, options.ordinary))) return true
       }
     }
     const tail = decoder.decode()
     for (const block of parser.push(tail)) {
-      if (await accept(decodeSseBlock(block))) return true
+      if (await accept(decodeSseBlock(block, options.ordinary))) return true
     }
     for (const block of parser.finish()) {
-      if (await accept(decodeSseBlock(block))) return true
+      if (await accept(decodeSseBlock(block, options.ordinary))) return true
     }
     return cursor.terminalSeen
   } finally {

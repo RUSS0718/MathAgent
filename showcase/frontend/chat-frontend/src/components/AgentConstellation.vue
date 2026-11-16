@@ -21,7 +21,7 @@ function point(role: string) { return roles.find(item => item[0] === role) }
     </svg>
     <button v-for="role in roles" :key="role[0]" type="button" :style="{ left: `${role[2] / 10}%`, top: `${role[3] / 7}%` }"
       :class="[roleStates[role[0]], { selected: selected === role[0] }]" :data-role-state="roleStates[role[0]]" :aria-pressed="selected === role[0]"
-      :aria-label="`筛选${roleLabels[role[0]]}角色`" @click="emit('select', role[0])"><span>{{ roleLabels[role[0]] }}</span><small>{{ stateLabels[roleStates[role[0]] ?? 'idle'] ?? '状态待确认' }}</small></button>
+      :aria-label="`筛选${roleLabels[role[0]]} ${stateLabels[roleStates[role[0]] ?? 'idle'] ?? '状态待确认'}角色`" @click="emit('select', role[0])"><span>{{ roleLabels[role[0]] }}</span><small>{{ stateLabels[roleStates[role[0]] ?? 'idle'] ?? '状态待确认' }}</small></button>
   </div>
 </template>
 
