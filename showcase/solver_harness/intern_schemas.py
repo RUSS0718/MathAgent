@@ -258,6 +258,25 @@ def response_schema(request):
         }
     # Build complete branches after optional extensions; the boundary validator
     # checks oneOf branches independently, including their strict field sets.
+    if request["role"] == "step_verifier" and isinstance(request.get("problem_spec"), dict):
+        schema = deepcopy(schema)
+        pending = deepcopy(schema)
+        pending["properties"].update(verdict={"enum": ["ACCEPT"]}, tool_request=TOOL)
+        pending["required"].append("tool_request")
+        terminal = deepcopy(schema)
+        proved = deepcopy(schema["properties"]["answer_claim"])
+        proved["properties"]["both_directions_proved"] = {"type": "boolean", "enum": [True]}
+        numerical = deepcopy(schema["properties"]["answer_claim"])
+        numerical["properties"].update(both_directions_proved={"type": "boolean", "enum": [False]},
+                                      claim_type={"enum": ["numerical_evaluation"]})
+        numerical["required"].append("claim_type")
+        terminal["properties"].update(
+            verdict={"enum": ["ACCEPT"]}, goal_gate={"enum": ["YES"]},
+            logic_gate={"enum": ["PASS"]}, tool_request={"enum": [None]},
+            answer_claim={"oneOf": [proved, numerical]})
+        other = deepcopy(schema)
+        other["properties"]["verdict"] = {"enum": ["CHALLENGE", "TRACE_BACK", "PROPOSE_REPLAN"]}
+        schema["oneOf"] = [other, pending, terminal]
     if request["role"] in {"meta", "meta_strategist"} and "trace_back_to" in schema["properties"]:
         schema = deepcopy(schema)
         action, trace = ("action_type", "trace_back") if request.get("guidance_request") else (

@@ -189,6 +189,19 @@ def repair_request(request, *, instruction=REPAIR_INSTRUCTION, failed_call=None)
         if not errors:
             return repaired
         repaired["format_repair"] = {"previous_response": text, "schema_errors": errors}
+        if (instruction == REPAIR_INSTRUCTION and request.get("role") == "step_verifier"
+                and isinstance(failed_call.get("request", {}).get("problem_spec"), dict)
+                and isinstance(parsed, dict) and parsed.get("verdict") == "ACCEPT"
+                and not isinstance(parsed.get("tool_request"), dict)):
+            repaired["repair_instruction"] = (
+                "Re-evaluate the current step's ruling against its actual proof and evidence. "
+                "A terminal ACCEPT requires YES/PASS and, if a non-numerical answer_claim is "
+                "declared, all applicable proof obligations established. If proof is missing, "
+                "return CHALLENGE and identify the gap; do not flip a proof flag merely to pass "
+                "validation. Later steps are outside this review. Omit answer_claim when it "
+                "does not apply. Do not add mathematical facts or claim unexecuted tools. "
+                "Return one complete JSON reply matching the schema."
+            )
         if request.get("role") == "reasoner" and request.get("checkpoint_protocol"):
             repaired["repair_instruction"] += (
                 " If a tool_request or tool_evidence_refs was placed directly on checkpoint, "

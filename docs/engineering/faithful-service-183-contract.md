@@ -2,6 +2,17 @@
 
 ## 2026-11-16 按需求解接续
 
+live29 越过时间预留障碍，却在 S1 两次出现终态 YES/PASS/ACCEPT 与
+general_proof/both_directions_proved=false 的矛盾，触发反例搜索及检查点轮数上限。
+本切片仅对冻结 ProblemSpec 的 Intern StepVerifier 终态增加跨字段协议校验；
+有工具请求的暂定回复继续走真实工具续接，数值声明及未声明 answer_claim 的
+合法审查保持。已完成但协议矛盾的首答或工具续答至多获得一次独立计账的重新
+裁决，必须依当前证明选择 ACCEPT 或 CHALLENGE，不由控制器补证明、翻转布尔值
+或用 NOT_FOUND 代替证明。第二次协议失败诚实停止，未知零重发，原根预算、
+deadline、当前权限、回执与来源绑定不变。旧无规格审查和一致的 CHALLENGE
+仍保留既有反例兜底；旧 Run 不重判。先保留公共红见证，再聚焦验证初答、工具
+续答、重复失败、预算和 unknown，双轴复审后再登记一个新真实 Job。
+
 用户已确认 #185 增量验收并要求关闭、推送后继续本票。旧 live27 之后“不自动
 追加 live28”约束由本次明确接续覆盖：先运行一个新普通 Job，复用 live27 数学
 输入与完整工具/Population 配置，显式启用 adaptive-solving-v1，观察修复后的

@@ -301,3 +301,72 @@ live25已准备唯一新普通Job，沿用live24输入，显式faithful-stream-v
 首次双轴独立审查未完成：Spec Ptolemy（01a1def8-c1c5-7231-bb7f-58e8b0debf22）与Standards Meitner（01a1def8-c2f3-7732-ac30-89ee1bd97242）均因本地代理/上游503、request recording storage unavailable退出，不能记为clear。两代理已关闭，此失败历史保留。
 
 用户随后要求修小bug并提交推送。新Spec Russell（01a1df01-dc55-73c2-bce3-b4f4cba41bc5）及Standards Singer（01a1df01-dda8-7fe1-a2b7-cf53f92a3761）均发现等值异类型可绕过既有身份比较；修复为同时比较字段存在性、类型和值。route-spec-bool-red.json/.log保留1→True红见证；最终route-spec-recheck.json/.log为30项、0失败/错误/跳过，19.660秒。新增2→2.0和1→True拒绝（含有效lineage）、合法绑定注册/流转、无规格变更历史的旧路线兼容检查；其余复用相关公共回归。仅随后调整测试导入换行，ruff与diff检查通过；官方baseline共11文件SHA256保持。两轴定向静态复查均无剩余发现。此次为小范围修复提交，不是#183阶段退出，不重复全仓门禁或新增provider-live。
+
+
+## 2026-11-16 live28/29 接续结果
+
+#185 的 0d9f86d 已推送并关闭该票；继续 #183 的 5b43599、86173f5 也已推送。
+live28 233.191 秒、4 次完成请求、0 未决、1 Python 后，收尾时间预留被误乘
+运输重试数而拒绝规划。实际重试共享逻辑调用截止；86173f5 仅去掉该重复倍数。
+公共红绿、13 项聚焦回归和两轴无发现复审见 adaptive-time-*，不重复全仓门禁。
+
+live29 冻结 86173f5ac81917195ed546225d918db30ab388dc，配置 SHA256
+ e00d8711ade0349e2d006cfcd0f12ceedf7ec2377fb4a76d5d95e47b8027025d，Job
+run_da0f0b8ae8b48ac1e1fb7b8e4eeff469 failed/reasoner_checkpoint_round_limit。
+1913.624 秒、14 模型/14 HTTP、6 工具、本地计账 981168 token、0 未决。
+14 个物理请求全部 success，用时合计 1859.767 秒；provider 用量未知的
+unknown_attempts=14 不表示 14 次远端结果未知。根 48/48/8、2097152、3600
+未耗尽，不能归为预算耗尽或超时。
+
+实际顺序：Intake→普通证明来源澄清 no→Intake v2→三次 Explore（前两次
+Python 错误）→Planner→Reasoner S1→StepVerifier 及两次工具续答→Researcher
+→Reasoner 局部修正→StepVerifier→Researcher→检查点轮数上限。Planner 选
+population，但仅一个合法独立前沿，按 independent_frontiers_required 串行，
+不算自然并发。仍停在五步计划的第一步，四根覆盖零，没有完整答案。
+
+两轮最终审查都为 YES/PASS/ACCEPT，却将已审查换元恒等式声明为 general_proof、
+both_directions_proved=false。第一轮此前错误请求符号系数 polynomial_check，
+后经真实 Python 化简得到 0；最终文字确认三条 claim 成立，结构字段仍声明缺证明。
+第二轮同样矛盾，Researcher 均 NOT_FOUND，依现有保守合同不补证明，遂再次返工。
+原始完整调用留在本地 SQLite；限定证据见 live29/verifier-witness.json。
+
+UI page_errors=[]，只读刷新 writes=[]、完整 result 相同；终态 identity.py 退出 0。
+wrapper11484、observer43292、service21544 均退出，8103 空闲，临时检查删除。
+旧 8100/PID15376 保留。上述失败及旧 unknown 不修改、不自动重发。
+
+追加 F5 管理补验时，SQLite 副本加服务和浏览器组合操作被自动审批拒绝，理由仅
+blocked by policy；没有执行备份、启动 8104 或管理写入，management01 未运行。
+不绕过拒绝，不计通过或测试失败。自然并发正确交付、切换/F4、可信缓存当前核验
+及最终必要门禁仍未完成，#183/#168 保持开放。
+
+
+### 终态审查矛盾的最小修复
+
+冻结 ProblemSpec 的 StepVerifier schema 将非 ACCEPT、带真实工具请求的暂定
+ACCEPT、无待执行工具的终态 ACCEPT 分支区分。终态须 YES/PASS；可省略
+answer_claim，声明非数值证明时须明确证明完整。数值声明及旧无规格审查保持原
+兼容和保守反例兜底。修复提示要求重新核对当前证据作裁决，不静默翻转 false，
+不强制保持自相矛盾的旧 verdict。首答、工具续答与 claim 目标修复共享本审查链
+的一次额度，恢复时从持久调用记录识别已用额度。工具续答依据异常的实际调用
+身份区分 known/unknown，unknown 不再落为旧协议失败后的 step_reviewed。
+
+公共红 verifier-consistency-red 保留初答/续答无法交付及 schema 放过矛盾；
+其中旧无规格兼容断言误含 obligation_evidence，随后修正测试夹具，不作产品故障。
+green01 两项暴露了原始 request 未带扩展规格，修复提示改从实际失败调用判断；
+green02 的 6 项通过。独立 Standards Jason、Spec Turing 发现续答 unknown 误分类
+和组合路径重复修复，review-red 两项稳定复现后才修改。green03 的 9 项通过。
+最终 verifier-consistency-regression-final 为 50 项、0 failure/error/skip，76.595 秒；
+覆盖旧反例、合法部分成果、工具回执/来源、协议交接、根调用预算及 unknown。
+单项 unknown-red 实际为通过（原断言不足），不作为红证据。Ruff/diff 检查通过，
+11 个官方 baseline 文件 SHA256 一致；未重复全仓门禁，不代表真实求解已修好。
+
+只读性能补查：live29 原库 mode=ro，9844 事件三次 get_run 合计约 0.326 秒，
+其中 JSON 解码约 0.214 秒，见 readonly-load-profile.txt。首次探针遗漏 Row factory
+导致诊断脚本异常，补齐后测量；不是运行时故障。不由该局部测量推算远端占比，
+本切片不添加缓存、批处理或性能改动。
+
+live30 仅准备一个新普通 Job，沿用 live29 数学输入、完整能力与原授权预算，
+诊断修复后的审查链和完整正确交付。模型仍自主决定规划与模式；参考不发模型，
+不预制规格、计划或成果。双轴复查清零、提交冻结后才启动，原 Run 不重跑。
+
+两轴受影响部分静态复查均 clear：Standards Jason 01a1e1d5-ca1d-79e3-9860-973a1b464b99；Spec Turing 01a1e1d5-cb22-72d2-a3e4-9fd31a6050f7。两者未独立运行测试，均已关闭。

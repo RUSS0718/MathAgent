@@ -161,9 +161,16 @@ def verify_step(
         from .serial_intervention import applicable_results
         request['intervention_results'] = applicable_results(harness, run)
 
+    repair_used = any(
+        item.get("role") == "step_verifier"
+        and (identity == call_id or identity.startswith(call_id + ":"))
+        and item.get("request", {}).get("repair_instruction")
+        for identity, item in state.get("calls", {}).items()
+    )
+
     def reserve_and_dispatch(current, seq, continuation_call_id, continuation_request,
                              *, purpose="compute"):
-        nonlocal call_id
+        nonlocal call_id, repair_used
         # Claim-target repairs may continue an already answered computation.
         # Its call identity must own a distinct reservation event.
         identity = hashlib.sha256(continuation_call_id.encode()).hexdigest()[:16]
@@ -184,7 +191,35 @@ def verify_step(
                 },
             },
         )
-        reply = harness.dispatch(reserved, verifier_port.verify, continuation_request)
+        from . import protocol_repair
+
+        if continuation_request.get("repair_instruction"):
+            repair_used = True
+        try:
+            reply = harness.dispatch(reserved, verifier_port.verify, continuation_request)
+        except CallInterrupted as exc:
+            if repair_used:
+                raise
+            reserved = protocol_repair.reserve_repair(
+                harness, current["run_id"], exc,
+                failure_event=lambda latest, failed: {
+                    "event_id": f"step-review-parse-{step_id}{suffix}-{event_suffix}",
+                    "type": "step_review_parse_failed", "step_id": step_id,
+                    "role": "step_verifier",
+                    "summary": "Verifier continuation failed protocol; one bounded repair follows",
+                },
+                dispatch_event={
+                    "event_id": f"step-review-dispatched-{step_id}{suffix}-{event_suffix}-repair-1",
+                    "type": "step_review_dispatched", "step_id": step_id,
+                    "role": "step_verifier",
+                },
+            )
+            repair_used = True
+            continuation_request = protocol_repair.repair_request(
+                continuation_request,
+                failed_call=protocol_repair.interrupted_call(harness, current["run_id"], exc))
+            continuation_call_id = continuation_request["call_id"]
+            reply = harness.dispatch(reserved, verifier_port.verify, continuation_request)
         latest = harness.get_run(current["run_id"])
         call_id = latest_retry_id(latest["state"].get("calls", {}), continuation_call_id)
         return latest, reply
@@ -198,6 +233,8 @@ def verify_step(
             try:
                 reply = harness.dispatch(reserved, verifier_port.verify, request)
             except CallInterrupted as exc:
+                if repair_used:
+                    raise
                 reserved = protocol_repair.reserve_repair(
                     harness, run["run_id"], exc,
                     failure_event=lambda latest, failed: {
@@ -212,6 +249,7 @@ def verify_step(
                         "role": "step_verifier",
                     },
                 )
+                repair_used = True
                 request = protocol_repair.repair_request(
                     request, failed_call=protocol_repair.interrupted_call(harness, run["run_id"], exc))
                 call_id = request["call_id"]
@@ -283,7 +321,7 @@ def verify_step(
                     and not 0 <= claim_index < len(claims)):
                 from . import protocol_repair
 
-                if protocol_repair.repair_enabled(harness._config):
+                if protocol_repair.repair_enabled(harness._config) and not repair_used:
                     target_request = protocol_repair.repair_request(
                         request,
                         instruction=(
