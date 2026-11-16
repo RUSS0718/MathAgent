@@ -1,5 +1,21 @@
 # F8 真实题集执行记录
 
+## 2026-11-17 只读终态核验
+
+本节更新旧批次状态，以下2026-11-12记录保留为历史快照。未启动或接管实验、模型、服务或监控，#157保持open。
+
+`artifacts/faithful-f8-real-20261111/resume-execution-01/status.json` 已为failed，封存10/29槽，2395.172秒；10份均execution_status=failed、math_verdict=unresolved。末槽处置为 `hard_stop_diagnosis_required`、refused包含 `source_drift`，原请求不重试。2026-11-12 16:53:18 +08:00的scheduled-terminal已观察终态；本轮一次查询原PID1208无记录，未轮询或停止进程。
+
+该接续冻结源码为 `1ca4fea64e72635b58b6720f32de3508be4d3527`，runtime hash为 `a32bbeb7696d07c5094f421ed0f3eb58a1842528ca27faa351019b58fa2c3657`。manifest、正式companion及10份接续结果的既有回执匹配。整体身份不等检测可确认，但缺少停止后的身份值和逐文件后像，无法确定具体漂移文件、时间或责任；不能用当前源码反推历史。
+
+离线覆盖账目核对51份首次：1 completed、49 failed、1 unknown；它们分属6个revision、4个runtime hash层，不能合并成同源码正确率。仍缺19个必需主槽（A1/B1/C2/D13/G2）。原98登记与70必需、E14 unsupported、条件F14范围保持；14个C中12份筛查及绑定可核验，另2个尚未执行，不能据此免除条件F。固定28槽辅助审查的frame及R1/R2/R3/G rubric仍缺；执行失败不等于数学错误。
+
+原绝对截止为2026-11-16 15:25:53.698563 +08:00，已经过去。不能通过新Run或恢复重置原截止。后续真实执行需另行明确协议版本、源码/配置/模型/环境、新截止及比较边界，保留全部旧首次与unknown；本次没有授权或启动新批次。usage observe_only及官方重评分unavailable仅适用于原合同，不外推为#124验收豁免。
+
+逐槽路径、哈希、漂移证据边界及未执行提案保存在忽略目录 `artifacts/issue157/offline-audit-20261117/157-offline-drift-gap-ledger-20261117.{md,json}`，由仓库外独立只读审阅结果复制并核对哈希一致。本节仅归档已有终态与缺口，未运行产品门禁、数学复判或付费审查。
+
+## 历史：2026-11-12 执行与恢复
+
 日期：2026-11-12；本次事实截面为11:31 +08:00。状态：重启中断后归档，按用户要求完成本次交接后停止，真实实验未完成。接续 [真实合同v1](../engineering/faithful-f8-real-protocol-20261111.md)、[v1.2格式恢复](../engineering/faithful-f8-real-recovery-20261112.md)及[新源码接续v1.3](../engineering/faithful-f8-real-source-continuation-20261112.md)，执行入口为[#157](https://github.com/RUSS0718/MathAgent/issues/157)。官方重评分unavailable，真人L3 not_run，usage缺失observe_only。
 
 ## 用户授权恢复后的准备记录
