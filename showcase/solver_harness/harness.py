@@ -81,6 +81,9 @@ class SolverHarness:
         self._intervention_enabled = intervention_enabled is True
         self._event_observer = event_observer
         self._config = _normalize_config(config)
+        from .dependency_routing import validate_config
+
+        validate_config(self._config)
         if self._config.get("features", {}).get("auto_problem_spec") is True and any(
             self._config.get("features", {}).get(key) is not True
             for key in ("problem_spec", "stream_recovery")
@@ -273,6 +276,10 @@ class SolverHarness:
                                   if isinstance(effective_metadata, Mapping) else None
                               ))
         pending_intake = auto_spec and supplied_spec is None
+        if "routing_policy_version" in self._config:
+            from .dependency_routing import POLICY
+
+            state["routing_policy"] = dict(POLICY)
         if self._config.get("features", {}).get("adaptive_solving") is True:
             from .adaptive_resources import VERSION
             from .progress import ADAPTIVE_SEARCH_VERSION
@@ -486,6 +493,8 @@ class SolverHarness:
             raise SolverValidationError("route_state_requires_internal_commit")
         if "route_policy" in normalized_updates:
             raise SolverValidationError("route_policy_is_run_frozen")
+        if "routing_policy" in normalized_updates:
+            raise SolverValidationError("routing_policy_is_run_frozen")
 
         # Validate the persisted run identity before writing through this Harness.
         current = self._state_store.get_run(normalized_run_id) if current is None else current

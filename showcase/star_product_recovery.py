@@ -266,7 +266,9 @@ def resume_solver(harness, problem, run_id, retry):
             from .solver_harness.population_lifecycle import resume_population
 
             return resume_population(harness, run, problem, {})
-    if recovery_projection(run)["unknown_calls"] and retry is None:
+    recovery = recovery_projection(run)
+    if (retry is None and (recovery["unknown_calls"]
+            or (run["state"].get("routing_policy") and recovery["unknown_tools"]))):
         return run
     if run["state"]["phase"] in {"STEP_EXECUTE", "STEP_VERIFY", "CHALLENGE"}:
         return run_supplied_plan_or_explore(
