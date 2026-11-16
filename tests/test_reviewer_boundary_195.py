@@ -105,8 +105,8 @@ class ReviewerBoundaryTest(unittest.TestCase):
         for _ in range(2):
             answer = self.client.get(f'/api/agent/jobs/{job}/answer')
             self.assertEqual(200, answer.status_code)
-            self.assertEqual('2',answer.json['answer'])
-            self.assertEqual('legacy',answer.json['presentation_status'])
+            self.assertEqual('',answer.json['answer'])
+            self.assertEqual('pending',answer.json['presentation_status'])
             self.assertEqual({'job_id','status','mode','answer','presentation_status','notice'},set(answer.json))
             self.assertEqual('no-store',answer.headers['Cache-Control'])
         self.assertEqual(404,self.client.get('/api/agent/jobs/foreign/answer').status_code)
@@ -131,3 +131,27 @@ class ReviewerBoundaryTest(unittest.TestCase):
             problem='1+1',idempotency_key='dcb224db-3708-44a1-a963-e20083744ce1')
         self.assertEqual(404,reviewer.get('/api/agent/jobs/'+foreign['job_id']+'/report').status_code)
         self.assertEqual(404,ordinary.get('/api/agent/jobs/'+foreign['job_id']+'/answer').status_code)
+
+    def test_worker_output_is_readable_through_answer_http(self):
+        import time
+        self.config['SHOWCASE_WORKER_ENABLED'] = True
+        self.config['SHOWCASE_JOB_DELAY_SECONDS'] = 0
+        app = self.make_app()
+        client = app.test_client()
+        csrf = client.get('/api/check_auth').json['csrf_token']
+        headers = {'X-CSRF-Token':csrf, 'Idempotency-Key':'64cdd48c-f62c-4bb0-a823-73c06663ccbf'}
+        session = client.post('/api/new_chat',headers=headers).json['new_session_id']
+        job = client.post('/api/agent/jobs',headers=headers,
+            json={'session_id':session,'message':'1+1'}).json['job_id']
+        deadline = time.monotonic() + 3
+        answer = None
+        while time.monotonic() < deadline:
+            answer = client.get('/api/agent/jobs/'+job+'/answer')
+            if answer.json['presentation_status'] == 'ready':
+                break
+            time.sleep(.01)
+        self.assertEqual(200,answer.status_code)
+        self.assertEqual('ready',answer.json['presentation_status'])
+        self.assertTrue(answer.json['answer'])
+        self.assertNotIn('final_response', client.get('/api/agent/jobs/'+job).json.get('result',{}))
+        self.assertEqual(answer.json, client.get('/api/agent/jobs/'+job+'/answer').json)

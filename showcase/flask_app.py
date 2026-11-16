@@ -927,8 +927,8 @@ def create_app(
     @app.get("/api/agent/jobs/<job_id>/answer")
     def get_job_answer(job_id):
         session = _require_auth(g.auth_session)
-        from .public_workspace import final_answer
-        response = jsonify(final_answer(workspace_service, session.user_id, job_id))
+        from .presentation_api import get_final_answer
+        response = jsonify(get_final_answer(workspace_service, session.user_id, job_id))
         response.headers["Cache-Control"] = "no-store"
         return response
 

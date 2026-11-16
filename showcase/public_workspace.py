@@ -85,18 +85,3 @@ def event_data(event):
     safe['summary'] = '求解进展已更新。'
     return safe
 
-
-def final_answer(service, user_id, job_id):
-    """Use #194 output helper; legacy fallback supports independent integration."""
-    from . import presentation_api
-    helper = getattr(presentation_api, 'get_final_answer', None)
-    if helper is not None:
-        return helper(service, user_id, job_id)
-    job = service.store.get_job(job_id, user_id)
-    result = obj(job.get('result'))
-    terminal = job['status'] in {'succeeded', 'failed', 'canceled'}
-    return {'job_id': job_id, 'status': job['status'],
-            'mode': result.get('presentation_mode', 'solve'),
-            'answer': redact_text(result.get('final_response', '')) if terminal else '',
-            'presentation_status': 'legacy' if terminal else 'pending',
-            'notice': '历史答复，未应用新的输出规则。' if terminal else '正在处理，请稍候。'}
