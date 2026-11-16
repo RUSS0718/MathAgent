@@ -261,6 +261,8 @@ class FaithfulMultistepJobTest(StarJobFixture, unittest.TestCase):
     def test_not_found_search_allows_serial_challenge_correction_to_continue(self):
         self.open_multistep([{"final_response": "1+1=2"}, ACCEPT], calls=14)
         self.replies[4]["answer_claim"] = TRIGGER
+        self.replies[4].update(goal_gate="PARTIAL", verdict="CHALLENGE",
+                               objection="The answer claim lacks proof of both directions.")
         self.replies[5:5] = [NOT_FOUND, REPLIES[2],
                             {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
                              "objection": ""}]
