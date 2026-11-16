@@ -42,8 +42,10 @@ def search_context(state):
 def explore_direct(harness, run, problem):
     """Try a complete candidate and at most one feedback-directed correction."""
     config = harness._config
-    from .dependency_routing import planning_requirement, require_plan
+    from .dependency_routing import planning_requirement, require_plan, unknown_pending
 
+    if unknown_pending(run, allow_authorized_retry=True):
+        return run
     run = require_plan(harness, run)
     if run["state"]["phase"] == "PLAN" and planning_requirement(run["state"]):
         return run
@@ -53,6 +55,8 @@ def explore_direct(harness, run, problem):
             "adaptive_solving": {"version": VERSION, "corrections": 0,
                                  "reason": "candidate_first"}}, reason="candidate_first")
     while True:
+        if unknown_pending(run, allow_authorized_retry=True):
+            return run
         run = require_plan(harness, run)
         if run["state"]["phase"] == "PLAN" and planning_requirement(run["state"]):
             return run

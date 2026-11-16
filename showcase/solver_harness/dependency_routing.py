@@ -44,18 +44,33 @@ def planning_requirement(state):
     return None
 
 
-def require_plan(harness, run):
-    """Route eligible pre-plan work once, after control and unknown guards."""
+def unknown_pending(run, *, allow_authorized_retry=False):
+    """Keep frozen-policy advancement behind the existing unknown audit boundary."""
     from ..run_control import check_control
     from ..star_product_recovery import recovery_projection
+
+    if not run["state"].get("routing_policy"):
+        return False
+    check_control()
+    recovery = recovery_projection(run)
+    unknown_calls = recovery["unknown_calls"]
+    if allow_authorized_retry:
+        from ..run_budget import public_solver_call_id
+
+        retry = run["state"].get("authorized_retry") or {}
+        authorized = public_solver_call_id(run["run_id"], retry.get("call_id"))
+        unknown_calls = [item for item in unknown_calls if item["call_id"] != authorized]
+    return bool(unknown_calls or recovery["unknown_tools"])
+
+
+def require_plan(harness, run):
+    """Route eligible pre-plan work once, after control and unknown guards."""
     from .finalize import commit
 
     state = run["state"]
     if not state.get("routing_policy") or state["phase"] == "TERMINAL":
         return run
-    check_control()
-    recovery = recovery_projection(run)
-    if (recovery["unknown_calls"] or recovery["unknown_tools"]
+    if (unknown_pending(run)
             or state.get("status") in {"interrupted", "recovered_pending_validation"}
             or state.get("clarification", {}).get("status") == "waiting"):
         return run

@@ -16,6 +16,29 @@ ROUTED_CONFIG = {**CONFIG, "routing_policy_version": POLICY_VERSION,
 
 
 class DependencyRecoveryTest(unittest.TestCase):
+    def test_unknown_tool_also_blocks_subsequent_public_run_advancement(self):
+        from showcase.run_budget import RunBudgetLedger, RunBudgetLimits
+        from showcase.solver_harness.calls import CallInterrupted
+
+        directory = self.enterContext(TemporaryDirectory())
+        database = Path(directory) / "unknown.db"
+        ledger = RunBudgetLedger(database_path=database)
+        self.addCleanup(ledger.close)
+        ledger.ensure("unknown-advance", RunBudgetLimits())
+        with SolverHarness(database_path=database, config=ROUTED_CONFIG) as harness:
+            run = harness.solve(PROBLEM, {"run_id": "unknown-advance", "problem_spec": SPEC})
+            staged = harness.commit_event(run["run_id"], expected_revision=run["state_revision"],
+                event={"event_id": "tool-190:dispatch", "type": "tool_dispatched"},
+                state_updates={"phase": "PLAN"})
+        port = IntakePort([])
+        with SolverHarness(database_path=database, config=ROUTED_CONFIG, model_port=port) as harness:
+            try:
+                recovered = harness.solve(PROBLEM, {"run_id": "unknown-advance"})
+            except CallInterrupted:
+                self.fail(f"Unknown tool allowed another role dispatch: {port.requests}")
+        self.assertEqual([], port.requests)
+        self.assertEqual(staged["state_revision"], recovered["state_revision"])
+
     def test_spec_changed_after_exploration_is_rechecked_before_whole_review(self):
         class PlannerObserved(BaseException):
             pass
