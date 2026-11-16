@@ -11,6 +11,7 @@ from typing import Any
 from flask import Flask, Response, g, jsonify, request, stream_with_context
 
 from .loopback import AuthSession
+from .public_workspace import event_data
 from .workspace import WorkspaceError, WorkspaceService
 
 _PUBLIC_EVENT_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
@@ -100,6 +101,7 @@ def register_job_event_route(
     @app.get("/api/agent/jobs/<job_id>/events")
     def get_job_events(job_id: str) -> Response | tuple[Response, int]:
         session = require_auth(g.auth_session)
+        reviewer = g.get("is_reviewer", False)
         raw_cursor = request.args.get("last_event_id")
         if raw_cursor is None:
             raw_cursor = request.headers.get("Last-Event-ID", "0")
@@ -130,6 +132,10 @@ def register_job_event_route(
                     for event in raw_page
                     if (summary := public_event_summary(event)) is not None
                 ]
+                if not reviewer:
+                    events = [{"id": event["id"], "event": event["event"],
+                               "summary": "求解进展已更新。", "data": event_data(event)}
+                              for event in raw_page]
                 next_cursor = raw_page[-1]["id"] if raw_page else after_id
                 has_more = len(raw_events) > limit
             else:
@@ -153,7 +159,7 @@ def register_job_event_route(
 
         def generate():
             for event in events:
-                data = json.dumps(event["data"], ensure_ascii=False, separators=(",", ":"))
+                data = json.dumps(event["data"] if reviewer else event_data(event), ensure_ascii=False, separators=(",", ":"))
                 if event["id"] is None:
                     yield f"event: {event['event']}\ndata: {data}\n\n"
                 else:

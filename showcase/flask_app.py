@@ -67,6 +67,7 @@ def create_app(
         TESTING=False,
         SHOWCASE_PROFILE=profile,
         SHOWCASE_MODE="fake",
+        SHOWCASE_REVIEWER_SECRET=os.getenv("SHOWCASE_REVIEWER_SECRET"),
         SHOWCASE_DATA_DIR=None,
         SHOWCASE_DATABASE_PATH=None,
         SHOWCASE_VISION_ENABLED=os.getenv("SHOWCASE_VISION_ENABLED", "").lower() in {"1", "true", "yes"},
@@ -102,6 +103,8 @@ def create_app(
     star_pipeline = create_star_product_pipeline(
         resolved_database, storage_root=storage_root, config=app.config)
     loopback_store = LoopbackStore(resolved_database)
+    from .reviewer_auth import PERMISSION, ReviewerGrants, technical_request
+    reviewer_grants = ReviewerGrants(str(resolved_database))
     live_pipeline = app.config.get("SHOWCASE_LIVE_PIPELINE")
     if service is None:
         if app.config["SHOWCASE_MODE"] == "live":
@@ -173,11 +176,32 @@ def create_app(
                 return _json_error("csrf_required", 403)
             if csrf_token != g.auth_session.csrf_token:
                 return _json_error("csrf_invalid", 403)
+        g.is_reviewer = reviewer_grants.has(g.auth_session)
+        if technical_request(request):
+            if g.auth_session is None:
+                return _json_error("auth_required", 401)
+            if not g.is_reviewer:
+                return _json_error("reviewer_required", 403)
         return None
 
     @app.after_request
     def add_request_id(response: Response) -> Response:
         response.headers.setdefault("X-Request-ID", g.get("request_id", f"req_{uuid.uuid4().hex}"))
+        if response.is_json and response.status_code < 400 and not g.get("is_reviewer", False):
+            from .public_workspace import job_view
+            body = response.get_json()
+            rule = str(request.url_rule)
+            if rule == "/api/capabilities":
+                body = {key: body[key] for key in ("profile", "jobs", "sse", "files", "presentation") if key in body}
+            elif rule == "/api/load_session":
+                from .public_workspace import fields
+                body = {"success": True, "messages": [fields(m, ("sender", "text", "analysis_job_id", "created_at")) for m in body["messages"]]}
+            elif rule.startswith("/api/agent/") and not rule.endswith(("/answer", "/events")):
+                if isinstance(body, dict):
+                    body = ({"success": True, "jobs": [job_view(j) for j in body["jobs"]]}
+                            if "jobs" in body else job_view(body))
+            response.set_data(app.json.dumps(body))
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.errorhandler(404)
@@ -215,10 +239,22 @@ def create_app(
         session, created = loopback_store.get_or_create(request.cookies.get(AUTH_COOKIE))
         g.auth_session = session
         payload = _auth_payload(session)
+        if reviewer_grants.has(session):
+            payload["permissions"].append(PERMISSION)
         response = jsonify(payload)
         if created:
             _set_auth_cookie(response, session)
         return response
+
+    @app.post("/api/reviewer/grant")
+    def grant_reviewer():
+        payload = _request_object()
+        if isinstance(payload, tuple):
+            return payload
+        if not reviewer_grants.grant(g.auth_session, payload.get("secret"),
+                                     app.config.get("SHOWCASE_REVIEWER_SECRET")):
+            return _json_error("reviewer_denied", 403)
+        return jsonify({"success": True, "reviewer": True})
 
     @app.post("/api/logout")
     def logout() -> Response:
@@ -887,6 +923,14 @@ def create_app(
             verification["findings"] = ["needs_review", "tool_evidence_missing"]
         report = app.extensions["showcase_evidence_exporter"].report(snapshot, tool_results=tool_results, verification=verification)
         return {"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": snapshot["execution_mode"], "solver": {key: (job.get("result") or {}).get(key) for key in ("solver_mode", "missing_capabilities", "evidence_kind", "solver")}, "report": report}
+
+    @app.get("/api/agent/jobs/<job_id>/answer")
+    def get_job_answer(job_id):
+        session = _require_auth(g.auth_session)
+        from .public_workspace import final_answer
+        response = jsonify(final_answer(workspace_service, session.user_id, job_id))
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/api/agent/jobs/<job_id>/report")
     def get_job_report(job_id: str) -> Response | tuple[Response, int]:
