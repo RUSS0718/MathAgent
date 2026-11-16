@@ -35,6 +35,11 @@ class ReviewerBoundaryTest(unittest.TestCase):
         other.get('/api/check_auth')
         self.assertEqual(403, self.client.post('/api/reviewer/grant', json={'secret':'test-review-secret'}).status_code)
         self.assertEqual(403, self.grant(secret='wrong').status_code)
+        self.assertEqual(401, self.app.test_client().post('/api/reviewer/grant',
+            json={'secret':'test-review-secret'}).status_code)
+        self.assertEqual(403, self.client.post('/api/reviewer/grant',
+            json={'secret':'test-review-secret'}, headers={'X-CSRF-Token':'wrong'}).status_code)
+        self.assertNotIn('test-review-secret',self.client.get('/api/capabilities').text)
         self.assertEqual(200, self.grant().status_code)
         self.assertIn('reviewer.access', self.client.get('/api/check_auth').json['permissions'])
         self.assertNotIn('reviewer.access', other.get('/api/check_auth').json['permissions'])

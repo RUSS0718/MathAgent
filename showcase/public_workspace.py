@@ -84,4 +84,3 @@ def event_data(event):
             safe['workbench']['changes'] = [fields(c, ('op','step_label','summary')) for c in workbench['changes']]
     safe['summary'] = '求解进展已更新。'
     return safe
-
