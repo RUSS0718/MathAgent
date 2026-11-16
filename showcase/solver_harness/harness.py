@@ -493,6 +493,8 @@ class SolverHarness:
             raise SolverValidationError("route_state_requires_internal_commit")
         if "route_policy" in normalized_updates:
             raise SolverValidationError("route_policy_is_run_frozen")
+        if "routing_policy" in normalized_updates:
+            raise SolverValidationError("routing_policy_is_run_frozen")
 
         # Validate the persisted run identity before writing through this Harness.
         current = self._state_store.get_run(normalized_run_id) if current is None else current
