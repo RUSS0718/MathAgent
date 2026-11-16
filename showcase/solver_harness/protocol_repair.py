@@ -134,8 +134,18 @@ def _schema_diagnostics(value, schema, path="$"):
     if schema_error(value, schema) is None:
         return []
     if "oneOf" in schema:
-        branches = [branch for branch in schema["oneOf"] if schema_error(value, {
-            key: branch[key] for key in ("type", "const", "enum") if key in branch}) is None]
+        branches = []
+        for branch in schema["oneOf"]:
+            shape = {key: branch[key] for key in ("type", "const", "enum") if key in branch}
+            if isinstance(value, dict) and "properties" in branch:
+                # Prefer the branch selected by supplied fields (e.g. verdict),
+                # without requiring its nested payload to be valid already.
+                shape.update(properties={name: {
+                    key: child[key] for key in ("type", "const", "enum") if key in child
+                } for name, child in branch["properties"].items()},
+                    required=branch.get("required", []))
+            if schema_error(value, shape) is None:
+                branches.append(branch)
         alternatives = [_schema_diagnostics(value, branch, path)
                         for branch in (branches or schema["oneOf"])]
         return min(alternatives, key=len) or [

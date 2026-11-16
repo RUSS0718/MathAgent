@@ -370,3 +370,29 @@ live30 仅准备一个新普通 Job，沿用 live29 数学输入、完整能力�
 不预制规格、计划或成果。双轴复查清零、提交冻结后才启动，原 Run 不重跑。
 
 两轴受影响部分静态复查均 clear：Standards Jason 01a1e1d5-ca1d-79e3-9860-973a1b464b99；Spec Turing 01a1e1d5-cb22-72d2-a3e4-9fd31a6050f7。两者未独立运行测试，均已关闭。
+
+
+## live30 真实拦截与 oneOf 诊断误导
+
+修复7b01eaa已推送；唯一普通Job run_16d198f6578b44b71663959667f0d29e，
+配置SHA256 df24b52eac4bad622ac108883b94c6f3fd01ffb2adf1a46703ec528e2b36f42c。
+720.310秒、8模型/8HTTP、2工具、本地计账529649 token、0未决；8实际请求均返回，
+两个StepVerifier为已知协议失败，不是unknown；provider用量仍全部未知。
+Planner首答自依赖后有界修复，只有一个合法独立前沿，走串行；S1仅安排证明，
+Reasoner已列多个错误的待证猜想（边界和零点均不符合独立参考），没有完整答案。
+
+首个StepVerifier在文字确认当前安排已完成后，仍返回ACCEPT及general_proof/false。
+新协议正确拒绝并派发一次重裁；第二答仍完全相同，按合同停止。无Researcher、
+无NOT_FOUND返工、没有整题正确交付；证明了真实拦截和有界停止，不证明修复提示
+能够纠正模型。run1-final/report/ui/refresh及verifier-witness保留。UI无脚本错误，
+刷新无写；终态identity.py退出0，自有wrapper37228、observer27316、service22120
+均退出、8103空闲、临时检查删除。旧8100保留。
+
+实际重裁的schema_errors把唯一问题报为$.verdict枚举不接受ACCEPT。根因是
+_schema_diagnostics对oneOf只按分支顶层原始约束筛选，三个object分支均进入，
+按错误数取第一个tie，误选非ACCEPT分支。模型第二答文字明确引用这个错误，
+原proof=false未改。verifier-diagnostics-red稳定复现无tool_request及null两种
+相同错误；只改诊断分支形状选择，不改接受校验或增加重试。green10项通过，
+真实两答只读diagnostics-fixed-replay均仅指向$.answer_claim.both_directions_proved。
+
+最终verifier-diagnostics-regression为51项、0 failure/error/skip、81.910秒；Ruff/diff通过，11 baseline字节一致。Standards Bacon（01a1e1ee-7350-7442-8467-eb343f10f286）与Spec Schrodinger（01a1e1ee-743f-7080-ab3c-b821a4179e34）独立静态复审均clear，未独立跑测试，已关闭。至多一个新live31准备，原输入/授权不变，源码冻结后启动。

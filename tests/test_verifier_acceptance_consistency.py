@@ -10,6 +10,7 @@ from pathlib import Path
 import requests
 
 from showcase.solver_harness.intern_schemas import response_schema
+from showcase.solver_harness.protocol_repair import _schema_diagnostics
 from showcase.tool_schemas import schema_error
 from showcase.tools import ToolRegistry
 from tests import test_faithful_protocol_handoff as handoff
@@ -30,6 +31,14 @@ TOOL = {"tool": "polynomial_check", "scope": "finite_computation", "arguments": 
 
 
 class AcceptanceSchemaTest(unittest.TestCase):
+    def test_terminal_claim_diagnostics_point_to_proof_flag_not_legal_accept(self):
+        schema = response_schema({"role": "step_verifier", "problem_spec": SPEC})
+        for reply in (BAD, {**BAD, "tool_request": None}):
+            with self.subTest(tool_request="tool_request" in reply):
+                errors = _schema_diagnostics(reply, schema)
+                self.assertEqual(["$.answer_claim.both_directions_proved"],
+                                 [error["path"] for error in errors])
+
     def test_terminal_review_consistency_and_pending_tool_are_distinct(self):
         request = {"role": "step_verifier", "problem_spec": SPEC,
                    "population_memory_advisory": {"authority": "advisory_only",
@@ -84,6 +93,8 @@ class AcceptanceRepairJobTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(reviewers[-2]["call_id"] + ":repair-1", reviewers[-1]["call_id"])
         repair = reviewers[-1]
         self.assertEqual(BAD, json.loads(repair["format_repair"]["previous_response"]))
+        self.assertEqual(["$.answer_claim.both_directions_proved"],
+                         [error["path"] for error in repair["format_repair"]["schema_errors"]])
         self.assertIn("Re-evaluate", repair["repair_instruction"])
         self.assertNotIn("preserve the verdict", repair["repair_instruction"].lower())
         self.assertNotIn("researcher", [r["role"] for r in self.outbound])
