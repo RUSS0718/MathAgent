@@ -27,6 +27,7 @@ for (const mode of ['solve', 'teach', 'report']) test(`196 ${mode} freezes comma
   })
   await page.route('**/api/load_session?*', route => route.fulfill({ json: { success: true, messages: submitted ? [{ sender: 'user', text: '证明示例', analysis_job_id: 'run-demo' }, { sender: 'ai', text: '不应重复显示的旧答案', analysis_job_id: 'run-demo' }] : [] } }))
   await page.route('**/api/agent/jobs', route => {
+    expect(route.request().postDataJSON().solver_mode).toBeUndefined()
     expect(route.request().postDataJSON().presentation_mode).toBe(mode)
     expect(route.request().postDataJSON().message).toBe('证明示例')
     count++; submitted = true

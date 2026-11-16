@@ -32,7 +32,7 @@ const draft = ref('')
 const notice = ref('')
 const visionEnabled = ref(false)
 const presentationEnabled = ref(false)
-const solverMode = ref('legacy')
+const solverMode = ref('')
 const faithful = ref<CapabilitiesResponse['faithful']>()
 const locallyStartedJob = ref<string | null>(null)
 const faithfulBlocked = computed(() => faithful.value?.enabled === true && !faithful.value.ready)
@@ -249,7 +249,7 @@ async function initialize(): Promise<void> {
   try {
     const capabilities = await api.capabilities()
     faithful.value = capabilities.faithful?.enabled ? capabilities.faithful : undefined
-    solverMode.value = faithful.value?.solver_mode ?? 'legacy'
+    solverMode.value = ''
     if (capabilities.execution?.mode === 'live' && capabilities.execution.status !== 'configured') {
       notice.value = 'live 模式未检测到 Intern API 凭证。'
     }
