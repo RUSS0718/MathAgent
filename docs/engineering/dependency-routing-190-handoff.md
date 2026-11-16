@@ -86,3 +86,9 @@ Ruff 与 diff 检查通过。累计覆盖 122 个不同测试方法（45+29+48�
 未运行 provider/paid、自然数学验收、浏览器、整仓门禁；未宣称等待时间、准确率或数学收益。
 真实自然验收交 #191；Explore cap/截断语义交 #192；UI/组合验收交 #193。
 主控用 fresh merger 集成，独立双轴审阅和阶段门禁仍待执行。
+
+## 2026-11-17 集成与独立纵切审阅
+
+已由fresh merger集成至 `40fec2b05422d1a40153bd98dc35a2e7a27924e5`，合并树与实现者最终树一致。60个忽略证据文件复制到root的 `artifacts/issue190/` 并逐一核对哈希一致。固定比较 `1307aab...40fec2b` 的独立两轴结论分别为：规范轴0项违规/0项可行动smell/0项阻断；规格轴0项发现/0项阻断。报告位于 `C:/Users/CQX/.codex/tmp/190-review-standards-20261117.md` 和 `190-review-spec-20261117.md`；两轴均静态审查及核对既有证据，未重复运行测试。
+
+集成源码上主控执行 `uv run --no-sync python scripts/check_fast.py`，退出0、5项通过（3.229秒）、`fast_check=PASS`，覆盖baseline、官方导入/JSON及Demo合同；终端结果摘要 `artifacts/issue190/fast-main-summary.json`。结合最终45项聚焦及本票公共AC，#190独立开发纵切达到退出条件。该结论不关闭#189：#191自然模型与数学核对、#192首次探索容量、#193用户呈现和组合验收及整体冻结门禁仍待执行；不把受控HTTP称为自然能力证据。

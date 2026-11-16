@@ -1,5 +1,7 @@
 # MathAgent 文档索引
 
+2026-11-17 #189实施中：#190依赖分流已集成，公共聚焦45项和快速检查通过、双轴无阻断；自然验收、首次探索容量、用户呈现及整体门禁待完成。见[设计合同](engineering/dependency-routing-189-design.md)与[#190验收交接](engineering/dependency-routing-190-handoff.md)。
+
 2026-11-17 #188 用户答疑工程退出完成：冻结8db1006门禁6/6通过，后端2241项、0失败/错误、42跳过，源码无漂移；原失败保留。受控表达与fake回退不代表教学质量或数学效果提升。
 见 [实施设计](engineering/user-solving-188-design.md)、
 [验收映射与证据](evals/user-solving-188-20261116.md)和 [审阅授权入口](engineering/reviewer-access-195.md)。
