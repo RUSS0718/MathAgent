@@ -374,7 +374,8 @@ class FaithfulProtocolHandoffTest(StarJobFixture, unittest.TestCase):
             {"checkpoint": {**planner_checkpoint("FINAL"), "gaps": []}, "plan": plan},
             bad, first, review, second, second_review, {"final_response": "1+1=2"}, ACCEPT],
             calls=12, stream=True, stream_requests=stream_requests)
-        final = self.terminal(self.submit())
+        # Ten audited calls including a repair can exceed the fixture's 8s observation window.
+        final = self.terminal(self.submit(), timeout=30)
         self.assertEqual("succeeded", final["status"])
         reasoners = [r for r in self.outbound if r["role"] == "reasoner"]
         self.assertEqual(3, len(reasoners))
