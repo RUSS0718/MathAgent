@@ -15,8 +15,11 @@ user-solving-188，首轮最终门禁冻结 HEAD 为 f1c3d92。PR #197 仍为草
 [阶段记录](../evals/user-solving-188-20261116.md)。
 
 唯一修复实现者 Tesla（01a1e4c2-3136-7fa0-9e7e-d688c0c5f256）拥有
-D:/project/mathagent-188-fix 的 fix/user-solving-188-review，已接收首轮最终
-门禁的23 failure、2 error，正在做最小修复；不得重复启动实现者或覆盖其工作。
+D:/project/mathagent-188-fix 的 fix/user-solving-188-review，已完成首轮最终
+门禁的23 failure、2 error定点修复；29b78c4集成至6f82dea，仅补一行嵌套
+夹具清理。原失败稳定复现后同组20/20、相关54/54通过，受影响双轴复查均无
+阻断。证据 artifacts/issue188/final01-fix/。该实现者保留等待最终门禁，
+不得重复启动实现者或覆盖其工作。
 后续任务只读前沿位于
 C:/Users/CQX/.codex/tmp/remaining-ticket-frontier-20261117.md，技术接缝见
 189-routing-seams-20261117.md；这些准备不代表 #190 已领取或实施。
@@ -25,8 +28,10 @@ C:/Users/CQX/.codex/tmp/remaining-ticket-frontier-20261117.md，技术接缝见
 首轮冻结门禁 user-solving-188-final-01 已失败：2241项、23 failure、2 error、
 42 skip，source_changed=false；快速阶段通过后在offline停止，后续阶段未运行。
 证据位于 artifacts/final-gates/user-solving-188-final-01。PID35388已退出，
-临时定时检查已删除，无活跃门禁。修复及受影响复查后使用
-artifacts/issue188-monitor/start-final.ps1 和新的run ID启动唯一门禁，
+临时定时检查已删除。修复及受影响复查完成后，第二轮run ID固定为
+user-solving-188-final-02；先读取 artifacts/final-gates/ 下同名目录的
+status.json，存在运行态时接管所有权，禁止重复启动。首次启动使用
+artifacts/issue188-monitor/start-final.ps1，
 立即提供监控命令，并创建每30分钟检查；失败或完成后移除检查。
 旧 artifacts/issue188/backend-pre 保留首轮失败。主工作树原有的
 docs/README.md 十行新增、两个未跟踪合同及 tests/test.md 均须保护；
