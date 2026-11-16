@@ -2,6 +2,25 @@
 
 ## 2026-11-16 重新接续：Lean 限额传递
 
+live33 源码1cef5ec，两个普通Job分别为 run_d44ac65dbda220c5020399de4047f1b8
+和 run_e5bfdf59abdd02a11ac2a1c90e314c95，均 succeeded、4次模型请求及非空答案
+（412/334字符），实际UI及刷新无写/无脚本错误。首题真实Lean6.391秒、L2，
+来源formal_48649a03bdbf43b58ecf5cca23e42096，缓存6b07d59d238f4e56b00658286a2eeda3
+active；次题规格quantifiers/directions非规范表达，spec_target_mismatch，未查缓存，
+故整场景failed，不冒认缓存通过。完整规格还在domain/output_requirements上不同，
+不能通过删除身份字段制造命中。spec-comparison.json仅导出规格，不导出完整prompt。
+
+独立禁worker重启后，两答案/完整budget/Attempt及状态一致。初版只读观察器访问
+空浏览器主页触发POST /api/new_chat，原失败保留；修正观察器复用浏览器状态并直接
+访问已有深链，readonly02-observation.json为零写/零页面错误及两份一致。首次修正
+脚本的URL编码路径读取错误亦保留终端输出，改用已解析storageState对象后通过。
+源码identity终态后通过，11 baseline文件字节一致，自有进程与临时检查已清理。
+
+下一场景live34仅一个新普通Job：两个独立计数问题（16位十进制串数位和72且模7为0；
+4×12骨牌铺法恰12个竖骨牌），要求算法与完备性说明。目的为独立工作前沿的自然规划、
+并发/工具及完整交付观察，不强制内部路线，不注入计划、规格或参考答案，不评分数学
+内容。仍原配置/根预算及唯一后台，实际未触发能力继续not_run；不重复本次缓存任务。
+
 用户再次授权继续本票，以整个架构、格式及持久答案读取为目标，不独立评分数学
 内容。起点 b2cddce；旧 live32 停止排期覆盖，旧失败及 unknown 保留。
 
