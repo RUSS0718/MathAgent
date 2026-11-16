@@ -235,6 +235,17 @@ def run_exploration(
         unfulfilled = state.get("unfulfilled")
         findings = list(latest["state"].get("exploration_findings", []))
         finding = {"round": round_number, **assessment_data}
+        if latest["state"].get("routing_policy"):
+            # Only new findings use the already-loaded completed call; legacy data is untouched.
+            call = next((item for item in reversed(list(latest["state"].get("calls", {}).values()))
+                         if item.get("role") == "explore" and item.get("status") == "completed"
+                         and item.get("request", {}).get("round") == round_number), None)
+            finding["provenance"] = "unverified_exploration"
+            finding["source"] = ({
+                "call_id": call["call_id"], "state_revision": call["request_revision"],
+                "specification_version": call["request"].get("problem_spec_version"),
+                "round": round_number,
+            } if call is not None else {"status": "unknown"})
         if receipts or unfulfilled:
             # Computed exploration stays unverified exploration: the record keeps
             # its provenance and never mints a ledger-grade evidence claim.

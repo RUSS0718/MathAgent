@@ -6,6 +6,15 @@ VERSION = "objective-dependency-routing-v1"
 POLICY = {"name": "objective-dependency-routing", "version": 1}
 
 
+def unverified_findings(state):
+    """Label reference material without reconstructing or upgrading legacy sources."""
+    from copy import deepcopy
+
+    return [{**deepcopy(item), "provenance": "unverified_exploration",
+             "source": deepcopy(item.get("source") or {"status": "unknown"})}
+            for item in state.get("exploration_findings", [])]
+
+
 def validate_config(config):
     """Reject unsupported policies without adding defaults to legacy identity."""
     if "routing_policy_version" not in config:

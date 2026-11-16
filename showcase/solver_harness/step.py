@@ -130,6 +130,10 @@ def run_step(
         from .serial_intervention import applicable_results
         base_request['intervention_results'] = applicable_results(harness, run)
     request = base_request
+    if state.get("routing_policy") and state.get("exploration_findings"):
+        from .dependency_routing import unverified_findings
+
+        base_request["exploration_findings"] = unverified_findings(state)
     if checkpoint_mode:
         valid_sources = [
             deepcopy(item)

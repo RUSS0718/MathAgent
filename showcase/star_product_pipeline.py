@@ -316,6 +316,7 @@ class StarProductPipeline:
             # Only this new policy key is restored; all other identity checks remain strict.
             import sqlite3
             from contextlib import closing
+
             from .solver_harness.dependency_routing import POLICY, VERSION
 
             with closing(sqlite3.connect(self.database_path)) as connection:

@@ -64,6 +64,11 @@ def generate_initial_plan(harness, run, *, problem, model_port, config, metadata
             )
     from .autonomous_routes import planner_request
 
+    if state.get("routing_policy"):
+        from .dependency_routing import unverified_findings
+
+        request["exploration_findings"] = unverified_findings(state)
+
     if state.get("adaptive_solving"):
         request["review_feedback"] = state.get("candidate_review_feedback", {})
         request["unresolved_obligations"] = [
