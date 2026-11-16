@@ -2,6 +2,14 @@
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
 import ResponsivePanel from './ui/ResponsivePanel.vue'
+const sessionTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+})
+function formatSessionTime(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : sessionTimeFormatter.format(date)
+}
 defineProps<{
   items: Array<{ id: string; preview: string; lastTime: string }>
   currentId: string | null
@@ -32,7 +40,7 @@ const emit = defineEmits<{
     <nav v-else class="session-list" aria-label="数学会话">
       <div v-for="item in items" :key="item.id" class="session-row" :class="{ selected: item.id === currentId }">
         <button class="session-main" type="button" :aria-current="item.id === currentId ? 'page' : undefined" @click="emit('select', item.id)">
-          <span class="session-title">{{ item.preview }}</span><span class="session-time">{{ item.lastTime }}</span>
+          <span class="session-title">{{ item.preview }}</span><time class="session-time" :datetime="item.lastTime">{{ formatSessionTime(item.lastTime) }}</time>
         </button>
         <div class="session-actions">
           <UiButton icon-only variant="ghost" :aria-label="`重命名会话：${item.preview}`" @click="emit('rename', item.id)"><UiIcon name="pencil" /></UiButton>
