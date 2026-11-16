@@ -221,7 +221,8 @@ def run_challenges(
             checkpoint_record = reasoner_checkpoint.record(
                 run,
                 checkpoint,
-                call_id=request["call_id"],
+                call_id=protocol_repair.completed_call_id(
+                    harness.get_run(run["run_id"])["state"]["calls"], request["call_id"]),
                 checkpoint_round=len(checkpoints) + 1,
                 plan_version=state["plan_version"],
                 attempt_index=attempt,
