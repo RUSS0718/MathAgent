@@ -39,7 +39,30 @@ S/D预登记于 `artifacts/issue189/preregistration/natural-cases-v1.json`，U�
 
 先完成191/192补证和审阅，再冻结同一源码/配置唯一执行S/D/U，每题一次。unknown及提交身份不明不自动重发；失败与原记录保留。193随后使用持久结果做普通UI及只读刷新验收，分别记录自然运行和UI的适用源码SHA，不为界面重复调用模型。
 
-`artifacts/issue189/live01/` 运行器已完成两轮离线公共Flask/Job受控smoke：第二轮0真实provider、3受控Attempt、分页30页、读取新增0次，公共Run保持产品原响应；第一轮保留。配置审计为独立启动快照，不混入Run原生字段。自然服务尚未启动，端口8119和独立data待主控冻结；用户8103不动。长期运行遵循[工程门禁](../engineering/development-gates.md)和现有30分钟检查合同，不用子代理轮询。
+启动前，`artifacts/issue189/live01/` 运行器完成两轮离线公共Flask/Job受控smoke：第二轮0真实provider、3受控Attempt、分页30页、读取新增0次，公共Run保持产品原响应；第一轮保留。配置审计为独立启动快照，不混入Run原生字段。使用端口8119和独立data，用户8103不动。长期运行遵循[工程门禁](../engineering/development-gates.md)和现有30分钟检查合同，不用子代理轮询；实际首次启动结果见下节。
+
+### live01 提交前拒绝
+
+冻结9ca4212，于北京时间2026-11-17 06:39启动唯一后台实例与30分钟临时检查。
+首题S的公开POST返回400，运行器停止后续题、未自动重发。原运行器使用
+`issue189-live01-S` 作为幂等键，而公开入口要求UUIDv4；原离线smoke自行构造UUID，
+未复用实际提交代码，因此未覆盖此错误。原响应体未保留，错误码不能事后冒称已捕获。
+
+主控只读打开独立SQLite，workspace_jobs、runs、run_budgets、solver_states、solver_events
+全部为0；没有Job/Run或provider调用，自然数学验收仍not_run。核对记录
+`artifacts/issue189/live01/reconciliation.json`，S-terminal仅记录rejected_before_job_creation，
+不是产品Job成功或数学终态。原guards、失败status与日志完整保留，原请求不重发。
+主控按PID及创建时间释放服务，8119无监听，临时检查已删除。fresh子智能体仅修复
+新ignored live02运行器，要求稳定离线红绿、实际提交代码复用和HTTP错误脱敏留存，
+无修改产品源码或扩容。新运行须另行冻结与唯一启动，不能覆盖live01证据。
+
+live02窄修复已完成：实际observe和离线smoke复用同一提交代码，UUIDv4红400转绿202；
+真实faithful配置且worker关闭时，省略solver_mode的Job实际为star_reference，非legacy。
+HTTP错误只留状态码和符号error code，400/timeout/重复预约均不自动重发。证据为
+`artifacts/issue189/live02/{red,green,green-final,static-check,syntax-powershell}.json`；
+0真实provider，服务配置与admission和live01逐字节相同，未修改产品。仓库外交接
+`C:/Users/CQX/.codex/tmp/189-live02-runner-fix-20261117.md`。准备态not_run0/3，
+无freeze/guards/后台运行；主控接回冻结和唯一启动所有权。此离线准入不算自然题验收。
 
 ## 尚未退出
 

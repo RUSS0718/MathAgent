@@ -12,6 +12,10 @@
 
 下一步先提交这些文档并推送，填写live01内部冻结记录，再由主控冻结唯一自然S/D/U。冻结期间不改tracked bytes、HEAD、dist或配置；当前尚无本轮进程/定时检查，运行所有权归主控。自然终态后再推进193，真实Job只读复用，不为UI重复模型请求。继续同一模型选择，不指定子智能体型号覆盖，具体型号及继承无法独立确认。
 
+上述准备已于9ca4212冻结并启动live01，但S提交返回400，未创建Job；主控只读核对Job/Run/预算/solver state/event均为0，无provider调用。根因为运行器幂等键非UUIDv4、离线smoke未复用实际提交代码；原响应体丢失如实记录。原失败、guard及reconciliation保留，数学验收仍not_run，D/U未提交。主控按精确PID/创建时间清理服务与临时检查，8119无监听。fresh Nash（01a1e685-77b7-7d50-af61-433b30c87c08）独占ignored live02及仓库外交接，修正运行器并做公共离线红绿，不改产品或启动provider；主控等待，不催促。live02就绪后再记录新冻结与唯一启动，不能覆盖/重放live01原提交。另有Einstein（01a1e684-77ca-7fd3-a8d1-e462a3f7e8a7）只读准备#156后续工程缺口报告，无领取/实施/实验授权。
+
+Nash已完成关闭，live02红400/idempotency_key_invalid、绿202/default star_reference；observe与smoke共用提交代码，错误留存及单次请求断言通过，0真实provider。主控已审阅窄差异，下一步冻结新文档HEAD并唯一启动live02，继续原S/D/U题目与预算，保留live01全部失败。新的监控入口 `artifacts/issue189/live02/check.ps1`、任务 `MathAgent-Issue189-live02`，端口8119；尚未启动时无进程/任务所有权可交接。详见[阶段记录](../evals/dependency-routing-189-20261117.md)。Einstein亦完成关闭，报告 `C:/Users/CQX/.codex/tmp/156-next-slice-audit-20261117.md`；#156未领取，两个活跃公共owner接管为具体工程证据缺口，机器压力信号合同未定，provider/数学未实证不作为新增实验授权。
+
 自然S/D题干已预登记于忽略目录 `artifacts/issue189/preregistration/natural-cases-v1.json`，新增单目标题U登记于同目录 `natural-U-v1.json`，均为 `registered_not_run`；题干SHA在相应文件。U的人审参考另存仓库外，主控独立有理数枚举核对21组；答案不得进入运行器或模型。D未产生实际依赖，或U自然产生依赖/首次完整完成，均按相应路径记not_triggered，不注入Spec/计划或诱导重跑。先在191/192代码集成及独立审阅通过后冻结同一源码/配置，由主控唯一启动S/D/U每题一次；实际退出后才实施193，复用保存结果做只读UI/刷新验收，分别记录自然运行与UI源码SHA，不为UI重新派发模型。Boyle已完成运行器及公共Flask/Job受控离线smoke，真实provider为0，核心HTTP读取/分页通过；自然验收仍NOT_RUN。Dalton（01a1e659-e22f-7940-9b17-6d08464af0ea）仅在ignored `artifacts/issue189/live01/` 修简有效配置审计与冻结时序：独立服务配置快照，不修改受验公共Run响应。独立端口8119和data，不触碰用户8103；未启动provider、服务或定时检查。当前无本轮live/长测试进程。#188门禁源码为 `8db100636a117c7219d10dfeb7c974f505819e2b`，与文档交付SHA区别记录。
 
 独立只读审阅另确认#130按开发前决策地图范围完成交接，已由主控于2026-11-17关闭并重读确认；结案评论 `6930388527`。原五类待明确事项由146/156/157/168等执行票承接，不视为产品或实验完成；审阅报告 `C:/Users/CQX/.codex/tmp/130-closure-audit-20261117.md`。Boole（01a1e656-6341-7143-8c05-53c5b9fdcdd5）仅只读核对157旧批次证据，不启动或重试实验。
