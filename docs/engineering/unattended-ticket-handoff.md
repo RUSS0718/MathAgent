@@ -9,21 +9,25 @@
 较早父票及未实证能力不随界面交付自动关闭。本节覆盖下文旧的停止排期。
 
 集成工作树为 D:/project/工程化MathAgent/Challenge-Cup-2026，分支
-user-solving-188，当前文档提交前 HEAD 为 e44284c。PR #197 仍为草稿。
+user-solving-188，首轮最终门禁冻结 HEAD 为 f1c3d92。PR #197 仍为草稿。
 三个切片已合并，首轮离线回归为 2234 项、141 failure、587 error、42 skip；
 该失败保持，不能当作通过。双轴发现及修复进度见
 [阶段记录](../evals/user-solving-188-20261116.md)。
 
 唯一修复实现者 Tesla（01a1e4c2-3136-7fa0-9e7e-d688c0c5f256）拥有
-D:/project/mathagent-188-fix 的 fix/user-solving-188-review，尚待完成报告；
-不得重复启动实现者或覆盖其未提交工作。Harvey
-（01a1e527-b99b-7b02-919f-1d942f9ff77f）只读准备剩余任务前沿，输出位于
-C:/Users/CQX/.codex/tmp/remaining-ticket-frontier-20261117.md。
+D:/project/mathagent-188-fix 的 fix/user-solving-188-review，已接收首轮最终
+门禁的23 failure、2 error，正在做最小修复；不得重复启动实现者或覆盖其工作。
+后续任务只读前沿位于
+C:/Users/CQX/.codex/tmp/remaining-ticket-frontier-20261117.md，技术接缝见
+189-routing-seams-20261117.md；这些准备不代表 #190 已领取或实施。
 继续当前选择的同一模型，不覆盖子智能体型号；具体继承结果未独立核验。
 
-主智能体当前没有运行最终长门禁，也没有本轮活跃的定时检查。
-冻结源码后使用 artifacts/issue188-monitor/start-final.ps1 启动唯一门禁，
-立即提供监控命令，并创建每 30 分钟检查；失败或完成后移除检查。
+首轮冻结门禁 user-solving-188-final-01 已失败：2241项、23 failure、2 error、
+42 skip，source_changed=false；快速阶段通过后在offline停止，后续阶段未运行。
+证据位于 artifacts/final-gates/user-solving-188-final-01。PID35388已退出，
+临时定时检查已删除，无活跃门禁。修复及受影响复查后使用
+artifacts/issue188-monitor/start-final.ps1 和新的run ID启动唯一门禁，
+立即提供监控命令，并创建每30分钟检查；失败或完成后移除检查。
 旧 artifacts/issue188/backend-pre 保留首轮失败。主工作树原有的
 docs/README.md 十行新增、两个未跟踪合同及 tests/test.md 均须保护；
 tests/test.md 不读取、不修改、不暂存、不删除。
