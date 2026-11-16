@@ -34,7 +34,8 @@ def public_solver_event_id(run, event):
 
 
 def decision_fields(event, state, invocations=()):
-    routing_reason = (event.get("reason") == "objective_dependencies"
+    routing_reason = (event.get("reason") in {"objective_dependencies",
+                      "initial_explore_output_limit", "initial_explore_incomplete"}
                       and event["type"] == "adaptive_planning_required")
     fields = {key: event[key] for key in (
         "assessment", "round", "next_phase", "goal_gate", "logic_gate",
@@ -54,7 +55,7 @@ def decision_fields(event, state, invocations=()):
     ) if key in event}
     workbench = collaboration_fields(event, state)
     if routing_reason:
-        fields["reason"] = "objective_dependencies"
+        fields["reason"] = event["reason"]
     if workbench is not None:
         fields["workbench"] = workbench
     run_id = state.get("run_id")

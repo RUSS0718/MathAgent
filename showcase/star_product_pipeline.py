@@ -31,7 +31,7 @@ class StarProductPipeline:
     def __init__(self, database_path, *, adapter=None, evidence_kind="live", budget=None,
                  features=None, registry=None, hint_mode="none", full_enabled=False,
                  full_features=None, full_budget=None, experiment_policy=None,
-                 routing_policy_version=None,
+                 routing_policy_version=None, initial_explore_policy_version=None,
                  transport_policy="legacy", stream_profiles=None, acceptance_mode="strict",
                  context_capacity=None, population_capacity=None, population_budget=None,
                  limited_enabled=True,
@@ -44,6 +44,12 @@ class StarProductPipeline:
         if experiment_policy is not None and not isinstance(experiment_policy, ExperimentRunPolicy):
             raise ValueError("star_experiment_policy_invalid")
         self.experiment_policy = experiment_policy
+        self.initial_explore_policy_version = initial_explore_policy_version
+        if initial_explore_policy_version is not None:
+            from .solver_harness.initial_explore import validate_config
+
+            validate_config({"initial_explore_policy_version": initial_explore_policy_version,
+                             "routing_policy_version": routing_policy_version})
         self.routing_policy_version = routing_policy_version
         if routing_policy_version is not None:
             from .solver_harness.dependency_routing import VERSION
@@ -331,6 +337,17 @@ class StarProductPipeline:
                 selected = VERSION
             if selected is not None and solver_mode != "star_population" and component_features is None:
                 config["routing_policy_version"] = selected
+            from .solver_harness.initial_explore import POLICY as INITIAL_POLICY
+            from .solver_harness.initial_explore import VERSION as INITIAL_VERSION
+
+            initial_frozen = json.loads(stored[0]).get("initial_explore_policy") if stored else None
+            initial_selected = self.initial_explore_policy_version if stored is None else None
+            if initial_frozen is not None:
+                if initial_frozen != INITIAL_POLICY:
+                    raise ValueError("initial_explore_policy_version_invalid")
+                initial_selected = INITIAL_VERSION
+            if initial_selected is not None and solver_mode != "star_population" and component_features is None:
+                config["initial_explore_policy_version"] = initial_selected
             with SolverHarness(database_path=self.database_path, config=config,
                                intervention_enabled=self.intervention_enabled,
                                model_port=port, verifier_port=port,

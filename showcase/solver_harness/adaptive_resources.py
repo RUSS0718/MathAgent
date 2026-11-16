@@ -43,7 +43,8 @@ def allocate(harness, run, request):
         return {}, None
     port = harness._model_port
     adapter = getattr(port, "adapter", None)
-    cap = getattr(adapter, "max_tokens", None)
+    base_cap = getattr(adapter, "max_tokens", None)
+    cap = request.get("max_output_tokens", base_cap)
     client_getter = getattr(adapter, "_get_client", None)
     client = client_getter() if callable(client_getter) else None
     timeout = getattr(client, "timeout", None) or getattr(adapter, "client_timeout", None)
@@ -65,7 +66,7 @@ def allocate(harness, run, request):
     if role == "whole_solution_verifier":
         calls, tokens = 0, 0
     elif role in {"explore", "final_generator"}:
-        calls, tokens = 1, closing["review_input"] + cap
+        calls, tokens = 1, closing["review_input"] + base_cap
     else:
         calls, tokens = 2, closing["tokens"]
     # One shared repair cushion, not an indefinitely renewed per-call allowance.

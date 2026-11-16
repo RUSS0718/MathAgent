@@ -140,6 +140,13 @@ def _audit_fingerprints(request, schema, messages, *, fallback_problem=None):
     }
 
 
+def _validate_output_override(request):
+    if "max_output_tokens" in request:
+        cap = request["max_output_tokens"]
+        if type(cap) is not int or cap <= 0:
+            raise InternPortError("max_output_tokens_invalid", no_dispatch=True)
+
+
 def _loads_known_escape_rescue(text):
     """Parse strictly; rescue exactly the invalid-escape failure class.
 
@@ -197,6 +204,7 @@ class InternModelPort:
     def complete(self, request):
         if self.adapter is None:
             raise InternPortError("live_not_enabled")
+        _validate_output_override(request)
         schema = response_schema(request)
         messages = self._messages(request, schema)
         fingerprints = _audit_fingerprints(
@@ -240,6 +248,8 @@ class InternModelPort:
                 native_tools=bool(provider_tools),
                 profiles=self.stream_profiles,
                 schema_fingerprint=fingerprints["schema_fingerprint"],
+                max_output_tokens=request.get("max_output_tokens"),
+                transport_override=request.get("transport_override"),
             )
             self._authorize_transport(request, decision, fingerprints)
         else:
@@ -250,6 +260,8 @@ class InternModelPort:
                 native_tools=bool(provider_tools),
                 profiles=self.stream_profiles,
                 schema_fingerprint=fingerprints["schema_fingerprint"],
+                max_output_tokens=request.get("max_output_tokens"),
+                transport_override=request.get("transport_override"),
             )
             if decision["transport"] == "legacy" and self.streaming:
                 reason = (
@@ -289,6 +301,8 @@ class InternModelPort:
             adapter_kwargs = {
                 "metadata": _request_metadata(request, self.deadlines, activity_observer),
             }
+            if "max_output_tokens" in request:
+                adapter_kwargs["max_output_tokens"] = request["max_output_tokens"]
             if provider_tools:
                 adapter_kwargs["tools"] = provider_tools
             response = self.adapter.complete(messages, **adapter_kwargs)
@@ -361,6 +375,8 @@ class InternModelPort:
             for chunk in self.adapter.stream_complete(
                 messages,
                 metadata=_request_metadata(request, self.deadlines, activity_observer),
+                **({"max_output_tokens": request["max_output_tokens"]}
+                   if "max_output_tokens" in request else {}),
             ):
                 if chunk.get("type") == "text_delta" and isinstance(chunk.get("text"), str):
                     metrics["fragments"] += 1
@@ -474,6 +490,7 @@ class InternModelPort:
 
     def serialized_payload_size(self, request):
         """Estimate the exact non-stream provider body without dispatching it."""
+        _validate_output_override(request)
         if self.adapter is None:
             raise InternPortError("finalization_payload_estimate_unavailable", no_dispatch=True)
         from ..adapters import _normalize_message
@@ -485,7 +502,7 @@ class InternModelPort:
             "model": getattr(client, "model", None) or self.adapter.model_id,
             "messages": messages,
             "temperature": self.adapter.temperature,
-            "max_tokens": self.adapter.max_tokens,
+            "max_tokens": request.get("max_output_tokens", self.adapter.max_tokens),
         }
         tools = request.get("provider_tools", request.get("tools", ()))
         if tools and hasattr(client, "chat"):

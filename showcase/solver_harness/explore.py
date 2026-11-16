@@ -122,7 +122,7 @@ def run_exploration(
         )
         return {"call_reserved": True, "run": reserved}
 
-    def call_explore(state: _ExploreGraphState) -> dict[str, Any]:
+    def dispatch_explore(state: _ExploreGraphState) -> dict[str, Any]:
         current = state["run"]
         request = {
             "run_id": state["run_id"],
@@ -134,6 +134,10 @@ def run_exploration(
             "problem": state["problem"],
             "state_revision": current["state_revision"],
         }
+        from .initial_explore import OUTPUT_CAP, is_initial
+
+        if is_initial(current["state"]):
+            request.update(max_output_tokens=OUTPUT_CAP, transport_override="nonstream")
         guidance_task = current["state"].get("pending_guidance_task")
         if current["state"].get("adaptive_solving"):
             request["instruction"] = (
@@ -142,6 +146,12 @@ def run_exploration(
                 "otherwise return NEED_PLAN with concrete unresolved obligations. When given "
                 "review_feedback, correct the identified step and all affected conclusions; "
                 "preserve independently valid reasoning. Do not treat feedback as proven facts.")
+            if is_initial(current["state"]):
+                request["instruction"] = (
+                    "Make one short exploration within the output limit. Give a self-contained "
+                    "complete candidate only if readily available; otherwise return NEED_PLAN "
+                    "with useful partial findings and concrete unresolved obligations. Do not "
+                    "attempt a long proof at the expense of reporting the remaining gaps.")
             if current["state"].get("candidate_review_feedback"):
                 request["review_feedback"] = current["state"]["candidate_review_feedback"]
                 request["previous_candidate"] = current["state"]["exploration_findings"][-1].get(
@@ -155,6 +165,10 @@ def run_exploration(
         try:
             reply = harness.dispatch(current, state["model_port"].complete, request)
         except CallInterrupted as exc:
+            failed = protocol_repair.interrupted_call(harness, state["run_id"], exc)
+            if (current["state"].get("initial_explore_policy")
+                    and failed.get("error_category") == "truncated_response"):
+                raise
             current = protocol_repair.reserve_repair(
                 harness, state["run_id"], exc,
                 failure_event=lambda latest, failed: {
@@ -215,13 +229,53 @@ def run_exploration(
             "unfulfilled": "explore_tool_request_unfulfilled" if unfulfilled else None,
         }
 
+    def call_explore(state: _ExploreGraphState) -> dict[str, Any]:
+        from .calls import CallInterrupted
+        from .initial_explore import is_initial
+        from .protocol_repair import interrupted_call, known_protocol_failure
+
+        try:
+            return dispatch_explore(state)
+        except CallInterrupted as exc:
+            failed = interrupted_call(harness, state["run_id"], exc)
+            bounded_failure = (is_initial(state["run"]["state"])
+                               or (state["run"]["state"].get("initial_explore_policy")
+                                   and failed.get("error_category") == "truncated_response"))
+            if not bounded_failure or not known_protocol_failure(failed):
+                raise
+            # A known response failure ends this semantic attempt. Unknown stays interrupted.
+            return {"run": harness.get_run(state["run_id"]), "reply": {}}
+
     def persist_assessment(state: _ExploreGraphState) -> dict[str, Any]:
         assessment_data = _normalize_assessment(state.get("reply", {}))
+        from .initial_explore import is_initial
+
+        latest = harness.get_run(state["run_id"])
+        initial = is_initial(latest["state"])
+        call = max((item for item in latest["state"].get("calls", {}).values()
+                     if item.get("role") == "explore"
+                     and item.get("request", {}).get("round") == state["round"]),
+                   key=lambda item: item["request_revision"], default=None)
+        if (call and call.get("status") == "protocol_failed"
+                and (initial or (latest["state"].get("initial_explore_policy")
+                                 and call.get("error_category") == "truncated_response"))):
+            import json
+
+            # Preserve only a fully parseable object as unverified reference, never patch a tail.
+            try:
+                partial = json.loads(call.get("partial_text") or "")
+            except (ValueError, TypeError):
+                partial = {}
+            assessment_data = {**_normalize_assessment(partial), "assessment": "UNKNOWN",
+                               "end_reason": call.get("error_category")}
+        if initial and not assessment_data.get("solution_candidate", "").strip():
+            assessment_data["assessment"] = ("NEED_PLAN" if assessment_data["assessment"] == "SOLVED"
+                                             else assessment_data["assessment"])
         assessment = assessment_data["assessment"]
         round_number = state["round"]
         if assessment == "SOLVED":
             next_phase = "EXPLORE_REVIEW"
-        elif assessment == "PARTIALLY_SOLVED" and round_number < state["max_explore_rounds"]:
+        elif not initial and assessment == "PARTIALLY_SOLVED" and round_number < state["max_explore_rounds"]:
             next_phase = "EXPLORE"
         else:
             next_phase = "PLAN"
@@ -235,11 +289,14 @@ def run_exploration(
         unfulfilled = state.get("unfulfilled")
         findings = list(latest["state"].get("exploration_findings", []))
         finding = {"round": round_number, **assessment_data}
+        if initial:
+            finding["initial_explore"] = True
         if latest["state"].get("routing_policy"):
             # Only new findings use the already-loaded completed call; legacy data is untouched.
-            call = next((item for item in reversed(list(latest["state"].get("calls", {}).values()))
-                         if item.get("role") == "explore" and item.get("status") == "completed"
-                         and item.get("request", {}).get("round") == round_number), None)
+            if not latest["state"].get("initial_explore_policy"):
+                call = next((item for item in reversed(list(latest["state"].get("calls", {}).values()))
+                             if item.get("role") == "explore" and item.get("status") == "completed"
+                             and item.get("request", {}).get("round") == round_number), None)
             finding["provenance"] = "unverified_exploration"
             finding["source"] = ({
                 "call_id": call["call_id"], "state_revision": call["request_revision"],
@@ -286,7 +343,7 @@ def run_exploration(
         )
         next_action = (
             "retry"
-            if assessment == "PARTIALLY_SOLVED" and round_number < state["max_explore_rounds"]
+            if not initial and assessment == "PARTIALLY_SOLVED" and round_number < state["max_explore_rounds"]
             else "stop"
         )
         return {
