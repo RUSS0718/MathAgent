@@ -91,6 +91,8 @@ def presentation_snapshot(job, public_report=None):
         formal = _formal_source(solver.get("formal_verification"), snapshot["versions"])
         if formal:
             snapshot["sources"].append(formal)
+    if result.get("presentation_rule"):
+        snapshot["rule"] = deepcopy(result["presentation_rule"])
     snapshot["fingerprint"] = _digest(snapshot)
     return snapshot
 
