@@ -14,7 +14,7 @@ for (const width of [390, 1440]) {
         + Array.from({ length: 2000 }, (_, i) => frame(i + 2, { solver_event_type: 'state_saved', role: 'controller', summary: 'PRIVATE' })).join('')
         + frame(2002, { solver_event_type: 'call_audit', role: 'reasoner', solver_call_id: 'call-one', call_lifecycle: 'running', created_at: new Date().toISOString() })
       await mockWorkspace(page, true, stream + stream)
-      const result = { execution_mode: 'fake', faithful: { version: 'faithful-task-v1', phase: status === 'failed' ? 'unknown' : status, allowed_actions: [] }, identity: { attempt_id: 'attempt-one' }, budget: { used: 1 } }
+      const result = { execution_mode: 'fake', faithful: { version: 'faithful-task-v1', phase: status === 'failed' ? 'unknown' : status === 'succeeded' ? 'completed' : status, allowed_actions: [] }, identity: { attempt_id: 'attempt-one' }, budget: { used: 1 } }
       await page.route('**/api/agent/jobs/run-demo', route => route.fulfill({ json: { success: true, job_id: 'run-demo', session_id: 'session-demo', status, last_event_id: 0, result } }))
       await page.route('**/api/agent/jobs/run-demo/report', route => status === 'succeeded'
         ? route.fulfill({ json: report }) : route.fulfill({ status: 409, json: { error: 'not_ready' } }))
@@ -25,6 +25,7 @@ for (const width of [390, 1440]) {
         await expect(process).not.toHaveAttribute('open')
         if (status === 'succeeded') {
           await expect(page.getByRole('region', { name: '数学报告' })).toBeVisible()
+          expect(await page.locator('.report-section').evaluate(el => Boolean(el.compareDocumentPosition(document.querySelector('.presentation-section') ?? document.querySelector('.execution-process')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true)
           expect(await page.locator('.report-section').evaluate(el => Boolean(el.compareDocumentPosition(document.querySelector('.execution-process')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true)
         }
         await process.locator(':scope > summary').click()
