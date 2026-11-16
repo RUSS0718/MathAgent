@@ -2,6 +2,17 @@
 
 ## 2026-11-16 重新接续：Lean 限额传递
 
+live35源码9de0d72，Job run_99e14ea284fae6d0b2aea64c86833d7b，终态
+failed/job_execution_failed，无最终答案。Intake两次均合法完成（本轮没有触发
+新阶段诊断修复），Explore→Planner→串行Reasoner/StepVerifier及1次Python实际
+执行；12次模型/HTTP均完成、894603本地计账token，未耗尽原根预算或3600秒。
+S1/S2后进入S3核验，已完成StepVerifier结果提交时发生SolverPersistenceError，
+cause_type=ProofGraphValidationError（verification.py:585→storage.py:452），
+内部状态仍STEP_VERIFY/running。不能把它归为模型超时或因数学内容未通过。
+实际自然并发/切换/F4均未覆盖。原UI/刷新与公共失败保留于live35/；identity
+终态核对通过，服务及临时检查已清理。下一维护仅对真实状态只读重放定位，
+先保留稳定失败再修责任处，不放宽图/依赖/来源守卫，不重判或重发旧Run。
+
 阶段诊断修复c96a854、集成738a7bc：24行诊断及既有公共Job测试8行断言。
 红见证1项3子场景失败，修复后同项及6项聚焦回归通过；真实失败只读重放
 现准确报告$.applicable_condition/$.clarification，原阶段拒绝保持。两轴复查
