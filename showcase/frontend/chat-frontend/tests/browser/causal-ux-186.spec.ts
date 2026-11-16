@@ -77,3 +77,17 @@ test('fresh batch handoffs are bounded, reduced motion is respected, and replay 
   expect(await page.locator('.constellation-page').evaluate(el => el.scrollTop)).toBeLessThan(50)
   await workbench.getByRole('button', { name: '暂停回放', exact: true }).click()
 })
+
+test('completed history keeps progress after an earlier answered interruption', async ({ page }) => {
+  const stream = 'id: 1\nevent: interrupt\ndata: {"type":"interrupt","job_id":"run-demo","status":"waiting_input"}\n\n'
+    + 'id: 2\nevent: resumed\ndata: {"type":"resumed"}\n\n'
+    + frame(3, { solver_event_type: 'initial_plan_generated', role: 'planner' })
+    + 'id: 4\nevent: final_result\ndata: {"type":"final_result","data":{}}\n\n'
+  await mockWorkspace(page, true, stream)
+  await page.goto('/dashboard-assets/session/session-demo')
+  await page.locator('.execution-process > summary').click()
+  const workbench = page.locator('.workbench')
+  await expect(workbench.getByText('技术详情（4 条公开记录）')).toBeVisible()
+  await expect(workbench.locator('[data-workbench-event="4"]')).toBeVisible()
+  await expect(workbench.locator('.message-flight')).toHaveCount(0)
+})

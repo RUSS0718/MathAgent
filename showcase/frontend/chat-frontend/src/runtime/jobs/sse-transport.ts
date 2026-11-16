@@ -50,8 +50,8 @@ async function consumeResponse(
     events.push(event)
     await options.onEvent?.(event)
     cursor.terminalSeen ||= isTerminalEvent(event)
-    // Drain committed tail events through EOF; only waiting input stops observation.
-    return event.event === 'interrupt'
+    // A saved terminal run can contain an earlier, already answered interrupt.
+    return event.event === 'interrupt' && !cursor.terminalSeen
   }
   try {
     while (true) {
