@@ -107,7 +107,8 @@ class LateMeteringContractTest(unittest.TestCase):
                 }
             )
             try:
-                client = app.test_client()
+                from tests.reviewer_support import reviewer_client
+                client, _ = reviewer_client(app)
                 csrf = client.get("/api/check_auth").get_json()["csrf_token"]
 
                 def headers():

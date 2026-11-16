@@ -13,6 +13,7 @@ from showcase.experiment_pair import pair_manifest_digest
 from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
 from showcase.workspace import workspace_job_request_digest
+from tests.reviewer_support import reviewer_client
 from tests.test_showcase_experiment_pair_cli import _pair
 
 
@@ -27,7 +28,8 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
                 "SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED": True,
             }
         )
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         self.session_id = self.client.post(
             "/api/new_chat", headers={"X-CSRF-Token": self.csrf}
@@ -50,7 +52,8 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
         try:
             endpoints = {rule.endpoint for rule in app.url_map.iter_rules()}
             self.assertNotIn("get_job_by_idempotency_key", endpoints)
-            client = app.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, _ = reviewer_client(app)
             csrf = client.get("/api/check_auth").get_json()["csrf_token"]
             client.post("/api/new_chat", headers={"X-CSRF-Token": csrf})
             response = client.get("/api/agent/jobs/by-idempotency")
@@ -76,7 +79,8 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
             }
         )
         try:
-            client = app.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, _ = reviewer_client(app)
             csrf = client.get("/api/check_auth").get_json()["csrf_token"]
             session = client.post(
                 "/api/new_chat", headers={"X-CSRF-Token": csrf}
@@ -210,7 +214,8 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
             }
         )
         try:
-            client = app.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, _ = reviewer_client(app)
             csrf = client.get("/api/check_auth").get_json()["csrf_token"]
             client.post("/api/new_chat", headers={"X-CSRF-Token": csrf})
             response = client.post(
@@ -296,7 +301,7 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
             }
         )
         try:
-            response = app.test_client().get("/api/capabilities")
+            response = reviewer_client(app)[0].get("/api/capabilities")
             self.assertEqual(200, response.status_code)
             body = response.get_json()
             projection = body["applied_model_config"]
@@ -488,7 +493,7 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
         )
         try:
             projection = (
-                app.test_client().get("/api/capabilities").get_json()["applied_model_config"]
+                reviewer_client(app)[0].get("/api/capabilities").get_json()["applied_model_config"]
             )
             self.assertEqual("available", projection["status"])
             self.assertEqual(model, projection["model"])
@@ -524,7 +529,7 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
             }
         )
         try:
-            projection = app.test_client().get("/api/capabilities").get_json()[
+            projection = reviewer_client(app)[0].get("/api/capabilities").get_json()[
                 "applied_model_config"
             ]
             self.assertEqual("available", projection["status"])
@@ -556,7 +561,7 @@ class ExperimentPublicJobApiTest(unittest.TestCase):
             }
         )
         try:
-            projection = app.test_client().get("/api/capabilities").get_json()[
+            projection = reviewer_client(app)[0].get("/api/capabilities").get_json()[
                 "applied_model_config"
             ]
             self.assertEqual("unavailable", projection["status"])

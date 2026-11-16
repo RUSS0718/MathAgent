@@ -147,7 +147,8 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
             **config})
         for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(self.app.extensions[name].close)
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         self.session = self.client.post("/api/new_chat", headers=self.headers()).get_json()["new_session_id"]
 
@@ -367,7 +368,8 @@ class StarStreamingRecoveryTest(StarJobFixture, unittest.TestCase):
                 app = create_app(config(folder))
                 try:
                     self.app = app
-                    self.client = app.test_client()
+                    from tests.reviewer_support import reviewer_client
+                    self.client, _ = reviewer_client(app)
                     self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
                     failed = self.terminal(job_id)
                     self.assertEqual("failed", failed["status"], failed)

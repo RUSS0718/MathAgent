@@ -82,7 +82,8 @@ class RunBudgetContractTest(unittest.TestCase):
                 app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": directory}, service=service)
                 try:
                     with patch("llm_client.requests.post", return_value=Response()) as post:
-                        client = app.test_client()
+                        from tests.reviewer_support import reviewer_client
+                        client, _ = reviewer_client(app)
                         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
                         run = client.post(
                             "/api/runs", json={"problem": "1+1"}, headers={"X-CSRF-Token": csrf}
@@ -125,7 +126,8 @@ class RunBudgetContractTest(unittest.TestCase):
         )
         for key in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(app.extensions[key].close)
-        client = app.test_client()
+        from tests.reviewer_support import reviewer_client
+        client, _ = reviewer_client(app)
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
         headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
         session = client.post("/api/new_chat", headers=headers).get_json()["new_session_id"]
@@ -402,7 +404,8 @@ class RunBudgetContractTest(unittest.TestCase):
                 database_path=database,
             )
             try:
-                client = app.test_client()
+                from tests.reviewer_support import reviewer_client
+                client, _ = reviewer_client(app)
                 csrf = client.get("/api/check_auth").get_json()["csrf_token"]
                 response = client.post(
                     "/api/runs", json={"problem": "1+1"}, headers={"X-CSRF-Token": csrf}

@@ -4,8 +4,12 @@ import json
 import unittest
 
 from showcase.run_budget import RunBudgetLimits
-from tests.star_product_support import (POLISH, SOLVED, StarJobFixture,
-                                        assert_no_uncalibrated_probability)
+from tests.star_product_support import (
+    POLISH,
+    SOLVED,
+    StarJobFixture,
+    assert_no_uncalibrated_probability,
+)
 
 
 class StarRealContradictionReplayTest(StarJobFixture, unittest.TestCase):
@@ -76,7 +80,8 @@ class StarRealContradictionReplayTest(StarJobFixture, unittest.TestCase):
                 'SHOWCASE_STAR_BUDGET': RunBudgetLimits(
                     max_model_calls=2, max_http_attempts=2, max_tool_calls=0)})
             try:
-                client = reopened.test_client()
+                from tests.reviewer_support import reviewer_client
+                client, _ = reviewer_client(reopened)
                 # Establish the loopback login session before the replay read.
                 self.assertTrue(client.get('/api/check_auth').get_json()['csrf_token'])
                 replay = client.get(f'/api/agent/jobs/{job_id}/candidate-replay')
@@ -98,7 +103,7 @@ class StarUncalibratedProbabilityTest(StarJobFixture, unittest.TestCase):
 
     def test_step_reply_with_probability_field_is_rejected_by_strict_schema(self):
         from tests.test_star_product_planning import FEATURES, STEP
-        from tests.test_star_product_tools import NEED_PLAN, PLAN, VERDICT
+        from tests.test_star_product_tools import NEED_PLAN, PLAN
 
         confident = {**STEP, 'confidence': 0.95}
         # The reasoner owns one bounded format repair (ALIGN-10 round 2): the

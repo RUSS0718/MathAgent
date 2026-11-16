@@ -123,8 +123,25 @@ class PresentationBindingTest(unittest.TestCase):
             self.assertEqual([], artifact["paragraphs"])
 
 
+def seed_legacy_jobs(case, policy=None, *, unselected=False):
+    """Create pre-rule persisted jobs to exercise retained explicit template APIs."""
+    from showcase.workspace import WorkspaceStore
+    original = WorkspaceStore.create_job
+    def create(store, *args, **kwargs):
+        config = dict(kwargs.get('solver_identity') or {})
+        config.pop('presentation_rule', None)
+        if unselected:
+            config.pop('presentation_mode', None)
+        if policy:
+            config['presentation_policy_version'] = policy
+        kwargs['solver_identity'] = config
+        return original(store, *args, **kwargs)
+    case.enterContext(patch.object(WorkspaceStore, 'create_job', new=create))
+
+
 class PublicPresentationApiTest(unittest.TestCase):
     def setUp(self):
+        seed_legacy_jobs(self, getattr(self, "legacy_policy", "faithful-output-v1"))
         self.temp_dir = tempfile.TemporaryDirectory()
         self.app = create_app({
             "TESTING": True,
@@ -132,7 +149,8 @@ class PublicPresentationApiTest(unittest.TestCase):
             "SHOWCASE_JOB_DELAY_SECONDS": 0,
             "SHOWCASE_PRESENTATION_ENABLED": True,
         })
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
 
     def tearDown(self):
         self.app.extensions["showcase_workspace_service"].close()
@@ -162,7 +180,7 @@ class PublicPresentationApiTest(unittest.TestCase):
         job_id, headers = self._job("teach")
         job = self.client.get(f"/api/agent/jobs/{job_id}").get_json()
         self.assertEqual("teach", job["result"]["presentation_mode"])
-        self.assertEqual("faithful-output-v2", job["result"]["presentation_policy_version"])
+        self.assertEqual("faithful-output-v1", job["result"]["presentation_policy_version"])
         session = job["session_id"]
         conflict = self.client.post("/api/agent/jobs", json={
             "message": "计算 1+1", "session_id": session, "presentation_mode": "report",
@@ -215,7 +233,8 @@ class PublicPresentationApiTest(unittest.TestCase):
         disabled = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(disabled_dir),
                                "SHOWCASE_PRESENTATION_ENABLED": False})
         try:
-            client = disabled.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, _ = reviewer_client(disabled)
             caps = client.get("/api/capabilities").get_json()
             self.assertFalse(caps["presentation"]["enabled"])
             headers = {"X-CSRF-Token": client.get("/api/check_auth").get_json()["csrf_token"],
@@ -241,6 +260,10 @@ class PublicPresentationApiTest(unittest.TestCase):
 
 
 class CurrentSolverPresentationTest(StarJobFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        seed_legacy_jobs(self)
+
     def test_budget_stopped_real_candidate_is_partial_and_output_adds_no_model_call(self):
         self.open_star([SOLVED],
             SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=1, max_http_attempts=1, max_tool_calls=0),

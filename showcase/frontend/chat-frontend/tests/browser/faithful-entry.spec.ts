@@ -34,14 +34,16 @@ test('pending task revision restores its composer after reload and retries the o
   expect(keys).toHaveLength(1)
   await revision.getByRole('button', { name: '改题并创建新任务', exact: true }).click()
   await expect(page.getByText('计算 2+3。', { exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: '运行详情', exact: true })).toHaveAttribute('href', '/dashboard/run/run-new')
+  await expect(page.getByRole('link', { name: '运行详情', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: '最终答复' })).toBeVisible()
   expect(keys).toHaveLength(2)
   expect(keys[1]).toBe(keys[0])
 })
 
-test('task revision navigates linked records and ignores late old results', async ({ page }, testInfo) => {
+test('reviewer revision navigates linked records and ignores late old results', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 375, height: 850 })
   await mockWorkspace(page, true)
+  await page.route('**/api/check_auth', r => r.fulfill({ json: { isLoggedIn: true, username: 'local', csrf_token: 'synthetic', permissions: ['reviewer.access'] } }))
   // Production Flask serves the SPA shell here; the isolated Vite server only serves its assets base.
   await page.route('**/dashboard/run/*', async route => route.fulfill({
     response: await page.request.get('/dashboard-assets/'),
@@ -74,10 +76,11 @@ test('task revision navigates linked records and ignores late old results', asyn
       body: 'id: 2\nevent: final_result\ndata: {"type":"final_result","status":"succeeded"}\n\n' }).catch(() => {})
   })
   for (const id of ['run-demo', 'run-new']) {
-    await page.route(`**/api/agent/jobs/${id}/report`, route => route.fulfill({ json: {
-      ...report, evidence_id: id, report: { ...report.report, answer: id === 'run-new' ? '新题答案为 5。' : '旧题结果 999。' },
+    await page.route(`**/api/agent/jobs/${id}/answer`, route => route.fulfill({ json: {
+      job_id: id, status: 'succeeded', mode: 'solve', presentation_status: 'ready', notice: null, answer: id === 'run-new' ? '新题答案为 5。' : '旧题结果 999。',
     } }))
   }
+  for (const id of ['run-demo', 'run-new']) await page.route(`**/api/agent/jobs/${id}/report`, r => r.fulfill({ json: { ...report, report: { ...report.report, answer: id === 'run-new' ? '新题答案为 5。' : '旧题结果 999。' } } }))
   await page.route('**/api/agent/jobs/run-demo/revisions', async route => {
     posts += 1
     expect(route.request().postDataJSON()).toEqual({ message: '计算 2+3。', input_version: 1 })
@@ -149,8 +152,8 @@ test('necessary clarification continues the same task and refreshes read-only', 
       ? 'id: 2\nevent: final_result\ndata: {"type":"final_result","status":"succeeded"}\n\n'
       : 'id: 1\nevent: interrupt\ndata: {"type":"interrupt","status":"waiting_input"}\n\n',
   }))
-  await page.route('**/api/agent/jobs/run-demo/report', route => route.fulfill({ json: {
-    ...report, report: { ...report.report, answer: answers ? '面积为 12 cm²。' : '旧错误面积 999' },
+  await page.route('**/api/agent/jobs/run-demo/answer', route => route.fulfill({ json: {
+    job_id: 'run-demo', status: answers ? 'succeeded' : 'waiting_input', mode: 'solve', presentation_status: answers ? 'ready' : 'pending', notice: null, answer: answers ? '面积为 12 cm²。' : '',
   } }))
   await page.route('**/api/agent/jobs/run-demo/clarifications/*', route => {
     answers += 1
@@ -190,8 +193,8 @@ test('a saved clarification can resume after restart', async ({ page }) => {
     await route.fulfill({ contentType: 'text/event-stream',
       body: 'id: 4\nevent: final_result\ndata: {"type":"final_result","status":"succeeded"}\n\n' })
   })
-  await page.route('**/api/agent/jobs/run-demo/report', route => route.fulfill({ json: {
-    ...report, report: { ...report.report, answer: '面积为 12 cm²。' },
+  await page.route('**/api/agent/jobs/run-demo/answer', route => route.fulfill({ json: {
+    job_id: 'run-demo', status: 'succeeded', mode: 'solve', presentation_status: 'ready', notice: null, answer: '面积为 12 cm²。',
   } }))
   await page.route('**/api/agent/jobs/run-demo/resume', route => {
     resumes += 1
@@ -214,19 +217,18 @@ test('a saved clarification can resume after restart', async ({ page }) => {
 test('ready service defaults ordinary submit to Faithful and preserves failed form', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 900 })
   const requests = await setup(page, faithful)
-  await expect(page.getByRole('heading', { name: '因果推理智能体', exact: true })).toBeVisible()
-  await expect(page.locator('.faithful-entry')).toContainText('实验性')
-  await expect(page.locator('.faithful-entry [role="status"]')).toContainText('自主求解（推荐）')
-  await expect(page.locator('.faithful-entry')).toContainText('实际求解与检查反馈')
+  await expect(page.getByRole('heading', { name: '新建求解 · 输入题干', exact: true })).toBeVisible()
+  await expect(page.locator('.faithful-entry')).toHaveCount(0)
   await expect(page.locator('#solver-mode')).not.toBeVisible()
   await page.locator('#math-question').fill('1+1=?')
-  await page.getByRole('button', { name: '开始自主求解', exact: true }).click()
+  await page.getByRole('button', { name: '发送', exact: true }).click()
   await expect.poll(() => requests.length).toBe(1)
-  expect(requests[0]).toMatchObject({ message: '1+1=?', solver_mode: 'star_reference' })
+  expect(requests[0]).toMatchObject({ message: '1+1=?' })
+  expect(requests[0]).not.toHaveProperty('solver_mode')
   await expect(page.locator('#math-question')).toHaveValue('1+1=?')
   await expect(page.locator('.notice')).toBeVisible()
   await expect(page.locator('.notice')).toContainText('服务暂时不可用')
-  await expect(page.getByRole('button', { name: '开始自主求解', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '发送', exact: true })).toBeEnabled()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 
@@ -241,7 +243,7 @@ test('submission state stays visible and prevents duplicate requests', async ({ 
     await route.fulfill({ status: 503, json: { error: '服务暂时不可用' } })
   })
   await page.locator('#math-question').fill('1+1=?')
-  await page.getByRole('button', { name: '开始自主求解', exact: true }).click()
+  await page.getByRole('button', { name: '发送', exact: true }).click()
   try {
     await expect(page.getByRole('button', { name: '正在提交…', exact: true })).toBeDisabled()
     await expect(page.locator('#math-question')).toBeDisabled()
@@ -258,12 +260,12 @@ test('accepted Faithful submission enters the existing conversation workbench', 
   await page.route('**/api/agent/jobs', route => route.fulfill({ status: 202,
     json: { success: true, job_id: 'run-demo', status: 'queued' } }))
   await page.locator('#math-question').fill('1+1=?')
-  await page.getByRole('button', { name: '开始自主求解', exact: true }).click()
+  await page.getByRole('button', { name: '发送', exact: true }).click()
   const process = page.locator('.execution-process')
   await expect(process).toBeAttached()
   if (await process.getAttribute('open') === null) await process.locator(':scope > summary').click()
   await expect(page.getByRole('region', { name: '对话式执行工作台' })).toBeVisible()
-  await expect(page.locator('.workbench-problem')).toContainText('1+1=?')
+  await expect(page.getByRole('region', { name: '最终答复' })).toBeVisible()
 })
 
 test('capability failure is visible and retry cannot silently submit legacy', async ({ page }) => {
@@ -274,82 +276,38 @@ test('capability failure is visible and retry cannot silently submit legacy', as
   await expect(page.locator('#math-question')).toBeDisabled()
   await page.route('**/api/capabilities', route => route.fulfill({ json: { ...capabilities, faithful } }))
   await page.getByRole('button', { name: '重新加载', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '因果推理智能体', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '新建求解 · 输入题干', exact: true })).toBeVisible()
   await expect(page.locator('#math-question')).toBeEnabled()
 })
 
 test('enabled but unready blocks button and Enter and shows every missing reason', async ({ page }) => {
   const requests = await setup(page, { ...faithful, ready: false, unavailable_reasons: ['缺少 Python 镜像', '缺少容量证据'] })
-  await expect(page.getByRole('alert')).toContainText('缺少 Python 镜像')
-  await expect(page.getByRole('alert')).toContainText('缺少容量证据')
+  await expect(page.locator('#solver-mode')).toHaveCount(0)
   await page.locator('#math-question').fill('保留题干')
-  await expect(page.getByRole('button', { name: '开始自主求解', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '发送', exact: true })).toBeDisabled()
   await page.locator('#math-question').press('Enter')
   await expect(page.locator('#math-question')).toHaveValue('保留题干')
   expect(requests).toHaveLength(0)
 })
 
-test('advanced modes remain explicit and can return to autonomous solving', async ({ page }) => {
+for (const width of [320, 1440]) test(`ordinary entry has no technical preset controls at ${width}px`, async ({ page }, testInfo) => {
+  await page.setViewportSize({ width, height: 1000 })
   const requests = await setup(page, faithful)
-  const disclosure = page.getByText('高级设置', { exact: true })
-  await disclosure.focus()
-  await disclosure.press('Enter')
-  const selector = page.getByLabel('执行预设', { exact: true })
-  await expect(selector).toHaveValue('star_reference')
-  await expect(selector.locator('option:checked')).toHaveText('自主求解（推荐）')
-  await expect(selector.locator('optgroup')).toHaveCount(3)
-  await expect(selector.locator('optgroup[label="自主调度"] option')).toHaveAttribute('value', 'star_reference')
-  await expect(selector.locator('optgroup[label="调试与兼容"] option')).toHaveCount(2)
-  await expect(selector.locator('option[value="star_limited_best_effort"]')).toBeDisabled()
-  await expect(page.locator('.faithful-entry')).toContainText('互斥的执行预设')
-  await page.locator('#solver-mode').selectOption('star_limited')
-  await page.locator('#math-question').fill('求解 x+1=2')
-  await page.getByRole('button', { name: '开始求解', exact: true }).click()
-  await expect.poll(() => requests.length).toBe(1)
-  expect(requests[0]?.solver_mode).toBe('star_limited')
-  await expect(page.locator('.faithful-entry [role="status"]')).toContainText('已手选高级执行预设')
-  await page.getByRole('button', { name: '恢复自主求解（推荐）', exact: true }).click()
-  await page.route('**/api/new_chat', route => route.fulfill({ json: { success: true, new_session_id: 'session-resolve' } }))
-  await page.getByRole('button', { name: '再次求解', exact: true }).click()
-  await expect(page.locator('#math-question')).toHaveValue('求解 x+1=2')
-  await page.getByRole('button', { name: '开始自主求解', exact: true }).click()
-  await expect.poll(() => requests.length).toBe(2)
-  expect(requests[1]?.solver_mode).toBe('star_reference')
+  await expect(page.locator('#solver-mode')).toHaveCount(0)
+  await expect(page.getByText('高级设置', { exact: true })).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath(`entry-${width}.png`), fullPage: true })
+  expect(requests).toHaveLength(0)
 })
-
-for (const width of [320, 1440]) {
-  test(`autonomous preset disclosure stays readable at ${width}px`, async ({ page }, testInfo) => {
-    await page.setViewportSize({ width, height: 1000 })
-    const requests = await setup(page, faithful)
-    const errors: string[] = []
-    page.on('pageerror', error => errors.push(error.message))
-    await expect(page.locator('.faithful-entry [role="status"]')).toContainText('自主求解（推荐）')
-    await expect(page.getByLabel('执行预设', { exact: true })).not.toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath(`entry-${width}.png`), fullPage: true })
-    await page.getByText('高级设置', { exact: true }).click()
-    const selector = page.getByLabel('执行预设', { exact: true })
-    await selector.selectOption('star_population')
-    await expect(selector.locator('option:checked')).toHaveText('多路线并发（调试）')
-    await expect(page.locator('#solver-mode-note')).toContainText('自主入口也可按需选择多路线')
-    await expect(page.locator('.faithful-entry')).toContainText('不代表题目难度')
-    await page.screenshot({ path: testInfo.outputPath(`advanced-${width}.png`), fullPage: true })
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-    await page.getByRole('button', { name: '恢复自主求解（推荐）', exact: true }).click()
-    await expect(selector).toHaveValue('star_reference')
-    expect(requests).toHaveLength(0)
-    expect(errors).toEqual([])
-  })
-}
 
 for (const entry of [undefined, { ...faithful, enabled: false, ready: false, unavailable_reasons: ['不应显示'] }]) {
   test(`legacy behavior preserved when entry ${entry ? 'disabled' : 'absent'}`, async ({ page }) => {
     const requests = await setup(page, entry)
-    await expect(page.locator('#solver-mode')).toBeVisible()
-    await expect(page.locator('#solver-mode')).toHaveValue('legacy')
+    await expect(page.locator('#solver-mode')).toHaveCount(0)
     await expect(page.getByRole('alert')).toHaveCount(0)
     await page.locator('#math-question').fill('1+1=?')
-    await page.getByRole('button', { name: '开始求解', exact: true }).click()
+    await page.getByRole('button', { name: '发送', exact: true }).click()
     await expect.poll(() => requests.length).toBe(1)
-    expect(requests[0]?.solver_mode).toBe('legacy')
+    expect(requests[0]).not.toHaveProperty('solver_mode')
   })
 }

@@ -21,11 +21,11 @@ test('new workspace replaces the observer and shares state across its views', as
   await expect(page.locator('.workspace-shell')).toHaveCount(0)
   await page.locator('.execution-process > summary').click()
   const workbench = page.getByRole('region', { name: '对话式执行工作台' })
-  await expect(workbench.locator('[data-workbench-event]')).toHaveCount(1)
+  await expect(workbench.locator('.conversation-events article')).toHaveCount(1)
   await workbench.getByRole('button', { name: '完整星图', exact: true }).click()
   await expect(workbench.locator('.constellation:not(.mini)')).toBeVisible()
   await workbench.getByRole('button', { name: '关键进展', exact: true }).click()
-  await expect(workbench.locator('[data-workbench-event]:visible')).toHaveCount(1)
+  await expect(workbench.locator('.conversation-events article:visible')).toHaveCount(1)
 })
 
 test('IME Enter confirms composition without sending', async ({ page }) => {
@@ -39,6 +39,7 @@ test('IME Enter confirms composition without sending', async ({ page }) => {
 
 test('first click collapses an expanded timeline node', async ({ page }) => {
   await mockWorkspace(page, true)
+  await page.route('**/api/check_auth', r => r.fulfill({ json: { isLoggedIn: true, username: 'local', csrf_token: 'synthetic', permissions: ['reviewer.access'] } }))
   await page.goto('/dashboard-assets/run/run-demo')
   await page.getByRole('button', { name: /执行技术记录/ }).click()
   const step = page.locator('.step-header').filter({ hasText: '求解' })

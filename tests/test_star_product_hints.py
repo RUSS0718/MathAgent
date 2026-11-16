@@ -121,7 +121,8 @@ class StarHintTest(StarJobFixture, unittest.TestCase):
 
         reopened = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": self.data_dir})
         try:
-            second = reopened.test_client()
+            from tests.reviewer_support import reviewer_client
+            second, _ = reviewer_client(reopened)
             second.get("/api/check_auth")
             job_again = second.get(f"/api/agent/jobs/{job_id}")
             events_again = second.get(f"/api/agent/jobs/{job_id}/events").get_data(as_text=True)

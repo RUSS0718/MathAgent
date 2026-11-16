@@ -28,7 +28,8 @@ class SyncEvidenceContractTest(unittest.TestCase):
         self.addCleanup(app.extensions["loopback_store"].close)
         self.addCleanup(service.close)
         self.addCleanup(app.extensions["showcase_workspace_service"].close)
-        client = app.test_client()
+        from tests.reviewer_support import reviewer_client
+        client, _ = reviewer_client(app)
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
         run = client.post("/api/runs", json={"problem": "x-1=0"}, headers={"X-CSRF-Token": csrf}).get_json()
         run_id = run["run_id"]
@@ -57,7 +58,8 @@ class SyncEvidenceContractTest(unittest.TestCase):
         self.addCleanup(app.extensions["loopback_store"].close)
         self.addCleanup(service.close)
         self.addCleanup(app.extensions["showcase_workspace_service"].close)
-        client = app.test_client()
+        from tests.reviewer_support import reviewer_client
+        client, _ = reviewer_client(app)
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
         run = client.post("/api/runs", json={"problem": "x-1=0", "metadata": {"verification_mode": "required"}}, headers={"X-CSRF-Token": csrf}).get_json()
         self.assertEqual("NEEDS_REVIEW", run["status"])

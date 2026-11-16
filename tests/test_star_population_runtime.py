@@ -212,7 +212,8 @@ class PopulationLoopbackJobTest(StarJobFixture, unittest.TestCase):
         })
         for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(self.app.extensions[name].close)
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         self.session = self.client.post("/api/new_chat", headers=self.headers()).get_json()["new_session_id"]
 
@@ -546,7 +547,8 @@ app = create_app({
         InternChatClient(retry=1, timeout=12, loopback_only=True), max_tokens=256),
     'SHOWCASE_STAR_EVIDENCE_KIND': 'fault_injection',
 })
-client = app.test_client()
+from tests.reviewer_support import reviewer_client
+client, _ = reviewer_client(app)
 csrf = client.get('/api/check_auth').get_json()['csrf_token']
 session = client.post('/api/new_chat', headers={'X-CSRF-Token': csrf}).get_json()['new_session_id']
 response = client.post('/api/agent/jobs', json={
@@ -666,7 +668,8 @@ os._exit(74)
         })
         for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(restarted_app.extensions[name].close)
-        restarted_client = restarted_app.test_client()
+        from tests.reviewer_support import reviewer_client
+        restarted_client, _ = reviewer_client(restarted_app)
         restarted_client.set_cookie("auth_session", identity["cookie"])
         recovered_before_resume = restarted_client.get(
             f"/api/agent/jobs/{identity['job_id']}"

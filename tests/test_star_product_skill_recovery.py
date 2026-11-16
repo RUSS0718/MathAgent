@@ -95,7 +95,8 @@ class StarSkillRecoveryTest(StarJobFixture, unittest.TestCase):
                 app = create_app(app_config)
                 try:
                     self.app = app
-                    self.client = app.test_client()
+                    from tests.reviewer_support import reviewer_client
+                    self.client, _ = reviewer_client(app)
                     self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
                     failed = self.job(job_id)
                     self.assertEqual("failed", failed["status"], failed)

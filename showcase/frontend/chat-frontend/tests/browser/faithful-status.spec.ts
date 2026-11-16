@@ -32,13 +32,12 @@ for (const width of [375, 1440]) {
     await expect(status).toContainText('已请求暂停')
     await expect(pause).toHaveCount(0)
     expect(pauses).toBe(1)
-    phase = 'paused'; actions = ['resume']; await page.reload()
-    await expect(status.getByRole('button', { name: '恢复执行' })).toHaveCount(0)
-    await expect(status).toContainText('请到运行详情使用父 Run 专用恢复控制')
+    phase = 'paused'; actions = ['resume_intervention']; await page.reload()
+    await expect(status.getByRole('button', { name: '恢复执行' })).toBeVisible()
     phase = 'waiting_input'; await page.reload()
     const resume = status.getByRole('button', { name: '恢复执行' })
     await expect(resume).toBeVisible(); await resume.focus(); await expect(resume).toBeFocused()
-    await expect(page.getByRole('link', { name: '运行详情', exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: '运行详情', exact: true })).toHaveCount(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath(`faithful-${width}.png`), fullPage: true })
     expect(errors).toEqual([])
@@ -47,6 +46,7 @@ for (const width of [375, 1440]) {
 
 test('paused parent resumes only with dedicated backend admission and endpoint', async ({ page }) => {
   await mockWorkspace(page, true)
+  await page.route('**/api/check_auth', r => r.fulfill({ json: { isLoggedIn: true, username: 'local', csrf_token: 'synthetic', permissions: ['reviewer.access'] } }))
   let actions = ['resume_intervention']
   let dedicatedCalls = 0
   let genericCalls = 0
@@ -69,6 +69,7 @@ test('paused parent resumes only with dedicated backend admission and endpoint',
     genericCalls++
     return route.fulfill({ json: { success: true, status: 'queued' } })
   })
+  await page.route('**/api/check_auth', r => r.fulfill({ json: { isLoggedIn: true, username: 'local', csrf_token: 'synthetic', permissions: ['reviewer.access'] } }))
   await page.goto('/dashboard-assets/run/run-demo')
   const section = page.getByRole('region', { name: '同源干预实验' })
   const resume = section.getByRole('button', { name: '显式恢复父 Run' })
@@ -107,6 +108,7 @@ test('Faithful recovery obeys backend actions even with expired deadline and unk
   await page.route('**/api/agent/jobs/run-demo/resume', route => {
     posts++; return route.fulfill({ json: { success: true, status: 'queued' } })
   })
+  await page.route('**/api/check_auth', r => r.fulfill({ json: { isLoggedIn: true, username: 'local', csrf_token: 'synthetic', permissions: ['reviewer.access'] } }))
   await page.goto('/dashboard-assets/run/run-demo')
   const section = page.getByRole('region', { name: '安全续算' })
   const retry = page.getByRole('button', { name: '明确选择：用新身份重试' })

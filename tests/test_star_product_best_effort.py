@@ -211,6 +211,8 @@ class StarBestEffortTest(StarJobFixture, unittest.TestCase):
         for name in ('loopback_store', 'showcase_run_service', 'showcase_workspace_service'):
             self.addCleanup(app.extensions[name].close)
         with app.test_client() as client:
+            from tests.reviewer_support import reviewer_client
+            reviewer_client(client.application, client)
             client.get('/api/check_auth')
             self.assertEqual(original, client.get(
                 f'/api/agent/jobs/{job_id}/candidate-replay').get_json())

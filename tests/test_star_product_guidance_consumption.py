@@ -163,7 +163,8 @@ class StarGuidanceConsumptionTest(StarJobFixture, unittest.TestCase):
                 app = create_app(worker_config(folder))
                 try:
                     self.app = app
-                    self.client = app.test_client()
+                    from tests.reviewer_support import reviewer_client
+                    self.client, _ = reviewer_client(app)
                     self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
                     original = self.job(job_id)["result"]["budget"]
                     response = self.client.post(f"/api/agent/jobs/{job_id}/resume",

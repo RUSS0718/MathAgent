@@ -51,7 +51,8 @@ class RequestAttemptContractTest(unittest.TestCase):
                     "SHOWCASE_LIVE_PIPELINE": LiveAgentPipeline(model, ToolRegistry()),
                 }
             )
-            client = app.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, _ = reviewer_client(app)
             csrf = client.get("/api/check_auth").get_json()["csrf_token"]
             headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
             session = client.post("/api/new_chat", headers=headers).get_json()["new_session_id"]

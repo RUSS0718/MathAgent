@@ -5,24 +5,26 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import threading
 import tempfile
+import threading
 import time
 import unittest
 import uuid
-import requests
 from pathlib import Path
 from unittest.mock import patch
 
+import requests
+
+import tests.test_star_product_streaming_recovery as streaming_support
 from llm_client import InternChatClient
 from showcase.adapters import InternModelAdapter
 from showcase.flask_app import create_app
 from showcase.run_budget import RunBudgetLimits
-from tests.star_product_support import StarJobFixture
-from tests.test_star_product_planning import FEATURES as PLAN_FEATURES, STEP, VERDICT
-import tests.test_star_product_streaming_recovery as streaming_support
-from tests.test_star_product_tools import NEED_PLAN
 from showcase.solver_harness.intern_schemas import response_schema
+from tests.star_product_support import StarJobFixture
+from tests.test_star_product_planning import FEATURES as PLAN_FEATURES
+from tests.test_star_product_planning import STEP, VERDICT
+from tests.test_star_product_tools import NEED_PLAN
 
 
 def fingerprint(value):
@@ -124,7 +126,8 @@ class CP05PublicJobTest(unittest.TestCase):
         })
         for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(app.extensions[name].close)
-        client = app.test_client()
+        from tests.reviewer_support import reviewer_client
+        client, _ = reviewer_client(app)
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
         headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
         session = client.post("/api/new_chat", headers=headers).get_json()["new_session_id"]

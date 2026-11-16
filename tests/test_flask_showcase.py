@@ -61,6 +61,8 @@ class FlaskShowcaseContractTest(unittest.TestCase):
         self.assertNotIn("Set-Cookie", restored.headers)
 
     def test_logout_revokes_cookie_but_preserves_run_history(self) -> None:
+        from tests.reviewer_support import reviewer_client
+        reviewer_client(self.app, self.client)
         csrf = self._csrf()
         created = self.client.post(
             "/api/runs",
@@ -76,6 +78,8 @@ class FlaskShowcaseContractTest(unittest.TestCase):
 
         new_auth = self.client.get("/api/check_auth")
         self.assertNotEqual(csrf, new_auth.get_json()["csrf_token"])
+        self.assertEqual(403, self.client.get(f"/api/runs/{run_id}").status_code)
+        reviewer_client(self.app, self.client)
         self.assertEqual(200, self.client.get(f"/api/runs/{run_id}").status_code)
 
     def test_state_changes_require_server_issued_csrf(self) -> None:
@@ -90,6 +94,8 @@ class FlaskShowcaseContractTest(unittest.TestCase):
         self.assertEqual("csrf_invalid", invalid.get_json()["error"])
 
     def test_capabilities_and_file_compatibility_are_explicit(self) -> None:
+        from tests.reviewer_support import reviewer_client
+        reviewer_client(self.app, self.client)
         body = self.client.get("/api/capabilities").get_json()
 
         self.assertEqual("showcase_mvp", body["profile"])
@@ -100,6 +106,8 @@ class FlaskShowcaseContractTest(unittest.TestCase):
         self.assertEqual("unavailable", body["files"]["upload"]["status"])
 
     def test_job_polynomial_check_is_public_and_persisted(self) -> None:
+        from tests.reviewer_support import reviewer_client
+        reviewer_client(self.app, self.client)
         csrf = self._csrf()
         session = self.client.post("/api/new_chat", headers={"X-CSRF-Token": csrf}).get_json()["new_session_id"]
         created = self.client.post("/api/agent/jobs", json={"message": "校验", "session_id": session}, headers={"X-CSRF-Token": csrf, "Idempotency-Key": "00000000-0000-4000-8000-000000000001"})
@@ -169,7 +177,8 @@ class FlaskShowcaseContractTest(unittest.TestCase):
 
     def test_png_reference_enters_job_report_without_binary(self) -> None:
         app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(self.root / "job"), "SHOWCASE_VISION_ENABLED": True})
-        client = app.test_client()
+        from tests.reviewer_support import reviewer_client
+        client, _ = reviewer_client(app)
         try:
             csrf = client.get("/api/check_auth").get_json()["csrf_token"]
             session = client.post("/api/new_chat", json={}, headers={"X-CSRF-Token": csrf}).get_json()["new_session_id"]

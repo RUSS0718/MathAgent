@@ -178,12 +178,46 @@ if __name__ == '__main__':
     with tempfile.TemporaryDirectory() as directory:
         app = create_app({'TESTING': True, 'SHOWCASE_DATA_DIR': directory,
             'SHOWCASE_JOB_DELAY_SECONDS': 0, 'SHOWCASE_STAR_ENABLED': True,
-            'SHOWCASE_PRESENTATION_ENABLED': True,
+            'SHOWCASE_PRESENTATION_ENABLED': True, 'SHOWCASE_REVIEWER_SECRET': 'local-browser-fixture',
             'SHOWCASE_STAR_EVIDENCE_KIND': 'fault_injection',
             'SHOWCASE_STAR_FEATURES': {'final_generation': True, 'final_solution_review': True, 'local_code_tool': True},
             'SHOWCASE_STAR_REGISTRY': registry,
             'SHOWCASE_STAR_BUDGET': RunBudgetLimits(max_model_calls=28, max_http_attempts=28, max_tool_calls=2),
             'SHOWCASE_STAR_ADAPTER': InternModelAdapter(InternChatClient(retry=1), max_tokens=256)})
+        @app.post('/__test__/legacy-output')
+        def legacy_output():
+            # Explicit persisted legacy fixture; ordinary production creation is unchanged.
+            import uuid
+            from unittest.mock import patch
+
+            from flask import request
+
+            from showcase.workspace import WorkspaceStore
+            body = request.get_json()
+            client = app.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, csrf = reviewer_client(app, client)
+            headers = {'X-CSRF-Token': csrf, 'Idempotency-Key': str(uuid.uuid4())}
+            session = client.post('/api/new_chat', headers=headers).get_json()['new_session_id']
+            original = WorkspaceStore.create_job
+            def legacy(store, **kwargs):
+                kwargs['solver_identity'] = dict(kwargs.get('solver_identity') or {})
+                kwargs['solver_identity'].pop('presentation_rule', None)
+                return original(store, **kwargs)
+            with patch.object(WorkspaceStore, 'create_job', legacy):
+                created = client.post('/api/agent/jobs', headers=headers, json={
+                    'session_id': session, 'message': body['problem'], 'presentation_mode': body['mode']})
+            job = created.get_json()['job_id']
+            deadline = time.monotonic() + 5
+            while client.get(f'/api/agent/jobs/{job}').get_json()['status'] != 'succeeded':
+                if time.monotonic() > deadline:
+                    return {'error': 'fixture_timeout'}, 500
+                time.sleep(.01)
+            generated = client.post(f"/api/agent/jobs/{job}/{body['mode']}", headers=headers, json={})
+            if generated.status_code != 200:
+                return generated.get_json(), generated.status_code
+            return {'session': session, 'job': job}
+
         for port, limit in ((8093, RunBudgetLimits(max_model_calls=1, max_http_attempts=1, max_tool_calls=0)),
                             (8094, RunBudgetLimits(max_runtime_seconds=.5))):
             other = create_app({'TESTING': True, 'SHOWCASE_DATA_DIR': str(Path(directory) / str(port)),

@@ -34,7 +34,8 @@ class SseContractTest(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name) / "showcase-v0.2"
         self.app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(self.root), "SHOWCASE_JOB_DELAY_SECONDS": 0.2})
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         self.headers = {"X-CSRF-Token": self.csrf, "Idempotency-Key": str(uuid.uuid4())}
         self.session_id = self.client.post("/api/new_chat", headers={"X-CSRF-Token": self.csrf}).get_json()["new_session_id"]
@@ -57,13 +58,17 @@ class SseContractTest(unittest.TestCase):
 
     def test_stream_projects_durable_events_and_last_event_id(self) -> None:
         job_id = self._create_job()
+        deadline = time.monotonic() + 5
+        while self.client.get(f"/api/agent/jobs/{job_id}/answer").get_json()["presentation_status"] == "pending":
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(0.01)
         response = self.client.get(f"/api/agent/jobs/{job_id}/events")
         self.assertEqual(200, response.status_code)
         self.assertTrue(response.content_type.startswith("text/event-stream"))
         events = parse_sse(response.get_data(as_text=True))
         business_events = [event for event in events if event["event"] != "heartbeat"]
         self.assertGreaterEqual(len(business_events), 3)
-        self.assertEqual(["queued", "running", "final_result"], [event["event"] for event in business_events[-3:]])
+        self.assertEqual(["queued", "running", "final_result", "presentation_artifact_saved"], [event["event"] for event in business_events])
         ids = [int(event["id"]) for event in events if event["id"] is not None]
         self.assertEqual(ids, sorted(ids))
         self.assertTrue(all(value > 0 for value in ids))
@@ -73,7 +78,7 @@ class SseContractTest(unittest.TestCase):
             headers={"Last-Event-ID": str(ids[0] - 1)},
         )
         resumed_events = parse_sse(resumed.get_data(as_text=True))
-        self.assertEqual([ids[1], ids[2]], [int(event["id"]) for event in resumed_events])
+        self.assertEqual(ids[1:], [int(event["id"]) for event in resumed_events])
 
     def test_bad_cursor_has_stable_error(self) -> None:
         job_id = self._create_job()
