@@ -1,41 +1,26 @@
-# 无人值守交接：当前 #188，随后按依赖接续
+# 无人值守交接：#188交付收尾，随后按依赖接续
 
 ## 2026-11-17 当前授权与所有权
 
-用户明确要求：完成当前 ticket 后推送并关闭，再继续领取剩余 ticket；
-实现尽量交给子智能体，主智能体负责分派、等待及整合，不催促子智能体。
-当前先完成 #188 与子票 #194–#196 的修复、双轴复查和最终验收，再关闭。
-后续近期任务图为 #189 的 #190–#193，按真实依赖领取，先 #190；
-较早父票及未实证能力不随界面交付自动关闭。本节覆盖下文旧的停止排期。
+用户授权完成当前ticket后推送并关闭，再领取剩余ticket；实现尽量交给子智能体，主控分派、等待及整合，不催促。#188及子票#194/#195/#196已工程验收退出，当前先由主控完成文档提交、PR #197交付推送及关票，随后按 `#190 → {#191, #192} → #193` 接续#189。#190尚未领取实施；较早父票及未实证能力不随本次界面交付自动关闭。
 
-集成工作树为 D:/project/工程化MathAgent/Challenge-Cup-2026，分支
-user-solving-188，首轮最终门禁冻结 HEAD 为 f1c3d92。PR #197 仍为草稿。
-三个切片已合并，首轮离线回归为 2234 项、141 failure、587 error、42 skip；
-该失败保持，不能当作通过。双轴发现及修复进度见
-[阶段记录](../evals/user-solving-188-20261116.md)。
+集成root为 `D:/project/工程化MathAgent/Challenge-Cup-2026`，分支 `user-solving-188`，冻结源码/HEAD `8db100636a117c7219d10dfeb7c974f505819e2b`。最终文档交付SHA待主控提交后提供。PR #197仍draft，远端尚未推送最新；这些是主控提供状态，本次文档工作不操作GitHub，不预写推送、关票或main合并完成。
 
-唯一修复实现者 Tesla（01a1e4c2-3136-7fa0-9e7e-d688c0c5f256）拥有
-D:/project/mathagent-188-fix 的 fix/user-solving-188-review，已完成首轮最终
-门禁的23 failure、2 error定点修复；29b78c4集成至6f82dea，仅补一行嵌套
-夹具清理。原失败稳定复现后同组20/20、相关54/54通过，受影响双轴复查均无
-阻断。证据 artifacts/issue188/final01-fix/。该实现者保留等待最终门禁，
-不得重复启动实现者或覆盖其工作。
-后续任务只读前沿位于
-C:/Users/CQX/.codex/tmp/remaining-ticket-frontier-20261117.md，技术接缝见
-189-routing-seams-20261117.md；这些准备不代表 #190 已领取或实施。
-继续当前选择的同一模型，不覆盖子智能体型号；具体继承结果未独立核验。
+最终门禁 `artifacts/final-gates/user-solving-188-final-02/status.json`：北京时间2026-11-17 04:08:05启动，2123.609秒、passed 6/6、source_changed=false。完整测试2241项、0 failure/0 error/42 skip、1963.492秒；发布27项通过；前端精确日志79项全部通过、typecheck/build通过、audit 0漏洞，既有chunk warning非失败。fast包含baseline_snapshot及官方import/JSON合同；manifest前后指纹相同但不记录Git SHA，源码SHA与最终文档SHA分别登记。阶段、baseline验证流程及证据见[验收记录](../evals/user-solving-188-20261116.md)。不重复启动门禁或因纯文档修改重跑产品检查。
 
-首轮冻结门禁 user-solving-188-final-01 已失败：2241项、23 failure、2 error、
-42 skip，source_changed=false；快速阶段通过后在offline停止，后续阶段未运行。
-证据位于 artifacts/final-gates/user-solving-188-final-01。PID35388已退出，
-临时定时检查已删除。修复及受影响复查完成后，第二轮run ID固定为
-user-solving-188-final-02；先读取 artifacts/final-gates/ 下同名目录的
-status.json，存在运行态时接管所有权，禁止重复启动。首次启动使用
-artifacts/issue188-monitor/start-final.ps1，
-立即提供监控命令，并创建每30分钟检查；失败或完成后移除检查。
-旧 artifacts/issue188/backend-pre 保留首轮失败。主工作树原有的
-docs/README.md 十行新增、两个未跟踪合同及 tests/test.md 均须保护；
-tests/test.md 不读取、不修改、不暂存、不删除。
+PID34832已退出，临时检查 `MathAgent-188-user-solving-188-final-02`已由主控watcher删除，无运行/检查所有权待转移。旧final-01的2241项、23 failure/2 error/42 skip及backend-pre的2234项、141 failure/587 error/42 skip保持失败。修复29b78c4集成至6f82dea，仅一行嵌套fixture清理：20方法红（23/2）→同组20绿、相关54绿，见 `artifacts/issue188/final01-fix/`。受影响两轴均0阻断，外部报告 `C:/Users/CQX/.codex/tmp/188-final01-rereview-{standards,spec}.md`适用 `f1c3d92...6f82dea`；此前e42d865复核仍按原范围，不作为全量新审查。
+
+主控已确认安全移除本轮四个实现工作树 `D:/project/mathagent-188-{output,auth,ui,fix}`：分别核对绝对路径、clean、tip已合并并保留证据；Tesla（01a1e4c2-3136-7fa0-9e7e-d688c0c5f256）已关闭，无待修任务。其他工作树未触碰。本次文档工作不重复清理或启动旧实现者。
+
+后续只读准备指针（不是已领取或已实施）：
+
+- `C:/Users/CQX/.codex/tmp/190-routing-design-candidate-20261117.md`
+- `C:/Users/CQX/.codex/tmp/192-explore-cap-evidence-20261117.md`
+- `C:/Users/CQX/.codex/tmp/189-natural-cases-preregister-candidate-20261117.md`
+
+前沿及技术接缝另见 `C:/Users/CQX/.codex/tmp/remaining-ticket-frontier-20261117.md`和 `189-routing-seams-20261117.md`。继续当前选择的同一模型，不覆盖子智能体型号；具体型号及继承结果未独立核验。
+
+受控teach/report成功、fake回退及未新增paid真实质量验收的限制保持，不声明数学能力提升。主控已仅暂存README自身状态行，用户原有10行仍unstaged；两个未跟踪合同保持。`tests/test.md`不读取、不修改、不暂存、不删除。当前文档工作只写指定两份仓库文档及仓库外PR body，不提交、不推送。
 
 ## 历史：#183 受控工程退出
 
