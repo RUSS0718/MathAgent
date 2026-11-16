@@ -24,3 +24,11 @@
 ## 验收
 
 公开 Job/answer HTTP 与普通工作区浏览器为已确认接缝。各切片先保存稳定失败证据，再最小实现与聚焦回归。覆盖三模式、幂等、失败、部分结果、来源失效、刷新/历史无调用、普通/审阅正负权限、IME、键盘、题图、示例、角色筛选/计划/星图/回放、桌面/窄屏及 UTC 浏览器下北京时间。源码门禁按 development-gates.md。证据仅证明工程合同，不声称数学或教学效果提升。
+
+## #194 输出细化
+
+规则由 output_rules.py 版本化；每个新 Job（含省略 mode 的 solve）冻结规则正文、版本、SHA256、4096 输出 token、120 秒及一次 attempt。来源指纹包含冻结规则；_presentation_identity 在结果替换时保留它。solve 原文交付零新增调用；teach/report 复用现有 InternModelAdapter 及独立输出预算，客户端副本限制一次 attempt，不修改求解器客户端。上下文仅含脱敏原题、当前答案、范围及公开证据摘要，超过 64KiB 保存失败，不截断来源。
+
+output_generations 在网络前持久占位，每个 Job 不自动重发；启动时 generating 转 unknown。生成不修改 Job status/updated_at，不新增来源事件；保存产物沿用来源 CAS，附加规则身份比较。来源变化保留 stale 回退。产物记录独立模型、角色、attempt、usage 和预算；数学表达无 claim refs，保持 not_verified。
+
+#195 调用 presentation_api.get_final_answer(workspace_service,user_id,job_id,public_report=None)，注册只读 /answer。helper 使用 store Job + current_solver，避免读接口执行恢复对账；public_report 参数仅为兼容保留。pending 正文为空；ready 唯一正文；failed/stale/legacy 使用当前原答案。新规则任务的旧技术输出 POST/GET 也仅读取已保存自动产物；历史无规则任务保留旧显式技术接口。
