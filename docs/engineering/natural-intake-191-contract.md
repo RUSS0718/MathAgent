@@ -37,4 +37,4 @@ S/D 来源：`C:/Users/CQX/.codex/tmp/189-natural-cases-preregister-candidate-20
 
 共享文件顺序：#191 提交并由主控集成后，#192 才编辑 intern_instructions.py；#191 不修改其 cap/adapter/stream 接缝。全程不协调催促其他 owner。
 
-执行结果与命令将记录在独立 [验收与 HANDOFF](../evals/natural-intake-191-20261117.md)（实施后建立）；该链接在结果记录建立前为待完成入口。
+执行结果与命令见 [验收与 HANDOFF](../evals/natural-intake-191-20261117.md)。合入的主控交接已记自然题 registered_not_run；本票只准备可核对摘要的输入物料，不另建正式 prereg、不替代主控登记。
