@@ -67,6 +67,11 @@ class LeanDockerExecutor:
             outcome.update(status="error", error="lean_source_invalid")
             outcome["duration_seconds"] = time.monotonic() - started
             return outcome
+        # Docker CPU rlimits use whole seconds; never round above the tool budget.
+        cpu_seconds = math.floor(timeout)
+        if cpu_seconds < 1:
+            outcome.update(status="unavailable", error="lean_cpu_budget_too_small")
+            return self._finish(outcome, started)
         source_bytes = source.encode("utf-8")
         if len(source_bytes) > 64_000:
             outcome.update(status="error", error="lean_source_too_large")
@@ -104,7 +109,7 @@ class LeanDockerExecutor:
                 "create", "--name", name, "--pull=never", "--network=none",
                 "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
                 "--user=65534:65534", f"--memory={memory}m", f"--memory-swap={memory}m",
-                f"--cpus={cpus}", "--pids-limit=64", "--ulimit=cpu=25:30",
+                f"--cpus={cpus}", "--pids-limit=64", f"--ulimit=cpu={cpu_seconds}:{cpu_seconds}",
                 "--ulimit=fsize=16777216:16777216", "--log-driver=none",
                 "--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
                 "--label=mathagent.run_id=" + run_id,
