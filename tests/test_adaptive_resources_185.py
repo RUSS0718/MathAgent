@@ -30,6 +30,15 @@ class AdaptiveResourceTest(unittest.TestCase):
         with bind_budget(self.budget):
             self.assertEqual(({}, None), allocate(self.harness, self.run, {"role": "explore"}))
 
+    def test_transport_attempts_share_one_logical_call_time_reserve(self):
+        self.harness._model_port.adapter._get_client = lambda: SimpleNamespace(timeout=360, retry=3)
+        with bind_budget(self.budget):
+            floor, error = allocate(self.harness, self.run, {"role": "planner", "problem": "P"})
+        self.assertIsNone(error)
+        self.assertEqual(1080, floor["time_seconds"])
+        self.assertEqual(self.budget.snapshot()["deadline_at"] - 1080,
+                         floor["work_deadline_at"])
+
     def test_work_deadline_leaves_final_pair_and_repair_without_resetting_root(self):
         original = self.budget.snapshot()
         with bind_budget(self.budget):

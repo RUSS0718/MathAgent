@@ -11,6 +11,44 @@ from tests.test_faithful_s03_job import CAPACITY_POLICY, ENDPOINT, SPEC
 
 
 class AdaptiveJobTest(StarJobFixture, unittest.TestCase):
+    def test_live_profile_time_reserve_allows_planning_and_bound_delivery(self):
+        from copy import deepcopy
+
+        from llm_client import InternChatClient
+        from showcase.adapters import InternModelAdapter
+        from tests.test_faithful_s03_job import REPLIES
+
+        self.enterContext(patch.dict(os.environ, {"INTERN_API_BASE": ENDPOINT}))
+        replies = deepcopy(REPLIES)
+        replies[1]["steps"][0]["method_id"] = "direct"
+        self.open_star([SPEC, *replies],
+            SHOWCASE_FAITHFUL_AUTONOMOUS=True,
+            SHOWCASE_STAR_FULL_ENABLED=True,
+            SHOWCASE_STAR_FULL_FEATURES=dict.fromkeys(CORE_FEATURES | {
+                "adaptive_solving", "auto_problem_spec", "problem_spec", "context_pack",
+                "proof_graph", "progress_scheduling", "serial_routes"}, True),
+            SHOWCASE_STAR_ADAPTER=InternModelAdapter(
+                InternChatClient(timeout=360, retry=3), max_tokens=256),
+            SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION="faithful-stream-v1",
+            SHOWCASE_STAR_CONTEXT_CAPACITY=CAPACITY_POLICY,
+            SHOWCASE_STAR_FULL_BUDGET=RunBudgetLimits(
+                max_model_calls=48, max_http_attempts=48, max_tool_calls=8,
+                max_tokens=2097152, max_runtime_seconds=3600))
+        pipeline = self.app.extensions["showcase_workspace_service"].star_pipeline
+        self.enterContext(patch.object(pipeline, "full_gaps", return_value=[]))
+        response = self.client.post("/api/agent/jobs", headers=self.headers(),
+            json={"message": "1+1", "session_id": self.session})
+        job_id = response.get_json()["job_id"]
+        final = self.terminal(job_id)
+        self.assertEqual("succeeded", final["status"], final.get("result", {}).get("faithful"))
+        self.assertIn("planner", [r["role"] for r in self.outbound])
+        self.assertEqual("2", final["result"]["final_response"])
+        budget = final["result"]["budget"]
+        self.assertEqual(3600, budget["deadline_at"] - budget["started_at"])
+        self.assertEqual(7, budget["http_attempts"])
+        self.job(job_id)
+        self.assertEqual(7, len(self.outbound))
+
     def test_empty_candidate_repairs_once_and_spends_preserved_review_slot(self):
         self.open_adaptive([SPEC, RawProviderContent(""),
                            {**SOLVED, "solution_candidate": "1+1=2 by integer addition."}, ACCEPT])

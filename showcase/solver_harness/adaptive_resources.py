@@ -77,8 +77,10 @@ def allocate(harness, run, request):
     if not repair_used:
         calls += 1
         tokens += size + 4 * cap + 1024 + cap
+    # Transport attempts share the logical call deadline; retries do not each
+    # receive a fresh timeout. Keep one time share per reserved logical call.
     floor = {"model_calls": calls, "http_attempts": calls, "tokens": tokens,
-             "time_seconds": calls * timeout * (retries + 1)}
+             "time_seconds": calls * timeout}
     snapshot = shared.snapshot()
     limits = snapshot["limits"]
     deadline = snapshot["deadline_at"] - floor["time_seconds"]
