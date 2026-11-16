@@ -109,6 +109,48 @@ S失败后停止，D/U未提交；原失败/guards/冻结不覆盖、不自动�
 释放服务，cleanup-verification.json确认原进程退出、8119无监听、临时任务已删除。
 fresh只读诊断者负责仓库外最小离线回放与明确修复建议，零新增provider；尚未作代码修复或新自然运行。
 
+离线诊断已确认：实际Intake保存explain_reason→solve_equation，违反已有“解释不制造依赖”
+指令，路由忠实消费该边；本次不能据此评价2048首次探索容量。工具两次冲突是错误多项式
+参数，非原方程的数学反例。Reasoner空next_action被schema正确拒绝，repair虽恢复内容，
+checkpoint仍绑定原protocol_failed调用，导致review_record_mismatch，严格图来源无法刷新，
+最终触发route_requires_reevaluation。真实绑定接缝离线回放两次稳定红；仅内存改为实际
+completed repair身份即通过。此为定位证据，不是公共Job全链或自然修复成功。
+
+报告与回放：`C:/Users/CQX/.codex/tmp/189-live03-S-diagnosis-20261117.md`及同名目录。
+fresh实现者仅修成功repair的checkpoint来源传播并补公共Job红绿；不放宽schema/图守卫，
+不改旧Run、失败判定或预算，不添加自然提示示例/硬编码绕路。模型遵循偏差仍保留。
+
+下一自然登记为 `artifacts/issue189/preregistration/natural-cases-v2.json`：S2“求实数 x，使
+3x + 2 = 11。”，题面SHA256 `9267e0e67d77935deda7153d99372506c1f499c53512ef83f21814a58c63c51d`。
+仅去掉独立解释请求，以观察单数学目标的直解资格；未减少完整答案独立审查要求。
+原S失败不改判，S2实际仍有依赖时不算直解通过；D题面/hash不变，U仍原独立登记，
+均未提交。新live04仅准备，等待来源修复公共回归及受影响复查后才由主控冻结唯一运行，
+每题一次，原unknown/失败不自动重发，不注入Spec/Plan或参考。
+
+live04准备完成，主控已审阅：仅REG/顺序/停止列表换为S2/D/U及运行名替换，配置和
+提交代码与live03字节一致；实际PS5门控证实S2 guard存在而terminal缺失时，在读取任何
+进程元数据之前拒绝停止。证据 `artifacts/issue189/live04/{static-check,syntax-powershell,
+stop-gate-result}.json`，外部交接 `C:/Users/CQX/.codex/tmp/189-live04-runner-handoff-20261117.md`。
+0Job/provider/服务/定时任务，准备not_run0/3、无freeze/guards/data/运行进程。
+
+### checkpoint 来源修复集成
+
+来源9cf830d555de4263469322fae34d2b9a5abd7f90已由fresh merger集成至
+08eeecded8fbebd73bf91e228017072215c9c87e，tree一致。challenge.py及step.py各一处
+复用已有completed_call_id解析实际repair谱系，不改失败调用、schema/图守卫、旧Run或预算。
+公共红绿、真实registry回执及各源码适用范围见[修复记录](checkpoint-repair-source-189-20261117.md)。
+累计去重10项通过、零失败/错误/skip；最终补充4项包含3个重复，不能将较早9项冒称最终文件重跑。
+24份ignored证据已复制root `artifacts/checkpoint-189/` 并逐文件哈希一致；原失败保留。
+
+生产两轮上限下旧挑战链路仍以reasoner_checkpoint_round_limit终止；测试内三轮续算仅为
+来源机制见证，未修改生产上限，不能声称旧S自然成功。新增普通Reasoner回归在生产两轮内
+实际继续并交付，真实registry执行一次，检查回执身份/残差/预算及GET零新增请求。
+08eeecd上主控fast5/5、3.307秒通过，原输出见integration-fast.json；受影响两轴独立复查
+均确认0问题、0阻断，真实registry与生产两轮/测试三轮分层足以支持该来源修复，不代表旧S成功。
+固定范围c4493ba…08eeecd，报告位于root `artifacts/checkpoint-189/independent-review/`，
+外部原件为 `C:/Users/CQX/.codex/tmp/189-checkpoint-review-{standards,spec}-20261117.md`。
+证据复制、clean及来源已合并核对后，所属工作树已安全移除。live04仍未冻结或启动。
+
 ## 尚未退出
 
 自然S已失败并留存角色测量，D/U及191/192真实AC、193普通投影/浏览器与恢复、整体双轴和冻结最终门禁仍待完成。2048是工程假设，usage缺失不捏造token测量；没有耗时基线，不声称更快。188门禁只适用于188源码，不能代替本阶段。192工作树清理因自动审批拒绝删除自建ignored `.venv`（`blocked by policy`）暂保留。
