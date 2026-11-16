@@ -1,6 +1,6 @@
 # #183 当前机器阶段交付
 
-## 2026-11-16 当前入口（最终门禁后核验）
+## 2026-11-16 当前入口
 
 用户最新允许受控路由工程验收并要求尽早收尾。能力映射及实际限制见
 [阶段记录](../evals/faithful-service-183-20261115.md)首节，退出要求见
@@ -21,9 +21,16 @@ uv run --env-file .env python showcase_server.py --mode live --host 127.0.0.1 --
 
 访问[工作区](http://127.0.0.1:8103/dashboard)或
 [已保存首题](http://127.0.0.1:8103/dashboard/run/run_d44ac65dbda220c5020399de4047f1b8)。
-检查`/health`返回ok。前台用Ctrl+C停止；后台进程记录将保存在
-artifacts/issue-183/delivery-current-process.json，停止前须核对PID和创建时间。
+检查`/health`返回ok。13:13:43（Asia/Shanghai）已从停止状态启动，实际服务PID
+1824、创建时间2026-11-16T05:13:43.2897092Z，源码8b248b3；进程身份以
+artifacts/issue-183/delivery-current-process.json为准。前台用Ctrl+C停止；后台
+停止前须核对PID和创建时间。
 重启使用同一data目录，已有答案通过原深链读取，不重新提交历史题目；unknown不自动重发。
+
+本轮delivery-current-observation.json：health=ok，两Job仍succeeded，原答案
+可见且刷新后完整final_response/budget/request_attempts一致，写请求及页面错误
+均为0；桌面和移动截图保存在同目录delivery-current-*.png。未新增模型调用。
+配置SHA256为e00d8711ade0349e2d006cfcd0f12ceedf7ec2377fb4a76d5d95e47b8027025d。
 
 ## 历史入口（2026-11-15，非本轮当前配置）
 

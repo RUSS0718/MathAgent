@@ -1,6 +1,27 @@
-# 无人值守交接：#183 当前持有，继续真实闭环
+# 无人值守交接：#183 受控工程退出
 
-## 2026-11-16 重新授权接续
+## 2026-11-16 当前收尾入口
+
+用户最新允许受控路由、要求尽早结束，覆盖较早自然选择要求。不再追加provider
+试跑或创建接班会话；按[当前合同](faithful-service-183-contract.md)及
+[阶段记录](../evals/faithful-service-183-20261115.md)首节完成工程退出。
+Lean CPU限额、Intake阶段诊断、图步骤别名的唯一有效成果映射均已修复、聚焦
+通过并完成双轴复查。旧live33缓存未命中、live34/live35失败及unknown均保持。
+自然并发/切换/F4/正向经验缓存及数学正确率仍未验证，#168保持开放。
+
+集成checkout仍为D:/project/工程化MathAgent/Challenge-Cup-2026，分支
+faithful-autonomous-population。冻结8b248b3的gate-06源码未漂移，离线2214项
+2失败/1错误/42skip，已停止并清理其30分钟检查，正在处理必要聚焦复验。
+8103服务已从停止状态启动，PID1824/创建时间及配置身份见
+artifacts/issue-183/delivery-current-process.json；两份持久答案、完整预算和
+Attempt刷新一致、零写/零页面错误，访问与停止见[本机交付](faithful-service-183-delivery.md)。
+这是留给用户的服务，不是待完成模型试跑；不要重复启动或重新提交旧题。
+
+用户当前主工作树C:/Users/CQX/.codex/worktrees/issue183-lean-runtime/Challenge-Cup-2026
+由桌面保护，不手工删除。tests/test.md始终不读取/修改/暂存。继续同一模型选择；
+具体型号及继承无法核实，不猜测、不主动更改。下文为历史快照，不是新排期。
+
+## 历史：2026-11-16 重新授权接续
 
 用户本次明确继续 #183，以整个架构跑通及工程格式/稳定读取为目标，不评分数学
 内容。下节停止排期已被覆盖，历史 Run 和判定保持。当前持有本票，不创建接班。

@@ -1,9 +1,12 @@
 # MathAgent 文档索引
 
-2026-11-16 重新接续：用户明确继续 #183，目标跑通整个架构，不独立评分数学
-步骤或答案。复用 live32 交付/刷新和 live19 经验撤销/恢复证据；先修查 Lean
-执行限额传递，再补缓存及未覆盖的自然并发、切换和干预回接。未完成项不关闭。
-以[当前合同](engineering/faithful-service-183-contract.md)首节为准。
+2026-11-16 当前：用户允许受控路由并要求尽早结束，#183按工程接线验收，
+不再追加provider试跑。Lean限额、Intake阶段诊断、图依赖身份修复及双轴复查
+完成；8103从停止状态启动，两份持久答案/UI/刷新只读核验通过。冻结8b248b3
+的gate-06有2失败/1错误，正在聚焦处理，尚未退出。自然触发稳定性与数学
+正确率/F8未验证，#168保持开放。以[当前合同](engineering/faithful-service-183-contract.md)、
+[阶段记录](evals/faithful-service-183-20261115.md)及[交付入口](engineering/faithful-service-183-delivery.md)首节为准；
+下列旧计划和状态均为历史快照。
 
 2026-11-16 历史停止：live32首题答案交付、真实UI及只读刷新通过；Lean触发
 CPU时间限制、无可信缓存来源，条件性第二题未提交。按用户“再失败就终止”
@@ -22,7 +25,7 @@ CPU时间限制、无可信缓存来源，条件性第二题未提交。按用�
 
 - [#185 按需求解阶段验收](evals/adaptive-solving-185-20261115.md)：本票增量工程退出完成；[策略合同](engineering/adaptive-solving-185-contract.md)。轻量交付、一次数学修正、反馈调度、Meta 防循环与协议接缝修复均有证据；真实先单题再16题扩展，17个新 Job 独立核对正确（源码 `dfe8018`）。最终检查源码 `7b9962c` 的后端离线3/3通过（2196项、0 failure/error、42skip；发布27项；无源码漂移），baseline 11文件字节一致。完整深度交付、历史SQLite/并发间歇故障及数学误判仍有限制；不替代#183/#157，GitHub状态未自动变更。
 
-- [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：live27已失败，约922秒、8次完成请求、0未决，预算未耗尽；质疑后被历史规格变更保护误终止。新路线绑定规格版本的最小修复及针对性验证见阶段记录；旧Run不回填、不自动追加live28，未证明完整正确交付。live26根超时及1未知保持。#183/#168开放。见[当前交接](engineering/unattended-ticket-handoff.md)。
+- [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：首节按S01–S05/F1–F7区分受控接线、真实模型/工具及未验证自然能力；保留live33缓存未命中、live34协议失败及live35图提交异常。最终门禁与本机持久交付见当前记录，不将历史失败升级。见[当前交接](engineering/unattended-ticket-handoff.md)。
 
 - [#182 状态与控制组合验收](evals/faithful-service-182-20261115.md)：[G2合同](engineering/faithful-service-182-contract.md)。冻结e62d145的gate-01六阶段通过（2105项、0failure/error、42skip、source_changed=false），双轴复查解除；真实旧Run刷新/重启保持原预算、4次Attempt和输出身份。仅整合已有能力，#168完整服务仍未完成，按[交接](engineering/unattended-ticket-handoff.md)继续#183。
 
