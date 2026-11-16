@@ -1,6 +1,49 @@
 # #189 checkpoint repair 来源修复（2026-11-17）
 
-## 范围与源码
+## 合并前窄补充（2026-11-17，适用本记录最新提交）
+
+下文首次提交状态保留为历史快照；本节覆盖其中“step.py留后续风险”和“registry缺口”。
+
+公共直接Reasoner用例：自然输入、Intake依赖、Planner后，第一轮直接Reasoner
+FINAL空next_action导致协议失败，repair返回合法YIELD checkpoint；StepVerifier
+ACCEPT+Answer后下一轮实际派发并完成，再完成后继步骤、整题审查和只读GET。
+不patch轮次上限，生产MAX_CHECKPOINT_ROUNDS=2原样保留。
+
+`direct-red.json/log`：原step.py公共红灯，testsRun=1、failures=1、errors=0、skip=0，
+5次受控HTTP后route_requires_reevaluation；图review_record_mismatch，checkpoint引用
+原protocol_failed调用，而repair确为completed。明确确认同caller来源缺陷。
+step.py仅将checkpoint来源改用既有completed_call_id，从最新持久calls解析实际成功来源；
+没有泛化重构或失败调用状态覆盖。challenge.py沿用首次修复。
+
+直接用例复用现有ToolRegistry.register_polynomial_check与真实PolynomialChecker，
+repair checkpoint中只加入一次有限候选代回请求：x-4=0，candidate=4。
+验证实际回执executed、run_id、tool、candidate_status=pass、residual=0及持久receipt_id
+匹配；Run工具计账与公开tool_results各1，GET零新增HTTP。原easy-verify标签保持原样，
+没有expected_output就不声称其已升级verified，更不将候选代回当完整性证明。
+真实socket.connect仍禁止出站，0真实provider，不Docker、不新服务。此为直接repair
+路径的工具回执见证，不声称复现原S的工具数学语义。
+
+`direct-green.json/log`最初已完成身份/续算/交付，但错误预期label=verified导致失败；
+该断言按现有合同改为easy-verify，保留失败日志。最终无schema/守卫/容量改动。
+
+合并前再次 `git merge dependency-routing-189` 返回Already up to date，tip仍c4493ba。
+新增测试文件去除末尾多余空白，ruff排序及格式化仅该独立测试。
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT='D:/project/工程化MathAgent/Challenge-Cup-2026/.venv'
+uv run --no-sync python scripts/run_unittest_report.py --expect-count 3 --summary-json artifacts/checkpoint-189/supplement-focused.json --diagnostics artifacts/checkpoint-189/supplement-focused.log tests.test_checkpoint_repair_source_189
+uv run --no-sync python scripts/run_unittest_report.py --expect-count 1 --summary-json artifacts/checkpoint-189/step-context.json --diagnostics artifacts/checkpoint-189/step-context.log tests.test_reasoner_repair_context_127.ReasonerRepairContextTest.test_step_and_challenge_repair_include_exact_failed_reply_and_error
+uv run --no-sync ruff check tests/test_checkpoint_repair_source_189.py showcase/solver_harness/step.py showcase/solver_harness/challenge.py
+uv run --no-sync ruff format --check tests/test_checkpoint_repair_source_189.py
+```
+
+最终补充：3/3（12.475秒）+1/1（8.421秒），去重4项，0failure/error/skip；ruff与diff
+格式检查通过。跨首次与补充总去重10项，未重复运行无影响的continue/unknown组。
+生产文件只修改challenge.py和step.py来源解析各一处。新增ignored证据direct-red、
+direct-green、supplement-focused、step-context各JSON/log均保留在原worktree。
+未root写入、未自然运行、未push，未改模型选择；最终SHA由交接与git记录提供。
+
+## 范围与源码（首次提交历史快照）
 
 基点及集成 tip：`c4493ba3b6956eb8667dde3f67d98336dd69ff69`，分支
 `fix/checkpoint-repair-source-189`，独立目录 `D:/project/mathagent-189-checkpoint-fix`。
