@@ -64,6 +64,32 @@ HTTP错误只留状态码和符号error code，400/timeout/重复预约均不自
 `C:/Users/CQX/.codex/tmp/189-live02-runner-fix-20261117.md`。准备态not_run0/3，
 无freeze/guards/后台运行；主控接回冻结和唯一启动所有权。此离线准入不算自然题验收。
 
+### live02 原生启动失败
+
+冻结df546df，于北京时间2026-11-17 06:46启动。新运行器把中文绝对UV环境路径
+写进UTF8无BOM的PowerShell脚本，原生powershell.exe按ANSI解释后误建虚拟环境，
+service-entry在导入dotenv时失败。此前AST/parser和进程内Flask检查未覆盖这一原生启动接缝。
+观察器未启动，无submission guard、sqlite或Job/provider调用，自然题仍not_run。
+原失败日志和冻结保留在 `artifacts/issue189/live02/`；主控核对后停止仍等待health的
+精确owner，临时检查已删除，误建虚拟环境已按绝对目标核对清理，未触碰192保留环境。
+`cleanup-verification.json`确认原进程退出、8119无监听、无临时检查。
+
+原修复者接续只修新live03：PowerShell以运行时解析仓库路径生成UV环境，避免中文
+字面量；补真实powershell.exe后台启动/health和失败落盘检查，不改依赖、产品或预算。
+live01/live02原记录不覆盖，未因本次启动失败重发任何模型请求。
+
+live03窄修已完成并由主控审阅：四份正式PS脚本通过PSScriptRoot运行时解析仓库/.venv，
+全部ASCII；准备态补齐pid/created_at/log/job字段。原生PS5.1实际环境与Python前缀相等、
+dotenv导入成功；后台逐字节复制的service-entry在隔离worker-off夹具中真实boot/health=ok，
+零Job/provider/出站连接。失败路径实际落盘并由worker finally自动移除临时任务；
+测试所属PID/创建时间清理，remaining_process_count=0。提交代码未变，不重复live02准入检查。
+
+红绿与原失败记录位于 `artifacts/issue189/live03/`：environment-red/green.json、
+native-smoke-result.json、static-check.json、syntax-powershell.json；仓库外交接为
+`C:/Users/CQX/.codex/tmp/189-live03-runner-fix-20261117.md`。测试身份接缝不等于正式
+自然冻结，真实容量/题目不变；live03准备not_run0/3、无正式freeze/guards/data/进程/任务，
+主控负责后续唯一冻结和启动。以上检查不代表自然求解或数学效果。
+
 ## 尚未退出
 
 自然题数学与逐角色测量、191/192真实AC、193普通投影/浏览器与恢复、整体双轴和冻结最终门禁均待完成。2048是工程假设，usage缺失不捏造token测量；没有耗时基线，不声称更快。188门禁只适用于188源码，不能代替本阶段。192工作树清理因自动审批拒绝删除自建ignored `.venv`（`blocked by policy`）暂保留。

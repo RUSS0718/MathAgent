@@ -16,6 +16,10 @@
 
 Nash已完成关闭，live02红400/idempotency_key_invalid、绿202/default star_reference；observe与smoke共用提交代码，错误留存及单次请求断言通过，0真实provider。主控已审阅窄差异，下一步冻结新文档HEAD并唯一启动live02，继续原S/D/U题目与预算，保留live01全部失败。新的监控入口 `artifacts/issue189/live02/check.ps1`、任务 `MathAgent-Issue189-live02`，端口8119；尚未启动时无进程/任务所有权可交接。详见[阶段记录](../evals/dependency-routing-189-20261117.md)。Einstein亦完成关闭，报告 `C:/Users/CQX/.codex/tmp/156-next-slice-audit-20261117.md`；#156未领取，两个活跃公共owner接管为具体工程证据缺口，机器压力信号合同未定，provider/数学未实证不作为新增实验授权。
 
+live02实际启动在df546df发生原生PowerShell中文路径解码错误，误入新虚拟环境，dotenv导入失败。无observer、submission guard、sqlite、Job/provider；主控清理精确owner、临时检查及误建环境，原失败与cleanup证据保留。Nash已恢复接续，唯一写新ignored live03及仓库外交接，修运行时路径解析、原生后台health和启动失败落盘检查；主控等待，不催促，不改依赖掩盖问题。当前无本轮活跃进程/临时检查，193仍未正式实施，自然验收仍not_run。
+
+live03窄修已完成并审阅，Nash已关闭。原生PS5.1环境、真实worker-off后台boot/health、启动失败落盘及finally自动清理临时task均通过；0Job/provider、测试进程已精确清理。提交代码与live02字节相同，不重跑准入；实际证据范围及失败保留见[阶段记录](../evals/dependency-routing-189-20261117.md)。下一步在本次文档提交后冻结live03，唯一入口 `artifacts/issue189/live03/start.ps1`、监控 `check.ps1`、临时task `MathAgent-Issue189-live03`、端口8119，原S/D/U与预算不变。运行所有权归主控，不自动重复旧提交。
+
 自然S/D题干已预登记于忽略目录 `artifacts/issue189/preregistration/natural-cases-v1.json`，新增单目标题U登记于同目录 `natural-U-v1.json`，均为 `registered_not_run`；题干SHA在相应文件。U的人审参考另存仓库外，主控独立有理数枚举核对21组；答案不得进入运行器或模型。D未产生实际依赖，或U自然产生依赖/首次完整完成，均按相应路径记not_triggered，不注入Spec/计划或诱导重跑。先在191/192代码集成及独立审阅通过后冻结同一源码/配置，由主控唯一启动S/D/U每题一次；实际退出后才实施193，复用保存结果做只读UI/刷新验收，分别记录自然运行与UI源码SHA，不为UI重新派发模型。Boyle已完成运行器及公共Flask/Job受控离线smoke，真实provider为0，核心HTTP读取/分页通过；自然验收仍NOT_RUN。Dalton（01a1e659-e22f-7940-9b17-6d08464af0ea）仅在ignored `artifacts/issue189/live01/` 修简有效配置审计与冻结时序：独立服务配置快照，不修改受验公共Run响应。独立端口8119和data，不触碰用户8103；未启动provider、服务或定时检查。当前无本轮live/长测试进程。#188门禁源码为 `8db100636a117c7219d10dfeb7c974f505819e2b`，与文档交付SHA区别记录。
 
 独立只读审阅另确认#130按开发前决策地图范围完成交接，已由主控于2026-11-17关闭并重读确认；结案评论 `6930388527`。原五类待明确事项由146/156/157/168等执行票承接，不视为产品或实验完成；审阅报告 `C:/Users/CQX/.codex/tmp/130-closure-audit-20261117.md`。Boole（01a1e656-6341-7143-8c05-53c5b9fdcdd5）仅只读核对157旧批次证据，不启动或重试实验。
