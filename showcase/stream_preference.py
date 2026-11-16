@@ -125,7 +125,8 @@ def _payload_details(adapter, messages, *, max_output_tokens=None):
 
 
 def select_transport(adapter, messages, *, policy="legacy", native_tools=False, profiles=None,
-                     schema_fingerprint=None, max_output_tokens=None, transport_override=None):
+                     schema_fingerprint=None, max_output_tokens=None, transport_override=None,
+                     provider_tools=()):
     """Choose one transport before dispatch and return safe audit metadata."""
     if policy not in {"legacy", "stream_first"}:
         raise ValueError("star_transport_policy_invalid")
@@ -134,6 +135,8 @@ def select_transport(adapter, messages, *, policy="legacy", native_tools=False, 
     if transport_override == "nonstream":
         _, payload, _ = _payload_details(adapter, messages, max_output_tokens=max_output_tokens)
         payload.pop("stream", None)
+        if provider_tools:
+            payload["tools"] = [dict(tool) for tool in provider_tools]
         return {"policy": policy, "transport": "nonstream",
                 "reason": "initial_explore_explicit_nonstream", "evidence_kind": "documented",
                 "payload_fingerprint": _fingerprint(payload),
