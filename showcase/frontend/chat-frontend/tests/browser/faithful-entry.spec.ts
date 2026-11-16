@@ -112,7 +112,10 @@ const capabilities = {
   verification_mode: ['auto'], files: { upload: { enabled: false } },
   capabilities: { jobs: true, sse: true, verification_mode: ['auto'], file_upload: { enabled: false } },
   solver_modes: [{ solver_mode: 'star_reference', enabled: true, missing_capabilities: [] },
-    { solver_mode: 'star_limited', enabled: true, missing_capabilities: [] }],
+    { solver_mode: 'star_limited', enabled: true, missing_capabilities: [] },
+    { solver_mode: 'star_limited_best_effort', enabled: false, missing_capabilities: ['service_disabled'] },
+    { solver_mode: 'star_best_effort', enabled: true, missing_capabilities: [] },
+    { solver_mode: 'star_population', enabled: true, missing_capabilities: [] }],
 }
 async function setup(page: Page, entry: typeof faithful | undefined) {
   await mockWorkspace(page)
@@ -213,6 +216,8 @@ test('ready service defaults ordinary submit to Faithful and preserves failed fo
   const requests = await setup(page, faithful)
   await expect(page.getByRole('heading', { name: '因果推理智能体', exact: true })).toBeVisible()
   await expect(page.locator('.faithful-entry')).toContainText('实验性')
+  await expect(page.locator('.faithful-entry [role="status"]')).toContainText('自主求解（推荐）')
+  await expect(page.locator('.faithful-entry')).toContainText('实际求解与检查反馈')
   await expect(page.locator('#solver-mode')).not.toBeVisible()
   await page.locator('#math-question').fill('1+1=?')
   await page.getByRole('button', { name: '开始自主求解', exact: true }).click()
@@ -286,13 +291,24 @@ test('enabled but unready blocks button and Enter and shows every missing reason
 
 test('advanced modes remain explicit and can return to autonomous solving', async ({ page }) => {
   const requests = await setup(page, faithful)
-  await page.getByText('高级选项', { exact: true }).click()
+  const disclosure = page.getByText('高级设置', { exact: true })
+  await disclosure.focus()
+  await disclosure.press('Enter')
+  const selector = page.getByLabel('执行预设', { exact: true })
+  await expect(selector).toHaveValue('star_reference')
+  await expect(selector.locator('option:checked')).toHaveText('自主求解（推荐）')
+  await expect(selector.locator('optgroup')).toHaveCount(3)
+  await expect(selector.locator('optgroup[label="自主调度"] option')).toHaveAttribute('value', 'star_reference')
+  await expect(selector.locator('optgroup[label="调试与兼容"] option')).toHaveCount(2)
+  await expect(selector.locator('option[value="star_limited_best_effort"]')).toBeDisabled()
+  await expect(page.locator('.faithful-entry')).toContainText('互斥的执行预设')
   await page.locator('#solver-mode').selectOption('star_limited')
   await page.locator('#math-question').fill('求解 x+1=2')
   await page.getByRole('button', { name: '开始求解', exact: true }).click()
   await expect.poll(() => requests.length).toBe(1)
   expect(requests[0]?.solver_mode).toBe('star_limited')
-  await page.getByRole('button', { name: '使用 因果推理智能体 自主求解', exact: true }).click()
+  await expect(page.locator('.faithful-entry [role="status"]')).toContainText('已手选高级执行预设')
+  await page.getByRole('button', { name: '恢复自主求解（推荐）', exact: true }).click()
   await page.route('**/api/new_chat', route => route.fulfill({ json: { success: true, new_session_id: 'session-resolve' } }))
   await page.getByRole('button', { name: '再次求解', exact: true }).click()
   await expect(page.locator('#math-question')).toHaveValue('求解 x+1=2')
@@ -300,6 +316,30 @@ test('advanced modes remain explicit and can return to autonomous solving', asyn
   await expect.poll(() => requests.length).toBe(2)
   expect(requests[1]?.solver_mode).toBe('star_reference')
 })
+
+for (const width of [320, 1440]) {
+  test(`autonomous preset disclosure stays readable at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    const requests = await setup(page, faithful)
+    const errors: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
+    await expect(page.locator('.faithful-entry [role="status"]')).toContainText('自主求解（推荐）')
+    await expect(page.getByLabel('执行预设', { exact: true })).not.toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`entry-${width}.png`), fullPage: true })
+    await page.getByText('高级设置', { exact: true }).click()
+    const selector = page.getByLabel('执行预设', { exact: true })
+    await selector.selectOption('star_population')
+    await expect(selector.locator('option:checked')).toHaveText('多路线并发（调试）')
+    await expect(page.locator('#solver-mode-note')).toContainText('自主入口也可按需选择多路线')
+    await expect(page.locator('.faithful-entry')).toContainText('不代表题目难度')
+    await page.screenshot({ path: testInfo.outputPath(`advanced-${width}.png`), fullPage: true })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.getByRole('button', { name: '恢复自主求解（推荐）', exact: true }).click()
+    await expect(selector).toHaveValue('star_reference')
+    expect(requests).toHaveLength(0)
+    expect(errors).toEqual([])
+  })
+}
 
 for (const entry of [undefined, { ...faithful, enabled: false, ready: false, unavailable_reasons: ['不应显示'] }]) {
   test(`legacy behavior preserved when entry ${entry ? 'disabled' : 'absent'}`, async ({ page }) => {
