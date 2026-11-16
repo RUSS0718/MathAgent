@@ -40,6 +40,16 @@ class InitialExploreJobTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(["problem_intake", "explore", "whole_solution_verifier"],
                          [r["role"] for r in self.outbound])
 
+    def test_initial_admission_estimates_2048_while_preserving_base_review_capacity(self):
+        self.enterContext(patch.dict(os.environ, {"INTERN_API_BASE": ENDPOINT}))
+        self.open_initial([SPEC, {**SOLVED, "solution_candidate": "1+1=2 by integer addition."}, ACCEPT],
+            SHOWCASE_STAR_ADAPTER=InternModelAdapter(InternChatClient(retry=1), max_tokens=32768),
+            SHOWCASE_STAR_BUDGET=RunBudgetLimits(max_model_calls=12, max_http_attempts=12,
+                                                max_tokens=220000))
+        final = self.terminal(self.create_job())
+        self.assertEqual("succeeded", final["status"], final.get("result", {}).get("solver"))
+        self.assertEqual([32768, 2048, 32768], [p["max_tokens"] for p in self.payloads()])
+
     def test_known_length_plans_without_repair_and_preserves_unverified_source(self):
         from copy import deepcopy
 
