@@ -1,10 +1,10 @@
-# 无人值守交接：#188交付收尾，随后按依赖接续
+# 无人值守交接：#188已关闭，当前#190
 
 ## 2026-11-17 当前授权与所有权
 
-用户授权完成当前ticket后推送并关闭，再领取剩余ticket；实现尽量交给子智能体，主控分派、等待及整合，不催促。#188及子票#194/#195/#196已工程验收退出，当前先由主控完成文档提交、PR #197交付推送及关票，随后按 `#190 → {#191, #192} → #193` 接续#189。#190尚未领取实施；较早父票及未实证能力不随本次界面交付自动关闭。
+用户授权完成当前ticket后推送并关闭，再领取剩余ticket；实现尽量交给子智能体，主控分派、等待及整合，不催促。#188及子票#194/#195/#196已工程验收退出、推送并经GitHub复核关闭，交付 `1307aab40b8788cc408ef65fc94dfc7f2b1dc1f8`，PR #197已ready，未合入main。当前已领取#190，按 `#190 → {#191, #192} → #193` 接续#189；较早父票及未实证能力保持各自边界。
 
-集成root为 `D:/project/工程化MathAgent/Challenge-Cup-2026`，分支 `user-solving-188`，冻结源码/HEAD `8db100636a117c7219d10dfeb7c974f505819e2b`。最终文档交付SHA待主控提交后提供。PR #197仍draft，远端尚未推送最新；这些是主控提供状态，本次文档工作不操作GitHub，不预写推送、关票或main合并完成。
+集成root为 `D:/project/工程化MathAgent/Challenge-Cup-2026`，新分支 `dependency-routing-189`，起点为上述#188交付，后续PR堆叠于 `user-solving-188`。#190实现者Sartre（01a1e5fb-0127-7550-b768-3b260834fd0a）独占 `D:/project/mathagent-190`、`feat/dependency-routing-190`，先提交任务设计，再按公共Job红绿实现。主控不重复其实现；待完成后由fresh merger集成。原四项用户dirt仍保留。#188门禁源码为 `8db100636a117c7219d10dfeb7c974f505819e2b`，与文档交付SHA区别记录。
 
 最终门禁 `artifacts/final-gates/user-solving-188-final-02/status.json`：北京时间2026-11-17 04:08:05启动，2123.609秒、passed 6/6、source_changed=false。完整测试2241项、0 failure/0 error/42 skip、1963.492秒；发布27项通过；前端精确日志79项全部通过、typecheck/build通过、audit 0漏洞，既有chunk warning非失败。fast包含baseline_snapshot及官方import/JSON合同；manifest前后指纹相同但不记录Git SHA，源码SHA与最终文档SHA分别登记。阶段、baseline验证流程及证据见[验收记录](../evals/user-solving-188-20261116.md)。不重复启动门禁或因纯文档修改重跑产品检查。
 
@@ -12,7 +12,7 @@ PID34832已退出，临时检查 `MathAgent-188-user-solving-188-final-02`已由
 
 主控已确认安全移除本轮四个实现工作树 `D:/project/mathagent-188-{output,auth,ui,fix}`：分别核对绝对路径、clean、tip已合并并保留证据；Tesla（01a1e4c2-3136-7fa0-9e7e-d688c0c5f256）已关闭，无待修任务。其他工作树未触碰。本次文档工作不重复清理或启动旧实现者。
 
-后续只读准备指针（不是已领取或已实施）：
+后续准备指针（#190已领取实施，其余尚未领取）：
 
 - `C:/Users/CQX/.codex/tmp/190-routing-design-candidate-20261117.md`
 - `C:/Users/CQX/.codex/tmp/192-explore-cap-evidence-20261117.md`
