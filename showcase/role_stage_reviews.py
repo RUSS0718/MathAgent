@@ -10,6 +10,7 @@ from .final_evidence import artifact_identity
 from .role_stage_results import fingerprint
 from .solver_harness.classified import CATEGORIES
 from .solver_harness.final_binding import review_binding
+from .solver_harness.protocol_repair import completed_call_id
 
 
 def _sections(*pairs):
@@ -136,16 +137,24 @@ def _generator(state):
     if not attempts:
         return []
     attempt = attempts[-1]
-    if any(attempt.get(k) != state.get(k) for k in ('plan_version', 'attempt_index')):
+    if (any(attempt.get(k) != state.get(k)
+            for k in ('plan_version', 'attempt_index', 'specification_version'))
+            or attempt.get('invalidated') or attempt.get('invalidated_by_specification_version')):
         return []
-    calls = [(key, call) for key, call in state.get('calls', {}).items()
-             if _current_call(state, call, 'final_generator')
-             and call.get('request', {}).get('session_key') == attempt.get('session_key')
-             and isinstance(attempt.get('candidate'), str) and attempt['candidate'].strip()
-             and call.get('response', {}).get('final_response') == attempt['candidate']]
-    if len(calls) != 1:
+    session = attempt.get('session_key')
+    if not isinstance(session, str) or not session.strip():
         return []
-    key, call = calls[0]
+    # finalize.finalization_requests binds the logical session to this call root.
+    # The request session itself is rewritten by the native role-session layer.
+    calls = state.get('calls', {})
+    key = completed_call_id(calls, f'final-generator:{session}')
+    call = calls.get(key, {})
+    if (not _current_call(state, call, 'final_generator')
+            or call.get('call_id') != key or call.get('request', {}).get('call_id') != key
+            or call.get('request', {}).get('problem_spec_version') != state.get('specification_version')
+            or not isinstance(attempt.get('candidate'), str) or not attempt['candidate'].strip()
+            or call.get('response', {}).get('final_response') != attempt['candidate']):
+        return []
     return [_draft('final_generator', 'final_candidate', _sections(
         ('阶段结论', '已保存终稿候选，生成成功不代表检查通过。'),
         ('检查说明', '候选被采用或任务结束不提升证据等级；检查结果以独立审查记录为准。')),
