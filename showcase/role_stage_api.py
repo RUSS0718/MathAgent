@@ -9,6 +9,11 @@ def read_role_results(service, user_id, job_id, role, source=None):
         job = service.store.get_job(job_id, user_id)
         row = service.store._connection.execute(
             'SELECT state_json FROM solver_states WHERE run_id=?', (job_id,)).fetchone()
-        state = json.loads(row[0]) if row else {}
+        try:
+            state = json.loads(row[0]) if row else {}
+        except (ValueError, TypeError):
+            state = {}
+        if not isinstance(state, dict) or state.get('run_id') != job_id:
+            state = {}
         return {'version': 'role-stage-v1', 'job_id': job_id, 'role': role,
                 'status': job['status'], **plan_results(state, role, source)}

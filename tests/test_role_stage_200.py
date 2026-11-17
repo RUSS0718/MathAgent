@@ -82,3 +82,26 @@ class PlanReadTest(unittest.TestCase):
             event={'event_id': 'attempt', 'type': 'status_changed'}, state_updates={'attempt_index': 1})
         self.assertEqual('unavailable', self.client.get(self.url).json['content_status'])
 
+
+    def test_empty_corrupt_and_cross_job_sources_are_unavailable(self):
+        import copy
+        import json
+        store = self.app.extensions['showcase_workspace_service'].store
+        state = self.h.get_run(self.job_id)['state']
+        for query in ('?source=', '?source=broken'):
+            self.assertEqual('unavailable', self.client.get(self.url + query).json['content_status'])
+        for mutate in (
+            lambda s: s.update(run_id='different-job'),
+            lambda s: s.update(role_stage_results=[None]),
+            lambda s: s['role_stage_results'][0].update(items=None),
+            lambda s: s['role_stage_results'][0].update(check=None),
+            lambda s: s['role_stage_results'][0].update(plan_version='1'),
+        ):
+            damaged = copy.deepcopy(state)
+            mutate(damaged)
+            store._connection.execute('UPDATE solver_states SET state_json=? WHERE run_id=?',
+                (json.dumps(damaged), self.job_id))
+            store._connection.commit()
+            response = self.client.get(self.url)
+            self.assertEqual(200, response.status_code)
+            self.assertEqual('unavailable', response.json['content_status'])
