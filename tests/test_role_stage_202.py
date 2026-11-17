@@ -7,6 +7,24 @@ from showcase.formal_specification import normalize_target, public_target
 from showcase.role_stage_reviews import collect
 from showcase.solver_harness.classified import build_entries
 from showcase.solver_harness.final_binding import review_record
+from showcase.solver_harness.finalize import finalization_requests
+
+
+def generator_state():
+    session = 'final:run:plan1:attempt0:candidate0'
+    request, _ = finalization_requests('problem', [], [], session, None, False)
+    request.update(session_key='run:salt:final_generator:1:None:0', problem_spec_version=1)
+    call_id = request['call_id']
+    return {'run_id': 'run', 'plan_version': 1, 'attempt_index': 0,
+            'specification_version': 1,
+            'final_solution_attempts': [{'attempt': 0, 'plan_version': 1,
+                'attempt_index': 0, 'specification_version': 1,
+                'candidate': 'PRIVATE ANSWER', 'session_key': session,
+                'review': {'verdict': 'ACCEPT'}}],
+            'calls': {call_id: {'call_id': call_id, 'run_id': 'run',
+                'plan_version': 1, 'attempt_index': 0, 'role': 'final_generator',
+                'status': 'completed', 'request': request,
+                'response': {'final_response': 'PRIVATE ANSWER'}}}}
 
 
 def step_state():
@@ -78,20 +96,60 @@ class RoleStageReviewsTest(unittest.TestCase):
         self.assertNotEqual(draft['binding'], other['binding'])
 
     def test_generator_success_and_job_completion_cannot_upgrade_evidence(self):
-        state = {'run_id': 'run', 'plan_version': 1, 'attempt_index': 0,
-                 'final_solution_attempts': [{'attempt': 0, 'plan_version': 1,
-                     'attempt_index': 0, 'candidate': 'PRIVATE ANSWER',
-                     'session_key': 'final-session', 'review': {'verdict': 'ACCEPT'}}],
-                 'calls': {'gen': {'run_id': 'run', 'plan_version': 1, 'attempt_index': 0,
-                     'role': 'final_generator', 'status': 'completed',
-                     'request': {'session_key': 'final-session'},
-                     'response': {'final_response': 'PRIVATE ANSWER'}}}}
+        state = generator_state()
         draft, = collect(state, {'type': 'final_candidate_generated'})
+        self.assertEqual(next(iter(state['calls'])), draft['binding']['generator_call_id'])
         self.assertEqual('unreviewed', draft['check']['status'])
         self.assertNotIn('PRIVATE ANSWER', json.dumps(draft))
         self.assertEqual([], collect(state, {'type': 'finalization_completed'}))
         state['final_solution_attempts'][0]['candidate'] = 'changed'
         self.assertEqual([], collect(state, {'type': 'final_candidate_generated'}))
+
+    def test_generator_resolves_completed_protocol_repair_from_logical_call(self):
+        state = generator_state()
+        root, = state['calls']
+        repaired = copy.deepcopy(state['calls'][root])
+        repaired['call_id'] = repaired['request']['call_id'] = root + ':repair-1'
+        state['calls'][root]['status'] = 'protocol_failed'
+        state['calls'][root]['response'] = None
+        state['calls'][root + ':repair-1'] = repaired
+        draft, = collect(state, {'type': 'final_candidate_generated'})
+        self.assertEqual(root + ':repair-1', draft['binding']['generator_call_id'])
+        self.assertEqual('unreviewed', draft['check']['status'])
+        repaired['response']['final_response'] = 'different candidate'
+        self.assertEqual([], collect(state, {'type': 'final_candidate_generated'}))
+
+    def test_generator_rejects_wrong_sources_even_with_matching_text_and_session(self):
+        for field, value in [('call_id', 'unrelated'), ('run_id', 'other'),
+                             ('plan_version', 2), ('attempt_index', 1),
+                             ('status', 'unknown_outcome'), ('role', 'reasoner')]:
+            with self.subTest(field=field):
+                state = generator_state()
+                root, = state['calls']
+                call = state['calls'][root]
+                if field == 'call_id':
+                    state['calls'] = {value: call}
+                    call['call_id'] = call['request']['call_id'] = value
+                    call['request']['session_key'] = state['final_solution_attempts'][0]['session_key']
+                else:
+                    call[field] = value
+                self.assertEqual([], collect(state, {'type': 'final_candidate_generated'}))
+
+    def test_generator_does_not_inherit_other_candidate_or_specification_versions(self):
+        for target, field, value in [('attempt', 'plan_version', 2),
+                                     ('attempt', 'attempt_index', 1),
+                                     ('attempt', 'specification_version', 2),
+                                     ('attempt', 'invalidated', True),
+                                     ('attempt', 'invalidated_by_specification_version', 2),
+                                     ('attempt', 'session_key', 'another-candidate'),
+                                     ('attempt', 'candidate', 'changed'),
+                                     ('request', 'problem_spec_version', 2)]:
+            with self.subTest(target=target, field=field):
+                state = generator_state()
+                record = (state['final_solution_attempts'][0] if target == 'attempt'
+                          else next(iter(state['calls'].values()))['request'])
+                record[field] = value
+                self.assertEqual([], collect(state, {'type': 'final_candidate_generated'}))
 
     def test_meta_guidance_decision_and_execution_are_distinct_fixed_templates(self):
         state = {'run_id': 'run', 'plan_version': 1, 'attempt_index': 0,
