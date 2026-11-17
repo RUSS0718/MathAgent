@@ -4,6 +4,7 @@ export const statusLabels: Record<string, string> = {
   queued: '等待开始', running: '正在处理', waiting_input: '等待补充条件', succeeded: '执行完成',
   completed: '执行结束', failed: '执行遇到问题', canceled: '任务已取消', unknown: '结果未知', needs_review: '需要人工复核',
   idle: '未参与', pass: '步骤检查通过', active: '执行中', pending: '等待执行', challenged: '发现问题', revised: '已撤回',
+  ended_unconfirmed: '任务已结束，步骤结果未确认', historical_active: '历史记录：执行中（结果未确认）', historical_pending: '历史记录：等待执行',
 }
 export const roleLabels: Record<string, string> = {
   controller: '任务协调', explore: '问题探索', explore_polish: '探索整理', planner: '方案规划', reasoner: '推理',

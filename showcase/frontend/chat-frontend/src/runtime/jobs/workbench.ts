@@ -41,11 +41,16 @@ export function projectWorkbench(events: DecodedSseEvent[], result: unknown, rep
       for (const change of message.data.changes ?? []) if (change.op === 'del') revised.add(change.step_label)
     }
   }
+  const planEnded = ['failed', 'canceled', 'cancelled', 'succeeded', 'completed', 'partial', 'incomplete', 'budget_exhausted'].includes(status)
+  const planUncertain = ['unknown', 'needs_review', 'unknown_outcome'].includes(status)
+    || ['unknown', 'needs_review'].includes(String(object(detail.faithful).phase))
+  const activeStepStatus = replay ? 'historical_active' : planEnded ? 'ended_unconfirmed' : planUncertain ? 'unknown' : 'active'
+  const pendingStepStatus = replay || planEnded ? 'historical_pending' : 'pending'
   const steps: PlanStep[] = Array.isArray(progress.steps) ? progress.steps.map(value => {
     const step = object(value)
     return { label: String(step.label ?? '步骤'), goal: typeof step.goal_summary === 'string' ? step.goal_summary : '', status: step.verdict === 'CHALLENGE' ? 'challenged'
-      : step.verdict === 'ACCEPT' && step.valid === true ? 'pass' : step.current === true ? 'active'
-        : !step.reported && revised.has(String(step.label)) ? 'revised' : 'pending' }
+      : step.verdict === 'ACCEPT' && step.valid === true ? 'pass' : step.current === true ? activeStepStatus
+        : !step.reported && revised.has(String(step.label)) ? 'revised' : pendingStepStatus }
   }) : []
   const entries = unique.map(event => {
     const parsed = collaborationSchema.safeParse(event.data.workbench)
