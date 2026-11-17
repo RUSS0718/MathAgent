@@ -196,7 +196,7 @@ def create_app(
             elif rule == "/api/load_session":
                 from .public_workspace import fields
                 body = {"success": True, "messages": [fields(m, ("sender", "text", "analysis_job_id", "created_at")) for m in body["messages"]]}
-            elif rule.startswith("/api/agent/") and not rule.endswith(("/answer", "/events")):
+            elif rule.startswith("/api/agent/") and not rule.endswith(("/answer", "/events", "/role-results/<role>")):
                 if isinstance(body, dict):
                     body = ({"success": True, "jobs": [job_view(j) for j in body["jobs"]]}
                             if "jobs" in body else job_view(body))
@@ -923,6 +923,15 @@ def create_app(
             verification["findings"] = ["needs_review", "tool_evidence_missing"]
         report = app.extensions["showcase_evidence_exporter"].report(snapshot, tool_results=tool_results, verification=verification)
         return {"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": snapshot["execution_mode"], "solver": {key: (job.get("result") or {}).get(key) for key in ("solver_mode", "missing_capabilities", "evidence_kind", "solver")}, "report": report}
+
+    @app.get("/api/agent/jobs/<job_id>/role-results/<role>")
+    def get_role_results(job_id, role):
+        session = _require_auth(g.auth_session)
+        from .role_stage_api import read_role_results
+        response = jsonify(read_role_results(workspace_service, session.user_id, job_id,
+                                             role, request.args.get('source')))
+        response.headers['Cache-Control'] = 'no-store'
+        return response
 
     @app.get("/api/agent/jobs/<job_id>/answer")
     def get_job_answer(job_id):

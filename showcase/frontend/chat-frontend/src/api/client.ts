@@ -1,5 +1,6 @@
 import { campaignSchema, campaignsSchema } from './campaigns.schemas'
 import { z } from 'zod'
+import { roleStageSchema } from './role-stage.schemas'
 import { finalAnswerSchema } from './answer.schemas'
 import { ApiError } from './errors'
 import { checkAuthResponseSchema, logoutResponseSchema } from './auth.schemas'
@@ -45,6 +46,7 @@ async function requestJson<T>(input: string, init: RequestInit, schema: z.ZodTyp
 const json = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
 export const api = {
+  roleResults: (job: string, role: string, source?: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(job)}/role-results/${encodeURIComponent(role)}${source === undefined ? '' : '?source=' + encodeURIComponent(source)}`, {}, roleStageSchema),
   campaigns: (offset = 0) => requestJson('/api/experiments/campaigns?offset=' + offset + '&limit=20', {}, campaignsSchema),
   campaign: (id: string) => requestJson('/api/experiments/campaigns/' + encodeURIComponent(id), {}, campaignSchema),
   finalAnswer: (id: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(id)}/answer`, {}, finalAnswerSchema),
