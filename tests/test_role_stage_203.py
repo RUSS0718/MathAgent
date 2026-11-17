@@ -1,6 +1,7 @@
 import copy
 import unittest
-from showcase.role_stage_results import save_role_sources, role_results
+
+from showcase.role_stage_results import role_results, save_role_sources
 
 
 class HistoricalResultsTest(unittest.TestCase):
@@ -84,6 +85,7 @@ class HistoricalApiTest(unittest.TestCase):
 
     def test_failed_job_keeps_saved_results_and_get_is_read_only(self):
         from unittest.mock import patch
+
         from showcase.solver_harness import SolverHarness
         store = self.app.extensions['showcase_workspace_service'].store
         store._connection.execute("UPDATE workspace_jobs SET status='failed' WHERE job_id=?", (self.job_id,))
@@ -156,3 +158,48 @@ class AuthorityBindingTest(unittest.TestCase):
                              plan_version=1, attempt_index=0)
                 ref = self.publish(state, dict(kind='fixture'), role)
                 self.assertEqual(ref, role_results(state, role, ref)['results'][0]['source_ref'])
+
+    def test_old_whole_review_cannot_accept_new_candidate_and_qualification_revokes(self):
+        from showcase.final_evidence import artifact_identity
+        source = dict(run_id='r', call_id='review-A', candidate_version=1)
+        review = dict(source=source, artifact=artifact_identity('A'), verdict='ACCEPT')
+        state = dict(run_id='r', run_salt='salt', problem_hash='p', specification_version=1,
+                     plan_version=1, attempt_index=0, whole_solution_reviews=[review],
+                     final_solution_attempts=[dict(attempt=1, candidate='A')],
+                     calls={'review-A': dict(run_id='r', status='completed')})
+        ref = self.publish(state, dict(kind='whole_review', validity_origin='whole_solution_reviews',
+                                     review_source=source, candidate_artifact=artifact_identity('A')),
+                           'whole_solution_verifier')
+        self.assertEqual('current', role_results(state, 'whole_solution_verifier', ref)['results'][0]['validity'])
+        state['final_solution_attempts'].append(dict(attempt=2, candidate='B'))
+        self.assertEqual('replaced', role_results(state, 'whole_solution_verifier', ref)['results'][0]['validity'])
+        state['whole_solution_reviews'][0]['runtime_qualification'] = dict(verdict='REJECT')
+        self.assertEqual('invalidated', role_results(state, 'whole_solution_verifier', ref)['results'][0]['validity'])
+
+    def test_meta_consumption_keeps_original_body_and_formal_target_replacement_is_historical(self):
+        decision = dict(decided_at_revision=1, decision='CONTINUE', consumed=None)
+        state = dict(run_id='r', run_salt='salt', problem_hash='p', specification_version=1,
+                     plan_version=1, attempt_index=0, meta_decision=decision,
+                     formal_verification={'current_attempt_id': 'formal-A',
+                                          'current': dict(attempt_id='formal-A', status='completed')})
+        ref = self.publish(state, dict(kind='meta', validity_origin='meta_decision', decision_revision=1), 'meta')
+        state['meta_decision']['consumed'] = dict(event_type='applied')
+        self.assertEqual('historical', role_results(state, 'meta', ref)['results'][0]['validity'])
+        formal = self.publish(state, dict(kind='formal_target', validity_origin='formal_verification',
+                                        formal_attempt_id='formal-A'), 'whole_solution_verifier')
+        state['formal_verification'] = {'current_attempt_id': 'formal-B', 'current': dict(attempt_id='formal-B')}
+        self.assertNotEqual('current', role_results(state, 'whole_solution_verifier', formal)['results'][0]['validity'])
+
+    def test_same_plan_identity_does_not_keep_replaced_body_current(self):
+        from showcase.role_stage_results import save_plan_source
+        state = dict(run_id='r', run_salt='salt', problem_hash='p', specification_version=1,
+                     plan_version=1, attempt_index=0)
+        refs = []
+        for event_id, title in [('A', '旧目标'), ('B', '新目标')]:
+            updates, event = save_plan_source(state, {'plan': {'version': 1, 'steps': [
+                dict(step_id='s', title=title, objective=title, depends_on=[])]}},
+                dict(type='initial_plan_generated', event_id=event_id))
+            state.update(updates)
+            refs.append(event['role_stage_source'])
+        self.assertEqual([refs[1]], [r['source_ref'] for r in role_results(state, 'planner')['results']])
+        self.assertEqual('replaced', role_results(state, 'planner', refs[0])['results'][0]['validity'])

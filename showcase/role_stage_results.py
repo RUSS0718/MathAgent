@@ -1,9 +1,9 @@
 """Saved plan publications, bound at commit rather than inferred at read time."""
-from copy import deepcopy
 import hashlib
 import hmac
 import json
 import re
+from copy import deepcopy
 
 from .faithful_public_progress import public_text
 
@@ -137,6 +137,11 @@ def save_role_sources(state, updates, event, collectors=()):
             origin = _origin(current, record['binding'])
             if origin is not None:
                 record['authority_version'] = _origin_version(origin)
+            elif record['binding'].get('validity_origin'):
+                continue
+            call = _source_call(current, record['binding'])
+            if call is not None:
+                record['call_version'] = _call_version(call)
             if isinstance(publication.get('summary'), str):
                 record['summary'] = public_text(publication['summary'])
             else:
@@ -173,14 +178,24 @@ def _validity(state, record, records):
     # Different attempts never borrow a current source body or its checks.
     current = all(record.get(key) == state.get(key) for key in PLAN_IDENTITY)
     if record.get('format') != 'role-publication-v1':
+        plan = state.get('plan') or {}
+        body = [{key: step.get(key, [] if key == 'depends_on' else '')
+                 for key in ('step_id', 'title', 'objective', 'depends_on')}
+                for step in plan.get('steps', []) if isinstance(step, dict)]
+        current = current and fingerprint(body) == record.get('body_version')
         return 'current' if current else 'replaced'
     if record.get('specification_version') != state.get('specification_version'):
         return 'invalidated'
     kind = binding.get('kind')
-    call_id = binding.get('call_id') or binding.get('review_call_id') or binding.get('generator_call_id')
-    if call_id:
-        call = state.get('calls', {}).get(call_id)
+    if 'call_version' in record:
+        call = _source_call(state, binding)
         if not isinstance(call, dict) or call.get('run_id') != state.get('run_id') or call.get('status') != 'completed':
+            return 'invalidated'
+        if record['call_version'] != _call_version(call):
+            return 'invalidated'
+    for receipt_id in binding.get('receipt_ids', []):
+        receipts = [r for r in state.get('tool_receipts', []) if r.get('receipt_id') == receipt_id]
+        if len(receipts) != 1 or receipts[0].get('executed') is not True or receipts[0].get('status') != 'success':
             return 'invalidated'
     origin = _origin(state, binding)
     if 'authority_version' in record:
@@ -232,6 +247,17 @@ def _subject(record):
             binding.get('verifier_call_id'))
 
 
+def _source_call(state, binding):
+    call_id = (binding.get('call_id') or binding.get('review_call_id') or binding.get('generator_call_id')
+               or binding.get('review_source', {}).get('call_id'))
+    return state.get('calls', {}).get(call_id)
+
+
+def _call_version(call):
+    return fingerprint({key: call.get(key) for key in ('run_id', 'role', 'plan_version', 'attempt_index',
+                        'request_revision', 'request', 'response')})
+
+
 def _origin(state, binding):
     """Resolve the producer's exact authority record without reading another body."""
     origin = binding.get('validity_origin')
@@ -239,6 +265,11 @@ def _origin(state, binding):
     if origin == 'steps':
         step = state.get('steps', {}).get(binding.get('step_id'))
         return step.get('report') if isinstance(step, dict) else None
+    if origin == 'formal_verification':
+        formal = state.get('formal_verification', {})
+        current = formal.get('current')
+        return current if (isinstance(current, dict) and current.get('attempt_id') == binding.get('formal_attempt_id')
+                           and formal.get('current_attempt_id') == binding.get('formal_attempt_id')) else None
     if kind == 'step_review':
         step = state.get('steps', {}).get(binding.get('step_id'), {})
         return step.get('checkpoint_verification') if binding.get('checkpoint_id') else step.get('verification')
@@ -284,7 +315,7 @@ def _live_result(state, entry, seen):
             return False
         snapshot = snapshots[0]
         linked = [a for a in snapshot.get('attempts', {}).values() if a.get('result_id') == entry.get('result_id')]
-        if linked and not any(a.get('status') == 'accepted'
+        if linked and not any(a.get('status') == 'accepted' and a.get('direction', 'support') == 'support'
                               and snapshot.get('propositions', {}).get(a.get('conclusion'), {}).get('status') == 'supported'
                               and not snapshot['propositions'][a['conclusion']].get('conflict') for a in linked):
             return False
@@ -329,7 +360,7 @@ def role_results(state, role, source=None):
         metadata = next(h for h in history if h['source_ref'] == r['source_ref'])
         if r.get('format') != 'role-publication-v1':
             result = plan_results(state, role, r['source_ref'])['results'][0]
-            results.append({**result, 'sections': []})
+            results.append({**result, **metadata, 'sections': []})
         else:
             result = {**metadata, 'check': dict(r['check']), 'items': [],
                       'sections': [dict(section) for section in r['sections']]}

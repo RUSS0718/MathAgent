@@ -80,7 +80,7 @@ export function projectWorkbench(events: DecodedSseEvent[], result: unknown, rep
   const keyEntries = entries.filter(entry => {
     if (!progressText(entry.event).key) return false
     const data = entry.event.data
-    const key = JSON.stringify([typeOf(entry.event), data.plan_version ?? entry.message?.plan_version,
+    const key = JSON.stringify([typeOf(entry.event), data.role_stage_source, data.plan_version ?? entry.message?.plan_version,
       data.attempt_index ?? entry.message?.attempt_index, entry.step, data.verdict, data.valid,
       progressText(entry.event).summary, data.status, data.call_lifecycle ?? data.call_status, data.solver_call_id, data.decision, entry.message?.thread_id, entry.message?.kind, entry.message?.summary])
     if (semantic.has(key)) return false
