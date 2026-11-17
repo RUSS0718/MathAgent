@@ -38,6 +38,7 @@ def decision_fields(event, state, invocations=()):
                       "initial_explore_output_limit", "initial_explore_incomplete"}
                       and event["type"] == "adaptive_planning_required")
     fields = {key: event[key] for key in (
+        "role_stage_source",
         "assessment", "round", "next_phase", "goal_gate", "logic_gate",
         "verdict", "valid", "trace_back_to", "from_step_index", "attempt_index",
         "archived_plan_version", "archived_step_count", "invalidated_result_count",

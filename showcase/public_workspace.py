@@ -97,6 +97,8 @@ def event_data(event):
         safe['solver_call_id'] = opaque(raw['solver_call_id'])
     if isinstance(raw.get('solver'), Mapping):
         safe['solver'] = solver_view(raw['solver'])
+    if isinstance(raw.get('role_stage_source'), str):
+        safe['role_stage_source'] = raw['role_stage_source']
     workbench = obj(raw.get('workbench'))
     if workbench:
         safe['workbench'] = fields(workbench, ('version','kind','from_role','to_role','summary','step_label',

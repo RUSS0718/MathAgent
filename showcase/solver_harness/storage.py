@@ -343,6 +343,9 @@ class SolverStateStore:
                     state_updates = {**state_updates, "route_budget": candidate["route_budget"]}
                 next_revision = current_revision + 1
                 now = datetime.now(UTC).isoformat()
+                from ..role_stage_results import save_plan_source
+
+                state_updates, event = save_plan_source(state, state_updates, event)
                 state.update(state_updates)
                 state["state_revision"] = next_revision
                 state["updated_at"] = now
