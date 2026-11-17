@@ -13,6 +13,22 @@ from tests.test_star_product_tools import NEED_PLAN
 
 
 class DependencySource189DiagnosticTest(StarJobFixture, unittest.TestCase):
+    def test_new_challenge_with_legal_partial_lemma_stops_without_more_search(self):
+        job_id, terminal, result = self.run_case({
+            "goal_gate": "PARTIAL", "logic_gate": "UNCERTAIN", "verdict": "CHALLENGE",
+            "objection": "Only a local lemma is proved",
+            "classified_outcomes": [{"category": "Lemma", "statement": "parent result",
+                "scope": "parent", "claim_indexes": [0]}]})
+        self.assertEqual("failed", terminal["status"])
+        self.assertEqual("dependency_reclassification_failed", result["result_reason"])
+        self.assertEqual(["explore", "planner", "reasoner", "step_verifier", "step_verifier"],
+                         [request["role"] for request in self.outbound])
+        for _ in range(2):
+            self.report(job_id)
+            response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={}, headers=self.headers())
+            self.assertEqual(409, response.status_code)
+        self.assertEqual(5, len(self.outbound))
+
     def run_case(self, replacement, *, budget=9, enabled=True, dependency=True, repair=False,
                  parent_review=None, include_replacement=True):
         report = {"argument": "controlled proof", "claims": [

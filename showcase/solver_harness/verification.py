@@ -460,7 +460,7 @@ def verify_step(
     if reclassification.required(state, step_id):
         enough = reclassification.consumable(state, step_id, outcomes, verification)
         used = reclassification.scope_id(state, step_id) in state.get("dependency_reclassifications", {})
-        if not enough and used:
+        if used and (not enough or not verification["valid"] or verification["verdict"] != "ACCEPT"):
             return reclassification.fail(harness, reserved, step_id)
         if (not enough and rejections and reclassification.completed_accept(
                 state, call_id, step_id, report, verification)):
