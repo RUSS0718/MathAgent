@@ -9,7 +9,7 @@ function point(role: string) { return roles.find(item => item[0] === role) }
 </script>
 
 <template>
-  <div class="constellation" :class="{ mini }" :aria-label="mini ? '迷你星图角色成果' : '智能体协作星图'">
+  <div class="constellation" tabindex="-1" :class="{ mini }" :aria-label="mini ? '迷你星图角色成果' : '智能体协作星图'">
     <svg viewBox="0 0 1000 700" aria-hidden="true">
       <line v-for="role in roles.slice(1)" :key="role[0]" x1="500" y1="306" :x2="role[2]" :y2="role[3]" />
       <template v-for="message in messages.filter(m => point(m.from_role) && point(m.to_role) && m.from_role !== m.to_role)" :key="message.message_id">
@@ -37,6 +37,7 @@ button.completed { border-color: var(--success); color: var(--success); }
 button.failed, button.unknown { border-color: var(--danger); color: var(--danger); }
 button.selected { background: var(--accent-wash); outline: 2px solid var(--accent); }
 button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.constellation:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 small { font-size: 10px; color: var(--muted); }
 .mini button { font-size: 10px; min-height: 30px; padding: 4px; }
 @keyframes fade-message { 99% { opacity: 1; } 100% { opacity: 0; } }
