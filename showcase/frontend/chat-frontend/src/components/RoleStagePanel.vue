@@ -25,6 +25,7 @@ const runtimeLabel = computed(() => props.runtimeState === 'idle' &&
   (loading.value || failed.value || content.value?.content_status !== 'empty' || content.value?.history.length)
   ? '参与状态未确认' : runtimeLabels[props.runtimeState ?? 'unknown'] ?? '状态待确认')
 const validityLabels: Record<string, string> = { current: '当前版本有效', historical: '历史版本', replaced: '已替换', invalidated: '已失效' }
+const checkStatusLabels: Record<string, string> = { accepted: '通过', rejected: '未通过', unknown: '结论未知', unreviewed: '未检查' }
 const stageLabels: Record<string, string> = {
   planning: '阶段安排', exploration: '探索成果', step_submission: '步骤提交', research: '资料研究',
   counterexample_search: '反例查找', step_review: '步骤检查', classified_result: '分类成果',
@@ -103,6 +104,7 @@ defineExpose({ open })
       <h3>计划第 {{ result.plan_version }} 版 · {{ stageLabels[result.stage] ?? '阶段成果' }} · 第 {{ result.attempt_index + 1 }} 次尝试</h3>
       <p>{{ failed ? '最新状态未确认' : validityLabels[result.validity] ?? '有效性待确认' }}</p>
       <p>检查范围：{{ result.check.label || (result.check.scope === 'plan_structure' ? '计划结构校验通过，不代表目标已完成。' : '检查范围未记录，不代表整题通过。') }}</p>
+      <p v-if="result.check.status">检查结论：{{ checkStatusLabels[result.check.status] ?? '结论未知' }}</p>
       <div v-if="expanded.has(result.source_ref)" data-stage-content>
         <template v-if="result.sections.length">
           <section v-for="(section, index) in result.sections" :key="index"><h4>{{ section.label }}</h4><div v-html="renderSafeMarkdown(section.text)" /></section>
@@ -128,6 +130,7 @@ defineExpose({ open })
 dialog { margin: 0 0 0 auto; width: min(560px, 80vw); height: 100dvh; max-height: 100dvh; padding: 24px; border: 1px solid var(--border); background: var(--surface); color: var(--text); overflow-y: auto; }
 dialog:modal, dialog::backdrop { overscroll-behavior: contain; }
 dialog::backdrop { overflow: hidden; background: #0005; }
+dialog { overflow-anchor: none; }
 form { float: right; }
 p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
 button { padding: 8px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); cursor: pointer; }

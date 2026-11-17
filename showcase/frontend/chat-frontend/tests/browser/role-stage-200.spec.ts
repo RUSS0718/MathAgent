@@ -20,13 +20,17 @@ test(`desktop ${readingRole} saved plan event only prompts until user explicitly
       return original(...args)
     }
   })
-  let reads = 0
+  const reads: string[] = []
+  let replaced = false
   const nextSource = 'c'.repeat(64)
   await page.route('**/role-results/*', route => {
-    reads++
-    const role = new URL(route.request().url()).pathname.split('/').at(-1)
+    const url = new URL(route.request().url())
+    reads.push(url.href)
+    const role = url.pathname.split('/').at(-1)
+    const requestedSource = url.searchParams.get('source')
+    const old = !replaced || requestedSource === source
     return route.fulfill({ json: { version: 'role-stage-v1', job_id: 'run-demo', role,
-      status: 'succeeded', content_status: 'published', results: [reads === 1 ? result : {
+      status: 'succeeded', content_status: 'published', results: [old ? { ...result, validity: replaced ? 'replaced' : 'current' } : {
         ...result, source_ref: nextSource, plan_version: 2,
         items: [{ label: '步骤 1', title: '新计划', objective: '新目标', depends_on: [] }],
       }] } })
@@ -45,18 +49,25 @@ test(`desktop ${readingRole} saved plan event only prompts until user explicitly
   const panel = page.getByRole('dialog', { name: readingRole === 'planner' ? '方案规划阶段成果' : '任务协调阶段成果' })
   await expect(panel).toContainText('计划第 1 版')
   const body = await panel.locator('[data-plan-body]').innerText()
+  const content = await panel.locator('[data-stage-content]').innerText()
   await push(2, 'status_changed', 'd'.repeat(64))
   await push(3, 'plan_replaced') // No saved source means no published update.
   await expect(page.locator('input[type="range"]')).toHaveAttribute('max', '3')
   await expect(panel.getByRole('button', { name: '更新查看', exact: true })).toHaveCount(0)
+  expect(await panel.locator('[data-plan-body]').innerText()).toBe(body)
+  replaced = true
   await push(4, 'plan_replaced', nextSource)
   await expect(panel.getByRole('button', { name: '更新查看', exact: true })).toBeVisible()
-  expect(await panel.locator('[data-plan-body]').innerText()).toBe(body)
-  expect(reads).toBe(1)
+  await expect(panel).toContainText('已替换')
+  expect(await panel.locator('[data-stage-content]').innerText()).toBe(content)
+  await expect(panel).not.toContainText('新目标')
+  expect(reads.slice(1).every(url => new URL(url).searchParams.get('source') === source)).toBe(true)
+  const beforeUpdate = reads.length
   await panel.getByRole('button', { name: '更新查看', exact: true }).click()
   await expect(panel).toContainText('计划第 2 版')
   await expect(panel).toContainText('新目标')
-  expect(reads).toBe(2)
+  expect(reads.length).toBeGreaterThan(beforeUpdate)
+  expect(new URL(reads[beforeUpdate]!).searchParams.has('source')).toBe(false)
   await expect(panel.getByRole('button', { name: '更新查看', exact: true })).toHaveCount(0)
 })
 }
@@ -80,6 +91,8 @@ test('desktop dual entry reads the same saved plan, preserves filters and return
   await page.screenshot({ path: '../../../artifacts/role-stage-200/panel.png' })
   await expect(panel).toContainText('结构校验通过，不代表目标已完成')
   await expect(panel.getByRole('button', { name: '关闭' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(panel.getByRole('button', { name: '查看当前成果', exact: true })).toBeFocused()
   await page.keyboard.press('Tab')
   await expect(panel.getByRole('button', { name: '只看该角色' })).toBeFocused()
   await page.keyboard.press('Shift+Tab')

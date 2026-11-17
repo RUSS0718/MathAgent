@@ -68,7 +68,7 @@ def _reasoner(state, event):
     if not isinstance(step, dict):
         return []
     report = step.get('report', {})
-    if not isinstance(report, dict) or not _claims(report):
+    if not isinstance(report, dict):
         return []
     call = _call(state, lambda c: c['request'].get('step', {}).get('step_id') == step_id
                  and isinstance(c['response'].get('checkpoint', c['response']), dict)
@@ -91,11 +91,14 @@ def _reasoner(state, event):
     sections.extend(gaps)
     if report.get('blocked') is True and not gaps:
         sections.append({'label': '阻塞状态', 'text': '该步骤已记录阻塞，具体原因未记录'})
-    return [_draft(state, event, call, 'reasoner', 'step_submission', sections,
+    draft = _draft(state, event, call, 'reasoner', 'step_submission', sections,
                    {'scope': 'step_submission', 'status': 'unreviewed',
                     'label': '该步骤提交的主张，待检查；不构成整题证明'},
                    step_id=step_id, checkpoint_id=checkpoint.get('checkpoint_id'),
-                   validity_origin='steps')]
+                   validity_origin='steps')
+    if not _claims(report):
+        draft.update(sections=[], content_status='not_published')
+    return [draft]
 
 
 def _research(state, event):
@@ -109,8 +112,14 @@ def _research(state, event):
                    and t.get('status') == 'complete' and t.get('output_ref') == task_id]
         if not isinstance(task_id, str) or not task_id or len(matched) != 1:
             continue
-        call = _call(state, lambda c: c.get('session_key')
-                     == f"research:{state['run_id']}:{task_id}"
+        logical = f"research:{state['run_id']}:{task_id}"
+        sessions = {logical}
+        if state.get('run_salt') and state.get('config_hash'):
+            from .solver_harness.sessions import session_identity
+
+            sessions.add(session_identity(state, {'role': 'researcher',
+                         'call_id': logical, 'session_key': logical})['session_key'])
+        call = _call(state, lambda c: c.get('session_key') in sessions
                      and c['response'].get('findings') == finding['output'].get('findings'),
                      {'researcher'})
         sections = _sections(finding['output'], (('findings', '研究发现（未验证）'),))

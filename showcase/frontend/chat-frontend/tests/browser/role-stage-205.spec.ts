@@ -71,6 +71,23 @@ const saved = (index = 0) => ({ source_ref: (index + 1).toString(16).repeat(64),
 const dto = (role = 'reasoner', results = [saved()]) => ({ version: 'role-stage-v1', job_id: 'run-demo', role,
   status: 'failed', content_status: 'published', results, history: [] })
 
+test('step verdict remains readable and bound to its saved source', async ({ page }) => {
+  const results = ['accepted', 'rejected', 'unknown'].map((status, index) => ({ ...saved(index),
+    stage: 'step_review', check: { ...saved(index).check, scope: 'step_model_review', status,
+      label: '步骤模型检查（仅限本步目标）' }, sections: [{ label: '检查对象', text: `目标${index + 1}` }] }))
+  await page.route('**/role-results/*', route => route.fulfill({ json: dto('step_verifier', results) }))
+  await workspace(page)
+  await graph(page).getByRole('button', { name: /^查看步骤检查 / }).click()
+  const bodies = panel(page).locator('[data-plan-body]')
+  for (const [index, label] of ['通过', '未通过', '结论未知'].entries()) {
+    await expect(bodies.nth(index)).toContainText(`检查结论：${label}`)
+    await expect(bodies.nth(index)).toContainText(`目标${index + 1}`)
+    await expect(bodies.nth(index)).toContainText('仅限本步目标')
+    await expect(bodies.nth(index)).toContainText('当前版本有效')
+  }
+  await page.screenshot({ path: '../../../artifacts/role-stage-final-fix/check-status.png' })
+})
+
 test('loading, unpublished, failure and retry stay distinct and never write', async ({ page }) => {
   let answer!: () => void
   let mode = 'delayed'
@@ -234,4 +251,3 @@ for (const status of ['failed', 'canceled', 'unknown']) {
     await expect(node).toBeFocused()
   })
 }
-

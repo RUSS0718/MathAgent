@@ -86,7 +86,12 @@ export function projectWorkbench(events: DecodedSseEvent[], result: unknown, rep
     if (semantic.has(key)) return false
     semantic.add(key)
     return true
-  }).map(entry => ({ ...progressText(entry.event), ...entry }))
+  }).map(entry => {
+    const progress = progressText(entry.event)
+    const savedSummary = typeof entry.event.data.role_stage_source === 'string'
+      && typeof entry.event.data.role_stage_summary === 'string'
+    return { ...entry, ...progress, summary: savedSummary ? entry.summary : progress.summary }
+  })
   const taskPhase = object(detail.faithful).phase
   const effectiveStatus = ['unknown', 'needs_review', 'waiting_input', 'paused', 'pause_requested', 'budget_exhausted', 'incomplete'].includes(String(taskPhase)) ? String(taskPhase) : status
   const activity = lifecycle(unique, replay, effectiveStatus)
