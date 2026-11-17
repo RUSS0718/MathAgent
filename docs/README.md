@@ -5,7 +5,12 @@
 见[已确认设计](frontend/role-stage-summaries-contract.md)、
 [实施退出合同](engineering/role-stage-199-implementation.md)与
 [逐项验收记录](engineering/role-stage-199-acceptance.md)。不将展示接线视作数学能力证据；
-#206将单独核对下述#189原依赖题失败的修复及原场景复验，并预登记有限真实实验。
+#206另行核对下述#189原依赖题失败，不由展示验收推断数学交付通过。
+
+2026-11-18 #206 原D的R01–R03真实复验分别失败，三版各自0/1，原失败均保留。
+R03进入S2后仍被依赖来源守卫拒绝；局部代数正确不替代完整交付，A/B/C未启动。
+来源责任与只读刷新超时正在独立归因，#206保持open、PR208保持draft；见
+[预登记、机制状态及真实结果](evals/mechanism-206-20261118.md)。
 
 2026-11-17 #189补充真实验收未全通过：最终UI真实启动/跨重启恢复通过；新自然S2正确，D因unsupported_graph_step_dependency失败、U未运行。#189重新打开，PR198退回draft，详见[补验记录](evals/dependency-routing-189-20261117.md)。
 
