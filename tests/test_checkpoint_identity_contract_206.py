@@ -16,6 +16,32 @@ from tests.test_solver_harness_reasoner_checkpoint import ACCEPT, CHALLENGE, PLA
 
 
 class CheckpointIdentityContract206Test(unittest.TestCase):
+    def test_challenge_marker_scopes_guidance_for_both_checkpoint_reasoners(self):
+        for role in ("reasoner", "reason_noncoding"):
+            for challenge in (False, True):
+                with self.subTest(role=role, challenge=challenge):
+                    request = {"role": role, "problem": "Synthetic objection",
+                               "checkpoint_protocol": True, "objection": CHALLENGE["objection"],
+                               "parent_checkpoint_id": "cp-1",
+                               "reasoner_checkpoint": checkpoint()["checkpoint"]}
+                    if challenge:
+                        request.update(round=1, challenge_history=[])
+                    original = deepcopy(request)
+                    client = CaptureClient(checkpoint("FINAL"))
+                    port = InternModelPort(adapter=InternModelAdapter(client=client))
+                    port.complete(request)
+                    self.assertEqual(original, request)
+                    self.assertEqual(1, len(client.requests))
+                    messages, _ = client.requests[0]
+                    guidance = messages[0]["content"]
+                    self.assertEqual(challenge, "Challenge replies must use a fresh checkpoint_id" in guidance)
+                    self.assertEqual(challenge, "substantively address the objection" in guidance)
+                    self.assertEqual(not challenge, "Only the same-object tool completion exception" in guidance)
+                    self.assertIn("still requires a new independent Verifier review", guidance)
+                    if not challenge:
+                        self.assertIn("ordinary checkpoint continuations", guidance)
+                        self.assertIn("supported by the runtime", guidance)
+
     def test_identity_guidance_reaches_only_checkpoint_reasoners(self):
         cases = []
         for role in ("reasoner", "reason_noncoding"):
@@ -76,7 +102,7 @@ class CheckpointIdentityContract206Test(unittest.TestCase):
 
 
 class CheckpointIdentityHarness206Test(unittest.TestCase):
-    def run_case(self, *, fresh=False, mutation=None, verdict=ACCEPT):
+    def run_case(self, *, fresh=False, mutation=None, verdict=ACCEPT, first_verdict=ACCEPT):
         # All model/tool responses are synthetic. No registry, provider or subprocess tool runs.
         initial = checkpoint(marker="S1", tool_request={
             "tool": "polynomial_check", "arguments": {"coefficients": ["2", "-6"]},
@@ -84,7 +110,7 @@ class CheckpointIdentityHarness206Test(unittest.TestCase):
         })
         initial["checkpoint"]["evidence"] = []
         initial["checkpoint"]["claims"][0]["statement"] = "2 * 3 = 6"
-        verifier = ScriptedVerifierPort([ACCEPT, verdict])
+        verifier = ScriptedVerifierPort([first_verdict, verdict])
         client = CaptureClient(initial)
 
         def completed(messages, **kwargs):
@@ -106,6 +132,9 @@ class CheckpointIdentityHarness206Test(unittest.TestCase):
                     cp["evidence"] = cp["claims"][0]["tool_evidence_refs"]
                 elif mutation == "dependencies":
                     cp["dependencies"] = ["S1"]
+                elif mutation == "objection":
+                    cp["argument"] = "Dividing 2*x=6 by nonzero 2 forces x=3; the implication is necessary."
+                    cp["claims"][0]["statement"] = "2*x=6 implies x=3 by division by 2"
                 elif mutation == "r05":
                     cp["claims"].append({"statement": "The real solution is unique",
                                          "label": "verified"})
@@ -123,6 +152,37 @@ class CheckpointIdentityHarness206Test(unittest.TestCase):
         ) as harness:
             result = harness.solve("Synthetic substitution", {"plan": PLAN})
         return result["state"], client, verifier
+
+    def test_challenge_same_id_completion_is_rejected_and_message_requires_fresh_id(self):
+        state, client, verifier = self.run_case(first_verdict=CHALLENGE)
+        self.assertEqual(2, len(client.requests))
+        self.assertEqual(1, len(verifier.requests))
+        self.assertEqual(3, state["counters"]["model_calls"])
+        self.assertEqual(1, state["counters"]["tool_calls"])
+        self.assertNotEqual("ACCEPTED", state["steps"]["s1"]["status"])
+        self.assertEqual("checkpoint_no_progress", state["meta_interventions"][-1]["upgrade_reason"])
+        messages, _ = client.requests[1]
+        request = json.loads(messages[-1]["content"])
+        self.assertEqual(1, request["round"])
+        self.assertEqual(CHALLENGE["objection"], request["objection"])
+        self.assertEqual("S1", request["parent_checkpoint_id"])
+        self.assertIn("Challenge replies must use a fresh checkpoint_id", messages[0]["content"])
+        self.assertIn("substantively address the objection", messages[0]["content"])
+        self.assertNotIn("Only the same-object tool completion exception", messages[0]["content"])
+
+    def test_fresh_challenge_response_receives_independent_review(self):
+        for verdict in (ACCEPT, CHALLENGE):
+            with self.subTest(verdict=verdict):
+                state, client, verifier = self.run_case(
+                    first_verdict=CHALLENGE, fresh=True, mutation="objection", verdict=verdict)
+                self.assertEqual(2, len(client.requests))
+                self.assertEqual(2, len(verifier.requests))
+                self.assertEqual(4, state["counters"]["model_calls"])
+                self.assertEqual(1, state["counters"]["tool_calls"])
+                self.assertEqual("S1-completed", verifier.requests[1]["checkpoint"]["checkpoint_id"])
+                self.assertNotEqual(verifier.requests[0]["call_id"], verifier.requests[1]["call_id"])
+                self.assertEqual(verdict == ACCEPT, state["phase"] == "FINAL_GENERATE")
+                self.assertIn("Challenge replies must use a fresh checkpoint_id", client.requests[1][0][0]["content"])
 
     def test_same_id_mutation_is_rejected_before_another_review(self):
         for mutation in ("claim", "evidence", "dependencies", "r05"):
