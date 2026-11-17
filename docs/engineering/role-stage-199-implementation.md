@@ -1,7 +1,8 @@
 # #199 角色阶段成果实施与退出合同
 
 2026-11-17，Asia/Shanghai。需求权威为 GitHub #199、#200–#205；设计见
-[角色阶段成果合同](../frontend/role-stage-summaries-contract.md)。状态：实施中，未验收。
+[角色阶段成果合同](../frontend/role-stage-summaries-contract.md)。状态：2026-11-18工程验收完成。
+最终源码、RS-01–22映射、双轴复查和证据限制见[验收记录](role-stage-199-acceptance.md)。
 
 起点 `94a3626ab8401ee562d819acc4089af804add0f4`，集成分支
 `feat/role-stage-summaries-199`。原工作区已有改动保留原处；独立集成工作树
