@@ -222,7 +222,9 @@ def run_challenges(
                 run,
                 checkpoint,
                 call_id=protocol_repair.completed_call_id(
-                    harness.get_run(run["run_id"])["state"]["calls"], request["call_id"]),
+                    harness.get_run(run["run_id"])["state"]["calls"], request["call_id"])
+                if harness._config.get("features", {}).get("stream_recovery") is True
+                else request["call_id"],
                 checkpoint_round=len(checkpoints) + 1,
                 plan_version=state["plan_version"],
                 attempt_index=attempt,
