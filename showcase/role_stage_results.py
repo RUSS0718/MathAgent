@@ -29,7 +29,7 @@ def save_plan_source(state, updates, event):
     version = fingerprint(body)
     ref = hmac.new(str(state.get('run_salt') or state['run_id']).encode(),
                    fingerprint([identity, event['event_id'], version]).encode(), hashlib.sha256).hexdigest()
-    record = {**identity, 'source_ref': ref, 'event_id': event['event_id'],
+    record = {**identity, 'role': 'planner', 'source_ref': ref, 'event_id': event['event_id'],
               'stage': 'planning', 'body_version': version, 'items': body,
               'check': {'scope': 'plan_structure', 'body_version': version}}
     return {**updates, 'role_stage_results': [*state.get('role_stage_results', []), record]}, {**event, 'role_stage_source': ref}
@@ -43,6 +43,7 @@ def plan_results(state, role, source=None):
     records = state.get('role_stage_results', [])
     if not isinstance(records, list) or any(not isinstance(r, dict) for r in records):
         return unavailable
+    records = [r for r in records if r.get('role') == 'planner']
     matches = [r for r in records if r.get('source_ref') == source] if source is not None else [
         r for r in records if all(r.get(k) == state.get(k) for k in
         ('run_id', 'problem_hash', 'specification_version', 'plan_version', 'attempt_index'))]
