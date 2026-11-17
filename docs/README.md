@@ -1,6 +1,6 @@
 # MathAgent 文档索引
 
-2026-11-17 #189实施中：#190已关闭，#191自然S2/D验收和#192工程退出证据齐备；U失败、自然AC2未触发保留。#193正在独立实施，整体双轴与最终门禁待完成。见[设计合同](engineering/dependency-routing-189-design.md)、[阶段验收映射](evals/dependency-routing-189-20261117.md)和[#192交接](engineering/initial-explore-192-handoff.md)。
+2026-11-17 #189/#193等待最终门禁：#190/#191/#192已关闭；S2/D成功、U失败与自然AC2未触发保留。终态历史恢复修复、独立Vue DOM及受影响双轴已通过，gate01失败已最小修复；真实post-fix重启受工具审批阻断，保留未验证范围。见[阶段验收](evals/dependency-routing-189-20261117.md)、[#193合同](engineering/routing-ui-193-contract.md)与[当前交接](engineering/unattended-ticket-handoff.md)。
 
 2026-11-17 #188 用户答疑工程退出完成：冻结8db1006门禁6/6通过，后端2241项、0失败/错误、42跳过，源码无漂移；原失败保留。受控表达与fake回退不代表教学质量或数学效果提升。
 见 [实施设计](engineering/user-solving-188-design.md)、

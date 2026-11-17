@@ -1,12 +1,24 @@
-# 无人值守交接：191/192已关闭，193实施中
+# 无人值守交接：189/193 等待最终门禁
 
 ## 当前状态与所有权（2026-11-17）
 
-root/branch/自然源码为 `D:/project/工程化MathAgent/Challenge-Cup-2026`、dependency-routing-189、`aac4cf6498cefb9b8761976f479b90e52303537f`。退出记录 `832b33f24a8c7f8032d3b6adf0f49a3d3b6b7c7b` 已推送，#191自然正向与#192受控工程验收完成，两票已关闭并重读确认，评论6933445141/6933445637。S2/D成功、U失败，自然AC2 not_triggered。第4条按根预算/transport与context保守floor区分澄清，不改变验收。完整决定与证据见[#189 映射](../evals/dependency-routing-189-20261117.md)，本票分别见[#191验收](../evals/natural-intake-191-20261117.md)、[#192交接](initial-explore-192-handoff.md)。
+主控root D:/project/工程化MathAgent/Challenge-Cup-2026，分支dependency-routing-189，当前HEAD ea81b6b7198a2f69a0c5995ce5c587cd1134adf1/tree17aec4353149bbb4fa8d923afa32e06fc5943101。原四用户dirt保留；本次仅更新193 eval、189 eval、193合同及本交接，不暂存/commit，docs/README.md状态段由主控处理，用户10行不纳入。两未跟踪合同及tests/test.md不读、不hash、不提交，根README.md不在本次范围。
 
-#193 已由 fresh Peirce 在独立 worktree 正式实施，实际依赖证据已具备；修复后再记录 UI 适用源码，复用持久结果，不为 UI 重发模型。#189 阶段双轴与最终 gate 尚未完成。主控负责后续提交/关票/阶段整合；本代理仅写指定六文档与外部报告，不提交/暂存。README既有修改归原 owner，不改用户未跟踪文件。
+#190/#191/#192已关闭，#189/#193仍open，PR198 draft、base user-solving-188，不合main。#183已closed并按用户既有工程口径交付，不重开或接收新增缺口。完整证据与各源码范围见[#189验收](../evals/dependency-routing-189-20261117.md)及[#193验收](../evals/routing-ui-193-20261117.md)，本节状态沿主控交接，不冒称重新访问GitHub。
 
-主控已核查 observer39852退出；原服务1128存活，8119/创建 `2026-11-16T23:34:46.6007738Z`，task 已无、模型 Job 均终态。UI验收将用原库只读一致backup到自有副本、worker=False与8120端口；原库不写，新入口尚未实际启动。193实施代理Peirce、ignored运行器准备Erdos、普通浏览器基线Beauvoir各有独立写范围，主控等待不催促。192 被拒清理的 ignored `.venv` 保留。继续当前同一模型，不覆盖或猜测型号。文档代理交付报告 `C:/Users/CQX/.codex/tmp/191-192-natural-exit-20261117.md`。
+3797e7f及后续f94a492历史默认终态修复均已集成，后者merger为a59450a；新完整Vue DOM独立4/4及独立双轴0已齐，原a0真实after与3797e7f受控failed不改判。四组gate修复来源4e272e3，已合并至ea81b6b、tree一致；原8方法8/8（restart含3subtests）、最新合并相关25/25，受影响两fresh复查0确认问题/0阻断。静态不代替门禁，精确来源/证据指针见上述eval，不在交接复制计数历史。
+
+gate01仍failed，原task已删除；当前无主控活跃长测或临时检查，无需转移或重复启动。最终gate02尚未开始/PENDING，由主控冻结实际源码后唯一运行并按工程门禁持有检查所有权，文档另记最终受验SHA及交付SHA。本代理只完成四文档，不跑产品检查、不催促/轮询。
+
+依[#193合同](routing-ui-193-contract.md)及[接续合同第3条](unattended-ticket-loop.md)，已正式撤销本地附加“最终修复后同自然S2/D/U真实服务重启再浏览器验收”门槛：用户充分批准后安全Start三次工具拒绝，原四AC不要求新增该轮重启且产品不改启动/恢复。替代组合为原a0真实after+audit、新完整Vue DOM/刷新、公共进程恢复及最终门禁；前三组已有适用范围内证据，gate02仍待实际通过，不以缩减门槛假退出。身份/权限/预算/unknown与公共恢复要求不减。
+
+8119/8120均停止；真实post-fix服务重启为NOT_RUN / blocked_by_tool_approval，作为#168限制保留，不转给已关闭#183。用户批准充分，不再求同一批准或换执行器/工具/代理绕过。8119精确清理记录为artifacts/issue189/live04/final-service-cleanup-20261117.json。用户8103/PID36036保留，不碰。
+
+原mathagent-193已安全清理且28来源证据保留；merged clean mathagent-193-terminal-plan与mathagent-193-history-terminal也已由主控核对4/72来源证据后，仅删各精确junction再git worktree remove。root共享node_modules仍在、浏览器已完成不再使用来源dist，证据保留root；记录artifacts/issue193-history-terminal/controller-cleanup.json。192与189-gate-fixes来源树误建ignored .venv的清理被自动审批拒绝，继续保留，不force或换方式绕过。本代理不代删工作树。
+
+剩余顺序：主控在当前修复与独立复查齐备后冻结唯一gate02，按真实结果补最终字段及处理实际失败；必要门禁未通过不退出。随后按授权提交/推送、核验189/193退出，再继续其他ready ticket。优先#156公共活跃owner有限工程验收，依据C:/Users/CQX/.codex/tmp/156-next-slice-audit-20261117.md，尚未领取、不做实验；#124 usage暂缓，#127等124，#128等127；#157旧deadline已过，不新开真实批；#146/#168不假关。
+
+继续当前选择的同一模型，不指定/覆盖型号；具体型号及跨session继承无法独立确认。下文历史原样保留，不构成当前启动授权。
 
 ## 历史：2026-11-17 授权、准备与逐轮进展
 
