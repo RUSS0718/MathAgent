@@ -1,6 +1,6 @@
 # #189 目标依赖分流阶段验收
 
-2026-11-17，Asia/Shanghai。状态：#190/#191/#192已关闭；S2/D成功、U failed、自然AC2 not_triggered。当前集成ea81b6b已含UI与四组门禁修复；新完整Vue DOM独立4/4、原失败8方法8/8及相关25/25通过，受影响双轴均0确认问题/0阻断。gate01仍failed，gate02未开始；#189/#193 open、PR198 draft，不声明全仓通过、能力或效率提升。Issue状态沿主控交接，未重新查询GitHub。
+2026-11-17，Asia/Shanghai。状态：#190/#191/#192已关闭；S2/D成功、U failed、自然AC2 not_triggered。最终受验源码ada7c20444bde0a6351947c736b63fe4595e92e1已含UI与四组门禁修复；新完整Vue DOM受控fixture独立4/4、原失败8方法8/8及相关25/25通过，受影响双轴均0确认问题/0阻断。gate01仍failed，最终gate02 passed 6/6、source_changed=false，本轮工程退出条件已通过。剩余主控最终提交、推送、PR ready及关票复核；发布前#189/#193仍open、PR198 draft，不预记远端状态，不声明数学能力或效率提升。
 
 ## 源码与边界
 
@@ -19,12 +19,12 @@
 | C3 | S2 Explore cap2048→独立整题审查→直接交付，无 Planner；自然 AC1 通过 | 2048 是工程假设 |
 | C4 | #192 受控公共 Job 覆盖首次已知未完成/截断转规划及 unknown 零自动派发 | U 自然 AC2 not_triggered，不改判为通过 |
 | C5 | 受控一次修正与后续规划覆盖；U 观察到审查后修正及转 PLAN | U 最终 failed，无完整数学答案 |
-| C6 | 190/192及reviewfix身份/预算边界受控覆盖；原gate01失败中的公共进程恢复已修复，原8方法8/8含restart的3subtests，相关25/25；UI副本身份审计见193验收 | 不撤销公共恢复合同；最终门禁PENDING，不称整库零写 |
-| C7 | live04逐角色测量/人审及原a0真实普通UI；新f94a492完整Vue DOM/刷新独立4/4，具体来源与资产见193验收 | 真实post-fix服务重启NOT_RUN，限制留#168；gate02未开始，不称效率提升 |
+| C6 | 190/192及reviewfix身份/预算边界受控覆盖；原gate01失败中的公共进程恢复已修复，原8方法8/8含restart的3subtests，相关25/25；UI副本身份审计见193验收 | 公共恢复与最终gate02通过；副本auth/init允许写，不称整库零写 |
+| C7 | live04逐角色测量/人审及原a0真实普通UI；新f94a492完整Vue DOM/刷新受控fixture独立4/4，具体来源与资产见193验收 | 真实post-fix服务重启NOT_RUN，限制留仍开放#168；gate02通过不证明自然重启或效率提升 |
 
 整体独立双轴固定范围 1307aab40b8788cc408ef65fc94dfc7f2b1dc1f8…a0a4cd2abe7524eab51cdd2d7a4b87986045d42c，规范轴与规格轴均0问题/0阻断；原件在 artifacts/issue189/final-review/{standards,spec}.md。审查不等于浏览器或最终门禁通过；终态修复另有受影响双轴，见 [#193 验收](routing-ui-193-20261117.md)。
 
-自然源码aac4cf6498cefb9b8761976f479b90e52303537f、原真实after源码a0a4cd2与新Vue DOM来源f94a492分别登记。当前候选集成ea81b6b7198a2f69a0c5995ce5c587cd1134adf1/tree17aec4353149bbb4fa8d923afa32e06fc5943101，四组修复来源4e272e3370eb0d5ae1d5fb7c54c3f0200635210e且tree一致；最终gate受验冻结身份仍待实际记录。
+自然源码aac4cf6498cefb9b8761976f479b90e52303537f、原真实after源码a0a4cd2与新Vue DOM来源f94a492分别登记。较早集成ea81b6b7198a2f69a0c5995ce5c587cd1134adf1/tree17aec4353149bbb4fa8d923afa32e06fc5943101已含四组修复，来源4e272e3370eb0d5ae1d5fb7c54c3f0200635210e且tree一致。最终gate02冻结源码为ada7c20444bde0a6351947c736b63fe4595e92e1/tree445fce256c5446f25915914924c7445552a994b2，受验期间source_changed=false。最终纯文档交付SHA在提交后由HEAD、PR及关票评论记录，与受验源码SHA分记。
 
 ### 原gate01失败及受影响修复
 
@@ -32,17 +32,36 @@ gate dependency-routing-189-01冻结a0a4cd2，终态failed，完成1/6、offline
 
 完整原因、红绿、精确命令及计数以[四组修复验收](dependency-routing-189-gate-fixes-20261117.md)和C:/Users/CQX/.codex/tmp/189-gate-fixes-handoff-20261117.md为准。当前集成已含4e272e3修复：原8方法8/8（restart含3subtests），最新合并相关25/25，0failure/error/skip；重复和重叠运行不累加为唯一覆盖。15份证据已复制并核对hash至root artifacts/gate-fixes-189/，包括green-eight.json与postmerge.json；公共进程恢复必须通过的要求保留。
 
-两位fresh reviewer对a59450a2c650f760f73e0f4017e2af7afb6cea43…4e272e3370eb0d5ae1d5fb7c54c3f0200635210e受影响差异各自复查，规范/规格均0确认问题、0阻断；报告已复制并核对hash至artifacts/gate-fixes-189/independent-review/{standards,spec}.md。静态复查不代替门禁。原task已删，无主控活跃长测；gate02尚未开始/NOT_STARTED，不声称全仓通过。
+两位fresh reviewer对a59450a2c650f760f73e0f4017e2af7afb6cea43…4e272e3370eb0d5ae1d5fb7c54c3f0200635210e受影响差异各自复查，规范/规格均0确认问题、0阻断；报告已复制并核对hash至artifacts/gate-fixes-189/independent-review/{standards,spec}.md。静态复查与最终门禁分别记录：原gate01失败保持，gate02已在冻结源码完成6/6；结果见下节，不将聚焦回归与全仓检查重复累加。
 
-### 生效的工程退出口径与待填字段
+### 最终门禁与工程退出
 
-#193额外真实重启门槛已按[193合同](../engineering/routing-ui-193-contract.md)及接续合同第3条撤销：旧要求为最终修复后同自然S2/D/U真实服务重启再浏览器验收，障碍为用户充分批准后安全Start仍三次被工具拒绝，原四AC不要求新增该轮重启且产品不改启动/恢复机制。替代组合为原a0真实after+只读audit、新源码完整Vue DOM/刷新、公共进程恢复测试与最终门禁。前三组已有适用范围内的实测证据，最后一项gate02仍PENDING；身份/权限/预算/unknown不削弱，公共恢复不能删。未覆盖的真实post-fix服务重启仍NOT_RUN / blocked_by_tool_approval，限制留#168；#183已closed，不转派其补验。详细UI来源与旧失败见[#193验收](routing-ui-193-20261117.md)。
+#193额外真实重启门槛已按[193合同](../engineering/routing-ui-193-contract.md)及接续合同第3条撤销：旧要求为最终修复后同自然S2/D/U真实服务重启再浏览器验收，障碍为用户充分批准后安全Start仍三次被工具拒绝，原四AC不要求新增该轮重启且产品不改启动/恢复机制。替代组合为原a0真实after+只读audit、新源码完整Vue DOM/刷新、公共进程恢复测试与最终门禁，四组现均有适用范围内的通过证据，本轮工程退出条件已满足。身份/权限/预算/unknown不削弱，公共恢复不能删。未覆盖的真实post-fix服务重启仍NOT_RUN / blocked_by_tool_approval，限制留仍开放的#168；#183已closed，不转派其补验。详细UI来源与旧失败见[#193验收](routing-ui-193-20261117.md)。
 
-| 字段 | 当前状态 |
-| --- | --- |
-| gate02实际run ID、冻结源码SHA/tree、命令/证据位置 | NOT_STARTED / PENDING；ea81b6b为当前集成，不冒填最终冻结 |
-| gate02结果、完成阶段、测试计数/失败/skip、source_changed与日志 | PENDING |
-| 最终文档交付SHA、推送与189/193票状态复核 | PENDING；当前两票open、PR198 draft，base user-solving-188，不合main |
+最终run `dependency-routing-189-02`：`final_status=passed`、`completed=6/6`、`current_stage=completed`、`source_changed=false`，elapsed 2501.094秒。开始时间为2026-11-17T01:52:00.717451Z，结束后源码manifest的`captured_at`为2026-11-17T02:33:41.766081Z；后者是身份快照时间。证据目录为`artifacts/final-gates/dependency-routing-189-02/`，总体状态见`status.json`，冻结前后身份见`source-manifest.json`。status未单列`exit_code`字段；下表六份阶段日志均记录`EXIT_CODE 0`。
+
+| 阶段 | 最终结果 | 证据（相对run目录） |
+| --- | --- | --- |
+| fast | 通过，EXIT_CODE 0 | fast.log |
+| offline | testsRun=2311，failure=0、error=0、skip=42、expectedFailures=0、unexpectedSuccesses=0；2309.9602450999955秒 | offline.log、repository-check/tests.json |
+| release | 27/27，42.139秒，EXIT_CODE 0 | release.log |
+| frontend-install | npm ci成功，EXIT_CODE 0 | frontend-install.log |
+| frontend-check | check:deps、typecheck、test:unit及build成功；单测87/87、suites=0、fail/cancelled/skipped/todo均0，duration_ms=22220.6869；EXIT_CODE 0 | frontend-check.log |
+| frontend-audit | 0漏洞，EXIT_CODE 0 | frontend-audit.log |
+
+2311为报告的testsRun，不另推算unique，也不与聚焦检查累加；42项skip仍为未执行，不计通过覆盖。阶段通过不新增自然数学或真实重启结论。
+
+实际启动命令（仓库根）：
+
+```powershell
+uv run --no-sync python scripts/run_final_gate.py --root . --output-dir artifacts/final-gates --run-id dependency-routing-189-02
+```
+
+offline阶段实际执行`uv run python scripts/check.py --offline --report-dir D:/project/工程化MathAgent/Challenge-Cup-2026/artifacts/final-gates/dependency-routing-189-02/repository-check`。
+
+运行及监控已结束：临时task `MathAgent-189-dependency-routing-189-02`于北京时间2026-11-17 10:52写入`scheduled-terminal.json`后自动删除，主控10:55复核不存在；PID40112及测试子进程41976/43680/34888/11632/44264/43308/44248均已退出。清理证据入口为同run目录`controller-cleanup.json`，无检查所有权需要转移，不再启动测试。
+
+最终文档交付提交尚未产生，交付SHA由提交后的HEAD、PR及最终关票评论记录。主控剩余事务为审阅文档、提交推送、将PR198从draft设为ready、关闭并重读复核#189/#193；发布前两票仍open、PR198仍draft，base为user-solving-188，不合main。用户最新范围为#189完成推送关票后停止，不领取#156或其他票、不创建新session；等待、不催促。
 
 ## 历史：合同到公共证据
 
@@ -214,6 +233,6 @@ stop-gate-result}.json`，外部交接 `C:/Users/CQX/.codex/tmp/189-live04-runne
 外部原件为 `C:/Users/CQX/.codex/tmp/189-checkpoint-review-{standards,spec}-20261117.md`。
 证据复制、clean及来源已合并核对后，所属工作树已安全移除。live04仍未冻结或启动。
 
-## 尚未退出
+## 工程验收结论与最后交付
 
-UI两次修复、公共恢复与四组门禁修复已集成并保留聚焦实测及独立复查证据；最终gate02未开始/PENDING，#189/#193仍open、PR198 draft、base user-solving-188，不合main。真实post-fix服务重启的额外本地门槛已狭窄调整，实际NOT_RUN与#168限制保留，#183已closed。旧S/live01/live02/live03失败、U failed、自然AC2 not_triggered及gate01失败不改判；188门禁不代替本阶段。当前所有权及后续前沿见[交接](../engineering/unattended-ticket-handoff.md)。
+UI两次修复、公共恢复、独立双轴及冻结源码最终gate02共同满足本轮工程退出条件；剩余仅主控最终提交、推送、PR ready及关票复核，发布前#189/#193仍open、PR198 draft、base user-solving-188，不合main。真实post-fix服务重启仍NOT_RUN / blocked_by_tool_approval，限制留仍开放#168，#183已closed。旧S/live01/live02/live03失败、U failed、自然AC2 not_triggered及gate01失败不改判；188门禁不代替本阶段，不声明数学能力或效率提升。最终交付SHA在提交后记录，不与冻结受验源码SHA混用。#189完成推送关票后停止，不接#156或其他票、不创建新session；当前所有权及停止范围见[交接](../engineering/unattended-ticket-handoff.md)。

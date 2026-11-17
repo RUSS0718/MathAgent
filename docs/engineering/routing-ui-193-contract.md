@@ -30,4 +30,4 @@ EXACT 当前原文只能引用当前同 artifact 的既有整题审查；不修�
 
 身份、权限、原预算/deadline、来源及unknown不自动重发边界不变。公共进程恢复测试不得随额外门槛撤销；保留Jobs、Runs、调用、预算、输出与solver/events身份核对，副本auth/init允许写与业务身份不变分别记录，不能称整库零写。旧after不替代修复后DOM，模型整题审查不升级为步骤或形式证明，原失败不改判。
 
-独立双轴和最终源码门禁依[工程门禁](development-gates.md)完成；代码变化后重新验收，文档交付SHA与受验源码分记。源码、结果、命令、计数、证据及待填字段只写[#193验收](../evals/routing-ui-193-20261117.md)；整体证据归组及gate见[#189验收](../evals/dependency-routing-189-20261117.md)，当前所有权与后续前沿见[交接](unattended-ticket-handoff.md)。已提交[189设计](dependency-routing-189-design.md)及[189 Issue](https://github.com/RUSS0718/MathAgent/issues/189)为要求入口，不依赖用户未跟踪文件。不改锁、预算、official或旧数据；继续当前模型设置，不指定或覆盖型号。
+独立双轴和最终源码门禁依[工程门禁](development-gates.md)完成；本轮组合退出条件已通过，具体源码、结果、命令、计数与证据见[#193验收](../evals/routing-ui-193-20261117.md)，整体证据归组及gate见[#189验收](../evals/dependency-routing-189-20261117.md)。文档交付SHA在提交后由HEAD、PR及最终关票评论登记，与受验源码分记。剩余仅主控最终提交、推送、PR ready及关票复核；#189完成推送关票后停止，不领取#156或其他票、不创建新session，等待、不催促。#168保持开放、#183保持closed；当前所有权及停止范围见[交接](unattended-ticket-handoff.md)。已提交[189设计](dependency-routing-189-design.md)及[189 Issue](https://github.com/RUSS0718/MathAgent/issues/189)为要求入口，不依赖用户未跟踪文件。不改锁、预算、official或旧数据；继续当前模型设置，不指定或覆盖型号。
