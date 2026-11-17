@@ -16,6 +16,17 @@ from .product_control import controlled_patch
 _SOLVER_STORAGE_LOCK = threading.RLock()
 
 
+def read_owned_snapshot(store, user_id: str, job_id: str) -> tuple[dict, dict]:
+    """Authorize each read and validate saved identity without harness recovery."""
+    with store._lock:
+        job = store.get_job(job_id, user_id)
+        try:
+            run = SolverStateStore(store._connection).get_run(job_id)
+        except SolverPersistenceError:
+            run = None
+        return job, run['state'] if run else {}
+
+
 class _PublicCallLookup(dict):
     """Keep persisted call keys private while accepting their public aliases."""
 
