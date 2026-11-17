@@ -51,6 +51,7 @@ class PlanReadTest(unittest.TestCase):
         from unittest.mock import patch
         store = self.app.extensions['showcase_workspace_service'].store
         before = '\n'.join(store._connection.iterdump())
+        state_before = self.h.get_run(self.job_id)
         with patch('requests.sessions.Session.request', side_effect=AssertionError('no outbound')):
             response = self.client.get(self.url)
             self.assertEqual(200, response.status_code)
@@ -65,6 +66,10 @@ class PlanReadTest(unittest.TestCase):
                 self.assertEqual(body, self.client.get(self.url + '?source=' + result['source_ref']).json)
             self.assertEqual('unavailable', self.client.get(self.url + '?source=wrong').json['content_status'])
         self.assertNotIn('PRIVATE', response.text)
+        state_after = self.h.get_run(self.job_id)
+        for field in ('plan', 'role_stage_results', 'calls', 'counters', 'budget'):
+            self.assertEqual(state_before['state'].get(field), state_after['state'].get(field))
+        self.assertEqual(state_before['events'], state_after['events'])
         self.assertEqual(before, '\n'.join(store._connection.iterdump()))
         self.assertEqual(403, self.client.get(f'/api/agent/jobs/{self.job_id}/report').status_code)
 
@@ -105,3 +110,23 @@ class PlanReadTest(unittest.TestCase):
             response = self.client.get(self.url)
             self.assertEqual(200, response.status_code)
             self.assertEqual('unavailable', response.json['content_status'])
+
+    def test_bound_body_and_check_conflicts_do_not_publish(self):
+        import copy
+        import json
+        store = self.app.extensions['showcase_workspace_service'].store
+        state = self.h.get_run(self.job_id)['state']
+        ref = state['role_stage_results'][0]['source_ref']
+        for change in ('body', 'check', 'duplicate'):
+            damaged = copy.deepcopy(state)
+            r = damaged['role_stage_results'][0]
+            if change == 'body':
+                r['items'][0]['objective'] = 'wrong body'
+            elif change == 'check':
+                r['check']['body_version'] = 'wrong version'
+            else:
+                damaged['role_stage_results'].append(copy.deepcopy(r))
+            store._connection.execute('UPDATE solver_states SET state_json=? WHERE run_id=?',
+                (json.dumps(damaged), self.job_id))
+            store._connection.commit()
+            self.assertEqual('unavailable', self.client.get(self.url + '?source=' + ref).json['content_status'])

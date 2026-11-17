@@ -2,9 +2,10 @@
 import { nextTick, ref, watch } from 'vue'
 import { api } from '../api/client'
 import type { RoleStage } from '../api/role-stage.schemas'
-import { roleLabels } from '../runtime/jobs/causal-progress'
+import { roleLabels, statusLabels } from '../runtime/jobs/causal-progress'
+import { renderSafeMarkdown } from '../renderers/markdown-adapter'
 
-const props = defineProps<{ jobId?: string; role: string; source?: string }>()
+const props = defineProps<{ jobId?: string; role: string; source?: string; jobStatus: string; runtimeState?: string }>()
 const emit = defineEmits<{ filter: [role: string] }>()
 const dialog = ref<HTMLDialogElement>()
 const content = ref<RoleStage | null>(null)
@@ -32,6 +33,7 @@ defineExpose({ open })
   <dialog ref="dialog" aria-labelledby="role-stage-heading">
     <form method="dialog"><button autofocus>关闭</button></form>
     <h2 id="role-stage-heading">{{ roleLabels[role] }}阶段成果</h2>
+    <p>任务：{{ statusLabels[jobStatus] ?? '状态待确认' }} · 角色：{{ ({ idle: '未参与', running: '执行中', completed: '已完成', failed: '遇到问题', unknown: '结果未知' } as Record<string, string>)[runtimeState ?? 'unknown'] ?? '状态待确认' }}</p>
     <p>{{ role === 'planner' ? '职责：安排求解目标、方法和步骤依赖。' : '职责：组织阶段安排与任务派发；协调安排不是数学推导。' }}</p>
     <p v-if="loading" role="status">正在读取已保存成果…</p>
     <p v-else-if="failed" role="alert">读取失败，最新状态未确认。</p>
@@ -41,7 +43,7 @@ defineExpose({ open })
       <p>{{ result.validity === 'current' ? '当前版本有效' : '已替换' }}</p>
       <p>检查范围：计划结构校验通过，不代表目标已完成。</p>
       <ol><li v-for="item in result.items" :key="item.label">
-        <h4>{{ item.label }} · {{ item.title }}</h4><p>{{ item.objective }}</p>
+        <h4>{{ item.label }} · {{ item.title }}</h4><div v-html="renderSafeMarkdown(item.objective)" />
         <p>先后依赖：{{ item.depends_on.join('、') || '无前置步骤' }}</p>
       </li></ol>
     </section>

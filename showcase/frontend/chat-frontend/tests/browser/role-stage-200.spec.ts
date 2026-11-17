@@ -4,7 +4,7 @@ import { mockWorkspace } from './fixtures'
 const source = 'a'.repeat(64)
 const result = { source_ref: source, plan_version: 1, attempt_index: 0, stage: 'planning', body_version: 'b'.repeat(64),
   validity: 'current', check: { scope: 'plan_structure', body_version: 'b'.repeat(64) },
-  items: [{ label: '步骤 1', title: '平方非负', objective: '对任意实数 x，(x-1)^2≥0', depends_on: [] }] }
+  items: [{ label: '步骤 1', title: '平方非负', objective: '对任意实数 x，$(x-1)^2\\geq 0$', depends_on: [] }] }
 test('desktop dual entry reads the same saved plan, preserves filters and returns keyboard focus', async ({ page }) => {
   const writes: string[] = []
   const errors: string[] = []
@@ -19,7 +19,9 @@ test('desktop dual entry reads the same saved plan, preserves filters and return
   await planner.focus()
   await page.keyboard.press('Enter')
   const panel = page.getByRole('dialog', { name: '方案规划阶段成果' })
-  await expect(panel).toContainText('对任意实数 x，(x-1)^2≥0')
+  await expect(panel).toContainText('对任意实数 x')
+  await expect(panel.locator('.katex')).toHaveCount(1)
+  await page.screenshot({ path: '../../../artifacts/role-stage-200/panel.png' })
   await expect(panel).toContainText('结构校验通过，不代表目标已完成')
   await expect(panel.getByRole('button', { name: '关闭' })).toBeFocused()
   const first = await panel.locator('[data-plan-body]').innerText()
@@ -41,3 +43,26 @@ test('desktop dual entry reads the same saved plan, preserves filters and return
   expect(writes.filter(url => !url.endsWith('/api/change_session'))).toEqual([])
 })
 
+
+test('mini coordination entry displays saved arrangements without changing step or role filters', async ({ page }) => {
+  await mockWorkspace(page, true, `id: 1\nevent: solver_progress\ndata: ${JSON.stringify({ type: 'solver_progress', solver_event_type: 'initial_plan_generated', role: 'planner', role_stage_source: source })}\n\n`)
+  await page.route('**/role-results/*', route => {
+    const role = new URL(route.request().url()).pathname.split('/').at(-1)
+    return route.fulfill({ json: { version: 'role-stage-v1', job_id: 'run-demo', role, status: 'failed', content_status: 'published', results: [result] } })
+  })
+  await page.goto('/dashboard-assets/session/session-demo')
+  await page.locator('.execution-process > summary').click()
+  const workbench = page.getByRole('region', { name: '对话式执行工作台' })
+  await workbench.getByRole('combobox', { name: '角色', exact: true }).selectOption('planner')
+  const mini = workbench.getByLabel('迷你星图角色成果', { exact: true })
+  const node = mini.getByRole('button', { name: /^查看任务协调 / })
+  await node.focus()
+  await page.keyboard.press('Enter')
+  const panel = page.getByRole('dialog', { name: '任务协调阶段成果' })
+  await expect(panel).toContainText('协调安排不是数学推导')
+  await expect(panel).toContainText('平方非负')
+  await expect(workbench.getByRole('combobox', { name: '角色', exact: true })).toHaveValue('planner')
+  await expect(workbench.getByRole('combobox', { name: '步骤', exact: true })).toHaveValue('')
+  await panel.getByRole('button', { name: '关闭', exact: true }).press('Enter')
+  await expect(node).toBeFocused()
+})
