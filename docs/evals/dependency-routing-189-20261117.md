@@ -1,6 +1,6 @@
 # #189 目标依赖分流阶段验收
 
-2026-11-17，Asia/Shanghai。状态：190开发纵切已退出；191/192代码与审查修复已集成，受影响两轴复查零阻断；自然首题S失败，离线诊断中，D/U未提交；193与整体门禁未完成。能力与效率不作外推。
+2026-11-17，Asia/Shanghai。状态：190开发纵切已退出；191/192代码与审查修复已集成，受影响两轴复查零阻断；live04 S2/D成功、U失败；191自然因果链通过，192自然AC1通过/AC2 not_triggered，建议受控工程退出；193由fresh Peirce正式实施，整体门禁未完成。能力与效率不作外推。
 
 ## 源码与边界
 
@@ -13,13 +13,13 @@
 | 要求 | 公共入口与断言 | 证据 | 当前结果 |
 | --- | --- | --- | --- |
 | 依赖目标先规划，SOLVED不能短路 | Job/Run/当前Spec；Planner、依赖WorkUnits、Reasoner/Verifier实际派发；未验证材料不进已证账本 | 190最终45项、集成快速5项；[190记录](../engineering/dependency-routing-190-handoff.md) | 受控pass，190已关闭 |
-| 自然Intake依赖及Verifier实际作用 | 自然message→Spec→Plan→步骤反馈→最终答复，不能注入Spec/Plan | 191公共12项、角色14项、Intake9项，共35个不同方法、零skip；受控CHALLENGE后重做和后继门控 | 受控pass；自然not_run，191开放 |
-| 无依赖简单题有界直解 | 首次2048后独立整题审查，实际payload/Attempt/预算相符，其他角色基础cap不变 | 192最终21项；[192记录](../engineering/initial-explore-192-handoff.md) | 受控pass；自然not_run |
-| 未完成/已知截断转规划，unknown不自动派发 | Job及HTTP计数、公开原因、未验证来源；工具/有限修复同语义轮次 | 192最终21项及归档红绿；reviewfix工具续接完整payload/指纹和公开跨进程恢复 | 受控pass；自然not_run |
-| 具体数学异议一次修正及后续规划 | 同Run审查反馈、原容量与来源，二次拒绝/无具体异议沿既有规划 | 190/191公共组与192修正用例 | 受控pass，不称自然稳定性 |
+| 自然Intake依赖及Verifier实际作用 | 自然message→Spec→Plan→步骤反馈→最终答复，不能注入Spec/Plan | 191公共12项、角色14项、Intake9项，共35个不同方法、零skip；受控CHALLENGE后重做和后继门控 | 受控pass；自然S2/D通过，建议主控审核191退出 |
+| 无依赖简单题有界直解 | 首次2048后独立整题审查，实际payload/Attempt/预算相符，其他角色基础cap不变 | 192最终21项；[192记录](../engineering/initial-explore-192-handoff.md) | 受控pass；S2自然AC1通过，保守context floor按合同澄清 |
+| 未完成/已知截断转规划，unknown不自动派发 | Job及HTTP计数、公开原因、未验证来源；工具/有限修复同语义轮次 | 192最终21项及归档红绿；reviewfix工具续接完整payload/指纹和公开跨进程恢复 | 受控pass；U自然AC2 not_triggered |
+| 具体数学异议一次修正及后续规划 | 同Run审查反馈、原容量与来源，二次拒绝/无具体异议沿既有规划 | 190/191公共组与192修正用例 | 受控pass；U观察到一次修正后转PLAN，最终失败 |
 | 原预算/截止/旧Run及默认路径 | 新策略仅新Run冻结；旧无策略/190-only/新容量恢复，GET零新增调用 | 190恢复组、192配置/transport/ledger；reviewfix跨进程三场景、集成fast5/5 | 受控pass |
-| 普通用户真实路径与权限 | 普通投影/SSE/角色生命周期/唯一answer；ID、用量、hash不进普通DOM | 193仅只读设计 | not_run，193开放 |
-| 数学、测量、阶段退出 | 登记题逐角色duration/HTTP计数、来源/反馈/答案与独立人审；双轴及冻结最终门禁 | 下述自然登记与后续记录 | not_run，189开放 |
+| 普通用户真实路径与权限 | 普通投影/SSE/角色生命周期/唯一answer；ID、用量、hash不进普通DOM | fresh Peirce已在独立worktree正式实施 | 未完成，193开放 |
+| 数学、测量、阶段退出 | 登记题逐角色duration/HTTP计数、来源/反馈/答案与独立人审；双轴及冻结最终门禁 | 下述自然登记与后续记录 | S2/D成功、U失败；阶段双轴/最终gate未完成，189开放 |
 
 192回归A为27项、B为47项且1项skip，均在7a87eb2；最终资源切片8项含7个重复方法。最终21项加A/B共95个不同选择器，不将重复检查累加。未验证本地Docker Reference镜像的skip保持未执行；配置准入通过不替代它。191/192 ignored证据分别20/68文件已复制root并核对哈希一致。
 
@@ -33,7 +33,34 @@
 
 集成快速检查5/5、3.344秒、`fast_check=PASS`；可信JSON新策略经实际loader准入通过，摘要 `artifacts/issue189/backend-preflight.json`。独立临时库、worker关闭且禁止socket出站的运行时检查为ready=true，star_reference enabled、missing_capabilities为空，见 `artifacts/issue189/runtime-preflight-01.json`。没有创建题目或发送provider请求，不称线上能力验收。
 
-## 自然验收登记与时序
+## 2026-11-17 live04 当前退出映射
+
+自然运行适用源码 `aac4cf6498cefb9b8761976f479b90e52303537f`，分支 `dependency-routing-189`。依据仓库外独立报告 `C:/Users/CQX/.codex/tmp/189-live04-{S2,D,U}-assessment-20261117.md`；D 报告后半部补证解除第一轮公共包的 spec/WorkUnit/来源消费缺口。脱敏补证及 manifest 入口为 root `artifacts/issue189/live04/independent-D/`，15 文件已由主控校验复制；manifest SHA256 `c77800d41698009f592c6b718d4cab93cd1ec9f39e9603e69fbe9ff7529b3582`。本次只消费报告与 manifest，不访问库、raw、参考解，也不重新声称完成全仓冻结字节审计。
+
+| 验收范围 | 实际结果与退出边界 |
+| --- | --- |
+| #191 自然依赖与无依赖对照 | S2、D 均 succeeded，人工数学正确，独立整题模型 ACCEPT、EXACT same_artifact。D 具备 Intake→Plan/WorkUnit→逐轮 ACCEPT→后继来源消费→最终汇总因果链；S2 无依赖字段已由补证核实。自然部分可记通过，建议主控据此完成 #191 关票审核；本次不关闭 GitHub。 |
+| #191 CHALLENGE | D 五轮裁决全为 ACCEPT/PASS/YES，CHALLENGE=0；两次 YIELD 不是异议。I191-3 仅沿既有受控公共 CHALLENGE 与后继门控证据退出，不称自然异议实证。 |
+| #192 AC1 | S2 首次 Explore 实际 cap2048/nonstream，独立整题审查成功，无 Planner，支持自然 AC1；2048 仍是工程假设，不是优化分位数或速度结论。 |
+| #192 AC2 | 工程覆盖来自既有受控公共 Job；自然 U 为 **not_triggered**，不能写自然 AC2 PASS。首轮语义 Explore（含工具续接）返回 SOLVED，整题拒绝后仅一次修正未交付完整候选，才因 complete_candidate_unavailable 转 PLAN。这是审查后交接，不能倒算首次未完成交接。 |
+| #192 合同第4条 | 原reservation为根调用预算预留；profile为transport能力/请求fingerprint。有效cap2048贯通预算/HTTP/Attempt/serialized/fingerprint沿受控证据；ContextPack允许冻结保守floor32768，不是实际输出或RunBudget预留。此为条款澄清，非删约束/缩验收；只读核对未发现实质缺陷。 |
+| #193 / #189 | S2/D accepted/same_artifact 与用户接口“部分结果/未验证”矛盾，fresh Peirce已在独立worktree正式实施后端呈现与UI修复，实际依赖证据已具备；不可仅隐藏前端 notice 或伪造 ledger。UI/刷新/恢复、阶段独立双轴和最终 gate 尚未完成，#189 不退出。 |
+
+原 Issue AC2 未要求必须自然，本地首次完成记 not_triggered 的规则保留。条款澄清后建议主控按既有受控公共 Job 工程证据完成 #192 退出审核；不将自然缺口改成通过，不改判 U 失败。GitHub 关票待主控提交。
+
+服务8119，PID1128，创建 `2026-11-16T23:34:46.6007738Z`，按主控交接保留为只读 UI；临时 task 已删除，所有模型 Job 已终态。主控已核查 observer39852退出，仅1128存活；本文复用其核查，不冒称自行查询或清理进程。192 工作树被拒绝清理的 ignored `.venv` 保留。继续当前选择的同一模型，不覆盖型号；具体型号及跨 session 继承无法独立确认。
+
+### 第4条源码与既有受控证据核对
+
+只读核对自然源码 aac4cf6：`showcase/solver_harness/context_pack.py:354–358` 明确 actual_output_reserve=max(frozen policy.output_reserve_tokens,payload.max_tokens)，这是 context envelope 保守floor，不是根调用预算 reservation；比有效输出cap大不表示实际输出变大或预算越界。`showcase/stream_preference.py:135–144` 的显式非流使用实际payload/effective_max_tokens及documented证据；`showcase/adapters.py:180,314,332` 分别将实际cap传入非流调用、流式payload和Attempt；`showcase/solver_harness/adaptive_resources.py:47` 使用request cap估计当前工作，保留基础收尾容量。
+
+`tests/test_initial_explore_transport_192.py:25–61` 的7000根额度检查实际2048 reservation（reserved减local_input_estimate）、HTTP/Attempt/serialized相符与非流fingerprint/documented；流式使用独立受控2048 profile，旧profile零派发拒绝。`tests/test_initial_explore_192.py:43–51` 的220000公共Job检查初始2048准入与基础review32768共存。复用既有192验收记录，不重新运行测试，也不将只读断言核查当作新的通过记录。
+
+前轮把context reserve差异保留为潜在合同阻断；本轮根据上述指针明确职责后解除该疑点，未发现该差异构成实质实现缺陷。有效请求cap的预算/HTTP/Attempt/serialized/fingerprint要求完整保留，ContextPack可沿原冻结保守floor，无须改为2048或修改旧策略。uncalibrated/input_cap_tokens=null不作硬容量保证；自然S2只支持有限实际cap/transport观察，完整逐键及恢复边界仍沿受控证据，不宣称建立新provider-live profile。
+
+## 历史：自然验收登记与时序
+
+以下 live01–live04 准备/修复按当时源码与时间理解；NOT_RUN、尚未冻结及下一步安排均为历史，不覆盖上节自然终态。
 
 S/D预登记于 `artifacts/issue189/preregistration/natural-cases-v1.json`，U另登记 `natural-U-v1.json`，均 `registered_not_run`。运行器只有message可进入公开Job；参考解、观察预期及判断条件不进入任何角色或验证器。D未形成实际依赖，或U自然形成依赖/首次直接完成，按相应路径记not_triggered，不注入Spec/Plan或诱导重跑。
 
@@ -153,4 +180,4 @@ stop-gate-result}.json`，外部交接 `C:/Users/CQX/.codex/tmp/189-live04-runne
 
 ## 尚未退出
 
-自然S已失败并留存角色测量，D/U及191/192真实AC、193普通投影/浏览器与恢复、整体双轴和冻结最终门禁仍待完成。2048是工程假设，usage缺失不捏造token测量；没有耗时基线，不声称更快。188门禁只适用于188源码，不能代替本阶段。192工作树清理因自动审批拒绝删除自建ignored `.venv`（`blocked by policy`）暂保留。
+#191 自然 S2/D 正向证据已齐，CHALLENGE 只沿已有受控范围；建议主控完成关票审核。#192 自然 AC1 通过、AC2 not_triggered，受控公共 Job 覆盖原 AC2 工程行为，第4条职责已澄清，建议受控工程退出，待主控提交/关票。U 原失败保留。#193 已由 fresh Peirce 正式实施，修复及普通 UI/只读刷新、恢复验收尚未完成；阶段双轴与冻结最终门禁尚未完成，#189 保持开放。旧 S/live01/live02/live03 失败与 unknown 原判不变；188 门禁不能代替本阶段。未宣称效率或数学能力提升。192 被拒清理的 ignored `.venv` 保留。

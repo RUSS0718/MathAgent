@@ -1,8 +1,31 @@
-# #191 受控验收与 HANDOFF
+# #191 自然终态、受控验收与退出映射
 
-2026-11-17。状态：代码/受控聚焦完成；#191 **保持 open**，真实 S/D **NOT_RUN**，不关闭父票、不宣称数学效果或等待改善。
+2026-11-17。当前：live04 S2/D 自然验收通过；CHALLENGE 仅受控覆盖。建议主控完成 #191 关票审核，GitHub 本次未操作；#189 整体未退出。
 
-## 源码与文件所有权
+## 本票自然退出与证据入口
+
+自然源码 `aac4cf6498cefb9b8761976f479b90e52303537f`，分支 dependency-routing-189。依据独立 `C:/Users/CQX/.codex/tmp/189-live04-{S2,D}-assessment-20261117.md`，D 报告后半部补证解除第一轮 spec/WorkUnit/来源消费缺口；root `artifacts/issue189/live04/independent-D/manifest.json` 对应主控已校验复制的15文件，manifest SHA256 `c77800d41698009f592c6b718d4cab93cd1ec9f39e9603e69fbe9ff7529b3582` 复用报告，非本次重算。
+
+S2/D 自然正向证据通过，建议主控审核 #191 退出；CHALLENGE 只沿 I191-3 允许的既有受控公共证据，D 实际0次，不把 YIELD 当异议。不证明自然异议、恢复全路径或数学能力提升。本次不访问库/raw/参考解，不新运行。跨票状态与条款解释集中见[#189 当前退出映射](dependency-routing-189-20261117.md)，本页保存本票自然因果证据与测量。
+
+## live04 自然证据与测量
+
+S2 Job/Run `run_27f2b6b3af04031e3ba41094ed501222`；D Job/Run `run_2242f342feea32d8922e2f65f501b078`。均显式 Run 身份而非 JobID fallback；有效配置快照 SHA256 `d1956b3dc50e6bb8c76f4edf176cde9ae6ed79a841df490312e1e672f2e17843`。
+
+D 实际 spec1/plan1：solve_a→enumerate_solutions→prove_completeness；WorkUnits S1→S2→S3。S1/1、S1/2、S2/1、S2/2、S3/1 五轮全 ACCEPT，前两单元分别 YIELD→FINAL；S1 第2轮 request1498、S2 首轮2021及第2轮2946、S3 首轮3736 中的来源/检查点消费已由持久请求安全投影核实。S1/S2 完成义务分别在 revision2018/3733，review event2019/3734 后派发下一单元；S3 完整性4770、review4771 后进入 final_generator request4773 及 whole review5017。不同 revision/事件序号不直接混用。WorkUnit schema 无独立 owner 字段，不补造；S2 来源 llm_reviewed 不升级 verified。三步进入最终 step_proofs，EXACT artifact SHA256 `b230e1859d8069aa8ca1d1d5befff6355913b174a8ae4bd6ac4c9446c47422cc`。
+
+S2 spec root1/existence，Intake 原响应 prerequisite_ids=[]、auxiliary_goals=[]；规范化 spec 省略空字段，不能说源对象保存了空数组。自然直解一次 Explore→whole review，artifact SHA256 `b8478134ca41533393dbf434adc69d580346a7ed2c7ecbf7cdd67a7caf0926fc`。人工数学核对正确结论沿独立报告，不复制 raw 或参考解。
+
+| 样本 | 角色实际 HTTP 次数 / 物理秒数 | 总计与 Run wall time |
+| --- | --- | --- |
+| S2 | Intake1/4.050；Explore1/2.815；whole review1/5.669 | 3 HTTP，物理12.534s；Run13.01368260383606s；0工具 |
+| D | Intake1/14.052；Planner1/10.779；Reasoner5/301.601；StepVerifier5/191.278；final_generator1/59.046；whole review1/37.970 | 14 HTTP，物理614.726s；Run638.6060099601746s；4工具/2.610s |
+
+根上限均48模型/48HTTP/8工具、2097152 token/3600s，未耗尽。S2 charged89558/reserved87704，provider known total1854/completion124 只覆盖部分请求；用量未知2项。D charged=reserved1039861（本地估算），14项 provider usage 均缺失。两者 unresolved_attempts=0；用量未知不等于远端结果未知，不填零或把本地计账当 provider 实耗。solver HTTP 计数不声称覆盖全部 presentation 请求。本样本不证明旧 Run/恢复/unknown 全情形成立。
+
+本次文档映射验证仅 `git diff --check`；不新增运行或重跑测试。以下实现、命令与准备段均为 live04 前的历史快照，历史 NOT_RUN/待接管语句不再代表当前状态；原红例、失败和未执行检查保持原判。
+
+## 历史：源码与文件所有权
 
 - 唯一 worktree：`D:/project/mathagent-191`，branch `feat/natural-intake-191`，初始干净基点 `975560a9bd9c546d7e7b1ae7e8133071c3a41cf4`。
 - 先行合同提交 `4cc7c90`；代码/测试提交 `77314530cadcb5263d5c37a96432ddb639e49394`。

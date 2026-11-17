@@ -3,7 +3,30 @@
 2026-11-17，Asia/Shanghai。交付给主控 fresh merger，未 push、未写 GitHub。
 当前模型选择保持不变；不能独立确认具体型号或跨 session 继承结果。
 
-## 集成身份与可消费合同
+## 当前交付入口
+
+自然源码 `aac4cf6498cefb9b8761976f479b90e52303537f`。建议主控按受控工程范围退出 #192；自然 S2 支持 AC1，U 的 AC2 not_triggered 和 failed 均保持。第4条已澄清根预算/transport 与冻结 context floor 的职责，不构成降标，见[合同](initial-explore-192-contract.md)；逐项源码/受控证据和跨票退出见[#189 映射](../evals/dependency-routing-189-20261117.md)。本页仅保存 U 谱系/测量及历史工程交付。U 依据独立报告 `C:/Users/CQX/.codex/tmp/189-live04-U-assessment-20261117.md`，不新增调用。
+
+## live04 U 终态与 AC2 限制
+
+Job/Run `run_eac7bca2e881e60804091b45f5e738ea`，failed/NEEDS_REVIEW/partial_aborted，phase STEP_VERIFY、revision3863，error star_needs_review，根义务0/1；无完整数学交付。首轮 Explore 两个 HTTP（含一次工具续接）实际2048/nonstream、SOLVED；整题审查两个 HTTP 是一次审查加工具续接，拒绝不完整候选。随后一次具体异议修正含两次工具续接，共三个 HTTP、基础32768/stream，未产生合格替代候选，才进入 Planner。规划及 Reasoner 实际消费探索 findings/review feedback，但 unverified 不升级为证明。S1 checkpoint FINAL 不等于已通过审查，S2–S4 not_run。
+
+终止直接原因：StepVerifier 及一次有限 repair 的 classified_outcomes.dependencies 分别为整数数组与字符串，均违反字符串数组 schema，invalid_verifier_response；HTTP200/stop 不能覆盖协议拒绝。证据确认模型协议失败及安全拒绝，未证明生产 validator bug；不推测修复提示根因，不改判 U。UNKNOWN 的修正评估是语义状态，不是远端 outcome unknown。
+
+| 角色 | HTTP次数 | 物理秒数 |
+| --- | ---: | ---: |
+| Intake | 1 | 4.909 |
+| Explore | 5 | 109.088 |
+| whole review | 2 | 14.541 |
+| Planner | 1 | 66.728 |
+| Reasoner | 1 | 46.245 |
+| StepVerifier | 2 | 117.695 |
+
+12 HTTP/12 logical budget calls、4 python_math，工具3.718s；HTTP合计359.206s，Run372.834s。原上限48/48/8、2097152 token/3600s未耗尽。charged552168/reserved544618 为本地计账；provider known7550/completion934 仅两次非流，流式用量未知10项；unresolved_attempts=0、unknown_calls/tools/retries为空。不能将局部工具续接耗尽说成根预算耗尽。自然 AC2 not_triggered 与最终 failed 分别记账；受控公共 Job 工程覆盖仍有效，不能代替自然观察。
+
+以下全部为 live04 前实施/集成历史。旧“自然 not_run”“下一步冻结”等仅描述当时，不再是启动指令；保留原红绿、失败、skip、源码适用范围及审批拒绝。
+
+## 历史：集成身份与可消费合同
 
 - worktree：D:/project/mathagent-192；branch：feat/initial-explore-192。
 - 核对初始 HEAD：adc01500a6bdfae8c76bdcd8ed6f0871663de6b0；初始工作树干净。
