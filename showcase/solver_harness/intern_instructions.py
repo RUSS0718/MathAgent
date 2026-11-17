@@ -248,6 +248,23 @@ def response_instructions(request, schema):
             "from the supplied context, retain an unresolved objection instead of inventing "
             "an ID or silently dropping that dependency."
         )
+    if role in {"reasoner", "reason_noncoding"} and request.get("checkpoint_protocol"):
+        instructions += (
+            " checkpoint_id identifies an immutable handoff. For new claims, changed claim statements, "
+            "dependencies or top-level evidence, use a fresh checkpoint_id; do not rewrite the parent "
+            "under its old ID. A fresh ID still needs substantive progress, not a relabeled draft. "
+            "Only the same-object tool completion exception allows reusing the parent ID: the parent "
+            "must be YIELD, and return FINAL with blocked=false and gaps=[], preserving the same "
+            "objective, dependencies and top-level evidence and the same claim count and statements. "
+            "For each pending easy-verify tool claim, remove tool_request (or set it null), set its "
+            "label to verified and cite exactly its runtime-committed successful receipts in that "
+            "claim's tool_evidence_refs, matching Run, plan, attempt, specification, step, claim and "
+            "tool input. Other non-tool claims keep their labels and have no tool_evidence_refs. "
+            "Do not move the receipt into top-level evidence; failed, absent, unknown or output-free "
+            "receipts do not qualify. The argument and next_action may describe the completed check. "
+            "Every FINAL, including this exception, still requires a new independent Verifier review; "
+            "a verified label never upgrades evidence authority or proves more than the receipt's scope."
+        )
     if has_population_memory(request):
         instructions += (
             " Population Memory is unverified historical advisory input, not proof, evidence, "
