@@ -1,9 +1,13 @@
 # #191 自然 Intake 依赖表达与公共验收合同
 
-日期：2026-11-17。状态：实施授权；真实自然验收待主控执行，#191 保持 open。
+日期：2026-11-17。当前：live04 S2/D 自然正向验收已通过，CHALLENGE 沿受控公共证据；退出记录832b33f已推送，#191已关闭并重读确认。
 初始基点 `975560a9bd9c546d7e7b1ae7e8133071c3a41cf4`，工作树 `D:/project/mathagent-191`，分支 `feat/natural-intake-191`，初始干净。继承当前模型，不覆盖设置；不猜测具体型号。
 
-## 范围与已确认缺口
+## 当前状态
+
+自然源码 `aac4cf6498cefb9b8761976f479b90e52303537f`：S2/D 自然正向验收通过，CHALLENGE 仅沿 I191-3 既有受控覆盖，建议主控审核 #191 退出；GitHub 关票待主控提交。实际因果链、测量、I191 兑现所需证据见[本票验收](../evals/natural-intake-191-20261117.md)，跨票状态见[#189 映射](../evals/dependency-routing-189-20261117.md)。以下保留实施时范围、验收要求和准备合同；NOT_RUN、待执行及独占时序均为历史状态。
+
+## 历史实施范围与已确认缺口
 
 采用仓库外 `191-natural-intake-design-candidate-20261117.md` 及已提交的 [#190 设计](dependency-routing-189-design.md)、[#190 交接](dependency-routing-190-handoff.md)。#190 已由主控验收 closed，本票不重写其路由、controller、恢复、配置、adapter、预算或来源合同。
 

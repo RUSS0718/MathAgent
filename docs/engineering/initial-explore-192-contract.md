@@ -2,7 +2,17 @@
 
 2026-11-17；实施基点 adc01500a6bdfae8c76bdcd8ed6f0871663de6b0。
 承接 #189/#190/#191；只影响显式 Showcase 新 Run，2048 是工程假设，
-不是 provider token 测量或性能结论。自然 S/D/U 由集成后主控唯一运行。
+不是 provider token 测量或性能结论。自然 S2/D/U 已由主控唯一运行，见下述退出边界。
+
+## 当前状态与第4条澄清
+
+退出记录832b33f已推送，#192按受控工程范围关闭并重读确认；S2 支持自然 AC1，U 自然 AC2 **not_triggered**、最终 failed 不改判。原 Issue AC2 未要求必须自然，本地首次完成记 not_triggered 的规则保留；谱系/测量见[本票交接](initial-explore-192-handoff.md)，证据与跨票决定见[#189 映射](../evals/dependency-routing-189-20261117.md)。
+
+第4条“原 reservation”指根调用预算预留，“profile”指 transport 能力匹配及请求 fingerprint。有效请求 cap 必须贯通原预算、HTTP payload、Attempt、serialized 估计及 fingerprint；不能以旧输出 cap 的 stream profile 授权新 cap。非流证据标 documented，未标定 profile 不冒充硬容量保证。
+
+ContextPack 是独立的冻结 context envelope，允许 `max(frozen_policy.output_reserve_tokens, payload.max_tokens)` 的保守 floor 大于有效输出 cap；它不是 RunBudget 预留或实际输出量，无须降为2048。S2 的32768保守预留与2048实际请求可合法共存；uncalibrated/input_cap_tokens=null 仍不能提供硬容量保证。这是条款澄清，不删约束、不缩验收，也不修改冻结策略或根预算。
+
+上述区分经现有源码和测试断言只读核对，未发现该差异构成实质缺陷；transport 完整逐键沿既有受控证据，自然 S2 仅有限观测，不升级为新 provider-live profile 认证。
 
 ## 冻结入口与生产者合同
 
@@ -27,9 +37,9 @@
    耗尽转 PLAN。远端 unknown 保持原待审，零自动重发/Planner/fallback。
 3. whole review 具体数学异议最多一次修正，取原 Run 基础 cap，
    不重新获得首次身份；其他角色与根预算不变。
-4. 有效 cap 贯通原 reservation、stream/nonstream payload、Attempt、
-   serialized 估计、fingerprint/profile。非流证据明确为 documented，
-   不冒用旧32768 stream profile，不宣称新 cap 已 provider-live 验证。
+4. 有效 cap 贯通原根调用预算 reservation、stream/nonstream payload、Attempt、
+   serialized 估计及 transport fingerprint/profile，含义按上节澄清。非流证据明确为 documented，
+   不冒用旧32768 stream profile，不把自然有限观测宣称为新 provider-live profile 认证。
 5. partial findings 沿 #190 来源保留 unverified；截断 JSON 不补造候选，
    来源未知如实 unknown，不升级已证账本或重建旧来源。
 
