@@ -109,12 +109,12 @@ def _established_ids(state):
 
 
 def graph_step_result(state, step_id):
-    """Resolve only a unique live result already accepted by the current graph."""
+    """Resolve a unique live proposition to an existing accepted result."""
     snapshots = state.get("proof_graph", {}).get("snapshots", [])
     snapshot = snapshots[-1] if snapshots else {}
     propositions = snapshot.get("propositions", {})
     accepted = {
-        item.get("result_id")
+        item.get("result_id"): item.get("conclusion")
         for item in snapshot.get("derivations", {}).values()
         if item.get("status") == "accepted"
         and snapshot.get("attempts", {}).get(item.get("attempt_id"), {}).get("status") == "accepted"
@@ -128,7 +128,9 @@ def graph_step_result(state, step_id):
         and row.get("valid") is True and not row.get("invalidated")
         and row.get("specification_version", 0) == state.get("specification_version", 0)
     }
-    return next(iter(candidates)) if len(candidates) == 1 else None
+    # Independent checkpoints may establish the same proposition (OR support).
+    conclusions = {accepted[result_id] for result_id in candidates}
+    return min(candidates) if len(conclusions) == 1 else None
 
 
 def build_entries(state, reply, *, step_id, report, review_call_id, suffix,
