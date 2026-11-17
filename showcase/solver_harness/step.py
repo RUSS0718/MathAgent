@@ -234,7 +234,9 @@ def run_step(
             reserved,
             checkpoint,
             call_id=protocol_repair.completed_call_id(
-                harness.get_run(run["run_id"])["state"]["calls"], request["call_id"]),
+                harness.get_run(run["run_id"])["state"]["calls"], request["call_id"])
+                if harness._config.get("features", {}).get("stream_recovery") is True
+                else request["call_id"],
             checkpoint_round=len(current_checkpoints) + 1,
             plan_version=plan["version"],
             attempt_index=attempt,
