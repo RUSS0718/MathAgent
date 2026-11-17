@@ -77,7 +77,7 @@ for (const width of [320, 768, 1024, 1440]) {
     await workbench.getByText('求解计划与调度详情', { exact: true }).click()
     const plan = workbench.getByRole('complementary', { name: '求解计划' })
     await expect(plan.getByRole('listitem')).toHaveText(['步骤 1步骤检查通过', '步骤 2发现问题'])
-    await expect(workbench.getByText('历史回放 · 模拟运行', { exact: true })).toBeVisible()
+    await expect(workbench.getByText('求解进展 · 模拟运行', { exact: true })).toBeVisible()
 
     await workbench.getByRole('combobox', { name: '角色', exact: true }).selectOption({ label: '推理' })
     await expect(entries.getByRole('heading')).toHaveText(['步骤检查已完成', '已回应步骤疑问'])

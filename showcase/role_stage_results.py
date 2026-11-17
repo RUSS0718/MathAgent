@@ -16,7 +16,11 @@ def save_plan_source(state, updates, event):
         return updates, event
     current = {**state, **updates}
     plan = current['plan']
-    if not isinstance(plan, dict) or not plan.get('steps'):
+    from .solver_harness.plan import validate_plan
+
+    try:
+        validate_plan(plan)
+    except ValueError:
         return updates, event
     identity = {key: current.get(key) for key in
                 ('run_id', 'problem_hash', 'specification_version', 'plan_version', 'attempt_index')}
@@ -66,7 +70,8 @@ def valid_plan_record(record):
     """Malformed persisted sources are unavailable, never repaired by a read."""
     from .solver_harness.plan import validate_plan
 
-    if (any(type(record.get(k)) is not int for k in ('plan_version', 'attempt_index'))
+    if (any(not isinstance(record.get(k), str) or not record[k] for k in ('run_id', 'problem_hash'))
+            or any(type(record.get(k)) is not int for k in ('plan_version', 'attempt_index'))
             or record['plan_version'] < 1 or record['attempt_index'] < 0
             or record.get('stage') != 'planning'
             or any(not isinstance(record.get(k), str) or not re.fullmatch(r'[0-9a-f]{64}', record[k])
