@@ -6,7 +6,7 @@
 
 ## 当前状态与第4条澄清
 
-建议按受控工程范围退出 #192，GitHub 关票待主控提交；S2 支持自然 AC1，U 自然 AC2 **not_triggered**、最终 failed 不改判。原 Issue AC2 未要求必须自然，本地首次完成记 not_triggered 的规则保留；谱系/测量见[本票交接](initial-explore-192-handoff.md)，证据与跨票决定见[#189 映射](../evals/dependency-routing-189-20261117.md)。
+退出记录832b33f已推送，#192按受控工程范围关闭并重读确认；S2 支持自然 AC1，U 自然 AC2 **not_triggered**、最终 failed 不改判。原 Issue AC2 未要求必须自然，本地首次完成记 not_triggered 的规则保留；谱系/测量见[本票交接](initial-explore-192-handoff.md)，证据与跨票决定见[#189 映射](../evals/dependency-routing-189-20261117.md)。
 
 第4条“原 reservation”指根调用预算预留，“profile”指 transport 能力匹配及请求 fingerprint。有效请求 cap 必须贯通原预算、HTTP payload、Attempt、serialized 估计及 fingerprint；不能以旧输出 cap 的 stream profile 授权新 cap。非流证据标 documented，未标定 profile 不冒充硬容量保证。
 

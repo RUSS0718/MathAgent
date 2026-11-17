@@ -1,12 +1,12 @@
-# 无人值守交接：live04终态与191/192退出审核
+# 无人值守交接：191/192已关闭，193实施中
 
 ## 当前状态与所有权（2026-11-17）
 
-root/branch/自然源码为 `D:/project/工程化MathAgent/Challenge-Cup-2026`、dependency-routing-189、`aac4cf6498cefb9b8761976f479b90e52303537f`。建议主控审核 #191 自然正向退出及 #192 受控工程退出，GitHub 关票待主控提交；S2/D成功、U失败，自然AC2 not_triggered。第4条按根预算/transport与context保守floor区分澄清，不改变验收。完整决定与证据见[#189 映射](../evals/dependency-routing-189-20261117.md)，本票分别见[#191验收](../evals/natural-intake-191-20261117.md)、[#192交接](initial-explore-192-handoff.md)。
+root/branch/自然源码为 `D:/project/工程化MathAgent/Challenge-Cup-2026`、dependency-routing-189、`aac4cf6498cefb9b8761976f479b90e52303537f`。退出记录 `832b33f24a8c7f8032d3b6adf0f49a3d3b6b7c7b` 已推送，#191自然正向与#192受控工程验收完成，两票已关闭并重读确认，评论6933445141/6933445637。S2/D成功、U失败，自然AC2 not_triggered。第4条按根预算/transport与context保守floor区分澄清，不改变验收。完整决定与证据见[#189 映射](../evals/dependency-routing-189-20261117.md)，本票分别见[#191验收](../evals/natural-intake-191-20261117.md)、[#192交接](initial-explore-192-handoff.md)。
 
 #193 已由 fresh Peirce 在独立 worktree 正式实施，实际依赖证据已具备；修复后再记录 UI 适用源码，复用持久结果，不为 UI 重发模型。#189 阶段双轴与最终 gate 尚未完成。主控负责后续提交/关票/阶段整合；本代理仅写指定六文档与外部报告，不提交/暂存。README既有修改归原 owner，不改用户未跟踪文件。
 
-主控已核查 observer39852退出；仅服务1128存活，8119/创建 `2026-11-16T23:34:46.6007738Z` 保留作只读 UI，task 已无、模型 Job 均终态。本代理复用主控进程核查，不冒称自行查询。192 被拒清理的 ignored `.venv` 保留。继续当前同一模型，不覆盖或猜测型号；无需新增运行、监控或催促 owner。交付报告 `C:/Users/CQX/.codex/tmp/191-192-natural-exit-20261117.md`。
+主控已核查 observer39852退出；原服务1128存活，8119/创建 `2026-11-16T23:34:46.6007738Z`，task 已无、模型 Job 均终态。UI验收将用原库只读一致backup到自有副本、worker=False与8120端口；原库不写，新入口尚未实际启动。193实施代理Peirce、ignored运行器准备Erdos、普通浏览器基线Beauvoir各有独立写范围，主控等待不催促。192 被拒清理的 ignored `.venv` 保留。继续当前同一模型，不覆盖或猜测型号。文档代理交付报告 `C:/Users/CQX/.codex/tmp/191-192-natural-exit-20261117.md`。
 
 ## 历史：2026-11-17 授权、准备与逐轮进展
 
