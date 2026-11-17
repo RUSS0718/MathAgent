@@ -107,7 +107,7 @@ class DependencyRoutingReviewTest(StarJobFixture, unittest.TestCase):
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
                 folder = Path(directory)
                 for stage, code in (("crash", 71), ("resume", 0)):
-                    result = subprocess.run([sys.executable, "-m", __name__, directory,
+                    result = subprocess.run([sys.executable, "-m", "tests.test_dependency_routing_review", directory,
                                              scenario, stage], capture_output=True, timeout=25)
                     self.assertEqual(code, result.returncode, result.stderr.decode(errors="replace"))
                 before = json.loads((folder / "before.json").read_text())
