@@ -83,6 +83,26 @@ def verify_step(
             if completed_reclassification and completed_reclassification.get("status") in {
                 "unknown_outcome", "dispatched", "streaming", "interrupted",
             }:
+                retry = state.get("authorized_retry")
+                if retry and retry.get("call_id") == identity:
+                    reason = budget_reason(state, harness._config)
+                    if reason:
+                        return stop(harness, run, reason)
+                    reserved = harness.commit_event(
+                        run["run_id"], expected_revision=run["state_revision"],
+                        event={"event_id": "dependency-review-retry-" + retry["new_call_id"],
+                               "type": "step_review_dispatched", "step_id": state["current_step"]},
+                        state_updates={"counters": {**state["counters"],
+                            "model_calls": state["counters"]["model_calls"] + 1}})
+                    try:
+                        harness.dispatch(reserved, verifier_port.verify,
+                                         {**completed_reclassification["request"], "problem": problem})
+                    except CallInterrupted:
+                        return harness.get_run(run["run_id"])
+                    return verify_step(
+                        harness, harness.get_run(run["run_id"]), problem=problem,
+                        verifier_port=verifier_port, max_model_calls=max_model_calls,
+                        max_runtime_seconds=max_runtime_seconds, round_number=round_number)
                 return run
             return reclassification.fail(harness, run, state["current_step"])
     reason = budget_reason(run["state"], harness._config)
