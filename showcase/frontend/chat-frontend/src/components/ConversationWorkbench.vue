@@ -13,6 +13,10 @@ const props = defineProps<{ jobId?: string; events: DecodedSseEvent[]; result?: 
 const readingRole = ref('planner')
 const readingSource = ref<string>()
 const panel = ref<InstanceType<typeof RoleStagePanel>>()
+const savedPlanSource = computed(() => props.events.filter(event =>
+  ['initial_plan_generated', 'plan_replaced'].includes(typeOf(event)) && event.data.role === 'planner'
+  && typeof event.data.role_stage_source === 'string' && /^[0-9a-f]{64}$/.test(event.data.role_stage_source)
+).at(-1)?.data.role_stage_source as string | undefined)
 async function openRole(value: string, source?: string) {
   if (!['planner', 'controller'].includes(value)) return
   readingRole.value = value
@@ -85,7 +89,7 @@ onUnmounted(() => { pause(); clearTimeout(flightTimer); clearTimeout(displayTime
 
 <template>
   <section class="workbench" aria-label="对话式执行工作台">
-    <RoleStagePanel ref="panel" :job-id="jobId" :role="readingRole" :source="readingSource" :job-status="status" :runtime-state="state.roleStates[readingRole]" @filter="role = $event" />
+    <RoleStagePanel ref="panel" :job-id="jobId" :role="readingRole" :source="readingSource" :saved-source="savedPlanSource" :job-status="status" :runtime-state="state.roleStates[readingRole]" @filter="role = $event" />
     <header class="workbench-toolbar">
       <strong>{{ ordinary ? (replay || replayCount !== null ? '历史回放' : '求解进展') + ((result as { execution_mode?: string })?.execution_mode === 'fake' ? ' · 模拟运行' : (result as { execution_mode?: string })?.execution_mode === 'live' ? ' · 实际运行' : '') : replayCount === null ? all.source : 'REPLAY · 本地事件回放' }}</strong>
       <span role="status" aria-atomic="true">当前阶段：{{ state.phase }}<span v-if="error"> · 请刷新任务状态</span></span>

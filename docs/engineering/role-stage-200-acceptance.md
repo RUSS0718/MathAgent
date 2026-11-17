@@ -1,10 +1,55 @@
 # #200 当前计划双入口工程验收
 
-2026-11-18，Asia/Shanghai。状态：实现交接，未验收，待 fresh fixer 集中修复审查项。
+2026-11-18，Asia/Shanghai。状态：fresh fixer 已修复双轴四项并通过聚焦复验；#199 整体退出仍按实施合同验收。
 起点9765244，专属feat/role-stage-plan-200。
-最终已测源码33a79e7e280d2543ce46fd9e112cbb14616eaf84。
+前轮已测源码33a79e7e280d2543ce46fd9e112cbb14616eaf84。
 已合入集成tip 7e5d8ef（合并提交7acb862）。未改tracker、未推送、未创建PR。
 沿用会话当前模型，未指定或更换；无法独立证明宿主的具体型号继承结果。
+
+## 本轮双轴修复与复验（2026-11-18）
+
+本节覆盖下文前轮“未修/待复验”结论。本轮起点 b9e37e0，专属工作树
+`C:/Users/CQX/.codex/worktrees/role-stage-200-review/Challenge-Cup-2026`，
+分支 `fix/role-stage-200-review`。后端提交 ca536e8，最终源码
+`0db5e744c3ea2cd5628d0ccbf6e45c805d374079`。提交后的文档变更不改变该已测源码。
+
+| 审查项 / 合同 | 修复与公共接缝复验 | 证据（本工作树 artifacts/role-stage-200-review/） |
+| --- | --- | --- |
+| 规格 P2 来源身份冲突；RS-05/22 | 保存及读取复用同一 HMAC 构造，复核 Run、problem、specification、plan、attempt、事件及正文版本；旧引用仍可读为 replaced，改写旧记录身份或引用均 unavailable | red-backend.log：2 测试、8 个失败子场景；green-backend-02.log：8 项通过 |
+| 规范 P2 存储职责；RS-06/19/22 | API 调用 solver_harness/storage.py 的 read_owned_snapshot；每次 get_job 归属鉴权，复用 SolverStateStore.get_run 只读事务及 run/problem/config/revision 行与 state 校验，不进入 SolverHarness/current_solver/persisted_solver 恢复路径；损坏来源不修复 | 同上；行冲突与 SQL dump 不变断言；regression-backend.log |
+| 规范 P1 非法计划事务；保存接缝 | 独立复验发现旧 validate_plan 捕获 ValueError 后仍提交非法计划；现在异常进入已有存储回滚分支。[None] 提交失败、连接无遗留事务、Run/事件不变，同连接后续合法保存成功 | red-rollback.log：原实现未抛出预期错误；green-backend-02.log、regression-backend.log |
+| 规格 P2 更新提示；RS-18 | 规划/协调面板接收正常 initial_plan_generated/plan_replaced 的保存引用；状态事件即便携带引用、无保存引用的计划事件均不提示；真实保存只提示“有新成果，更新查看”，不自动 GET 或替换正文；点击后才读取对应来源 | red-browser.log：缺更新按钮；green-browser.log：3 项通过；regression-browser-02.log：6 项通过（含两个角色与 1024/1440 桌面） |
+
+最终聚焦后端 43 项全部通过；前端 typecheck 通过；官方 baseline 的 11 个 SHA256
+全部一致，见 baseline.json。新增浏览器负例等待断言曾用角色查询寻找模态背景滑块，
+导致 2 项夹具失败；改为 DOM 查询后 6 项通过，原失败保留在
+regression-browser-fixture-failure.log。未把失败覆写成成功证据。
+
+实际命令：
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT='D:/project/工程化MathAgent/Challenge-Cup-2026/.venv'
+uv run python scripts/run_unittest_report.py --expect-count 43 tests.test_role_stage_200 tests.test_conversation_workbench tests.test_reviewer_boundary_195 tests.test_star_product_planning tests.test_solver_harness_replan tests.test_solver_harness_persistence
+# showcase/frontend/chat-frontend
+npm.cmd run typecheck
+npx.cmd --no-install playwright test tests/browser/role-stage-200.spec.ts tests/browser/conversation-workbench.spec.ts --grep 'desktop|mini coordination|1440px|1024px' --workers=1
+```
+
+本轮所有修改文件：showcase/role_stage_results.py、showcase/role_stage_api.py、
+showcase/solver_harness/storage.py、tests/test_role_stage_200.py、
+showcase/frontend/chat-frontend/src/components/ConversationWorkbench.vue、
+showcase/frontend/chat-frontend/src/components/RoleStagePanel.vue、
+showcase/frontend/chat-frontend/tests/browser/role-stage-200.spec.ts，以及本验收文档。
+source.zip 为上述七个代码/测试文件在最终源码 SHA 的快照；source-manifest.json
+记录源码 SHA、文件哈希和证据目录。产物仅留忽略目录，不提交日志或运行 raw。
+
+复用既有 root .venv 与 node_modules（工作树 junction），未安装或修改依赖。
+未访问 tests/test.md、未修改 root 已有工作、未跑整仓/真实模型/手机测试、未操作
+GitHub/PR。以上为 fresh fixer 的修复与受影响差异复查，未冒称新一轮独立双轴审查。
+完整阅读保位/重开恢复/失效同步仍留 #204/#205，不用本轮信号测试代替后续验收。
+本地 integration 合并前已核对 tip 从 7e5d8ef 推进至 aeeefdc（已含 b9e37e0），
+无其他源码分叉；合并 SHA 由最终交接给出。继续使用当前选择的同一模型，未指定覆盖，
+具体型号及宿主继承结果无法独立核验。所有检查均秒级完成，无定时检查待交接。
 
 ## 实现与公共接口
 

@@ -5,6 +5,25 @@ from showcase.solver_harness import SolverHarness
 
 
 class PlanSourceTest(unittest.TestCase):
+    def test_invalid_plan_rolls_back_and_next_valid_save_succeeds(self):
+        from showcase.solver_harness.storage import SolverPersistenceError
+        folder = self.enterContext(tempfile.TemporaryDirectory())
+        h = SolverHarness(database_path=Path(folder) / 'rollback.sqlite', config={})
+        self.addCleanup(h.close)
+        before = h.solve('test', {'run_id': 'rollback-test'})
+        with self.assertRaises(SolverPersistenceError):
+            h.commit_event('rollback-test', expected_revision=0,
+                event={'event_id': 'bad', 'type': 'initial_plan_generated'},
+                state_updates={'plan_version': 1, 'plan': {'version': 1, 'steps': [None]}})
+        self.assertFalse(h._showcase_store._connection.in_transaction)
+        self.assertEqual(before, h.get_run('rollback-test'))
+        saved = h.commit_event('rollback-test', expected_revision=0,
+            event={'event_id': 'valid', 'type': 'initial_plan_generated'},
+            state_updates={'plan_version': 1, 'plan': {'version': 1, 'steps': [
+                {'step_id': 's1', 'title': '目标', 'objective': '验证', 'depends_on': []}]}})
+        self.assertEqual(1, saved['state_revision'])
+        self.assertEqual(1, len(saved['state']['role_stage_results']))
+
     def test_normal_save_retains_exact_source_across_status_events(self):
         folder = self.enterContext(tempfile.TemporaryDirectory())
         if folder:
@@ -46,6 +65,44 @@ class PlanReadTest(unittest.TestCase):
                 {'step_id': 'secret', 'title': 'secret: PRIVATE MANY WORDS', 'objective': '目标', 'depends_on': ['private']}]}})
         self.h = h
         self.url = f'/api/agent/jobs/{self.job_id}/role-results/planner'
+
+    def test_rewritten_old_identity_or_reference_never_publishes(self):
+        import copy
+        import json
+        store = self.app.extensions['showcase_workspace_service'].store
+        run = self.h.commit_event(self.job_id, expected_revision=1,
+            event={'event_id': 'p2', 'type': 'plan_replaced'},
+            state_updates={'plan_version': 2, 'plan': {'version': 2, 'steps': [
+                {'step_id': 'new', 'title': '新计划', 'objective': '新目标', 'depends_on': []}]}})
+        state = run['state']
+        old_ref = state['role_stage_results'][0]['source_ref']
+        self.assertEqual('replaced', self.client.get(self.url + '?source=' + old_ref).json['results'][0]['validity'])
+        for key, value in (('plan_version', 2), ('attempt_index', 1),
+                           ('specification_version', 'tampered'), ('event_id', 'different'),
+                           ('source_ref', 'f' * 64)):
+            with self.subTest(key=key):
+                damaged = copy.deepcopy(state)
+                damaged['role_stage_results'][0][key] = value
+                store._connection.execute('UPDATE solver_states SET state_json=? WHERE run_id=?',
+                    (json.dumps(damaged), self.job_id))
+                store._connection.commit()
+                ref = damaged['role_stage_results'][0]['source_ref']
+                self.assertEqual('unavailable', self.client.get(self.url + '?source=' + ref).json['content_status'])
+
+    def test_storage_identity_conflicts_are_unavailable_without_recovery_or_writes(self):
+        from unittest.mock import patch
+        store = self.app.extensions['showcase_workspace_service'].store
+        row = store._connection.execute('SELECT * FROM solver_states WHERE run_id=?', (self.job_id,)).fetchone()
+        for column, value in (('problem_hash', 'wrong'), ('config_hash', 'wrong'), ('state_revision', 99)):
+            with self.subTest(column=column):
+                store._connection.execute(f'UPDATE solver_states SET {column}=? WHERE run_id=?', (value, self.job_id))
+                store._connection.commit()
+                before = '\n'.join(store._connection.iterdump())
+                with patch.object(SolverHarness, 'get_run', side_effect=AssertionError('no reconciliation')):
+                    self.assertEqual('unavailable', self.client.get(self.url).json['content_status'])
+                self.assertEqual(before, '\n'.join(store._connection.iterdump()))
+                store._connection.execute(f'UPDATE solver_states SET {column}=? WHERE run_id=?', (row[column], self.job_id))
+                store._connection.commit()
 
     def test_ordinary_owner_reads_exact_saved_source_without_business_writes(self):
         from unittest.mock import patch
