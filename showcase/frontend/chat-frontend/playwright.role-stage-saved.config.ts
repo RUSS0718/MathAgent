@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/browser',
-  testMatch: 'role-stage-saved.spec.ts',
+  testMatch: 'role-stage-saved.acceptance.ts',
   outputDir: '../../../artifacts/role-stage-199/saved-browser',
   workers: 1,
   reporter: 'list',
