@@ -203,6 +203,9 @@ def _validity(state, record, records):
             return 'invalidated'
         if record['authority_version'] != _origin_version(origin):
             return 'replaced'
+        if binding.get('validity_origin') in {'steps', 'exploration_findings', 'reexploration_findings',
+                                              'counterexample_checks', 'formal_verification'} or kind == 'step_review':
+            current = True
     if kind == 'classified_result':
         ledger = state.get('verified_results_ledger', [])
         entries = [entry for entry in ledger if entry.get('result_id') == binding.get('result_id')]

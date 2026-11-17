@@ -203,3 +203,14 @@ class AuthorityBindingTest(unittest.TestCase):
             refs.append(event['role_stage_source'])
         self.assertEqual([refs[1]], [r['source_ref'] for r in role_results(state, 'planner')['results']])
         self.assertEqual('replaced', role_results(state, 'planner', refs[0])['results'][0]['validity'])
+
+    def test_planning_does_not_revoke_unchanged_exploration_authority(self):
+        state = dict(run_id='r', run_salt='salt', problem_hash='p', specification_version=1,
+                     plan_version=0, attempt_index=0,
+                     exploration_findings=[dict(round=1, worked=['x≥0'])])
+        ref = self.publish(state, dict(validity_origin='exploration_findings', round=1), 'explore')
+        state['plan_version'] = 1
+        self.assertEqual('current', role_results(state, 'explore', ref)['results'][0]['validity'])
+        state['exploration_findings'][0]['invalidated'] = True
+        self.assertEqual([], role_results(state, 'explore')['results'])
+        self.assertEqual('invalidated', role_results(state, 'explore', ref)['results'][0]['validity'])
