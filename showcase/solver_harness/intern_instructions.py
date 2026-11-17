@@ -140,6 +140,13 @@ def response_instructions(request, schema):
         )
     if role in {"meta", "meta_strategist"} and "trace_back_to" in schema.get("properties", {}):
         instructions += META_TRACE_INSTRUCTION
+    if (role in {"explore", "reasoner", "step_verifier", "whole_solution_verifier"}
+            and "python_math" in request.get("allowed_tools", [])):
+        instructions += (
+            "python_math runs code as an exec script and captures stdout as its output; "
+            "a bare final expression is not automatically output, so use explicit print(...) "
+            "for any result you need returned. "
+        )
     if role == "problem_intake":
         instructions += (
             "Optionally return formalization with status proposed/unsupported/not_selected, reason, "
