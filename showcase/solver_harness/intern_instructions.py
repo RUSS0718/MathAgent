@@ -235,6 +235,19 @@ def response_instructions(request, schema):
             "Propose at most one tool_request per reply and keep the result provisional; "
             "judge only from recorded receipts, never from assumed outputs."
         )
+    if (role == "step_verifier" or (role in {"reasoner", "reason_noncoding"}
+                                   and request.get("checkpoint_protocol"))):
+        instructions += (
+            " For checkpoint.dependencies and classified_outcomes[].dependencies, cite only "
+            "established step IDs (step_id/source) or accepted ledger result IDs (result_id) "
+            "supplied in the current context. valid_sources, when present, lists candidate "
+            "sources; use only valid, proven entries. checkpoint_id identifies a handoff, "
+            "not an established dependency; never copy it into dependencies or treat it as "
+            "an alias for a step or result ID. Independently check dependencies rather than "
+            "echoing the Reasoner's references. If a required source cannot be established "
+            "from the supplied context, retain an unresolved objection instead of inventing "
+            "an ID or silently dropping that dependency."
+        )
     if has_population_memory(request):
         instructions += (
             " Population Memory is unverified historical advisory input, not proof, evidence, "
