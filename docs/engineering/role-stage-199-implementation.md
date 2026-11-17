@@ -25,3 +25,36 @@ Job API、桌面 Vue 双入口。以来源/检查绑定、业务快照和派发�
 #206 尚未入场：#199 实际交付完成后，才核对 #189 原依赖题缺陷修复
 与原场景复验，再预登记有限真实实验。已知缺陷未解除时保留阻塞，
 不换题掩盖，不复活旧 unknown 或过期实验。
+
+## #200 退出与并行合同（2026-11-18）
+
+#200 已在源码 `0db5e74`、集成 `7734362` 独立验收：后端43项、桌面6项、
+typecheck通过，baseline11/11；两轮双轴报告保留于
+`artifacts/role-stage-200/review/`，复查无剩余确认缺陷。API与浏览器为分层
+受控证据，最终集成仍补真实后端固定保存数据的浏览器贯通，不新增求解。
+最终源码与已测源码tree一致。全部#199验收后统一更新票状态。
+
+后续共用 `GET /api/agent/jobs/<job_id>/role-results/<role>`。显式source即历史
+精确读取；无source即当前语境。损坏不回退、不写修复、不触发恢复。
+
+- #201 独占 `role_stage_findings.py` 与专属测试，生产探索、推理、研究摘录。
+- #202 独占 `role_stage_reviews.py` 与专属测试，生产检查/终稿/Meta范围。
+- #203 独占 `role_stage_results.py`、`role_stage_api.py`、storage保存hook、
+  公共事件/DTO白名单、前端role-stage schema、client与workbench投影。
+  同时负责历史来源、权威有效性、历史列表，以及前两项生产者接入。
+- #204 独占新 `runtime/jobs/role-stage-reading.ts` 与专属测试，负责异步读取
+  和阅读缓存；不改面板。对外composable接口由本票和#205在仓库外合同中约定。
+- #205 独占RoleStagePanel、ConversationWorkbench、AgentConstellation及专属
+  桌面测试；负责九角色、空错态、历史/更多操作、焦点与composable接入。
+
+生产者统一导出 `collect(state, event) -> list[dict]`，只读取该保存事件所对应的
+最终合并状态，输出角色、阶段、白名单sections（label/text完整数学单元）、
+准确检查范围及内部来源binding。#203负责封装、版本与签名、有效性和查询，
+不从未知字段自由摘取内容。生产者最小接口检查通过后再集成保存链路。
+
+公共results保持#200字段兼容；扩展sections、准确check对象/范围、权威validity，
+历史元数据列表不携带其他正文。#203/#204/#205开始前以外部共享合同具体冻结
+字段，不各自发明枚举。共用角色别名归并规则，不新增第十节点。
+
+各票在独立工作树提交；只有合并者写集成分支。不重置其他分支，不读取
+禁止文件。整体RS01–22逐项映射及最终双轴仍为退出条件。
