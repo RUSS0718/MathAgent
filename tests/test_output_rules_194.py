@@ -294,6 +294,12 @@ class TerminalOutputContractTest(unittest.TestCase):
                     }
                     if state == 'legacy':
                         result.pop('presentation_rule')
+                    if complete:
+                        from showcase.final_evidence import bind_verification
+                        result['verification'] = bind_verification('1+1=2', {
+                            'status': 'unknown', 'scope': 'whole_solution_llm_review',
+                            'findings': ['llm_whole_review_accept'],
+                        })
                     with store._lock:
                         store._connection.execute('UPDATE workspace_jobs SET result_json=? WHERE job_id=?',
                                                   (json.dumps(result), job_id))

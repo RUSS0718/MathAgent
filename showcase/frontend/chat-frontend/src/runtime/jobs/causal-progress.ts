@@ -11,6 +11,7 @@ export const roleLabels: Record<string, string> = {
   final_generator: '答案整理', meta: '策略调整', meta_strategist: '策略调整', unknown: '角色待确认',
 }
 const keyTitles: Record<string, string> = {
+  adaptive_planning_required: '求解安排已更新', adaptive_candidate_correction: '答案需要修正',
   initial_plan_generated: '求解计划已形成', plan_replaced: '已调整求解方案', step_reported: '步骤结果已提交',
   step_reviewed: '步骤检查已完成', challenge_replied: '已回应步骤疑问', challenge_stalemate: '正在调整处理策略',
   challenge_escalation_stopped: '步骤问题尚未解决', meta_dispatched: '正在评估调整方案', meta_decided: '调整方案已形成',
@@ -33,7 +34,15 @@ export function progressText(event: DecodedSseEvent) {
   const critical = callProblem || ['waiting_input', 'failed', 'canceled', 'unknown', 'needs_review'].includes(String(event.data.status))
   const title = critical ? statusLabels[String(callProblem ? callLifecycle(event) : event.data.status)]! : Object.hasOwn(keyTitles, type) ? keyTitles[type]! : '技术记录'
   const verdict = event.data.verdict ?? (event.data.review as Record<string, unknown> | undefined)?.verdict
-  const summary = type === 'step_reviewed' || type === 'final_candidate_reviewed'
+  const routeSummaries = ['题目中的目标有先后依赖，先制定分步方案。',
+    '本次探索达到输出上限，转入制定方案。', '本次探索未完成，转入制定方案。',
+    '已形成完整候选，交由独立答案审查。', '探索表明需要分步处理，转入制定方案。',
+    '已取得部分进展，转入分步求解。', '本次探索尚不能形成完整答案，转入制定方案。',
+    '已取得部分进展，继续探索。']
+  const route = ['adaptive_planning_required', 'explore_assessed'].includes(type)
+    && typeof event.data.routing_summary === 'string' && routeSummaries.includes(event.data.routing_summary)
+    ? event.data.routing_summary : null
+  const summary = !critical && route ? route : type === 'step_reviewed' || type === 'final_candidate_reviewed'
     ? verdict === 'ACCEPT' ? '本次检查通过；检查范围见结果，不等于形式化证明。'
       : verdict === 'CHALLENGE' || verdict === 'REJECT' ? '检查发现问题，尚未通过。' : '检查结论待确认。'
     : critical ? '请查看任务状态及可用操作；结果未知时不要重复提交。' : title
@@ -51,7 +60,7 @@ export function lifecycle(events: DecodedSseEvent[], replay: boolean, status: st
       calls.set(id, { role, status: state, startedAt: calls.get(id)?.startedAt ?? (typeof event.data.created_at === 'string' ? event.data.created_at : undefined) })
     } else if (event.event === 'node_start') calls.set(`${role}:${event.data.step_id}`, { role, status: 'running' })
     else if (event.event === 'node_end') calls.set(`${role}:${event.data.step_id}`, { role, status: event.data.status === 'failed' ? 'failed' : 'completed' })
-    else if (progressText(event).key && typeOf(event) !== 'meta_dispatched') states[role] = event.data.status === 'failed'
+    else if (progressText(event).key && !['meta_dispatched', 'adaptive_planning_required', 'adaptive_candidate_correction'].includes(typeOf(event))) states[role] = event.data.status === 'failed'
       || typeOf(event) === 'meta_invalid' ? 'failed' : event.data.status === 'unknown' || event.data.status === 'needs_review' ? 'unknown' : 'completed'
   }
   for (const role of Object.keys(states)) {
