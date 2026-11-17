@@ -293,7 +293,8 @@ async function initialize(): Promise<void> {
     try {
       jobs.observe(await api.getJob(latest.analysis_job_id))
       const restored = jobs.byId(latest.analysis_job_id)
-      if (restored) restored.replay = ['succeeded', 'failed', 'canceled'].includes(restored.status)
+      // Opening a saved session shows its current task state; replay is an explicit user action.
+      if (restored) restored.replay = false
     } catch (error) {
       notice.value = error instanceof Error ? error.message : '任务状态加载失败。'
     }
