@@ -25,7 +25,7 @@ def _draft(role, stage, sections, scope, status, label, binding):
 
 
 def _current_call(state, call, role):
-    return (call.get('role') == role and call.get('status') == 'completed'
+    return (isinstance(call, dict) and call.get('role') == role and call.get('status') == 'completed'
             and call.get('run_id') == state.get('run_id')
             and all(call.get(k) == state.get(k) for k in ('plan_version', 'attempt_index'))
             and ('specification_version' not in call

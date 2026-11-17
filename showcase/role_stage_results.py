@@ -134,6 +134,8 @@ def save_role_sources(state, updates, event, collectors=()):
                       'event_id': event['event_id'], 'sections': sections, 'items': [],
                       'body_version': body_version, 'check': {**check, 'body_version': body_version},
                       'binding': deepcopy(publication['binding'])}
+            if publication.get('content_status') == 'not_published':
+                record['content_status'] = 'not_published'
             origin = _origin(current, record['binding'])
             if origin is not None:
                 record['authority_version'] = _origin_version(origin)
@@ -275,6 +277,8 @@ def _origin(state, binding):
                            and formal.get('current_attempt_id') == binding.get('formal_attempt_id')) else None
     if kind == 'step_review':
         step = state.get('steps', {}).get(binding.get('step_id'), {})
+        if not isinstance(step, dict):
+            return None
         return step.get('checkpoint_verification') if binding.get('checkpoint_id') else step.get('verification')
     if origin in {'meta_decision', 'meta_guidance_decision'}:
         return state.get(origin)
@@ -352,6 +356,9 @@ def role_results(state, role, source=None):
     refs = [r['source_ref'] for r in records]
     if len(set(refs)) != len(refs):
         return unavailable
+    if any(r.get('binding', {}).get('kind') == 'step_review'
+           and _origin(state, r['binding']) is None for r in records):
+        return unavailable
     history = [{**{key: r[key] for key in METADATA}, 'validity': _validity(state, r, records)} for r in records]
     matches = [r for r in records if r['source_ref'] == source] if source is not None else [
         r for r, metadata in zip(records, history) if metadata['validity'] == 'current']
@@ -360,6 +367,8 @@ def role_results(state, role, source=None):
             'content_status': 'empty', 'results': [], 'history': history}
     results = []
     for r in matches:
+        if r.get('content_status') == 'not_published':
+            continue
         metadata = next(h for h in history if h['source_ref'] == r['source_ref'])
         if r.get('format') != 'role-publication-v1':
             result = plan_results(state, role, r['source_ref'])['results'][0]
@@ -370,4 +379,4 @@ def role_results(state, role, source=None):
             if 'summary' in r:
                 result['summary'] = r['summary']
             results.append(result)
-    return {'content_status': 'published', 'results': results, 'history': history}
+    return {'content_status': 'published' if results else 'not_published', 'results': results, 'history': history}

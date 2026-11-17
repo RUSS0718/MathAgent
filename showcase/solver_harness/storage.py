@@ -465,6 +465,9 @@ class SolverStateStore:
             except (sqlite3.Error, KeyError, TypeError, ValueError) as exc:
                 connection.rollback()
                 raise SolverPersistenceError("commit_event") from exc
+            except BaseException:
+                connection.rollback()
+                raise
 
     def _read_run(self, run_id: str) -> dict[str, Any] | None:
         try:
