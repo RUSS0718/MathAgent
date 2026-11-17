@@ -1,8 +1,10 @@
 # MathAgent 文档索引
 
-2026-11-17 #199 角色阶段成果进入实施，先验收 #200 当前计划双入口，
-再按原生依赖推进 #201–#205。见[已确认设计](frontend/role-stage-summaries-contract.md)
-与[实施退出合同](engineering/role-stage-199-implementation.md)。尚未完成验收，
+2026-11-18 #199 角色阶段成果实施中：#200 当前计划双入口已独立退出；
+#201/#202 成果生产者及 #204 阅读缓存已集成，#203/#205 仍在实施。
+见[已确认设计](frontend/role-stage-summaries-contract.md)、
+[实施退出合同](engineering/role-stage-199-implementation.md)与
+[逐项验收记录](engineering/role-stage-199-acceptance.md)。父 spec 尚未完成验收，
 不将展示接线视作数学能力证据；#206 真实机制实验等待 #199 实际交付，
 并须核对下述 #189 原依赖题失败的修复及原场景复验。
 
