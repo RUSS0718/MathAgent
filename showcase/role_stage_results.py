@@ -102,6 +102,13 @@ def canonical_role(role):
     return ROLE_ALIASES.get(role, role)
 
 
+def save_committed_sources(state, updates, event):
+    from .role_stage_findings import collect as findings
+    from .role_stage_reviews import collect as reviews
+
+    return save_role_sources(state, updates, event, collectors=(findings, reviews))
+
+
 def _signature(state, record):
     payload = {key: value for key, value in record.items() if key != 'source_ref'}
     return hmac.new(str(state.get('run_salt') or state['run_id']).encode(),
@@ -132,6 +139,12 @@ def save_role_sources(state, updates, event, collectors=()):
                 record['authority_version'] = _origin_version(origin)
             if isinstance(publication.get('summary'), str):
                 record['summary'] = public_text(publication['summary'])
+            else:
+                summary = next((section['text'] for section in sections if section['label'] in {
+                    '阶段结论', '阶段主张（待检查）', '候选结论（未检查）', '研究发现（未验证）',
+                    '探索尝试（未验证）'}), None)
+                if summary:
+                    record['summary'] = summary
             record['source_ref'] = _signature(current, record)
             records.append(record)
             event = {**event, 'role_stage_source': record['source_ref'], 'role': role}
@@ -164,6 +177,11 @@ def _validity(state, record, records):
     if record.get('specification_version') != state.get('specification_version'):
         return 'invalidated'
     kind = binding.get('kind')
+    call_id = binding.get('call_id') or binding.get('review_call_id') or binding.get('generator_call_id')
+    if call_id:
+        call = state.get('calls', {}).get(call_id)
+        if not isinstance(call, dict) or call.get('run_id') != state.get('run_id') or call.get('status') != 'completed':
+            return 'invalidated'
     origin = _origin(state, binding)
     if 'authority_version' in record:
         if origin is None or _revoked(origin):
@@ -248,7 +266,9 @@ def _origin_version(origin):
 
 def _revoked(origin):
     return (origin.get('invalidated') is True or origin.get('valid') is False
-            or origin.get('invalidated_by_specification_version') is not None)
+            or origin.get('invalidated_by_specification_version') is not None
+            or isinstance(origin.get('runtime_qualification'), dict)
+            and origin['runtime_qualification'].get('verdict') == 'REJECT')
 
 
 def _live_result(state, entry, seen):
@@ -257,6 +277,17 @@ def _live_result(state, entry, seen):
             or entry.get('invalidated') is True or entry.get('status') in {'INVALIDATED', 'invalidated'}):
         return False
     seen = seen | {entry.get('result_id')}
+    graph = state.get('proof_graph')
+    if isinstance(graph, dict):
+        snapshots = [s for s in graph.get('snapshots', []) if s.get('graph_version') == graph.get('current_version')]
+        if len(snapshots) != 1:
+            return False
+        snapshot = snapshots[0]
+        linked = [a for a in snapshot.get('attempts', {}).values() if a.get('result_id') == entry.get('result_id')]
+        if linked and not any(a.get('status') == 'accepted'
+                              and snapshot.get('propositions', {}).get(a.get('conclusion'), {}).get('status') == 'supported'
+                              and not snapshot['propositions'][a['conclusion']].get('conflict') for a in linked):
+            return False
     for dependency in entry.get('dependencies', []):
         matches = [r for r in state.get('verified_results_ledger', []) if r.get('result_id') == dependency]
         if len(matches) == 1:
@@ -280,7 +311,8 @@ def role_results(state, role, source=None):
     if not isinstance(records, list) or any(not isinstance(r, dict) for r in records):
         return unavailable
     wanted_role = 'planner' if role == 'controller' else role
-    records = [r for r in records if r.get('role') == wanted_role]
+    records = [r for r in records if r.get('role') == role or (role == 'controller'
+               and r.get('role') == 'planner' and r.get('format') != 'role-publication-v1')]
     if any(not _valid_record(state, r) for r in records):
         return unavailable
     refs = [r['source_ref'] for r in records]

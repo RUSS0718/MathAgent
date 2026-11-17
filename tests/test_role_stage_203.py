@@ -113,3 +113,46 @@ class HistoricalApiTest(unittest.TestCase):
         service.store._connection.execute('UPDATE workspace_jobs SET user_id=? WHERE job_id=?', ('different-owner', self.job_id))
         service.store._connection.commit()
         self.assertEqual(404, self.client.get(self.url + '?source=' + self.ref).status_code)
+
+
+class AuthorityBindingTest(unittest.TestCase):
+    def publish(self, state, binding, role='reasoner'):
+        draft = dict(role=role, stage='saved_stage', sections=[dict(label='阶段结论', text='x≥0')],
+                     check=dict(scope='local', status='unreviewed', label='局部候选'), binding=binding)
+        updates, event = save_role_sources(state, {}, dict(type='saved', event_id='saved-A'),
+                                           collectors=[lambda state, event: [draft]])
+        state.update(updates)
+        return event['role_stage_source']
+
+    def test_report_source_missing_or_changed_never_remains_current(self):
+        state = dict(run_id='r', run_salt='salt', problem_hash='p', specification_version=1,
+                     plan_version=1, attempt_index=0, steps={'s': {'report': {'claims': ['x≥0']}}})
+        ref = self.publish(state, dict(validity_origin='steps', step_id='s'))
+        self.assertEqual('current', role_results(state, 'reasoner', ref)['results'][0]['validity'])
+        state['steps']['s']['report']['claims'] = ['x>0']
+        self.assertEqual('replaced', role_results(state, 'reasoner', ref)['results'][0]['validity'])
+        state['steps'] = {}
+        self.assertEqual('invalidated', role_results(state, 'reasoner', ref)['results'][0]['validity'])
+
+    def test_call_revocation_and_graph_conflict_override_unmodified_ledger(self):
+        state = dict(run_id='r', run_salt='salt', problem_hash='p', specification_version=1,
+                     plan_version=1, attempt_index=0,
+                     calls={'c': dict(run_id='r', status='completed')},
+                     verified_results_ledger=[dict(result_id='f', valid=True, invalidated=False, dependencies=[])])
+        ref = self.publish(state, dict(kind='classified_result', result_id='f', review_call_id='c'))
+        state['calls']['c']['status'] = 'invalidated'
+        self.assertEqual('invalidated', role_results(state, 'reasoner', ref)['results'][0]['validity'])
+        state['calls']['c']['status'] = 'completed'
+        state['proof_graph'] = {'current_version': 2, 'snapshots': [dict(graph_version=2,
+            attempts={'a': dict(result_id='f', status='accepted', conclusion='p')},
+            propositions={'p': dict(status='supported', conflict=True)})]}
+        self.assertEqual('invalidated', role_results(state, 'reasoner', ref)['results'][0]['validity'])
+
+    def test_each_role_has_exact_history_and_alias_is_canonical(self):
+        for role in ('controller', 'planner', 'explore', 'reasoner', 'researcher', 'step_verifier',
+                     'whole_solution_verifier', 'final_generator', 'meta'):
+            with self.subTest(role=role):
+                state = dict(run_id='r', run_salt='salt', problem_hash='p', specification_version=1,
+                             plan_version=1, attempt_index=0)
+                ref = self.publish(state, dict(kind='fixture'), role)
+                self.assertEqual(ref, role_results(state, role, ref)['results'][0]['source_ref'])
