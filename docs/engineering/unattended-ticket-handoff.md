@@ -1,5 +1,7 @@
 # 无人值守交接：189/193 工程验收通过，发布后停止
 
+2026-11-17 补充真实验收（受验源码60a5882976e758558b5bc3dd6620daa579135047）：真实8120启动及跨进程重启浏览器恢复通过，重启后101个真实GET、0console/pageerror，资产及S2/D/U既有答案/终态一致，业务身份audit不变。新隔离自然live05中S2成功且x=3独立核对正确（4HTTP/1工具）；D failed，第三步依赖S1/S2无可接受证明图成果，unsupported_graph_step_dependency，未交付完整答案（12HTTP/4工具、非预算耗尽/协议失败/远端unknown）；U依停止门控未提交。此轮真实自然求解未全通过，重新打开#189、PR198退回draft；#193历史恢复验收保留。旧通过/失败按各自源码保留，下文完成状态为补验前快照。新证据artifacts/issue189/live05-final60a5882/{assessment.md,assessment-summary.json}、artifacts/issue193-browser/final60a5882-live/after-restart/report.md和artifacts/issue193-ui/attempts/final60a5882restart/controller-audit.json。自有8119/8120已停止，临时检查已移除；8103保留。本次补验不追加修复或重复求解，不领取其他票。
+
 ## 当前状态与所有权（2026-11-17）
 
 主控root D:/project/工程化MathAgent/Challenge-Cup-2026，分支dependency-routing-189。最终gate02受验源码为ada7c20444bde0a6351947c736b63fe4595e92e1/tree445fce256c5446f25915914924c7445552a994b2，source_changed=false，门禁完成后冻结已解除。最终纯文档交付提交尚未产生，交付SHA由提交后的HEAD、PR及最终关票评论记录，与受验源码分记。用户原有改动保持；docs/README.md由主控partial stage处理。两份用户未跟踪合同及tests/test.md不读、不hash、不改、不提交。

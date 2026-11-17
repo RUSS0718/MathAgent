@@ -1,6 +1,6 @@
 # MathAgent 文档索引
 
-2026-11-17 #189/#193工程验收完成：冻结ada7c20门禁6/6通过（后端2311项、0失败/错误、42跳过；发布27项、前端87项），源码无漂移。S2/D成功、U失败与自然AC2未触发保留，真实post-fix服务重启仍未验证。按用户要求，推送关票后停止接续。见[阶段验收](evals/dependency-routing-189-20261117.md)、[#193合同](engineering/routing-ui-193-contract.md)与[当前交接](engineering/unattended-ticket-handoff.md)。
+2026-11-17 #189补充真实验收未全通过：最终UI真实启动/跨重启恢复通过；新自然S2正确，D因unsupported_graph_step_dependency失败、U未运行。#189重新打开，PR198退回draft，详见[补验记录](evals/dependency-routing-189-20261117.md)。
 
 2026-11-17 #188 用户答疑工程退出完成：冻结8db1006门禁6/6通过，后端2241项、0失败/错误、42跳过，源码无漂移；原失败保留。受控表达与fake回退不代表教学质量或数学效果提升。
 见 [实施设计](engineering/user-solving-188-design.md)、

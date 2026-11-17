@@ -1,5 +1,7 @@
 # #189 目标依赖分流阶段验收
 
+2026-11-17 补充真实验收（受验源码60a5882976e758558b5bc3dd6620daa579135047）：真实8120启动及跨进程重启浏览器恢复通过，重启后101个真实GET、0console/pageerror，资产及S2/D/U既有答案/终态一致，业务身份audit不变。新隔离自然live05中S2成功且x=3独立核对正确（4HTTP/1工具）；D failed，第三步依赖S1/S2无可接受证明图成果，unsupported_graph_step_dependency，未交付完整答案（12HTTP/4工具、非预算耗尽/协议失败/远端unknown）；U依停止门控未提交。此轮真实自然求解未全通过，重新打开#189、PR198退回draft；#193历史恢复验收保留。旧通过/失败按各自源码保留，下文完成状态为补验前快照。新证据artifacts/issue189/live05-final60a5882/{assessment.md,assessment-summary.json}、artifacts/issue193-browser/final60a5882-live/after-restart/report.md和artifacts/issue193-ui/attempts/final60a5882restart/controller-audit.json。自有8119/8120已停止，临时检查已移除；8103保留。本次补验不追加修复或重复求解，不领取其他票。
+
 2026-11-17，Asia/Shanghai。状态：#190/#191/#192已关闭；S2/D成功、U failed、自然AC2 not_triggered。最终受验源码ada7c20444bde0a6351947c736b63fe4595e92e1已含UI与四组门禁修复；新完整Vue DOM受控fixture独立4/4、原失败8方法8/8及相关25/25通过，受影响双轴均0确认问题/0阻断。gate01仍failed，最终gate02 passed 6/6、source_changed=false，本轮工程退出条件已通过。剩余主控最终提交、推送、PR ready及关票复核；发布前#189/#193仍open、PR198 draft，不预记远端状态，不声明数学能力或效率提升。
 
 ## 源码与边界
