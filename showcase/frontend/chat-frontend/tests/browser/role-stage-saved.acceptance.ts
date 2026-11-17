@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('saved backend dual entry and history remain read-only after task failure', async ({ page, request }) => {
+test('saved backend dual entry and history remain read-only after task failure', async ({ page, request }, testInfo) => {
   const seed = await (await request.get('http://127.0.0.1:5182/_role-stage-fixture')).json()
   const before = await (await request.get('http://127.0.0.1:5182/_role-stage-audit')).json()
   const writes: string[] = []
@@ -36,6 +36,10 @@ test('saved backend dual entry and history remain read-only after task failure',
   await expect(panel).toContainText('保存目标第 2 版')
   await page.screenshot({ path: '../../../artifacts/role-stage-199/saved-browser-panel.png' })
   const after = await (await request.get('http://127.0.0.1:5182/_role-stage-audit')).json()
+  await testInfo.attach('saved-business-audit', {
+    contentType: 'application/json',
+    body: JSON.stringify({ evidence_kind: 'controlled_saved_fixture', before, after, writes, errors }, null, 2),
+  })
   expect(after).toEqual(before)
   expect(before.worker_enabled).toBe(false)
   expect(before.calls).toEqual({})

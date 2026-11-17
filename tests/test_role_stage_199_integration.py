@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from showcase.flask_app import create_app
 from showcase.solver_harness import SolverHarness
+from tests.star_product_support import StarJobFixture
 
 
 class BackgroundAttributionTest(unittest.TestCase):
@@ -68,3 +69,42 @@ class BackgroundAttributionTest(unittest.TestCase):
                 self.assertEqual('replaced', old['validity'])
                 self.assertEqual(2, client.get(url).json['results'][0]['plan_version'])
             self.assertEqual(after_background, business_snapshot())
+
+
+class NormalSavePublicationTest(StarJobFixture, unittest.TestCase):
+    def test_normal_scripted_pipeline_publishes_each_saved_role_without_read_dispatch(self):
+        from copy import deepcopy
+        import os
+        from showcase.run_budget import RunBudgetLimits
+        from tests.test_faithful_s03_job import CAPACITY_POLICY, ENDPOINT, FEATURES, REPLIES, SPEC
+
+        self.enterContext(patch.dict(os.environ, {'INTERN_API_BASE': ENDPOINT}))
+        replies = deepcopy(REPLIES)
+        replies[0]['worked'] = ['对所列整数表达式，$1+1=2$。']
+        self.open_star(replies, SHOWCASE_STAR_FEATURES=FEATURES,
+                       SHOWCASE_STAR_CONTEXT_CAPACITY=CAPACITY_POLICY,
+                       SHOWCASE_STAR_BUDGET=RunBudgetLimits(
+                           max_model_calls=8, max_http_attempts=8, max_tool_calls=0))
+        created = self.client.post('/api/agent/jobs', headers=self.headers(), json={
+            'message': '1+1', 'session_id': self.session, 'solver_mode': 'star_limited',
+            'problem_spec': SPEC})
+        self.assertEqual(202, created.status_code, created.json)
+        job = created.json['job_id']
+        self.assertEqual('succeeded', self.terminal(job)['status'])
+        self.assertEqual(6, len(self.outbound))
+        ordinary = self.app.test_client()
+        ordinary.get('/api/check_auth')
+        for role in ('controller', 'planner', 'explore', 'reasoner', 'step_verifier',
+                     'whole_solution_verifier', 'final_generator'):
+            with self.subTest(role=role):
+                url = f'/api/agent/jobs/{job}/role-results/{role}'
+                response = ordinary.get(url)
+                self.assertEqual(200, response.status_code)
+                self.assertEqual('published', response.json['content_status'], response.json)
+                self.assertTrue(response.json['results'])
+                for result in response.json['results']:
+                    exact = ordinary.get(url + '?source=' + result['source_ref']).json
+                    self.assertEqual([result], exact['results'])
+                self.assertNotIn('PRIVATE_ROOT_STATEMENT', response.text)
+                self.assertNotIn('argument', response.text)
+        self.assertEqual(6, len(self.outbound), 'viewing must not dispatch another request')
