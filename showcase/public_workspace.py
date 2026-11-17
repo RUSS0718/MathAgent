@@ -74,6 +74,25 @@ def event_data(event):
     safe = fields(raw, ('role','stage','phase','status','created_at','step_id','solver_event_type',
                        'call_lifecycle','call_status','plan_version','attempt_index','verdict','valid'))
     safe['type'] = event['event']
+    kind = raw.get('solver_event_type')
+    routing = {
+        'objective_dependencies': '题目中的目标有先后依赖，先制定分步方案。',
+        'initial_explore_output_limit': '本次探索达到输出上限，转入制定方案。',
+        'initial_explore_incomplete': '本次探索未完成，转入制定方案。',
+    }
+    if kind == 'adaptive_planning_required' and raw.get('reason') in routing:
+        safe['routing_summary'] = routing[raw['reason']]
+    elif kind == 'explore_assessed':
+        routes = {
+            ('SOLVED', 'EXPLORE_REVIEW'): '已形成完整候选，交由独立答案审查。',
+            ('NEED_PLAN', 'PLAN'): '探索表明需要分步处理，转入制定方案。',
+            ('PARTIALLY_SOLVED', 'PLAN'): '已取得部分进展，转入分步求解。',
+            ('UNKNOWN', 'PLAN'): '本次探索尚不能形成完整答案，转入制定方案。',
+            ('PARTIALLY_SOLVED', 'EXPLORE'): '已取得部分进展，继续探索。',
+        }
+        summary = routes.get((raw.get('assessment'), raw.get('next_phase')))
+        if summary:
+            safe['routing_summary'] = summary
     if 'solver_call_id' in raw:
         safe['solver_call_id'] = opaque(raw['solver_call_id'])
     if isinstance(raw.get('solver'), Mapping):

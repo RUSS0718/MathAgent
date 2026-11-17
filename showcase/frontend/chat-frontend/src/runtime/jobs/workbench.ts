@@ -76,7 +76,7 @@ export function projectWorkbench(events: DecodedSseEvent[], result: unknown, rep
     const data = entry.event.data
     const key = JSON.stringify([typeOf(entry.event), data.plan_version ?? entry.message?.plan_version,
       data.attempt_index ?? entry.message?.attempt_index, entry.step, data.verdict, data.valid,
-      data.status, data.call_lifecycle ?? data.call_status, data.solver_call_id, data.decision, entry.message?.thread_id, entry.message?.kind, entry.message?.summary])
+      progressText(entry.event).summary, data.status, data.call_lifecycle ?? data.call_status, data.solver_call_id, data.decision, entry.message?.thread_id, entry.message?.kind, entry.message?.summary])
     if (semantic.has(key)) return false
     semantic.add(key)
     return true

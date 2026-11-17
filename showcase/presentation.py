@@ -51,6 +51,13 @@ def presentation_snapshot(job, public_report=None):
                 and semantics.get("binding") == "same_artifact")
     sources = []
     for item in checked.get("history", []):
+        source = item.get("source") or {}
+        if (source and (source.get("run_id") != job["job_id"]
+                or any(key in progress and source.get(key) != progress[key]
+                       for key in ("specification_version", "plan_version", "attempt_index")))):
+            continue
+        if solver.get("run_id") and not source:
+            continue
         if (item.get("artifact") != artifact_identity(answer)
                 or item.get("scope") != "whole_solution_llm_review" or not reviewed):
             continue
@@ -233,7 +240,7 @@ def build_presentation(snapshot, mode, *, paragraphs=None):
         reviewed_answer = any(item["kind"] == "mathematical" and item["text"] == snapshot["answer"]
                               and item["status"] == "current" and item["grade"] == "llm_reviewed"
                               for item in output)
-        complete = (complete and snapshot["whole_review"] == "accepted"
+        complete = (snapshot["job_status"] == "succeeded" and snapshot["whole_review"] == "accepted"
                     and snapshot["answer_binding"] == "same_artifact"
                     and reviewed_answer and not no_candidate
                     and (not selection or selection.get("completeness") == "complete"))
