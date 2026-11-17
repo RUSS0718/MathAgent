@@ -21,7 +21,7 @@
   `uv run python scripts/run_unittest_report.py --expect-count 1 tests.test_role_stage_199_integration.BackgroundAttributionTest.test_reads_and_prearranged_background_commit_have_separate_attribution`
   在起点源码上通过。日志 `artifacts/role-stage-199/background-attribution-02.log`。
   首次夹具未启动 Job 的失败保留于 `background-attribution.log`。
-- `role-stage-saved.spec.ts`、`playwright.role-stage-saved.config.ts` 与
+- `role-stage-saved.acceptance.ts`、`playwright.role-stage-saved.config.ts` 与
   `role-stage-saved-server.py`：实际后端到桌面贯通。基线红例已稳定定位到
   历史面板缺少“查看当前成果”操作，日志
   `artifacts/role-stage-199/red-saved-browser-02.log`。首次断言文案与既有状态
