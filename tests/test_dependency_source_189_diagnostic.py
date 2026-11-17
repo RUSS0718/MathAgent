@@ -5,6 +5,7 @@ The unchanged captured D replay remains in ignored diagnostic artifacts.
 """
 
 import unittest
+import uuid
 
 from showcase.run_budget import RunBudgetLimits
 from tests.star_product_support import ACCEPT, StarJobFixture
@@ -13,6 +14,98 @@ from tests.test_star_product_tools import NEED_PLAN
 
 
 class DependencySource189DiagnosticTest(StarJobFixture, unittest.TestCase):
+    def test_unknown_reclassification_explicit_retry_keeps_identity_and_budget(self):
+        job_id, terminal, result = self.run_case(TimeoutError("controlled unknown"), budget=10)
+        old_id = result["recovery"]["unknown_calls"][0]["call_id"]
+        old_budget = terminal["result"]["budget"]
+        original = self.outbound[4]
+        for decision in ({}, {"retry_call": {"call_id": "unrelated", "new_call_id": str(uuid.uuid4())}},
+                         {"retry_call": {"call_id": old_id, "new_call_id": old_id}}):
+            response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json=decision,
+                                        headers=self.headers())
+            self.assertEqual(409, response.status_code)
+        self.assertEqual(5, len(self.outbound))
+
+        new_id = str(uuid.uuid4())
+        self.replies.insert(0, {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT",
+            "objection": "", "classified_outcomes": [{"category": "Lemma", "statement": "parent result",
+                "scope": "parent", "claim_indexes": [0]}]})
+        response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={"retry_call": {
+            "call_id": old_id, "new_call_id": new_id}}, headers=self.headers())
+        self.assertEqual(202, response.status_code)
+        final = self.terminal(job_id)
+        self.assertEqual("succeeded", final["status"], final)
+        self.assertEqual(10, len(self.outbound))
+        retried = self.outbound[5]
+        self.assertEqual(new_id, retried["call_id"])
+        for key in ("report", "step", "checkpoint", "specification_version", "reclassification_of"):
+            self.assertEqual(original.get(key), retried.get(key), key)
+        self.assertEqual(2, sum("reclassification_of" in row for row in self.outbound))
+        budget = final["result"]["budget"]
+        self.assertEqual(old_budget["deadline_at"], budget["deadline_at"])
+        self.assertEqual(old_budget["reserved_tokens"], budget["reserved_tokens"])
+        self.assertEqual(1, budget["unknown_attempts"])
+        self.assertEqual(10, budget["http_attempts"])
+        self.assertEqual(10, budget["logical_calls"])
+        recovery = self.report(job_id)["solver"]["solver"]["recovery"]
+        self.assertEqual([], recovery["unknown_calls"])
+        self.assertEqual(1, len(recovery["retries"]))
+        self.assertEqual(old_id, recovery["retries"][0]["retry_of"])
+        evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
+        self.assertEqual(1, sum(row.get("solver_event_type") == "dependency_review_reserved"
+                                for row in evidence["timeline"]))
+
+    def test_second_unknown_needs_new_decision_and_retried_challenge_stops(self):
+        job_id, first, result = self.run_case(TimeoutError("first unknown"), budget=12)
+        original_budget = first["result"]["budget"]
+        original = self.outbound[4]
+        replies = [TimeoutError("second unknown"), {
+            "goal_gate": "PARTIAL", "logic_gate": "UNCERTAIN", "verdict": "CHALLENGE",
+            "objection": "Only a local lemma",
+            "classified_outcomes": [{"category": "Lemma", "statement": "parent result",
+                "scope": "parent", "claim_indexes": [0]}]}]
+        for index, reply in enumerate(replies):
+            self.replies.insert(0, reply)
+            old_id = result["recovery"]["unknown_calls"][0]["call_id"]
+            ordinary = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={}, headers=self.headers())
+            self.assertEqual(409, ordinary.status_code)
+            self.assertEqual(5 + index, len(self.outbound))
+            response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={"retry_call": {
+                "call_id": old_id, "new_call_id": str(uuid.uuid4())}}, headers=self.headers())
+            self.assertEqual(202, response.status_code)
+            final = self.terminal(job_id)
+            result = self.report(job_id)["solver"]["solver"]
+            self.assertEqual("failed", final["status"])
+        self.assertEqual(7, len(self.outbound))
+        self.assertTrue(all(row["role"] == "step_verifier" for row in self.outbound[3:]))
+        self.assertEqual("dependency_reclassification_failed", result["result_reason"])
+        self.assertEqual(2, len(result["recovery"]["retries"]))
+        self.assertEqual([], result["recovery"]["unknown_calls"])
+        self.assertEqual(2, final["result"]["budget"]["unknown_attempts"])
+        self.assertEqual(original_budget["deadline_at"], final["result"]["budget"]["deadline_at"])
+        for retry in self.outbound[5:]:
+            for key in ("report", "step", "checkpoint", "specification_version", "reclassification_of"):
+                self.assertEqual(original.get(key), retry.get(key), key)
+        evidence = self.client.get(f"/api/runs/{job_id}/evidence").get_json()
+        self.assertEqual(1, sum(row.get("solver_event_type") == "dependency_review_reserved"
+                                for row in evidence["timeline"]))
+
+    def test_new_challenge_with_legal_partial_lemma_stops_without_more_search(self):
+        job_id, terminal, result = self.run_case({
+            "goal_gate": "PARTIAL", "logic_gate": "UNCERTAIN", "verdict": "CHALLENGE",
+            "objection": "Only a local lemma is proved",
+            "classified_outcomes": [{"category": "Lemma", "statement": "parent result",
+                "scope": "parent", "claim_indexes": [0]}]})
+        self.assertEqual("failed", terminal["status"])
+        self.assertEqual("dependency_reclassification_failed", result["result_reason"])
+        self.assertEqual(["explore", "planner", "reasoner", "step_verifier", "step_verifier"],
+                         [request["role"] for request in self.outbound])
+        for _ in range(2):
+            self.report(job_id)
+            response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={}, headers=self.headers())
+            self.assertEqual(409, response.status_code)
+        self.assertEqual(5, len(self.outbound))
+
     def run_case(self, replacement, *, budget=9, enabled=True, dependency=True, repair=False,
                  parent_review=None, include_replacement=True):
         report = {"argument": "controlled proof", "claims": [
