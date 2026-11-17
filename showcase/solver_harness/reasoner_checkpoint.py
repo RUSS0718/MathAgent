@@ -75,6 +75,56 @@ def same_draft(left, right):
     return all(left.get(key) == right.get(key) for key in keys)
 
 
+def tool_completion_receipts(checkpoint, parent, state, step_id):
+    """Allow one same-object FINAL only against its committed successful precheck."""
+    from .computation_evidence import has_computation_output
+
+    if (parent is None or parent.get("status") != "YIELD"
+            or checkpoint["status"] != "FINAL" or checkpoint["blocked"]
+            or checkpoint["checkpoint_id"] != parent["checkpoint_id"]
+            or any(checkpoint[key] != parent[key]
+                   for key in ("objective", "dependencies", "evidence"))
+            or len(checkpoint["claims"]) != len(parent["claims"])):
+        return None
+    call = state.get("calls", {}).get(parent.get("call_id"), {})
+    if (call.get("status") != "completed" or call.get("role") != "reasoner"
+            or call.get("request", {}).get("problem_spec_version")
+            != (state.get("problem_spec") or {}).get("specification_version")
+            or any(call.get(key) != state.get(key)
+                   for key in ("run_id", "plan_version", "attempt_index", "problem_hash", "config_hash"))
+            or call.get("request", {}).get("step", {}).get("step_id") != step_id):
+        return None
+    report = state.get("steps", {}).get(step_id, {}).get("report", {})
+    prior_claims = report.get("claims", [])
+    if len(prior_claims) != len(checkpoint["claims"]):
+        return None
+    receipts = {r["receipt_id"]: r for r in state.get("tool_receipts", [])}
+    used = []
+    for index, (old, new, checked) in enumerate(zip(parent["claims"], checkpoint["claims"], prior_claims)):
+        if new["statement"] != old["statement"] or new.get("tool_request"):
+            return None
+        refs = new.get("tool_evidence_refs", [])
+        if not old.get("tool_request"):
+            if refs or new["label"] != old["label"]:
+                return None
+            continue
+        if (old["label"] != "easy-verify" or new["label"] != "verified"
+                or not refs or refs != checked.get("tool_evidence_refs")):
+            return None
+        for ref in refs:
+            receipt = receipts.get(ref, {})
+            if (receipt.get("status") != "success" or receipt.get("executed") is not True
+                    or receipt.get("unknown_outcome") or not has_computation_output(receipt)
+                    or receipt.get("claim_index") != index or receipt.get("step_id") != step_id
+                    or receipt.get("tool") != old["tool_request"]["tool"]
+                    or receipt.get("input") != old["tool_request"]["arguments"]
+                    or any(receipt.get(key) != state.get(key)
+                           for key in ("run_id", "plan_version", "attempt_index"))):
+                return None
+            used.append(deepcopy(receipt))
+    return used or None
+
+
 def feedback(checkpoint, *, objection=None):
     result = {
         "accepted": ["checkpoint_schema_and_semantics"],

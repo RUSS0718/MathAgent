@@ -134,6 +134,12 @@ def verify_step(
     ) if checkpoint_mode else None
     if checkpoint is not None:
         suffix += f"-checkpoint-{checkpoint['checkpoint_id']}"
+        if any(item is not checkpoint and item.get("checkpoint_id") == checkpoint["checkpoint_id"]
+               and item.get("step_id") == step_id
+               and item.get("plan_version") == state["plan_version"]
+               and item.get("attempt_index") == state["attempt_index"]
+               for item in state.get("reasoner_checkpoints", [])):
+            suffix += f"-round-{checkpoint['round']}"
     counters = dict(state["counters"])
     from .budget import budget_reason
 
