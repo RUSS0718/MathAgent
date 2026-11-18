@@ -75,6 +75,134 @@ def same_draft(left, right):
     return all(left.get(key) == right.get(key) for key in keys)
 
 
+def tool_completion_receipts(checkpoint, parent, state, step_id):
+    """Allow one same-object FINAL only against its committed successful precheck."""
+    from .computation_evidence import has_computation_output
+
+    if (parent is None or parent.get("status") != "YIELD"
+            or checkpoint["status"] != "FINAL" or checkpoint["blocked"]
+            or checkpoint["checkpoint_id"] != parent["checkpoint_id"]
+            or any(checkpoint[key] != parent[key]
+                   for key in ("objective", "dependencies", "evidence"))
+            or len(checkpoint["claims"]) != len(parent["claims"])):
+        return None
+    call = state.get("calls", {}).get(parent.get("call_id"), {})
+    if (call.get("status") != "completed" or call.get("role") != "reasoner"
+            or call.get("request", {}).get("problem_spec_version")
+            != (state.get("problem_spec") or {}).get("specification_version")
+            or any(call.get(key) != state.get(key)
+                   for key in ("run_id", "plan_version", "attempt_index", "problem_hash", "config_hash"))
+            or call.get("request", {}).get("step", {}).get("step_id") != step_id):
+        return None
+    report = state.get("steps", {}).get(step_id, {}).get("report", {})
+    prior_claims = report.get("claims", [])
+    if len(prior_claims) != len(checkpoint["claims"]):
+        return None
+    receipts = {r["receipt_id"]: r for r in state.get("tool_receipts", [])}
+    used = []
+    for index, (old, new, checked) in enumerate(zip(parent["claims"], checkpoint["claims"], prior_claims)):
+        if new["statement"] != old["statement"] or new.get("tool_request"):
+            return None
+        refs = new.get("tool_evidence_refs", [])
+        if not old.get("tool_request"):
+            if refs or new["label"] != old["label"]:
+                return None
+            continue
+        if (old["label"] != "easy-verify" or new["label"] != "verified"
+                or not refs or refs != checked.get("tool_evidence_refs")):
+            return None
+        for ref in refs:
+            receipt = receipts.get(ref, {})
+            if (receipt.get("status") != "success" or receipt.get("executed") is not True
+                    or receipt.get("unknown_outcome") or not has_computation_output(receipt)
+                    or receipt.get("claim_index") != index or receipt.get("step_id") != step_id
+                    or receipt.get("tool") != old["tool_request"]["tool"]
+                    or receipt.get("input") != old["tool_request"]["arguments"]
+                    or any(receipt.get(key) != state.get(key)
+                           for key in ("run_id", "plan_version", "attempt_index"))):
+                return None
+            used.append(deepcopy(receipt))
+    return used or None
+
+
+def checkpoint_tool_receipts(checkpoint, run, step):
+    """Resolve explicit citations to committed, successful, scoped computations."""
+    from .computation_evidence import has_computation_output
+
+    state = run["state"]
+    receipts = {r["receipt_id"]: r for r in state.get("tool_receipts", [])}
+    committed = {e.get("receipt", {}).get("receipt_id"): e.get("receipt")
+                 for e in run["events"] if e.get("type") == "tool_receipt"}
+    allowed_steps = {step["step_id"]}
+    pending = list(step.get("depends_on", []))
+    plan_steps = {s["step_id"]: s for s in (state.get("plan") or {}).get("steps", [])}
+    while pending:
+        source = pending.pop()
+        if source in allowed_steps:
+            continue
+        record = state.get("steps", {}).get(source, {})
+        if (record.get("status") != "ACCEPTED"
+                or record.get("verification", {}).get("valid") is not True):
+            continue
+        allowed_steps.add(source)
+        pending.extend(plan_steps.get(source, {}).get("depends_on", []))
+    used = {}
+    for claim in checkpoint["claims"]:
+        for ref in claim.get("tool_evidence_refs", []):
+            receipt = receipts.get(ref, {})
+            if (not receipt or committed.get(ref) != receipt
+                    or receipt.get("status") != "success" or receipt.get("executed") is not True
+                    or type(receipt.get("exit_code")) is not int or receipt["exit_code"] != 0
+                    or receipt.get("comparison_status") == "mismatched"
+                    or receipt.get("unknown_outcome") or not has_computation_output(receipt)
+                    or receipt.get("step_id") not in allowed_steps
+                    or (receipt.get("step_id") != step["step_id"] and ref not in
+                        state["steps"][receipt["step_id"]].get("report", {}).get("tool_evidence_refs", []))
+                    or any(receipt.get(k) != state.get(k)
+                           for k in ("run_id", "plan_version", "attempt_index"))):
+                raise ValueError("invalid_checkpoint_tool_evidence")
+            # Bind the target and input to the original request, never to a label.
+            source_found = False
+            for source in current_checkpoints({**state, "current_step": receipt["step_id"]}):
+                call = state.get("calls", {}).get(source.get("call_id"), {})
+                index = receipt.get("claim_index")
+                claims = source.get("claims", [])
+                if (source.get("step_id") != receipt["step_id"]
+                        or type(index) is not int or not 0 <= index < len(claims)
+                        or call.get("status") != "completed" or call.get("role") != "reasoner"
+                        or any(call.get(k) != state.get(k) for k in
+                               ("run_id", "plan_version", "attempt_index", "problem_hash", "config_hash"))
+                        or call.get("request", {}).get("problem_spec_version")
+                        != (state.get("problem_spec") or {}).get("specification_version")
+                        or call.get("request", {}).get("step", {}).get("step_id") != receipt["step_id"]):
+                    continue
+                original = claims[index]
+                request = original.get("tool_request") or {}
+                if (original["statement"] == claim["statement"]
+                        and request.get("scope") == "finite_computation"
+                        and request.get("tool") == receipt.get("tool")
+                        and request.get("arguments") == receipt.get("input")
+                        and (not claim.get("tool_request") or claim["tool_request"] == request)):
+                    source_found = True
+                    break
+            if not source_found:
+                raise ValueError("invalid_checkpoint_tool_evidence")
+            used[ref] = deepcopy(receipt)
+    return list(used.values())
+
+
+def validated_report(checkpoint, run, step):
+    """Resolve citations before either checkpoint handoff persists its report."""
+    receipts = checkpoint_tool_receipts(checkpoint, run, step)
+    report = to_report(checkpoint, step)
+    report["tool_receipts"] = receipts
+    report["tool_evidence_refs"] = [r["receipt_id"] for r in receipts]
+    for claim in report["claims"]:
+        if claim["tool_evidence_refs"]:
+            claim["verification_scope"] = "finite_computation"
+    return report
+
+
 def feedback(checkpoint, *, objection=None):
     result = {
         "accepted": ["checkpoint_schema_and_semantics"],
@@ -117,7 +245,7 @@ def to_report(checkpoint, step):
         normalized = {
             "statement": claim["statement"],
             "label": claim["label"],
-            "tool_evidence_refs": [],
+            "tool_evidence_refs": list(claim.get("tool_evidence_refs", [])),
         }
         if isinstance(claim.get("tool_request"), Mapping):
             normalized["tool_request"] = dict(claim["tool_request"])

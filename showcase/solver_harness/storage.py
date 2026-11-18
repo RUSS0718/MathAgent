@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,6 +15,50 @@ from ..run_control import RunStopped
 from .product_control import controlled_patch
 
 _SOLVER_STORAGE_LOCK = threading.RLock()
+
+
+class _StreamHistory(Sequence):
+    """Share validated prefixes between internal stream snapshots without copying them."""
+
+    def __init__(self, prefix, events, run_id):
+        if any(not isinstance(event, dict) or event.get("run_id") != run_id for event in events):
+            raise SolverPersistenceError("stream_history")
+        for event in events:
+            event.pop("_request_hash", None)
+        self.prefix = prefix
+        self.events = events
+        self.size = len(prefix) + len(events)
+
+    def __len__(self):
+        return self.size
+
+    def __iter__(self):
+        blocks = []
+        node = self
+        while isinstance(node, _StreamHistory):
+            blocks.append(node.events)
+            node = node.prefix
+        yield from node
+        for block in reversed(blocks):
+            yield from block
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return list(self)[index]
+        if index < 0:
+            index += self.size
+        if index < 0 or index >= self.size:
+            raise IndexError(index)
+        node = self
+        while isinstance(node, _StreamHistory):
+            prefix_size = len(node.prefix)
+            if index >= prefix_size:
+                return node.events[index - prefix_size]
+            node = node.prefix
+        return node[index]
+
+    def __deepcopy__(self, memo):
+        return deepcopy(list(self), memo)
 
 
 def read_owned_snapshot(store, user_id: str, job_id: str) -> tuple[dict, dict]:
@@ -176,7 +221,7 @@ class SolverStateStore:
             raise SolverPersistenceError("create_run") from exc
         return True
 
-    def get_run(self, run_id: str) -> dict[str, Any] | None:
+    def get_run(self, run_id: str, *, _history=None) -> dict[str, Any] | None:
         """Return one snapshot and its events, validating their shared identity."""
 
         with _SOLVER_STORAGE_LOCK:
@@ -184,7 +229,7 @@ class SolverStateStore:
             try:
                 if owns_transaction:
                     self._connection.execute("BEGIN")
-                result = self._read_run(run_id)
+                result = self._read_run(run_id, _history=_history)
                 if owns_transaction:
                     self._connection.commit()
                 return result
@@ -416,7 +461,7 @@ class SolverStateStore:
                     if (
                         validated_run.get("run_id") != run_id
                         or validated_run.get("state_revision") != expected_revision
-                        or not isinstance(validated_run.get("events"), list)
+                        or not isinstance(validated_run.get("events"), (list, _StreamHistory))
                         or not isinstance(validated_state, Mapping)
                         or validated_state.get("run_id") != run_id
                         or validated_state.get("problem_hash") != row["problem_hash"]
@@ -424,10 +469,13 @@ class SolverStateStore:
                         or validated_state.get("state_revision") != expected_revision
                     ):
                         raise SolverPersistenceError("commit_event")
-                    events = [dict(item) for item in validated_run["events"]]
                     public_event = dict(stored_event)
                     public_event.pop("_request_hash", None)
-                    events.append(public_event)
+                    if isinstance(validated_run["events"], _StreamHistory):
+                        events = _StreamHistory(validated_run["events"], [public_event], run_id)
+                    else:
+                        events = [dict(item) for item in validated_run["events"]]
+                        events.append(public_event)
                 else:
                     event_rows = connection.execute(
                         """
@@ -469,7 +517,7 @@ class SolverStateStore:
                 connection.rollback()
                 raise
 
-    def _read_run(self, run_id: str) -> dict[str, Any] | None:
+    def _read_run(self, run_id: str, *, _history=None) -> dict[str, Any] | None:
         try:
             row = self._connection.execute(
                 """
@@ -480,14 +528,26 @@ class SolverStateStore:
             ).fetchone()
             if row is None:
                 return None
+            reuse_history = (
+                _history is not None
+                and _history.get("run_id") == run_id
+                and _history["state"].get("problem_hash") == row["problem_hash"]
+                and _history["state"].get("config_hash") == row["config_hash"]
+                and _history["state_revision"] == _history["state"].get("state_revision")
+                and _history["state_revision"] <= row["state_revision"]
+            )
+            prefix = _history["events"] if reuse_history else []
             event_rows = self._connection.execute(
                 """
                 SELECT event_json FROM solver_events
-                WHERE run_id = ? ORDER BY sequence
+                WHERE run_id = ? AND sequence > ? ORDER BY sequence
                 """,
-                (run_id,),
+                (run_id, len(prefix)),
             ).fetchall()
             events = [json.loads(item["event_json"]) for item in event_rows]
+            if _history is not None:
+                events = (prefix if not events and isinstance(prefix, _StreamHistory)
+                          else _StreamHistory(prefix, events, run_id))
             return self._materialize_run(
                 run_id,
                 json.loads(row["state_json"]),
@@ -509,7 +569,7 @@ class SolverStateStore:
         problem_hash: str,
         config_hash: str,
         state_revision: int,
-        events: list[Any],
+        events: Sequence[Any],
         operation: str,
     ) -> dict[str, Any]:
         """Build a public Run projection from already-read snapshot data."""
@@ -524,10 +584,11 @@ class SolverStateStore:
             raise SolverPersistenceError(operation)
         if isinstance(state.get("calls"), dict):
             state["calls"] = _PublicCallLookup(run_id, state["calls"])
-        if any(not isinstance(event, dict) or event.get("run_id") != run_id for event in events):
-            raise SolverPersistenceError(operation)
-        for event in events:
-            event.pop("_request_hash", None)
+        if not isinstance(events, _StreamHistory):
+            if any(not isinstance(event, dict) or event.get("run_id") != run_id for event in events):
+                raise SolverPersistenceError(operation)
+            for event in events:
+                event.pop("_request_hash", None)
         return {
             "run_id": run_id,
             "state": state,

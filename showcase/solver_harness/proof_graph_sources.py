@@ -73,6 +73,43 @@ def reasoner_report_call(state, step_id, report, plan_version, attempt_index, be
     return source['source_id'] if source else None
 
 
+def _review_dependencies_match(state: Mapping, record: Mapping, declared: list) -> bool:
+    """Check persisted step bindings without reselecting an OR support."""
+    dependencies = record.get("dependencies", [])
+    if not isinstance(declared, list) or not isinstance(dependencies, list):
+        return False
+    if len(declared) != len(dependencies):
+        return False
+    snapshots = state.get("proof_graph", {}).get("snapshots", [])
+    snapshot = snapshots[-1] if snapshots else {}
+    derivations = {item.get("result_id"): item
+                   for item in snapshot.get("derivations", {}).values()}
+    binding = derivations.get(record.get("result_id"), {})
+    historical = (binding.get("ledger_dependencies") == dependencies
+                  and f"review:{record.get('review_call_id')}" in binding.get("source_refs", []))
+    rows = {row.get("result_id"): row for row in state.get("verified_results_ledger", [])
+            if isinstance(row, Mapping)}
+    for step, dependency in zip(declared, dependencies):
+        if not isinstance(step, str) or not isinstance(dependency, str):
+            return False
+        if step not in state.get("steps", {}):
+            if step != dependency:
+                return False
+        elif historical:
+            # The original result remains a reference to the same proposition,
+            # even when its own attempt has been withdrawn. Current support and
+            # irreversible invalidation are enforced by graph evolution.
+            parent = derivations.get(dependency, {}).get("conclusion")
+            if (rows.get(dependency, {}).get("source") != step
+                    or parent not in binding.get("premises", [])
+                    or snapshot.get("propositions", {}).get(parent, {}).get("problem_version")
+                    != state.get("specification_version", 0)):
+                return False
+        elif graph_step_result(state, step) != dependency:
+            return False
+    return True
+
+
 def _verify_record(state: Mapping, record: Mapping) -> tuple[dict | None, str | None]:
     expected_version = state.get("specification_version", 0)
     if (record.get("specification_version", 0) != expected_version
@@ -129,8 +166,7 @@ def _verify_record(state: Mapping, record: Mapping) -> tuple[dict | None, str | 
         and item.get("scope") == scope
         and item.get("claim_indexes", []) == record.get("claim_indexes", [])
         and item.get("receipt_ids", []) == record.get("receipt_ids", [])
-        and [graph_step_result(state, dep) if dep in state.get("steps", {}) else dep
-             for dep in item.get("dependencies", [])] == record.get("dependencies", [])
+        and _review_dependencies_match(state, record, item.get("dependencies", []))
         for item in response.get("classified_outcomes", [])
     ):
         return None, "review_did_not_accept_record"

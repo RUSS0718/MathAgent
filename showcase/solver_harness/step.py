@@ -197,19 +197,40 @@ def run_step(
     if checkpoint_mode:
         try:
             checkpoint = reasoner_checkpoint.parse(reply)
+            failed_checkpoint_call = harness.get_run(run["run_id"])["state"].get("calls", {}).get(
+                request["call_id"], {})
+            if protocol_repair.known_protocol_failure(failed_checkpoint_call):
+                protocol_repair.validate_checkpoint_repair(checkpoint, failed_checkpoint_call)
         except ValueError as exc:
             return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", str(exc))
         if checkpoint["objective"] != step["objective"]:
             return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", "invalid_reasoner_checkpoint_objective")
-        if any(item.get("checkpoint_id") == checkpoint["checkpoint_id"]
-               for item in current_checkpoints):
+        completion_receipts = reasoner_checkpoint.tool_completion_receipts(
+            checkpoint, parent_checkpoint, state, step_id,
+        )
+        if completion_receipts is None and any(
+            item.get("checkpoint_id") == checkpoint["checkpoint_id"]
+            for item in current_checkpoints
+        ):
             return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", "reasoner_checkpoint_no_progress")
-        if parent_checkpoint is not None and (
+        if completion_receipts is None and parent_checkpoint is not None and (
             checkpoint["checkpoint_id"] == parent_checkpoint["checkpoint_id"]
             or reasoner_checkpoint.same_draft(checkpoint, parent_checkpoint)
         ):
             return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", "reasoner_checkpoint_no_progress")
-        report = reasoner_checkpoint.to_report(checkpoint, step)
+        try:
+            report = reasoner_checkpoint.validated_report(
+                checkpoint, harness.get_run(run["run_id"]), step)
+        except ValueError as exc:
+            return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", str(exc))
+        if completion_receipts is not None:
+            for claim, original in zip(report["claims"], checkpoint["claims"]):
+                claim["tool_evidence_refs"] = list(original.get("tool_evidence_refs", []))
+            report.update(
+                prechecked=True,
+                tool_receipts=completion_receipts,
+                tool_evidence_refs=[item["receipt_id"] for item in completion_receipts],
+            )
         if checkpoint["status"] in {"BLOCKED", "FAILED"}:
             report["blocked"] = True
     else:

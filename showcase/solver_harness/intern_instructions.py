@@ -140,6 +140,13 @@ def response_instructions(request, schema):
         )
     if role in {"meta", "meta_strategist"} and "trace_back_to" in schema.get("properties", {}):
         instructions += META_TRACE_INSTRUCTION
+    if (role in {"explore", "reasoner", "step_verifier", "whole_solution_verifier"}
+            and "python_math" in request.get("allowed_tools", [])):
+        instructions += (
+            "python_math runs code as an exec script and captures stdout as its output; "
+            "a bare final expression is not automatically output, so use explicit print(...) "
+            "for any result you need returned. "
+        )
     if role == "problem_intake":
         instructions += (
             "Optionally return formalization with status proposed/unsupported/not_selected, reason, "
@@ -188,6 +195,16 @@ def response_instructions(request, schema):
             "Record only genuine logical prerequisites; leave dependencies empty when absent. "
             "Do not infer dependencies from difficulty, length, or the requirement to explain or "
             "list all solutions. "
+            "For a request to solve one equation, distinguish one user mathematical objective "
+            "from its possibly multiple root obligation records, with one scalar obligation_type per record. "
+            "Do not cap the number of roots: preserve required enumeration/completeness types and "
+            "uniqueness and all-solutions completeness requirements without inventing dependency edges. "
+            "Existence, algebraic manipulation and substitution checks are internal work, not separate "
+            "roots or auxiliary goals merely because they occur in sequence. Do not promote a chosen "
+            "method or verification step into a requested conclusion. Preserve separately requested "
+            "conclusions and their genuine logical dependencies when one uses another's result. "
+            "Classify the requested mathematical conclusion: ordinary equation solving is not "
+            "extremum_attainment. "
             "Use extremum_bound/extremum_attainment only when the original problem asks for a "
             "minimum or maximum, not ordinary counting or numerical evaluation."
         )
@@ -227,6 +244,48 @@ def response_instructions(request, schema):
             "computation or review the symbolic argument without a tool. "
             "Propose at most one tool_request per reply and keep the result provisional; "
             "judge only from recorded receipts, never from assumed outputs."
+        )
+    if (role == "step_verifier" or (role in {"reasoner", "reason_noncoding"}
+                                   and request.get("checkpoint_protocol"))):
+        instructions += (
+            " For checkpoint.dependencies and classified_outcomes[].dependencies, cite only "
+            "established step IDs (step_id/source) or accepted ledger result IDs (result_id) "
+            "supplied in the current context. valid_sources, when present, lists candidate "
+            "sources; use only valid, proven entries. checkpoint_id identifies a handoff, "
+            "not an established dependency; never copy it into dependencies or treat it as "
+            "an alias for a step or result ID. Independently check dependencies rather than "
+            "echoing the Reasoner's references. If a required source cannot be established "
+            "from the supplied context, retain an unresolved objection instead of inventing "
+            "an ID or silently dropping that dependency."
+        )
+    if role in {"reasoner", "reason_noncoding"} and request.get("checkpoint_protocol"):
+        instructions += (
+            " checkpoint_id identifies an immutable handoff. For new claims, changed claim statements, "
+            "dependencies or top-level evidence, use a fresh checkpoint_id; do not rewrite the parent "
+            "under its old ID. A fresh ID still needs substantive progress, not a relabeled draft. "
+        )
+        # run_challenges supplies round; ordinary run_step continuations may also carry objections.
+        if "round" in request:
+            instructions += (
+                "Challenge replies must use a fresh checkpoint_id and substantively address the objection; "
+                "the same-object tool completion exception does not apply, even with successful receipts. "
+            )
+        else:
+            instructions += (
+                "Only the same-object tool completion exception on ordinary checkpoint continuations "
+                "supported by the runtime allows reusing the parent ID: the parent "
+                "must be YIELD, and return FINAL with blocked=false and gaps=[], preserving the same "
+                "objective, dependencies and top-level evidence and the same claim count and statements. "
+                "For each pending easy-verify tool claim, remove tool_request (or set it null), set its "
+                "label to verified and cite exactly its runtime-committed successful receipts in that "
+                "claim's tool_evidence_refs, matching Run, plan, attempt, specification, step, claim and "
+                "tool input. Other non-tool claims keep their labels and have no tool_evidence_refs. "
+                "Do not move the receipt into top-level evidence; failed, absent, unknown or output-free "
+                "receipts do not qualify. The argument and next_action may describe the completed check. "
+            )
+        instructions += (
+            "Every FINAL still requires a new independent Verifier review; "
+            "a verified label never upgrades evidence authority or proves more than the receipt's scope."
         )
     if has_population_memory(request):
         instructions += (

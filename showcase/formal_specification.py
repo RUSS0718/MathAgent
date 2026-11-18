@@ -175,18 +175,28 @@ def public_target(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def spec_target_representation_matches(
+    specification: Mapping[str, Any], normalized_target: Mapping[str, Any],
+) -> bool:
+    """Match finite spec spellings to a normalized target, without claiming review."""
+    variable = normalized_target["variables"][0]
+    return (
+        specification["domain"].strip().lower()
+        in {"rationals", "rational", "rational numbers", "有理数"}
+        and specification["quantifiers"] in (
+            [f"forall {variable}"], [f"∀{variable} ∈ ℚ"],
+        )
+        and specification["assumptions"] == []
+        and specification["directions"] == [normalized_target["direction"]]
+    )
+
+
 def build_specification_records(problem: str, specification: Any, target: Any) -> dict[str, Any]:
     """Build three typed records without asserting any correspondence review."""
     problem = _nonempty(problem, "problem")
     normalized_spec = normalize_problem_spec(specification)
     normalized_target = normalize_target(target)
-    domain = str(normalized_spec.get("domain", "")).strip().lower()
-    if domain not in {"rationals", "rational", "rational numbers"}:
-        raise ValueError("spec_target_mismatch")
-    if normalized_spec.get("quantifiers", []) != normalized_target["quantifiers"]:
-        raise ValueError("spec_target_mismatch")
-    directions = normalized_spec.get("directions", [])
-    if not directions or directions[0] != normalized_target["direction"]:
+    if not spec_target_representation_matches(normalized_spec, normalized_target):
         raise ValueError("spec_target_mismatch")
     public = public_target(normalized_target)
     return {
@@ -283,4 +293,5 @@ __all__ = [
     "TEMPLATE_VERSION", "build_polynomial_identity_source", "build_specification_records",
     "canonical_identity", "normalize_formal_request", "normalize_target",
     "public_target", "required_review_fields", "safe_polynomial_ast",
+    "spec_target_representation_matches",
 ]

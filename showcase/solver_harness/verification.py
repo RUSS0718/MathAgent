@@ -68,10 +68,45 @@ def verify_step(
     run = _run_guidance_for_failure(harness, run, max_model_calls, max_runtime_seconds)
     if run["state"]["phase"] != "STEP_VERIFY":
         return run
+    from . import dependency_reclassification as reclassification
     from .budget import budget_reason, stop
 
+    state = run["state"]
+    saved = reclassification.saved_review(state, state["current_step"])
+    completed_reclassification = None
+    if saved is not None:
+        from .protocol_repair import completed_call_id
+
+        identity = completed_call_id(state.get("calls", {}), saved["call_id"])
+        completed_reclassification = state.get("calls", {}).get(identity)
+        if not completed_reclassification or completed_reclassification.get("status") != "completed":
+            if completed_reclassification and completed_reclassification.get("status") in {
+                "unknown_outcome", "dispatched", "streaming", "interrupted",
+            }:
+                retry = state.get("authorized_retry")
+                if retry and retry.get("call_id") == identity:
+                    reason = budget_reason(state, harness._config)
+                    if reason:
+                        return stop(harness, run, reason)
+                    reserved = harness.commit_event(
+                        run["run_id"], expected_revision=run["state_revision"],
+                        event={"event_id": "dependency-review-retry-" + retry["new_call_id"],
+                               "type": "step_review_dispatched", "step_id": state["current_step"]},
+                        state_updates={"counters": {**state["counters"],
+                            "model_calls": state["counters"]["model_calls"] + 1}})
+                    try:
+                        harness.dispatch(reserved, verifier_port.verify,
+                                         {**completed_reclassification["request"], "problem": problem})
+                    except CallInterrupted:
+                        return harness.get_run(run["run_id"])
+                    return verify_step(
+                        harness, harness.get_run(run["run_id"]), problem=problem,
+                        verifier_port=verifier_port, max_model_calls=max_model_calls,
+                        max_runtime_seconds=max_runtime_seconds, round_number=round_number)
+                return run
+            return reclassification.fail(harness, run, state["current_step"])
     reason = budget_reason(run["state"], harness._config)
-    if reason:
+    if reason and completed_reclassification is None:
         return stop(harness, run, reason)
     state = run["state"]
     suffix = f"-challenge-{round_number}" if round_number else ""
@@ -99,12 +134,18 @@ def verify_step(
     ) if checkpoint_mode else None
     if checkpoint is not None:
         suffix += f"-checkpoint-{checkpoint['checkpoint_id']}"
+        if any(item is not checkpoint and item.get("checkpoint_id") == checkpoint["checkpoint_id"]
+               and item.get("step_id") == step_id
+               and item.get("plan_version") == state["plan_version"]
+               and item.get("attempt_index") == state["attempt_index"]
+               for item in state.get("reasoner_checkpoints", [])):
+            suffix += f"-round-{checkpoint['round']}"
     counters = dict(state["counters"])
     from .budget import budget_reason
 
     reason = budget_reason(state, {"max_model_calls": max_model_calls,
                                    "max_total_duration_seconds": max_runtime_seconds})
-    if reason:
+    if reason and completed_reclassification is None:
         return harness.commit_event(
             run["run_id"],
             expected_revision=run["state_revision"],
@@ -128,7 +169,7 @@ def verify_step(
         f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
     )
     adoption_receipt = adoption_review and call_id in state.get("calls", {})
-    reserved = run if pending or adoption_receipt else harness.commit_event(
+    reserved = run if pending or adoption_receipt or completed_reclassification else harness.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],
         event={
@@ -156,6 +197,9 @@ def verify_step(
         "current_step_index": index + 1,
         "state_revision": reserved["state_revision"],
     }
+    if completed_reclassification:
+        call_id = completed_reclassification["call_id"]
+        request = {**completed_reclassification["request"], "problem": problem}
 
     if state.get('serial_intervention'):
         from .serial_intervention import applicable_results
@@ -225,7 +269,9 @@ def verify_step(
         return latest, reply
 
     try:
-        if pending:
+        if completed_reclassification:
+            reply = completed_reclassification["response"]
+        elif pending:
             call_id, reply = pending
         else:
             from . import protocol_repair
@@ -291,18 +337,21 @@ def verify_step(
         reply = None
     from .verifier_compute import continue_review
 
-    reserved, reply, unfulfilled = continue_review(
-        harness,
-        reserved,
-        role="step_verifier",
-        step_id=step_id,
-        round_number=round_number,
-        attempt_index=attempt,
-        base_call_id=call_id,
-        base_request=request,
-        reply=reply,
-        reserve_and_dispatch=reserve_and_dispatch,
-    )
+    if completed_reclassification:
+        unfulfilled = isinstance(reply, Mapping) and isinstance(reply.get("tool_request"), Mapping)
+    else:
+        reserved, reply, unfulfilled = continue_review(
+            harness,
+            reserved,
+            role="step_verifier",
+            step_id=step_id,
+            round_number=round_number,
+            attempt_index=attempt,
+            base_call_id=call_id,
+            base_request=request,
+            reply=reply,
+            reserve_and_dispatch=reserve_and_dispatch,
+        )
     verification = _reject_contradictory_acceptance(normalize_verdict(reply, index + 1))
     if unfulfilled:
         # A computation the reviewer asked for never completed; its verdict is not
@@ -321,7 +370,8 @@ def verify_step(
                     and not 0 <= claim_index < len(claims)):
                 from . import protocol_repair
 
-                if protocol_repair.repair_enabled(harness._config) and not repair_used:
+                if (not completed_reclassification
+                        and protocol_repair.repair_enabled(harness._config) and not repair_used):
                     target_request = protocol_repair.repair_request(
                         request,
                         instruction=(
@@ -378,6 +428,10 @@ def verify_step(
                     reason=("verifier_tool_request_unfulfilled" if unfulfilled
                             else repair_failure_reason or "invalid_answer_claim_target"),
                 )
+        if (completed_reclassification and declared is not None
+                and counterexample.missing_direction(declared)):
+            # The one new ruling still lacks a proof; do not start another search.
+            verification.update(valid=False, reason="missing_proof_direction")
         if declared is not None and verification["valid"] and counterexample.missing_direction(declared):
             reserved = counterexample.run_check(
                 harness, reserved, problem=problem, declared=declared, verifier_call_id=call_id,
@@ -429,6 +483,32 @@ def verify_step(
             state, reply, step_id=step_id, report=report, review_call_id=call_id,
             suffix=suffix, plan_version=plan["version"], attempt_index=attempt,
         )
+    if reclassification.required(state, step_id):
+        enough = reclassification.consumable(state, step_id, outcomes, verification)
+        used = reclassification.scope_id(state, step_id) in state.get("dependency_reclassifications", {})
+        if used and (not enough or not verification["valid"] or verification["verdict"] != "ACCEPT"):
+            return reclassification.fail(harness, reserved, step_id)
+        if (not enough and rejections and reclassification.completed_accept(
+                state, call_id, step_id, report, verification)):
+            reason = budget_reason(state, harness._config)
+            if reason:
+                return stop(harness, reserved, reason)
+            reserved = reclassification.reserve(
+                harness, reserved, step_id=step_id, call_id=call_id, rejections=rejections)
+            new_request = reclassification.request(reserved["state"], step_id, problem)
+            try:
+                reserved, _ = reserve_and_dispatch(
+                    reserved, 0, new_request["call_id"], new_request,
+                    purpose="dependency-reclassification")
+            except CallInterrupted:
+                latest = harness.get_run(run["run_id"])
+                if latest["state"].get("status") == "interrupted":
+                    return latest
+                return reclassification.fail(harness, latest, step_id)
+            return verify_step(
+                harness, reserved, problem=problem, verifier_port=verifier_port,
+                max_model_calls=max_model_calls, max_runtime_seconds=max_runtime_seconds,
+                round_number=round_number)
     if any(item["reason"] == "unsupported_graph_step_dependency" for item in rejections):
         # The completed review is known, but cannot be admitted to this graph.
         # Fail before promoting any part of this ruling or its obligations.

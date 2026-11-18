@@ -55,11 +55,11 @@ def retry_parent_id(record):
 
 
 def _save(harness, run, record, *, status=None, event_type="call_audit", event_fields=None,
-          state_updates=None):
+          state_updates=None, streaming=False):
     from .storage import SolverRevisionConflictError
 
     while True:
-        latest = harness.get_run(run["run_id"])
+        latest = harness.get_run(run["run_id"], _history=run if streaming else None)
         updates = {"calls": {**latest["state"].get("calls", {}), record["call_id"]: redact(record)}}
         # Use the same snapshot/revision fence for the provider failure and its audit;
         # a cancellation that committed first must keep its terminal math state.
@@ -403,6 +403,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
                     record,
                     event_type="call_activity",
                     event_fields={"activity_kind": kind or "activity", "stream_activity": safe_metrics},
+                    streaming=True,
                 )
 
             prepared["activity_observer"] = observe_activity
@@ -410,7 +411,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
 
         def checkpoint():
             record.update(status="streaming", partial_text="".join(partial))
-            _save(harness, run, record)
+            _save(harness, run, record, streaming=True)
 
         try:
             if allocation:
