@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { roles } from '../runtime/jobs/workbench'
 import type { Collaboration } from '../api/workbench.schemas'
 import { roleLabels } from '../runtime/jobs/causal-progress'
@@ -8,8 +8,16 @@ const props = defineProps<{ selected: string; roleStates: Record<string, string>
 const motionEnabled = defineModel<boolean>('motionEnabled', { default: true })
 const media = globalThis.matchMedia('(prefers-reduced-motion: reduce)')
 const reducedMotion = ref(media.matches)
-function syncMotion(event: MediaQueryListEvent) { reducedMotion.value = event.matches }
-media.addEventListener('change', syncMotion)
+const emit = defineEmits<{ select: [role: string]; systemMotion: [allowed: boolean] }>()
+function syncMotion(event: MediaQueryListEvent) {
+  reducedMotion.value = event.matches
+  emit('systemMotion', !event.matches)
+}
+onMounted(() => {
+  if (props.mini) return
+  media.addEventListener('change', syncMotion)
+  emit('systemMotion', !media.matches)
+})
 onUnmounted(() => media.removeEventListener('change', syncMotion))
 const effectiveMotion = computed(() => motionEnabled.value && !reducedMotion.value)
 function canDraw(message: Collaboration) {
@@ -28,7 +36,6 @@ function trajectory(message: Collaboration) {
   const b = point(message.to_role)!
   return `M ${a[2]} ${a[3]} Q ${(a[2] + b[2]) / 2 - (b[3] - a[3]) * .16} ${(a[3] + b[3]) / 2 + (b[2] - a[2]) * .16} ${b[2]} ${b[3]}`
 }
-const emit = defineEmits<{ select: [role: string] }>()
 function point(role: string) { return roles.find(item => item[0] === role) }
 </script>
 
@@ -76,7 +83,7 @@ small { font-size: 10px; color: #b5cad8; }
 .message-flight { animation: flight 1.6s linear both; }
 .arrival { animation: arrival .7s 1.6s both; }
 @media (prefers-reduced-motion: reduce) {
-  .message-flight, .arrival, .message-highlight { visibility: hidden; }
+  .message-flight, .arrival, .message-highlight { animation: none; visibility: hidden; }
 }
 .motion-toggle { position: absolute; right: 12px; top: 12px; z-index: 1; padding: 6px 10px; min-height: 32px; background: #11283a; border: 1px solid #446277; border-radius: 6px; color: #c0d2df; cursor: pointer; font: inherit; font-size: 11px; }
 .motion-toggle[aria-pressed=true] { color: #9aeaff; border-color: #73adbf; }

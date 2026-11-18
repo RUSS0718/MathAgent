@@ -178,8 +178,27 @@ test('motion preferences and view changes preserve paths without replaying a fli
   await expect(toggle).toBeDisabled()
   await expect(toggle).toHaveAttribute('aria-pressed', 'false')
   await page.evaluate(() => (window as any).pushBatch(['reduced']))
-  await expect(flights.locator('.message-flight').first()).toBeHidden()
   await expect(host.locator('.message-wire')).toBeVisible()
+  await expect(flights).toHaveCount(0)
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await expect(toggle).toBeEnabled()
+  await expect(flights).toHaveCount(0)
+  await expect(host.locator('.message-wire')).toBeVisible()
+})
+
+test('opening the graph during batching does not animate a handoff received while hidden', async ({ page }) => {
+  await mountLiveWorkbench(page)
+  const time = new Date('2026-11-18T04:00:00Z')
+  await page.clock.install({ time })
+  await page.clock.pauseAt(new Date(time.valueOf() + 1000))
+  const host = page.locator('#live-fixture')
+  const view = (name: string) => host.getByRole('button', { name, exact: true })
+  await view('关键进展').evaluate(button => button.click())
+  await page.evaluate(() => (window as any).pushBatch(['hidden-before-flush']))
+  await view('完整星图').evaluate(button => button.click())
+  await page.clock.runFor(150)
+  await expect(host.locator('.message-wire')).toBeVisible()
+  await expect(host.locator('[data-flight]')).toHaveCount(0)
 })
 
 for (const width of [320,390]) test(`full map coordinates and readable bounds at ${width}`, async ({page}) => {

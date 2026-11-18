@@ -43,10 +43,6 @@ let timer: ReturnType<typeof setInterval> | undefined
 // Batch display updates only; the store and durable cursor retain every event.
 const displayEvents = shallowRef(props.events.slice())
 let displayTimer: ReturnType<typeof setTimeout> | undefined
-watch(() => props.events.length, () => {
-  if (displayTimer !== undefined) return
-  displayTimer = setTimeout(() => { displayTimer = undefined; displayEvents.value = props.events.slice() }, 100)
-})
 const all = computed(() => projectWorkbench(displayEvents.value, props.result, Boolean(props.replay), props.status))
 const state = computed(() => replayCount.value === null ? all.value : projectWorkbench(all.value.events.slice(0, replayCount.value), null, true))
 const now = ref(Date.now())
@@ -60,16 +56,19 @@ const shown = computed(() => expanded.value ? filtered.value : filtered.value.sl
 const technicalEntries = computed(() => state.value.entries.slice((page.value - 1) * 100, page.value * 100))
 const flights = ref<Collaboration[]>([])
 const motionEnabled = ref(true)
+const systemAllowsMotion = ref(true)
+const eligibleEvents = new Set<number>()
 const flightTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const displayedMessages = computed(() => state.value.entries.flatMap(entry => entry.message ? [entry.message] : []))
-const motionActive = computed(() => view.value === 'constellation' && motionEnabled.value
+const motionActive = computed(() => view.value === 'constellation' && motionEnabled.value && systemAllowsMotion.value
   && props.animateLive && !props.replay && replayCount.value === null)
 function clearFlights() {
+  eligibleEvents.clear()
   flightTimers.forEach(clearTimeout)
   flightTimers.clear()
   flights.value = []
 }
-watch(motionActive, active => { if (!active) clearFlights() })
+watch(motionActive, active => { if (!active) clearFlights() }, { flush: 'sync' })
 const provenance = computed(() => {
   if (all.value.source.startsWith('FAKE') || props.executionMode === 'fake') return '模拟运行'
   if (all.value.source.startsWith('LIVE') || props.executionMode === 'live') {
@@ -84,15 +83,28 @@ function toggleTheme() {
   document.documentElement.dataset.theme = dark.value ? 'dark' : 'light'
   try { localStorage.setItem('mathagent-theme', dark.value ? 'dark' : 'light') } catch { /* Optional persistence. */ }
 }
-const animated = new Set(all.value.entries.flatMap(entry => entry.message ? [entry.message.message_id] : []))
+// Record visibility at arrival. Switching views during the display batch must not replay a handoff.
+watch(() => props.events.length, (length, previous) => {
+  if (motionActive.value && length > previous) {
+    for (const event of props.events.slice(previous, length)) {
+      if (event.id !== null) eligibleEvents.add(event.id)
+    }
+  }
+  if (displayTimer === undefined) {
+    displayTimer = setTimeout(() => { displayTimer = undefined; displayEvents.value = props.events.slice() }, 100)
+  }
+}, { flush: 'sync' })
+const seenMessages = new Set(all.value.entries.flatMap(entry => entry.message ? [entry.message.message_id] : []))
 watch(displayEvents, () => {
   const batch: Collaboration[] = []
   for (const entry of all.value.entries) {
-    if (entry.message && !animated.has(entry.message.message_id)) {
-      animated.add(entry.message.message_id)
-      if (motionActive.value) batch.push(entry.message)
+    if (entry.message && !seenMessages.has(entry.message.message_id)) {
+      seenMessages.add(entry.message.message_id)
+      if (entry.event.id !== null && eligibleEvents.has(entry.event.id)) batch.push(entry.message)
     }
   }
+  eligibleEvents.clear()
+  if (!batch.length) return
   flights.value = [...flights.value, ...batch]
   for (const message of batch) {
     const id = message.message_id
@@ -137,7 +149,7 @@ onUnmounted(() => { pause(); clearFlights(); clearTimeout(displayTimer); clearIn
           <label>步骤 <select v-model="step"><option value="">全部步骤</option><option v-for="item in state.steps" :key="item.label">{{ item.label }}</option></select></label>
           <button type="button" @click="role = ''; step = ''">清除筛选</button>
         </div>
-        <AgentConstellation v-show="view === 'constellation'" v-model:motion-enabled="motionEnabled" :selected="role" :role-states="state.roleStates" :messages="displayedMessages" :flights="flights" @select="selectRole" />
+        <AgentConstellation v-show="view === 'constellation'" v-model:motion-enabled="motionEnabled" :selected="role" :role-states="state.roleStates" :messages="displayedMessages" :flights="flights" @system-motion="systemAllowsMotion = $event" @select="selectRole" />
         <ol v-show="view === 'conversation'" class="conversation-events">
           <li v-for="entry in shown" :key="entry.event.id!" :data-thread-id="ordinary ? undefined : entry.message?.thread_id">
             <article :data-workbench-event="ordinary ? undefined : entry.event.id">
