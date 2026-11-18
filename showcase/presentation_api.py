@@ -116,6 +116,12 @@ def get_final_answer(workspace_service, user_id, job_id, public_report=None):
     snapshot = presentation_snapshot(job)
     mode = result.get('presentation_mode', 'solve')
     answer = snapshot['answer']
+    # export_result's nonempty transport fallback is not a delivered answer.
+    if job['status'] in {'succeeded', 'failed', 'canceled'} and answer.strip() in {
+            '', 'No complete answer is available for this run.'}:
+        return {'job_id': job_id, 'status': job['status'], 'mode': mode, 'answer': '',
+                'presentation_status': 'unavailable',
+                'notice': '本次任务没有可用解答，请查看任务状态与求解进展。'}
     artifact = None
     status, notice = 'legacy', '历史答复，保留原有格式。'
     if result.get('presentation_rule'):

@@ -7,8 +7,24 @@ const answer = ref<Awaited<ReturnType<typeof api.finalAnswer>> | null>(null)
 const error = ref('')
 const waiting = ref(true)
 const labels = { solve: '求解', teach: '教学', report: '报告' }
-const boundaries = { ready: '', pending: '正在整理最终答复…', failed: '所选格式生成失败，以下为已有答案。', legacy: '历史结果，保留原有格式。', stale: '结果来源已变化，以下仅为当前可用答案。', unavailable: '当前没有可用答复。' }
-const html = computed(() => renderSafeMarkdown(answer.value?.answer ?? ''))
+const boundaries = { ready: '', pending: '正在整理最终答复…', failed: '所选格式生成失败，以下为已有答案。', legacy: '历史结果，保留原有格式。', stale: '结果来源已变化，以下仅为当前可用答案。', unavailable: '当前答复格式暂不可用。' }
+const content = computed(() => {
+  const text = answer.value?.answer ?? ''
+  return !text.trim() || text.trim() === 'No complete answer is available for this run.' ? '' : text
+})
+const partial = computed(() => !!content.value && answer.value?.status !== 'succeeded')
+const title = computed(() => {
+  if (!answer.value) return '答复状态'
+  if (content.value) return partial.value ? '部分结果' : '最终答复'
+  if (answer.value.presentation_status === 'pending') return '正在整理答复'
+  return answer.value.status === 'unknown' ? '结果状态待确认' : '未生成答案'
+})
+const availability = computed(() => {
+  if (partial.value) return '本次求解尚未成功完成，以下仅为已保存的部分结果。'
+  if (!answer.value || content.value || answer.value.presentation_status === 'pending') return ''
+  return answer.value.status === 'unknown' ? '本次运行的结果尚无法确认，当前没有可用答案。' : '本次运行未生成可用答案。'
+})
+const html = computed(() => renderSafeMarkdown(content.value))
 let generation = 0
 let timer: ReturnType<typeof setTimeout> | undefined
 async function load(id: string, token: number, attempt = 0): Promise<void> {
@@ -30,8 +46,9 @@ watch(() => [props.jobId, props.status], refresh, { immediate: true })
 onUnmounted(() => { generation++; clearTimeout(timer) })
 </script>
 <template>
-  <section class="report-section" aria-label="最终答复" :aria-busy="waiting">
-    <h2>最终答复<span v-if="answer"> · {{ labels[answer.mode] }}</span></h2>
+  <section class="report-section" :aria-label="title" :aria-busy="waiting">
+    <h2>{{ title }}<span v-if="answer"> · {{ labels[answer.mode] }}</span></h2>
+    <p v-if="availability" role="status">{{ availability }}</p>
     <p v-if="answer && !answer.notice && boundaries[answer.presentation_status]" role="status">{{ boundaries[answer.presentation_status] }}</p>
     <p v-if="answer?.notice">{{ answer.notice }}</p>
     <div v-if="html" class="report-content" v-html="html"></div>
