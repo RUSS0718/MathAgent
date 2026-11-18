@@ -451,10 +451,10 @@ def create_app(
         if payload.get("presentation_mode") is not None and not app.config.get("SHOWCASE_PRESENTATION_ENABLED", False):
             return _json_error("capability_unavailable", 503)
         if file_id is not None:
-            if not isinstance(file_id, str) or not file_id:
-                return _json_error("file_id_invalid", 400)
             if not app.config.get("SHOWCASE_VISION_ENABLED"):
                 return _json_error("capability_unavailable", 503)
+            if not isinstance(file_id, str) or not file_id:
+                return _json_error("file_id_invalid", 400)
         budget_limits = None
         deadline_at = payload.get("deadline_at")
         raw_limits = payload.get("budget_limits")
