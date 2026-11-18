@@ -26,8 +26,18 @@ e8c20c7上另登记的受影响A-simple取得自然Explore直解、独立代数�
 历史经验原件已认证内容拒绝及关闭注入后的新任务闭环，限其复合冻结版本；当前动态unknown。
 B随后获用户独立授权：894e113上的L-02数学/文本交付1/1，形式提案因等价表示拒绝，
 无Lean/可信缓存、H未准入。A耗时归因确认至少72.84%同步本地处理；性能及有限形式表示
-修复已双轴复查、聚焦检查并集成为e6a313e，组合快速门禁通过，尚未真实复验。
-A失败/unknown及B形式0/1保留，C未登记。#206保持open、PR208保持draft；见
+修复已双轴复查、聚焦检查并集成为e6a313e，组合快速门禁通过。source 3d0a107、
+product e6a313e的新冷态L-retest-01与H-01已真实通过：分别37.819790秒、27.290646秒，
+各3模型/3HTTP/1Lean；H取得可信active缓存命中、当前重验及同根计账。仅局部L2，
+correspondence=not_reviewed，不升级整题L3或证明成本收益。L的live日志提前封存偏差
+保留为literal 48/49；原20230字节prefix及其余48文件、4份外部证据吻合，原seal不改。
+C-01固定原D三次及变式一次已闭组：依赖消费、独立数学及正确完整终稿/same_artifact
+各3/3，完整证据交付2/3。D3确认P1：serialization-only修复把YIELD及两项pending工具
+改成FINAL/verified并捏造1047:0/1回执（实际仅S1的1046:0），S2/S3核验接受且S3复用。
+变式按stop_rest保留not_run、零派发，窗口不移动、不替换；全部服务、runner、controller
+及监控已关闭。guard修复在另一worktree处理中，pending、未集成/未验收，不预填新实验。
+A失败/unknown及至少72.84%同步本地处理归因下界保留，未重跑A；旧B形式0/1、
+R06与#189各版结果不混分母。#206保持open、PR208保持draft，不宣称当前稳定或完成；见
 [预登记、机制状态及真实结果](evals/mechanism-206-20261118.md)。
 
 2026-11-17 #189补充真实验收未全通过：最终UI真实启动/跨重启恢复通过；新自然S2正确，D因unsupported_graph_step_dependency失败、U未运行。#189重新打开，PR198退回draft，详见[补验记录](evals/dependency-routing-189-20261117.md)。
