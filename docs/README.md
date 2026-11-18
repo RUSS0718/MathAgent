@@ -1,6 +1,6 @@
 # MathAgent 文档索引
 
-Showcase 支持显式启用单张 PNG 题图输入、文字加图和基础题型提示，见[图文读题合同](engineering/showcase-multimodal-intake.md)。该入口不影响官方评测骨架。
+Showcase 支持显式启用单张 PNG 题图输入、文字加图和基础题型提示，见[图文读题合同](engineering/showcase-multimodal-intake.md)及[验收记录](evals/showcase-multimodal-intake-20261119.md)。该入口不影响官方评测骨架；定向通过，最终门禁因本机 Docker 引擎未运行未通过。
 
 2026-11-18 #209 现场演示候选版已在独立工作树通过两例彩排。真人走通整合首版，冻结 `8ba7341` 复跑通过。
 D2 在 1280×720 首屏可读，回放、成果读取与刷新新增求解 0，预算一致。历史全仓门禁失败已按根因修复，原失败选择器 59/59 定向复验通过。本轮未复跑全仓。见[验收记录](evals/onsite-demo-209-20261118.md)。
