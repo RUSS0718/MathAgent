@@ -125,6 +125,67 @@ def tool_completion_receipts(checkpoint, parent, state, step_id):
     return used or None
 
 
+def checkpoint_tool_receipts(checkpoint, run, step):
+    """Resolve explicit citations to committed, successful, scoped computations."""
+    from .computation_evidence import has_computation_output
+
+    state = run["state"]
+    receipts = {r["receipt_id"]: r for r in state.get("tool_receipts", [])}
+    committed = {e.get("receipt", {}).get("receipt_id"): e.get("receipt")
+                 for e in run["events"] if e.get("type") == "tool_receipt"}
+    allowed_steps = {step["step_id"]}
+    pending = list(step.get("depends_on", []))
+    plan_steps = {s["step_id"]: s for s in (state.get("plan") or {}).get("steps", [])}
+    while pending:
+        source = pending.pop()
+        if source in allowed_steps:
+            continue
+        record = state.get("steps", {}).get(source, {})
+        if (record.get("status") != "ACCEPTED"
+                or record.get("verification", {}).get("valid") is not True):
+            continue
+        allowed_steps.add(source)
+        pending.extend(plan_steps.get(source, {}).get("depends_on", []))
+    used = {}
+    for claim in checkpoint["claims"]:
+        for ref in claim.get("tool_evidence_refs", []):
+            receipt = receipts.get(ref, {})
+            if (not receipt or committed.get(ref) != receipt
+                    or receipt.get("status") != "success" or receipt.get("executed") is not True
+                    or receipt.get("unknown_outcome") or not has_computation_output(receipt)
+                    or receipt.get("step_id") not in allowed_steps
+                    or any(receipt.get(k) != state.get(k)
+                           for k in ("run_id", "plan_version", "attempt_index"))):
+                raise ValueError("invalid_checkpoint_tool_evidence")
+            # Bind the target and input to the original request, never to a label.
+            source_found = False
+            for source in state.get("reasoner_checkpoints", []):
+                call = state.get("calls", {}).get(source.get("call_id"), {})
+                index = receipt.get("claim_index")
+                claims = source.get("claims", [])
+                if (source.get("step_id") != receipt["step_id"]
+                        or type(index) is not int or not 0 <= index < len(claims)
+                        or call.get("status") != "completed" or call.get("role") != "reasoner"
+                        or any(call.get(k) != state.get(k) for k in
+                               ("run_id", "plan_version", "attempt_index", "problem_hash", "config_hash"))
+                        or call.get("request", {}).get("problem_spec_version")
+                        != (state.get("problem_spec") or {}).get("specification_version")
+                        or call.get("request", {}).get("step", {}).get("step_id") != receipt["step_id"]):
+                    continue
+                original = claims[index]
+                request = original.get("tool_request") or {}
+                if (original["statement"] == claim["statement"]
+                        and request.get("tool") == receipt.get("tool")
+                        and request.get("arguments") == receipt.get("input")
+                        and (not claim.get("tool_request") or claim["tool_request"] == request)):
+                    source_found = True
+                    break
+            if not source_found:
+                raise ValueError("invalid_checkpoint_tool_evidence")
+            used[ref] = deepcopy(receipt)
+    return list(used.values())
+
+
 def feedback(checkpoint, *, objection=None):
     result = {
         "accepted": ["checkpoint_schema_and_semantics"],
@@ -167,7 +228,7 @@ def to_report(checkpoint, step):
         normalized = {
             "statement": claim["statement"],
             "label": claim["label"],
-            "tool_evidence_refs": [],
+            "tool_evidence_refs": list(claim.get("tool_evidence_refs", [])),
         }
         if isinstance(claim.get("tool_request"), Mapping):
             normalized["tool_request"] = dict(claim["tool_request"])

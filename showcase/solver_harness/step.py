@@ -214,7 +214,14 @@ def run_step(
             or reasoner_checkpoint.same_draft(checkpoint, parent_checkpoint)
         ):
             return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", "reasoner_checkpoint_no_progress")
+        try:
+            cited_receipts = reasoner_checkpoint.checkpoint_tool_receipts(
+                checkpoint, harness.get_run(run["run_id"]), step)
+        except ValueError as exc:
+            return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", str(exc))
         report = reasoner_checkpoint.to_report(checkpoint, step)
+        report["tool_receipts"] = cited_receipts
+        report["tool_evidence_refs"] = [r["receipt_id"] for r in cited_receipts]
         if completion_receipts is not None:
             for claim, original in zip(report["claims"], checkpoint["claims"]):
                 claim["tool_evidence_refs"] = list(original.get("tool_evidence_refs", []))
