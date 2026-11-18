@@ -23,6 +23,24 @@ from tests.test_faithful_s09_public_job import SPEC as RATIONAL_SPEC
 
 
 class FormalGenerationTest(unittest.TestCase):
+    def test_chinese_representation_selection_preserves_raw_source(self):
+        from showcase.solver_harness.formal_generation import select_formalization
+        from tests.test_formal_specification import (
+            CHINESE_SPEC,
+            PROBLEM_HASH,
+            RATIONAL_TARGET,
+            SPEC_HASH,
+        )
+
+        spec = deepcopy(CHINESE_SPEC)
+        selection = select_formalization({"status": "proposed", "obligation_ids": ["O1"],
+            "target": RATIONAL_TARGET}, spec, "intake:1")
+        self.assertEqual("proposed", selection["status"])
+        self.assertEqual({"problem_hash": PROBLEM_HASH, "specification_hash": SPEC_HASH,
+            "obligation_ids": ["O1"], "generation_call_id": "intake:1"}, selection["source"])
+        self.assertEqual(["forall x"], selection["target"]["quantifiers"])
+        self.assertEqual(CHINESE_SPEC, spec)
+
     def test_legacy_required_selection_survives_clarification_without_new_metadata(self):
         from showcase.solver_harness.problem_intake import _apply_clarification
         from showcase.solver_harness.specification import normalize_problem_spec
