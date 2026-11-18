@@ -23,6 +23,13 @@ from typing import Any
 
 from .evidence_store import append_check
 from .final_evidence import bind_verification
+from .image_intake import (
+    classify_problem,
+    effective_problem,
+    public_intake,
+    read_problem_image,
+    vision_status,
+)
 from .presentation import MODES, POLICY_VERSION, SCHEMA_VERSION, normalize_mode
 from .redaction import redact
 from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, freeze_budget
@@ -260,6 +267,7 @@ class WorkspaceStore:
         solver_hint: str | None = None,
         problem_spec: Mapping[str, Any] | None = None,
         presentation_config: Mapping[str, Any] | None = None,
+        validate_image=None,
     ) -> tuple[dict[str, Any], bool]:
         """Durably accept one Job and its user message before returning."""
 
@@ -276,6 +284,9 @@ class WorkspaceStore:
                         raise WorkspaceError("idempotency_conflict", status=409)
                     self._connection.commit()
                     return self._job_payload(existing), True
+
+                if input_user_file_id is not None and validate_image is not None:
+                    validate_image(input_user_file_id)
 
                 revision_source = (solver_identity or {}).get("faithful", {}).get("revision_source")
                 if revision_source:
@@ -339,6 +350,20 @@ class WorkspaceStore:
         with self._lock:
             row = self._connection.execute("SELECT result_json FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
         return _loads(row[0]) if row else {}
+
+    def set_image_intake(self, job_id: str, intake: Mapping[str, Any]) -> None:
+        with self._lock:
+            prior = self.job_identity(job_id)
+            updated = self._connection.execute(
+                "UPDATE workspace_jobs SET result_json=?,updated_at=? WHERE job_id=? AND status='running'",
+                (_json({**prior, "input_intake": dict(intake)}), _utc_now(), job_id),
+            )
+            if updated.rowcount and intake["status"] == "ready":
+                self._insert_event(job_id, "progress", {
+                    "type": "progress", "job_id": job_id, "stage": "image_intake_ready",
+                    "status": "running", "summary": "已经读取题图，开始求解。",
+                })
+            self._connection.commit()
 
     def record_pair_applied_config(
         self, job_id: str, expected_binding: Mapping[str, Any], config: Mapping[str, Any]
@@ -421,6 +446,8 @@ class WorkspaceStore:
                 now = _utc_now()
                 prior = _loads(row["result_json"]) if row["result_json"] else {}
                 result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response), "execution_mode": prior.get("execution_mode", "unavailable"), **_presentation_identity(prior)}
+                if "input_intake" in prior:
+                    result["input_intake"] = prior["input_intake"]
                 if isinstance(prior.get("experiment_pair"), dict):
                     result["experiment_pair"] = prior["experiment_pair"]
                     _mark_pair_config_not_applied(result)
@@ -580,6 +607,9 @@ class WorkspaceStore:
                 now = _utc_now()
                 result = _loads(row["result_json"]) if row["result_json"] else {}
                 _mark_pair_config_not_applied(result)
+                intake = result.get("input_intake", {})
+                if intake.get("status") == "pending":
+                    intake.update(status="failed", error="image_intake_interrupted")
                 self._connection.execute("UPDATE workspace_jobs SET status='failed',error_code='needs_review',result_json=?,updated_at=? WHERE job_id=?", (_json(result), now, job_id))
                 self._connection.execute("UPDATE runs SET snapshot_json=?,updated_at=? WHERE run_id=?", (_json(_run_snapshot(job_id, "NEEDS_REVIEW", now, execution_mode=(_loads(row["result_json"]) if row["result_json"] else {}).get("execution_mode", "unavailable"), result=self.job_identity(job_id), error={"category": "needs_review"}, asset_refs=self._asset_refs(job_id))), now, job_id))
                 self._insert_event(job_id, "needs_review", {"type": "needs_review", "job_id": job_id, "status": "failed", "reason": "process_restart"})
@@ -680,7 +710,7 @@ class WorkspaceStore:
                     return
                 prior = _loads(row["result_json"]) if row["result_json"] else {}
                 result.update(_presentation_identity(prior))
-                for frozen_key in ("formal_policy", "formal_policy_hash", "faithful"):
+                for frozen_key in ("formal_policy", "formal_policy_hash", "faithful", "input_intake"):
                     if frozen_key in prior:
                         result[frozen_key] = prior[frozen_key]
                 _apply_formal_requirement(result)
@@ -921,9 +951,9 @@ class WorkspaceStore:
     def problem(self, job_id: str) -> str:
         with self._lock:
             row = self._connection.execute(
-                "SELECT problem FROM workspace_jobs WHERE job_id=?", (job_id,)
+                "SELECT problem,result_json FROM workspace_jobs WHERE job_id=?", (job_id,)
             ).fetchone()
-        return "" if row is None else str(row["problem"])
+        return "" if row is None else effective_problem(row["problem"], _loads(row["result_json"] or "{}").get("input_intake", {}))
 
     def last_event_id(self, job_id: str, user_id: str) -> int:
         with self._lock:
@@ -992,9 +1022,13 @@ class WorkspaceStore:
             (job_id, _json(_run_snapshot(job_id, "QUEUED", now, execution_mode=execution_mode, result=self.job_identity(job_id), input_text=problem, asset_refs=self._asset_refs(job_id))), now, now),
         )
 
+    def job_file_id(self, job_id: str) -> str | None:
+        with self._lock:
+            row = self._connection.execute("SELECT input_user_file_id FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
+        return row["input_user_file_id"] if row is not None else None
+
     def _asset_refs(self, job_id: str) -> list[dict[str, Any]]:
-        row = self._connection.execute("SELECT input_user_file_id FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
-        value = row["input_user_file_id"] if row is not None else None
+        value = self.job_file_id(job_id)
         return [{"file_id": value, "status": "unavailable"}] if value else []
 
     @staticmethod
@@ -1011,6 +1045,8 @@ class WorkspaceStore:
         if include_result and row["result_json"]:
             payload["result"] = _loads(row["result_json"])
             payload["result"].pop("retry_call", None)
+            if "input_intake" in payload["result"]:
+                payload["result"]["input_intake"] = public_intake(payload["result"]["input_intake"])
         if row["error_code"]:
             payload["error"] = row["error_code"]
         return payload
@@ -1030,6 +1066,8 @@ class WorkspaceService:
         waiting_input_marker: str = "",
         pipeline: Any | None = None,
         star_pipeline: Any | None = None,
+        image_loader=None,
+        image_validator=None,
         stream_timeout_policy_version: str | None = None,
     ) -> None:
         from .stream_timeout_policy import policy_for_version
@@ -1041,6 +1079,8 @@ class WorkspaceService:
         self.waiting_input_marker = waiting_input_marker
         self.pipeline = pipeline
         self.star_pipeline = star_pipeline
+        self.image_loader = image_loader
+        self.image_validator = image_validator
         self.stream_timeout_policy = policy_for_version(stream_timeout_policy_version)
         self.budget_ledger = RunBudgetLedger(
             self.store._connection, connection_lock=self.store._lock
@@ -1142,6 +1182,8 @@ class WorkspaceService:
                 "formal_policy": formal_policy,
                 "formal_policy_hash": _request_digest(formal_policy),
             }
+        if input_user_file_id is not None and problem_spec is not None:
+            raise WorkspaceError("image_intake_requires_automatic_problem_spec", status=400)
         if problem_spec is not None:
             if solver_mode not in STAR_MODES:
                 raise WorkspaceError("problem_spec_requires_star_mode", status=400)
@@ -1199,6 +1241,9 @@ class WorkspaceService:
                 raise WorkspaceError("clarification_new_task_unavailable", status=409)
             faithful_identity["faithful"]["clarification_source"] = dict(clarification_source)
             digest = _request_digest(digest, clarification_source)
+        intake = ({"modality": "text_image" if problem else "image", "status": "pending"}
+                  if input_user_file_id else
+                  {"modality": "text", "status": "ready", "problem_type": classify_problem(problem)})
         payload, existing = self.store.create_job(
             user_id=user_id,
             session_id=session_id,
@@ -1208,6 +1253,7 @@ class WorkspaceService:
             execution_mode=solver_mode if solver_mode in STAR_MODES else getattr(selected, "execution_mode", self.execution_mode),
             solver_identity={
                 **identity,
+                "input_intake": intake,
                 "evidence_kind": getattr(selected, "evidence_kind", self.execution_mode),
                 **({"stream_timeout_policy": self.stream_timeout_policy}
                    if self.stream_timeout_policy is not None else {}),
@@ -1220,6 +1266,7 @@ class WorkspaceService:
             solver_hint=solver_hint,
             verification_mode=verification_mode,
             input_user_file_id=input_user_file_id,
+            validate_image=self.image_validator,
         )
         if budget_limits is not None:
             frozen_identity = self.store.job_identity(payload["job_id"])
@@ -1570,6 +1617,8 @@ class WorkspaceService:
                     stream_timeout_policy=identity.get("stream_timeout_policy"),
                 )) as budget, bind_control(RunControl(self.store, job_id, budget, self.checkpointer)) as control:
                     control.check()
+                    if not self._read_job_image(job_id, identity, pipeline, control):
+                        return
                     state = pipeline.run(
                         job_id,
                         self._problem(job_id),
@@ -1590,6 +1639,9 @@ class WorkspaceService:
                     job = self.store.control_status(job_id)
                     status = "CANCELED" if job["status"] == "canceled" else ("COMPLETED" if job["status"] == "succeeded" else str(state.get("status", "FAILED")))
                     self.checkpointer.stop(job_id, status, job["error_code"])
+                return
+            if identity.get("input_intake", {}).get("status") == "pending":
+                self._fail_image_intake(job_id, identity["input_intake"], "image_input_unavailable")
                 return
             if (
                 self.waiting_input_marker
@@ -1626,6 +1678,33 @@ class WorkspaceService:
                 from .task_revision import wake_revision_jobs
 
                 wake_revision_jobs(self)
+
+    def _fail_image_intake(self, job_id, intake, code):
+        self.store.set_image_intake(job_id, {**intake, "status": "failed", "error": code})
+        self.store.fail_job(job_id, code)
+
+    def _read_job_image(self, job_id, identity, pipeline, control):
+        from .run_budget import BudgetExhausted
+        from .vision import VisionInputError
+
+        intake = identity.get("input_intake", {})
+        if intake.get("status") != "pending":
+            return True
+        model = getattr(pipeline, "adapter", None) if identity.get("solver_mode") in STAR_MODES else getattr(pipeline, "model", None)
+        file_id = self.store.job_file_id(job_id)
+        try:
+            if model is None or self.image_loader is None:
+                raise FileNotFoundError
+            path, reference = self.image_loader(file_id)
+            parsed = read_problem_image(model, path, reference, self._problem(job_id), job_id)
+        except (OSError, VisionInputError, BudgetExhausted) as exc:
+            control.check()
+            code = exc.category if isinstance(exc, (VisionInputError, BudgetExhausted)) else "image_input_unavailable"
+            self._fail_image_intake(job_id, intake, code)
+            return False
+        control.check()
+        self.store.set_image_intake(job_id, {**intake, **parsed, "status": "ready"})
+        return True
 
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
         # File-backed STAR reads deliberately leave the writer connection and
@@ -1822,6 +1901,7 @@ def _run_snapshot(
 ) -> dict[str, Any]:
     from .faithful_task import public_run_result
 
+    image_status = vision_status(result) if asset_refs else None
     snapshot: dict[str, Any] = {
         "run_id": job_id,
         "profile": "showcase_mvp",
@@ -1829,8 +1909,8 @@ def _run_snapshot(
         "status": status,
         "stage": stage or ("queued" if status == "QUEUED" else ("synthesis" if status == "COMPLETED" else "solving")),
         "input_ref": {"kind": "text", "length": len(input_text)} if input_text else {"kind": "text"},
-        "asset_refs": list(asset_refs or []),
-        "vision_status": "unavailable" if asset_refs else None,
+        "asset_refs": [{**ref, "status": image_status} for ref in asset_refs or []],
+        "vision_status": image_status,
         "result": public_run_result(result) if result else None,
         "final_response": result.get("final_response") if result else None,
         "error": dict(error) if error else None,

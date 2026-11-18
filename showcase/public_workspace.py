@@ -34,6 +34,8 @@ def solver_view(value):
 def result_view(value):
     value = obj(value)
     result = fields(value, ('presentation_mode',))
+    if isinstance(value.get('input_intake'), Mapping):
+        result['input_intake'] = fields(value['input_intake'], ('modality', 'status', 'problem_type', 'error'))
     mode = value.get('execution_mode')
     if value.get('evidence_kind') in ('scripted', 'fault_injection'):
         result['execution_mode'] = 'fake'

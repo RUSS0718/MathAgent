@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import time
 import uuid
 from collections.abc import Mapping
@@ -47,7 +48,8 @@ from .workspace import WorkspaceError, WorkspaceService
 
 AUTH_COOKIE = "auth_session"
 MAX_BODY_BYTES = 1_000_000
-MAX_PNG_BYTES = 2 * 1024 * 1024
+# Base64 is charged as serialized bytes by the default Job budget meter.
+MAX_PNG_BYTES = 128 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 VERIFICATION_MODES = ["auto", "required", "off"]
 
@@ -118,6 +120,21 @@ def create_app(
     # another thread. Job and budget writes still share Workspace's connection.
     if getattr(getattr(service, "_store", None), "database_path", ":memory:") != ":memory:":
         shared_connection = None
+
+    def load_job_image(file_id):
+        reference = app.extensions["showcase_files"].get(file_id)
+        if reference is None or re.fullmatch(r"file_[0-9a-f]{32}", file_id) is None:
+            raise FileNotFoundError
+        return storage_root / "attachments" / f"{file_id}.png", reference
+
+    def validate_job_image(file_id):
+        try:
+            _, reference = load_job_image(file_id)
+        except FileNotFoundError as exc:
+            raise WorkspaceError("file_not_found", status=404) from exc
+        if reference["size"] > MAX_PNG_BYTES:
+            raise WorkspaceError("image_too_large", status=413)
+
     workspace_service = WorkspaceService(
         resolved_database,
         connection=shared_connection,
@@ -127,6 +144,8 @@ def create_app(
         waiting_input_marker=str(app.config.get("SHOWCASE_WAITING_INPUT_MARKER", "")),
         pipeline=live_pipeline,
         star_pipeline=star_pipeline,
+        image_loader=load_job_image,
+        image_validator=validate_job_image,
         stream_timeout_policy_version=app.config.get("SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION"),
     )
     app.extensions["loopback_store"] = loopback_store
@@ -420,22 +439,22 @@ def create_app(
         payload = _request_object()
         if isinstance(payload, tuple):
             return payload
-        message = payload.get("message")
+        file_id = payload.get("input_user_file_id")
+        message = payload.get("message", "")
         session_id = payload.get("session_id")
-        if not isinstance(message, str) or not message.strip():
+        if not isinstance(message, str) or (not message.strip() and file_id is None):
             return _json_error("message_must_be_non_empty", 400)
         if not isinstance(session_id, str) or not session_id:
             return _json_error("session_id_required", 400)
         if len(message.strip()) > 100_000:
             return _json_error("message_too_large", 400)
-        file_id = payload.get("input_user_file_id")
         if payload.get("presentation_mode") is not None and not app.config.get("SHOWCASE_PRESENTATION_ENABLED", False):
             return _json_error("capability_unavailable", 503)
         if file_id is not None:
+            if not isinstance(file_id, str) or not file_id:
+                return _json_error("file_id_invalid", 400)
             if not app.config.get("SHOWCASE_VISION_ENABLED"):
                 return _json_error("capability_unavailable", 503)
-            if file_id not in app.extensions["showcase_files"]:
-                return _json_error("file_not_found", 404)
         budget_limits = None
         deadline_at = payload.get("deadline_at")
         raw_limits = payload.get("budget_limits")
@@ -888,6 +907,12 @@ def create_app(
             if event.get("event") != "presentation_artifact_saved"
         ]
         result = job.get("result") if isinstance(job.get("result"), Mapping) else {}
+        file_id = job.get("input_user_file_id")
+        from .image_intake import vision_status
+
+        image_status = vision_status(result) if file_id else None
+        asset_refs = [{**app.extensions["showcase_files"].get(file_id, {"file_id": file_id}),
+                       "vision_status": image_status}] if file_id else []
         snapshot = {
             "run_id": job_id,
             "execution_mode": result.get(
@@ -899,8 +924,8 @@ def create_app(
             "result": result,
             "final_response": result.get("final_response"),
             "error": job.get("error"),
-            "asset_refs": ([{**app.extensions["showcase_files"].get(job.get("input_user_file_id"), {"file_id": job.get("input_user_file_id")}), "vision_status": "unavailable"}] if job.get("input_user_file_id") else []),
-            "vision_status": "unavailable" if job.get("input_user_file_id") else None,
+            "asset_refs": asset_refs,
+            "vision_status": image_status,
         }
         stored_tools = result.get("tool_results") if isinstance(result.get("tool_results"), list) else []
         tool_results = [item for item in stored_tools if isinstance(item, Mapping)]
@@ -1089,6 +1114,7 @@ def _set_auth_cookie(response: Response, session: AuthSession) -> None:
 
 def _json_error(error: str, status: int) -> tuple[Response, int]:
     messages = {
+        "image_too_large": "PNG 题图超过 128 KiB，请裁剪或压缩后重新上传。",
         "auth_required": "请先完成本地登录。",
         "csrf_required": "请求缺少安全令牌。",
         "csrf_invalid": "安全令牌无效。",

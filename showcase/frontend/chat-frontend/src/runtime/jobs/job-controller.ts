@@ -8,7 +8,7 @@ export class JobController {
 
   constructor(private readonly jobs: ReturnType<typeof useJobsStore>, private readonly ordinary = false) {}
 
-  async subscribe(jobId: string): Promise<void> {
+  async subscribe(jobId: string, onEvent?: (event: DecodedSseEvent) => void): Promise<void> {
     const generation = ++this.generation
     this.activeAbort?.abort()
     const abort = new AbortController()
@@ -23,6 +23,7 @@ export class JobController {
         onEvent: (event: DecodedSseEvent) => {
           if (generation !== this.generation || abort.signal.aborted) return
           this.jobs.applyEvent(jobId, event)
+          onEvent?.(event)
         },
       })
     } catch (error) {

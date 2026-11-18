@@ -7,6 +7,7 @@ type Status = 'queued' | 'running' | 'waiting_input' | 'succeeded' | 'failed' | 
 export interface JobRecord {
   jobId: string
   sessionId: string
+  fileId?: string
   status: Status
   lastEventId: number
   renderedEventId: number
@@ -58,6 +59,7 @@ export const useJobsStore = defineStore('jobs', {
       const existing = this.records[job.job_id]
       const cursor = existing?.lastEventId ?? 0
       const record = this.start(job.job_id, job.session_id, job.status, cursor)
+      if (typeof job.input_user_file_id === 'string') record.fileId = job.input_user_file_id
       record.error = typeof job.error === 'string' ? job.error : null
       if (job.result && typeof job.result === 'object') record.result = job.result as Record<string, unknown>
       const mode = (job as ActiveJobResponse & { result?: { presentation_mode?: unknown } }).result?.presentation_mode
