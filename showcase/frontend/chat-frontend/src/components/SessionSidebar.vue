@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { useAuthStore } from '../stores/auth.store'
 const auth = useAuthStore()
 import UiButton from './ui/UiButton.vue'
@@ -12,12 +13,14 @@ function formatSessionTime(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : sessionTimeFormatter.format(date)
 }
-defineProps<{
+const props = defineProps<{
   items: Array<{ id: string; preview: string; lastTime: string }>
   currentId: string | null
   open: boolean
 }>()
 
+const query = ref('')
+const filteredItems = computed(() => props.items.filter(item => item.preview.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())))
 const emit = defineEmits<{
   new: []
   select: [id: string]
@@ -37,10 +40,12 @@ const emit = defineEmits<{
       <UiButton icon-only variant="ghost" class="mobile-only" aria-label="关闭会话栏" @click="emit('close')"><UiIcon name="close" /></UiButton>
     </div>
     <nav class="sidebar-nav" aria-label="主导航"><UiButton variant="primary" @click="emit('new')"><UiIcon name="plus" />新建会话</UiButton><a v-if="auth.reviewer" class="ui-button ui-button--ghost" href="/dashboard/campaigns"><UiIcon name="experiments" />配对实验</a></nav>
+    <div role="search" class="session-search"><label for="session-search">搜索会话</label><input id="session-search" v-model="query" type="search" name="session-search" placeholder="查找题目或会话" autocomplete="off" /></div>
     <div class="sidebar-section"><div class="sidebar-section-label"><span>最近会话</span><span>{{ items.length }}</span></div>
     <div v-if="!items.length" class="sidebar-empty">还没有数学题记录</div>
+    <p v-else-if="!filteredItems.length" class="sidebar-empty" role="status">没有匹配的会话</p>
     <nav v-else class="session-list" aria-label="数学会话">
-      <div v-for="item in items" :key="item.id" class="session-row" :class="{ selected: item.id === currentId }">
+      <div v-for="item in filteredItems" :key="item.id" class="session-row" :class="{ selected: item.id === currentId }">
         <button class="session-main" type="button" :aria-current="item.id === currentId ? 'page' : undefined" @click="emit('select', item.id)">
           <span class="session-title">{{ item.preview }}</span><time class="session-time" :datetime="item.lastTime">{{ formatSessionTime(item.lastTime) }}</time>
         </button>

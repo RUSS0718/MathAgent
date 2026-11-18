@@ -9,7 +9,7 @@ import RoleStagePanel from './RoleStagePanel.vue'
 import AutonomousRouteStatus from './AutonomousRouteStatus.vue'
 import SerialInterventionStatus from './SerialInterventionStatus.vue'
 
-const props = defineProps<{ jobId?: string; events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null; animateLive?: boolean; ordinary?: boolean }>()
+const props = defineProps<{ jobId?: string; executionMode?: string; events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null; animateLive?: boolean; ordinary?: boolean }>()
 const readingRole = ref('planner')
 const readingSource = ref<string>()
 const panel = ref<InstanceType<typeof RoleStagePanel>>()
@@ -58,9 +58,26 @@ const filtered = computed(() => state.value.keyEntries.filter(entry => (!role.va
   || entry.message?.from_role === role.value || entry.message?.to_role === role.value) && (!step.value || entry.step === step.value)))
 const shown = computed(() => expanded.value ? filtered.value : filtered.value.slice(-6))
 const technicalEntries = computed(() => state.value.entries.slice((page.value - 1) * 100, page.value * 100))
-const messages = ref<Collaboration[]>([])
-const displayedMessages = computed(() => replayCount.value === null ? messages.value : state.value.keyEntries.flatMap(entry => entry.message ? [entry.message] : []).slice(-1))
-let flightTimer: ReturnType<typeof setTimeout> | undefined
+const flights = ref<Collaboration[]>([])
+const motionEnabled = ref(true)
+const flightTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const displayedMessages = computed(() => state.value.entries.flatMap(entry => entry.message ? [entry.message] : []))
+const motionActive = computed(() => view.value === 'constellation' && motionEnabled.value
+  && props.animateLive && !props.replay && replayCount.value === null)
+function clearFlights() {
+  flightTimers.forEach(clearTimeout)
+  flightTimers.clear()
+  flights.value = []
+}
+watch(motionActive, active => { if (!active) clearFlights() })
+const provenance = computed(() => {
+  if (all.value.source.startsWith('FAKE') || props.executionMode === 'fake') return '模拟运行'
+  if (all.value.source.startsWith('LIVE') || props.executionMode === 'live') {
+    return !props.replay && replayCount.value === null && ['queued', 'running'].includes(props.status)
+      ? '实时运行' : '真实历史记录'
+  }
+  return '来源待确认'
+})
 const dark = ref(globalThis.document?.documentElement.dataset.theme === 'dark')
 function toggleTheme() {
   dark.value = !dark.value
@@ -73,12 +90,17 @@ watch(displayEvents, () => {
   for (const entry of all.value.entries) {
     if (entry.message && !animated.has(entry.message.message_id)) {
       animated.add(entry.message.message_id)
-      if (props.animateLive && !props.replay && props.status === 'running' && replayCount.value === null) batch.push(entry.message)
+      if (motionActive.value) batch.push(entry.message)
     }
   }
-  messages.value = batch.slice(-8)
-  clearTimeout(flightTimer)
-  flightTimer = setTimeout(() => { messages.value = [] }, 1400)
+  flights.value = [...flights.value, ...batch]
+  for (const message of batch) {
+    const id = message.message_id
+    flightTimers.set(id, setTimeout(() => {
+      flights.value = flights.value.filter(item => item.message_id !== id)
+      flightTimers.delete(id)
+    }, 2500))
+  }
 })
 function selectRole(value: string) { openRole(value) }
 function pause() { clearInterval(timer); playing.value = false }
@@ -91,14 +113,14 @@ function play() {
     if (replayCount.value >= all.value.events.length) pause()
   }, 900)
 }
-onUnmounted(() => { pause(); clearTimeout(flightTimer); clearTimeout(displayTimer); clearInterval(phaseClock) })
+onUnmounted(() => { pause(); clearFlights(); clearTimeout(displayTimer); clearInterval(phaseClock) })
 </script>
 
 <template>
   <section class="workbench" aria-label="对话式执行工作台">
     <RoleStagePanel ref="panel" :job-id="jobId" :role="readingRole" :source="readingSource" :saved-source="savedSource" :revision="events.length" :job-status="status" :runtime-state="state.roleStates[readingRole]" @filter="role = $event" />
     <header class="workbench-toolbar">
-      <strong>{{ ordinary ? (replay || replayCount !== null ? '历史回放' : '求解进展') + ((result as { execution_mode?: string })?.execution_mode === 'fake' ? ' · 模拟运行' : (result as { execution_mode?: string })?.execution_mode === 'live' ? ' · 实际运行' : '') : replayCount === null ? all.source : 'REPLAY · 本地事件回放' }}</strong>
+      <strong>{{ ordinary ? (replay || replayCount !== null ? '历史回放' : '求解进展') + ' · ' + provenance : replayCount === null ? all.source : 'REPLAY · 本地事件回放' }}</strong>
       <span role="status" aria-atomic="true">当前阶段：{{ state.phase }}<span v-if="error"> · 请刷新任务状态</span></span>
       <small>{{ elapsed }}</small>
       <div class="view-controls" aria-label="执行视图">
@@ -108,14 +130,14 @@ onUnmounted(() => { pause(); clearTimeout(flightTimer); clearTimeout(displayTime
       </div>
     </header>
     <p v-if="['waiting_input', 'failed', 'canceled', 'unknown', 'needs_review'].includes(status)" class="attention">{{ statusLabels[status] }}。请查看任务状态及当前允许的操作；结果未知时先核对原提交，不要自动重发。</p>
-    <div class="workbench-columns">
+    <div class="workbench-columns" :class="{ 'full-graph': view === 'constellation' }">
       <div class="workbench-main">
         <div class="event-filters">
           <label>角色 <select v-model="role"><option value="">全部角色</option><option v-for="item in roles" :key="item[0]" :value="item[0]">{{ item[1] }}</option></select></label>
           <label>步骤 <select v-model="step"><option value="">全部步骤</option><option v-for="item in state.steps" :key="item.label">{{ item.label }}</option></select></label>
           <button type="button" @click="role = ''; step = ''">清除筛选</button>
         </div>
-        <AgentConstellation v-show="view === 'constellation'" :selected="role" :role-states="state.roleStates" :messages="displayedMessages" @select="selectRole" />
+        <AgentConstellation v-show="view === 'constellation'" v-model:motion-enabled="motionEnabled" :selected="role" :role-states="state.roleStates" :messages="displayedMessages" :flights="flights" @select="selectRole" />
         <ol v-show="view === 'conversation'" class="conversation-events">
           <li v-for="entry in shown" :key="entry.event.id!" :data-thread-id="ordinary ? undefined : entry.message?.thread_id">
             <article :data-workbench-event="ordinary ? undefined : entry.event.id">
@@ -153,14 +175,14 @@ onUnmounted(() => { pause(); clearTimeout(flightTimer); clearTimeout(displayTime
           <article v-for="(candidate, i) in state.partial.candidates" :key="i"><small>候选 {{ i + 1 }} · {{ candidate.review }} · {{ candidate.eligible ? '已通过审查' : '未获通过' }}</small><p>{{ candidate.text }}</p></article>
         </details>
         </details>
-        <AgentConstellation mini :selected="role" :role-states="state.roleStates" :messages="displayedMessages" @select="selectRole" />
+        <AgentConstellation v-show="view === 'conversation'" mini :selected="role" :role-states="state.roleStates" :messages="displayedMessages" @select="selectRole" />
         <p class="interjection-note">节点依据公开生命周期更新；历史在途状态不冒充实时执行。</p>
       </aside>
     </div>
     <details class="replay-controls"><summary>查看历史回放</summary>
       <button type="button" :disabled="!all.events.length" @click="playing ? pause() : play()">{{ playing ? '暂停回放' : '回放已收事件' }}</button>
       <label>回放位置（不是求解进度） <input type="range" min="0" :max="all.events.length" :value="replayCount ?? all.events.length" @input="pause(); replayCount = Number(($event.target as HTMLInputElement).value)" /></label>
-      <button v-if="replayCount !== null" type="button" @click="pause(); replayCount = null; messages = []">返回任务状态</button>
+      <button v-if="replayCount !== null" type="button" @click="pause(); replayCount = null; clearFlights()">返回任务状态</button>
     </details>
   </section>
 </template>
@@ -179,6 +201,8 @@ button, select { background: var(--surface); color: var(--text); border: 1px sol
 button[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
 button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .workbench-columns { display: grid; grid-template-columns: minmax(0, 1fr) 230px; }
+.workbench-columns.full-graph { grid-template-columns: minmax(0, 1fr); }
+.full-graph .workbench-plan { position: static; border-left: 0; }
 .workbench-main { padding: 16px; min-width: 0; }
 .workbench-plan { align-self: start; position: sticky; top: 0; padding: 12px; border-left: 1px solid var(--border); }
 .workbench-plan h3 { margin: 0 0 12px; }

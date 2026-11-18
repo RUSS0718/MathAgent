@@ -53,3 +53,21 @@
   .workspace-notice { margin: var(--space-3) var(--space-3) 0; }
   .session-actions .ui-button { --control-height: 36px; }
 }
+/* Observatory navigation stays visually distinct from the reading surface. */
+.session-sidebar { --surface: #173148; --sidebar: #102638; --text: #edf3f7; --muted: #b0c2cf; --border: #31495b; --border-strong: #698395; --accent: #91dbe9; --accent-strong: #bcf0f8; --accent-wash: #234359; --accent-soft: #4d7a90; --on-accent: #102638; gap: 24px; padding: 28px 16px 20px; }
+.session-sidebar .brand-mark { background: transparent; border: 1px solid var(--border-strong); color: var(--accent); }
+.session-search { display: grid; gap: 8px; }
+.session-search label { color: var(--muted); font-size: 12px; }
+.session-search input { min-width: 0; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--sidebar); color: var(--text); font: inherit; font-size: 16px; }
+.session-search input::placeholder { color: var(--muted); }
+.session-search input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.session-sidebar .session-actions { flex-direction: column; }
+.session-sidebar .session-row { align-items: flex-start; }
+.session-sidebar .session-main { gap: 8px; }
+.session-sidebar .session-title { font-size: 13px; }
+.session-sidebar .session-time { font-size: 10px; }
+.session-sidebar .sidebar-footer a { color: var(--muted); font-size: 12px; text-underline-offset: 4px; }
+::selection { background: var(--accent-wash); color: var(--text); }
+input, textarea { caret-color: var(--accent); }
+* { scrollbar-color: var(--border-strong) transparent; scrollbar-width: thin; }
+@media (max-width: 760px) { .session-sidebar .session-actions .ui-button { --control-height: 40px; } }

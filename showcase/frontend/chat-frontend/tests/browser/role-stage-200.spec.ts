@@ -73,6 +73,7 @@ test(`desktop ${readingRole} saved plan event only prompts until user explicitly
 }
 
 test('desktop dual entry reads the same saved plan, preserves filters and returns keyboard focus', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
   const writes: string[] = []
   const errors: string[] = []
   page.on('pageerror', e => errors.push(e.message))
@@ -107,6 +108,12 @@ test('desktop dual entry reads the same saved plan, preserves filters and return
   await expect(panel).toBeVisible()
   expect(await panel.locator('[data-plan-body]').innerText()).toBe(first)
   await expect(workbench.getByRole('combobox', { name: '角色', exact: true })).toHaveValue('')
+  await page.keyboard.press('Escape')
+  await expect(panel).not.toBeVisible()
+  await expect(node).toBeFocused()
+  await expect(workbench.getByRole('combobox', { name: '角色', exact: true })).toHaveValue('')
+  await page.keyboard.press('Enter')
+  await expect(panel).toBeVisible()
   await panel.getByRole('button', { name: '只看该角色' }).click()
   await expect(workbench.getByRole('combobox', { name: '角色', exact: true })).toHaveValue('planner')
   await expect(node).toBeFocused()
