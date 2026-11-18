@@ -39,11 +39,11 @@ async function revise(): Promise<void> {
       <a v-if="state.revision_source" :href="`/dashboard/run/${state.revision_source.task_id}`">查看原任务</a>
       <a v-if="state.revision_to" :href="`/dashboard/run/${state.revision_to.task_id}`">查看改题后的任务</a>
     </nav>
-    <template v-if="state.revision_allowed && !readonly">
-      <h2>改题或追加要求</h2>
+    <details v-if="state.revision_allowed && !readonly">
+      <summary>改题或追加要求</summary>
       <p>请输入包含新要求的完整题目。提交后原任务停止后续派发；已发出的远端请求可能仍在执行并按原任务结算。回答上方的澄清问题请使用“补充条件”。</p>
       <ComposerBar v-model="draft" submit-label="改题并创建新任务" :disabled="disabled || pending" :busy="pending" :running="false" :vision-enabled="false" @submit="revise" />
-    </template>
+    </details>
     <p v-if="state.revision_to" role="status">已创建关联新任务。原任务不再派发新工作，在途或未知请求仍保留原身份与预留。</p>
     <p v-if="error" role="alert">{{ error }}</p>
   </section>
@@ -52,6 +52,8 @@ async function revise(): Promise<void> {
 <style scoped>
 .task-revision { margin-block: var(--space-4); overflow-wrap: anywhere; }
 nav { display: flex; flex-wrap: wrap; gap: var(--space-3); }
-h2 { margin-block: var(--space-4) var(--space-2); font-size: var(--text-lg); }
+details { margin-block: var(--space-3); color: var(--muted); font-size: var(--text-sm); }
+summary { cursor: pointer; }
+summary:focus-visible { outline: 2px solid var(--accent); outline-offset: var(--space-1); }
 p { margin-block: var(--space-2); }
 </style>

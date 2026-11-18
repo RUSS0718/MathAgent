@@ -82,11 +82,6 @@ class CheckpointRepairSourceTest(StarJobFixture, unittest.TestCase):
                 ctx, text, status=status, claims=[{"statement": "2+2=4", "label": "hard-verify"}]
             )
 
-        def invalid(ctx):
-            reply = draft(ctx, "Four follows from addition")
-            reply["checkpoint"]["next_action"] = ""
-            return reply
-
         def accepted(ctx):
             owner = ctx["step"]["obligation_ids"][0]
             return {
@@ -117,7 +112,8 @@ class CheckpointRepairSourceTest(StarJobFixture, unittest.TestCase):
         registry.register_polynomial_check()
 
         def repaired(ctx):
-            reply = draft(ctx, "Repaired addition draft", "YIELD")
+            original = {**ctx, "call_id": ctx["call_id"].removesuffix(":repair-1")}
+            reply = draft(original, "Repaired addition draft", "YIELD")
             if direct:
                 reply["checkpoint"]["claims"][0].update(
                     label="easy-verify",
@@ -133,6 +129,12 @@ class CheckpointRepairSourceTest(StarJobFixture, unittest.TestCase):
                         "scope": "finite_computation",
                     },
                 )
+            return reply
+
+        def invalid(ctx):
+            # Omit one required field while retaining the checkpoint's supplied semantics.
+            reply = repaired(ctx)
+            del reply["checkpoint"]["next_action"]
             return reply
 
         prefix = (

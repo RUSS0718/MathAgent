@@ -35,7 +35,9 @@ def result_view(value):
     value = obj(value)
     result = fields(value, ('presentation_mode',))
     mode = value.get('execution_mode')
-    if mode in {'fake', 'live', 'unavailable'}:
+    if value.get('evidence_kind') in ('scripted', 'fault_injection'):
+        result['execution_mode'] = 'fake'
+    elif mode in {'fake', 'live', 'unavailable'}:
         result['execution_mode'] = mode
     elif isinstance(mode, str) and mode.startswith('star'):
         result['execution_mode'] = 'live'

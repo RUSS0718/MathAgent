@@ -23,7 +23,7 @@ test('default page replaces old chat and submits the actual entered problem with
   } }))
   await page.goto('/dashboard-assets/')
   await expect(page.getByRole('main')).toBeVisible()
-  await expect(page.getByRole('heading', { name: '新建求解 · 输入题干', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '数学工作区', exact: true })).toBeVisible()
   await page.getByRole('textbox', { name: '数学问题', exact: true }).fill('求解 x+1=2')
   await page.getByRole('button', { name: '发送', exact: true }).click()
   await page.locator('.execution-process > summary').click()

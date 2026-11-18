@@ -18,8 +18,9 @@ class RouteHarness(SolverHarness):
         self._product_recovery = True
         self._owns_showcase_store = False
 
-    def get_run(self, run_id, *, problem=None):
+    def get_run(self, run_id, *, problem=None, _history=None):
         """Read a branch without marking other live workers as abandoned."""
+        # The caller's stream history describes the branch, not the parent ledger.
         parent = self._state_store.get_run(run_id)
         route = parent["state"]["population"]["routes"][self._route_id]
         # get_run decoded a fresh, private parent; its branch has no shared owner.

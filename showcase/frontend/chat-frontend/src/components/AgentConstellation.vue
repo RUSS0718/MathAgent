@@ -1,23 +1,57 @@
 <script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { roles } from '../runtime/jobs/workbench'
 import type { Collaboration } from '../api/workbench.schemas'
 import { roleLabels } from '../runtime/jobs/causal-progress'
 const stateLabels: Record<string, string> = { idle: '未参与', running: '执行中', completed: '已完成', failed: '遇到问题', unknown: '结果未知' }
-defineProps<{ selected: string; roleStates: Record<string, string>; messages: Collaboration[]; mini?: boolean }>()
-const emit = defineEmits<{ select: [role: string] }>()
+const props = defineProps<{ selected: string; roleStates: Record<string, string>; messages: Collaboration[]; flights?: Collaboration[]; mini?: boolean }>()
+const motionEnabled = defineModel<boolean>('motionEnabled', { default: true })
+const media = globalThis.matchMedia('(prefers-reduced-motion: reduce)')
+const reducedMotion = ref(media.matches)
+const emit = defineEmits<{ select: [role: string]; systemMotion: [allowed: boolean] }>()
+function syncMotion(event: MediaQueryListEvent) {
+  reducedMotion.value = event.matches
+  emit('systemMotion', !event.matches)
+}
+onMounted(() => {
+  if (props.mini) return
+  media.addEventListener('change', syncMotion)
+  emit('systemMotion', !media.matches)
+})
+onUnmounted(() => media.removeEventListener('change', syncMotion))
+const effectiveMotion = computed(() => motionEnabled.value && !reducedMotion.value)
+function canDraw(message: Collaboration) {
+  return message.from_role !== message.to_role && point(message.from_role) && point(message.to_role)
+}
+const visibleMessages = computed(() => {
+  const paths = new Map<string, Collaboration>()
+  for (const message of props.messages.filter(canDraw)) {
+    paths.set(`${message.from_role}:${message.to_role}`, message)
+  }
+  return [...paths.values()]
+})
+const visibleFlights = computed(() => props.flights?.filter(canDraw) ?? [])
+function trajectory(message: Collaboration) {
+  const a = point(message.from_role)!
+  const b = point(message.to_role)!
+  return `M ${a[2]} ${a[3]} Q ${(a[2] + b[2]) / 2 - (b[3] - a[3]) * .16} ${(a[3] + b[3]) / 2 + (b[2] - a[2]) * .16} ${b[2]} ${b[3]}`
+}
 function point(role: string) { return roles.find(item => item[0] === role) }
 </script>
 
 <template>
-  <div class="constellation" tabindex="-1" :class="{ mini }" :aria-label="mini ? '迷你星图角色成果' : '智能体协作星图'">
-    <svg viewBox="0 0 1000 700" aria-hidden="true">
+  <div class="constellation" tabindex="-1" :class="{ mini, 'motion-off': !effectiveMotion }" :aria-label="mini ? '迷你星图角色成果' : '智能体协作星图'">
+    <button v-if="!mini" class="motion-toggle" type="button" :aria-pressed="effectiveMotion" :disabled="reducedMotion" @click="motionEnabled = !motionEnabled">{{ reducedMotion ? '完整星图动效 · 系统已减少动态效果' : '完整星图动效' }}</button>
+    <svg v-if="!mini" preserveAspectRatio="none" viewBox="0 0 1000 700" aria-hidden="true">
+      <ellipse v-for="r in [150, 245, 330]" :key="r" class="orbit" cx="500" cy="350" :rx="r * 1.3" :ry="r" />
       <line v-for="role in roles.slice(1)" :key="role[0]" x1="500" y1="306" :x2="role[2]" :y2="role[3]" />
-      <template v-for="message in messages.filter(m => point(m.from_role) && point(m.to_role) && m.from_role !== m.to_role)" :key="message.message_id">
-        <path :id="`${mini ? 'mini' : 'full'}-${message.message_id}`" :d="`M ${point(message.from_role)![2]} ${point(message.from_role)![3]} L ${point(message.to_role)![2]} ${point(message.to_role)![3]}`" class="message-wire" />
-        <circle r="7" class="message-flight">
-          <animateMotion dur="1.4s" repeatCount="1" fill="freeze"><mpath :href="`#${mini ? 'mini' : 'full'}-${message.message_id}`" /></animateMotion>
+      <path v-for="message in visibleMessages" :key="message.message_id" :d="trajectory(message)" class="message-wire" />
+      <g v-for="message in visibleFlights" :key="message.message_id" :data-flight="message.message_id">
+        <path :d="trajectory(message)" class="message-highlight" />
+        <circle v-for="particle in 6" :key="particle" :r="8 - particle" class="message-flight" :style="{ animationDelay: `${(particle - 1) * .045}s`, offsetPath: `path('${trajectory(message)}')`, opacity: 1 - particle * .12 }">
         </circle>
-      </template>
+        <circle class="arrival" :cx="point(message.to_role)![2]" :cy="point(message.to_role)![3]" r="32" />
+      </g>
     </svg>
     <button v-for="role in roles" :key="role[0]" type="button" :style="{ left: `${role[2] / 10}%`, top: `${role[3] / 7}%` }"
       :class="[roleStates[role[0]], { selected: selected === role[0] }]" :data-role-state="roleStates[role[0]]" :aria-pressed="selected === role[0]"
@@ -26,20 +60,41 @@ function point(role: string) { return roles.find(item => item[0] === role) }
 </template>
 
 <style scoped>
-.constellation { position: relative; aspect-ratio: 1000 / 700; width: 100%; background: radial-gradient(ellipse at center, var(--accent-wash), transparent 70%); }
+.constellation { position: relative; aspect-ratio: 1000 / 700; width: 100%; overflow: hidden; border-radius: var(--radius-lg); background: radial-gradient(ellipse at 50% 45%, #19364b, #081421 75%); isolation: isolate; }
 svg { position: absolute; width: 100%; height: 100%; overflow: visible; }
-line { stroke: var(--border-strong); stroke-dasharray: 3 5; }
-.message-wire { fill: none; stroke: var(--accent); stroke-width: 2; }
-.message-flight { fill: var(--accent); animation: fade-message 1.4s forwards; }
-button { position: absolute; transform: translate(-50%, -50%); display: grid; gap: 4px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--muted); cursor: pointer; font: inherit; white-space: nowrap; }
-button.running { border-color: var(--accent); color: var(--text); background: var(--accent-wash); }
-button.completed { border-color: var(--success); color: var(--success); }
-button.failed, button.unknown { border-color: var(--danger); color: var(--danger); }
-button.selected { background: var(--accent-wash); outline: 2px solid var(--accent); }
-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
-.constellation:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
-small { font-size: 10px; color: var(--muted); }
-.mini button { font-size: 10px; min-height: 30px; padding: 4px; }
-@keyframes fade-message { 99% { opacity: 1; } 100% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .message-flight { display: none; } }
+.orbit { fill: none; stroke: #92b7d0; stroke-opacity: .12; stroke-width: 1; }
+line { stroke: #80a8c2; stroke-opacity: .25; stroke-dasharray: 2 8; }
+.message-wire { fill: none; stroke: #64dbef; stroke-width: 1.5; opacity: .45; }
+.message-highlight { fill: none; stroke: #b5f4ff; stroke-width: 3; opacity: 0; }
+.message-flight { fill: #d4fbff; filter: drop-shadow(0 0 6px #68dff5); }
+.arrival { fill: none; stroke: #8ceaff; stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
+button:not(.motion-toggle) { position: absolute; transform: translate(-50%, -50%); display: grid; gap: 4px; min-height: 40px; padding: 8px 12px; border: 1px solid #446277; border-radius: var(--radius-md); background: #11283a; color: #c0d2df; cursor: pointer; font: inherit; white-space: nowrap; }
+button.running { border-color: #79e4f3; color: #ecfcff; background: #18455a; }
+button.completed { border-color: #82d9b0; color: #a4efcb; }
+button.failed, button.unknown { border-color: #ffa8ac; color: #ffc3c6; }
+button.selected { background: #214b64; color: #ffffff; outline: 2px solid #9aeaff; outline-offset: 4px; }
+button:hover { border-color: #bbf3ff; }
+button:focus-visible, .constellation:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+small { font-size: 10px; color: #b5cad8; }
+@keyframes flight { 0% { offset-distance: 0%; } 99% { opacity: 1; } 100% { offset-distance: 100%; opacity: 0; } }
+@keyframes arrival { 0% { opacity: .8; transform: scale(.5); } 100% { opacity: 0; transform: scale(2); } }
+@keyframes highlight { from { opacity: .95; } to { opacity: 0; } }
+.message-highlight { animation: highlight 1.6s linear both; }
+.message-flight { animation: flight 1.6s linear both; }
+.arrival { animation: arrival .7s 1.6s both; }
+@media (prefers-reduced-motion: reduce) {
+  .message-flight, .arrival, .message-highlight { animation: none; visibility: hidden; }
+}
+.motion-toggle { position: absolute; right: 12px; top: 12px; z-index: 1; padding: 6px 10px; min-height: 32px; background: #11283a; border: 1px solid #446277; border-radius: 6px; color: #c0d2df; cursor: pointer; font: inherit; font-size: 11px; }
+.motion-toggle[aria-pressed=true] { color: #9aeaff; border-color: #73adbf; }
+.motion-off .message-flight, .motion-off .arrival, .motion-off .message-highlight { visibility: hidden; }
+.mini { aspect-ratio: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; }
+.mini button:not(.motion-toggle) { position: static; transform: none; min-height: 48px; font-size: 12px; white-space: normal; }
+.mini button.selected { outline-offset: 1px; }
+.constellation:not(.mini) { min-height: 540px; }
+@media (max-width: 760px) {
+  .constellation:not(.mini) button:not(.motion-toggle) { font-size: 12px; padding: 6px; gap: 3px; }
+  .constellation:not(.mini) .motion-toggle { top: 4px; right: 4px; font-size: 10px; min-height: 28px; padding: 4px 6px; }
+}
+.message-flight { offset-anchor: 0px 0px; offset-rotate: 0deg; }
 </style>

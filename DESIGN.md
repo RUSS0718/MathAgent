@@ -2,18 +2,18 @@
 name: MathAgent Showcase
 description: 本机数学工作区的浅色界面系统
 colors:
-  background: "#f7f8fa"
+  background: "#f7f7f3"
   surface: "#ffffff"
-  surface-muted: "#eef2f4"
-  sidebar: "#f1f4f5"
-  text: "#18232f"
+  surface-muted: "#eeefeb"
+  sidebar: "#e4ecf4"
+  text: "#172c40"
   muted: "#566574"
   border: "#dce2e6"
   border-strong: "#b7c3cb"
-  accent: "#0f766e"
-  accent-strong: "#095c56"
-  accent-soft: "#9bc9c2"
-  accent-wash: "#e9f5f2"
+  accent: "#176782"
+  accent-strong: "#104d65"
+  accent-soft: "#9acbda"
+  accent-wash: "#e5f3f8"
   success: "#216442"
   success-wash: "#edf7f0"
   warning: "#85520b"
@@ -55,7 +55,7 @@ typography:
 rounded:
   sm: "6px"
   md: "8px"
-  lg: "12px"
+  lg: "16px"
 spacing:
   '1': "4px"
   '2': "8px"
@@ -104,7 +104,7 @@ components:
 
 ## Overview
 
-这是既有 accepted 工作区的系统整理，不引入新的品牌隐喻。依据是 `docs/frontend/v0.2-workspace-redesign.md`、`docs/frontend/ui-unification-contract.md` 与当前实现。中性浅色表面和蓝绿色强调色服务数学阅读、输入和运行观察；状态文字必须说明执行模式及验证边界。
+2026-11-17 视觉重塑：观测台风格，浅色阅读区与深空星图，暗色模式采用夜空蓝。依据是 `docs/frontend/v0.2-workspace-redesign.md`、`docs/frontend/ui-unification-contract.md` 与当前实现。中性浅色表面和蓝绿色强调色服务数学阅读、输入和运行观察；状态文字必须说明执行模式及验证边界。
 
 **Key Characteristics:**
 
@@ -134,17 +134,17 @@ components:
 
 ## Layout
 
-工作区高度为 100dvh。桌面左栏 248px，右栏 320px，主列 minmax(0, 1fr)。大于 1180px 时观察栏默认打开，关闭后释放空间；不大于 1180px 时观察栏转右抽屉。不大于 760px 时左栏也转抽屉，中间占满宽度。抽屉宽 min(360px, 100vw - 32px)，关闭后不能参与背景 Tab。
+当前求解工作区高度为 100dvh，桌面左栏 264px，主列 minmax(0, 1fr)。不大于 760px 时左栏转抽屉，中间占满宽度。工作台内部角色栏为 230px，不大于 900px 时置于主内容上方。共享旧布局仍保留 sidebar-width 248px 和 inspector-width 320px token，不代表当前求解页的列宽。
 
-对话阅读宽度上限 760px，欢迎内容上限 640px；普通阅读页上限 1120px、桌面两侧至少 32px，窄屏两侧 16px。对话独立滚动，输入栏保持可达；桌面输入栏宽 min(760px, 100% - 48px)，窄屏为 100% - 24px。设置、配对实验的双列在 760px 处变单列。间距沿用 YAML 四像素节奏。
+当前输入区宽 min(720px, 100% - 40px)，求解内容宽 min(1100px, 100%)，桌面内边距 32px、窄屏 12px；主内容独立滚动。设置、配对实验的双列在 760px 处变单列。其他共享阅读页沿用既有宽度，间距沿用 YAML 四像素节奏。
 
 ## Elevation & Depth
 
-常规页面依靠底色、细边界和留白区分层次，报告不加阴影。唯一共享浮层阴影是 `shadow-overlay`（`0 16px 48px rgb(24 35 47 / 16%)`），配合 overlay 用于抽屉。焦点环为 accent 的 2px outline、外偏移 3px，不用阴影替代。
+常规页面依靠底色、细边界和留白区分层次，报告不加阴影。共享浮层阴影 `shadow-overlay`（`0 16px 48px rgb(24 35 47 / 16%)`）配合 overlay 用于抽屉；新建题目输入区使用较轻的 `0 12px 36px rgb(26 43 57 / 7%)`。焦点采用可见 outline，不用阴影替代。
 
 ## Shapes
 
-小圆角用于状态与行内代码，中圆角用于按钮、选中行、通知，大圆角用于输入容器、用户消息和报告。状态点为圆形。默认控件最小高 40px；会话行内操作桌面 28px、移动 36px 是现有紧凑例外，不推广为其他按钮的默认尺寸。
+小圆角用于状态与行内代码，中圆角用于按钮、选中行、通知，大圆角用于输入容器、用户消息和报告。状态点为圆形。默认控件最小高 40px；会话行内操作桌面 28px、移动 40px，星图动效按钮桌面 32px、窄屏完整星图 28px，是紧凑例外，不推广为其他按钮的默认尺寸。mini 角色按钮最小高48px。
 
 ## Components
 
@@ -169,3 +169,9 @@ components:
 - **Don't** 引入第二套框架、状态、数学渲染或图标库，或 CDN 字体与运行时资源。
 - **Don't** 用渐变、大面积装饰和无信息卡片替代数学内容。
 - **Don't** 将界面通过、演示数据或有限验证声明为数学能力提升。
+
+普通工作区使用暖白阅读区和固定深蓝导航。会话搜索在本地过滤，示例按钮展示可回填的题干。
+
+星图节点打开阶段成果。面板内的「只看该角色」筛选关键进展，Esc 返回原节点。关键进展视图保留双列角色入口，切到完整星图后只显示一张图。
+
+完整星图保留每个已观察角色方向的静态路径。开启动效时，仅在可见星图收到新的公开交接时突出对应路径。系统减少动态效果时，仍可阅读路径、角色状态和关键进展。

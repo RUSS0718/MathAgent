@@ -35,15 +35,23 @@ class NoncodingCheckpointTest(StarJobFixture, unittest.TestCase):
             reply["checkpoint"]["blocked"] = True
             return reply
 
+        def pure(context):
+            original = {**context, "call_id": context["call_id"].removesuffix(":repair-1")}
+            return checkpoint(original, "Addition gives 1+1=2", claims=[
+                {"statement": "1+1=2", "label": "hard-verify"}])
+
+        def missing_field(context):
+            reply = pure(context)
+            del reply["checkpoint"]["next_action"]
+            return reply
+
         replies = [NEED_PLAN, PLAN, blocked, GUIDANCE]
         if needs_repair:
-            replies.append(PLAIN)
+            replies.append(missing_field)
         verdict = {**VERDICT, **({"classified_outcomes": [{
             "category": "Lemma", "statement": "1+1=2", "scope": "integer addition",
             "claim_indexes": [0]}]} if graph else {})}
-        replies.extend([lambda ctx: checkpoint(ctx, "Addition gives 1+1=2", claims=[
-            {"statement": "1+1=2", "label": "hard-verify"}]),
-            verdict, {"final_response": "2"}, ACCEPT])
+        replies.extend([pure, verdict, {"final_response": "2"}, ACCEPT])
         self.open_star(replies, stream_chunk_size=4096,
                        SHOWCASE_STAR_FEATURES={**FEATURES, "meta_guidance": True, "skills": True,
                                               **({"proof_graph": True} if graph else {})},
@@ -74,7 +82,7 @@ class NoncodingCheckpointTest(StarJobFixture, unittest.TestCase):
     def test_guidance_switch_reaches_independent_review_with_pure_checkpoint(self):
         self.run_pure_checkpoint()
 
-    def test_plain_pure_reply_uses_one_protocol_repair_before_review(self):
+    def test_pure_checkpoint_missing_field_uses_one_protocol_repair_before_review(self):
         first, repair = self.run_pure_checkpoint(needs_repair=True)
         self.assertEqual(first["call_id"] + ":repair-1", repair["call_id"])
         self.assertEqual(first["step"], repair["step"])

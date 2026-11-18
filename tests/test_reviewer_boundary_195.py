@@ -172,3 +172,16 @@ class ReviewerBoundaryTest(unittest.TestCase):
     def test_ordinary_progress_preserves_safe_execution_mode(self):
         from showcase.public_workspace import result_view
         self.assertEqual('fake', result_view({'execution_mode': 'fake'})['execution_mode'])
+
+    def test_ordinary_progress_identifies_controlled_star_runs(self):
+        from showcase.public_workspace import result_view
+
+        for kind in ('scripted', 'fault_injection'):
+            with self.subTest(evidence_kind=kind):
+                self.assertEqual({'execution_mode': 'fake'}, result_view({
+                    'execution_mode': 'star_reference', 'evidence_kind': kind,
+                    'private_config': 'ignored',
+                }))
+        self.assertEqual({'execution_mode': 'live'}, result_view({
+            'execution_mode': 'star_reference', 'evidence_kind': 'live',
+        }))

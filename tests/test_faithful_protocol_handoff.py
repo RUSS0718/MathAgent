@@ -341,7 +341,7 @@ class FaithfulProtocolHandoffTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(5, final["result"]["budget"]["logical_calls"])
         self.assertEqual(5, len(self.outbound))
 
-    def test_reasoner_empty_yield_is_repaired_before_serial_execution_continues(self):
+    def test_reasoner_missing_field_is_repaired_before_serial_execution_continues(self):
         spec = deepcopy(SPEC)
         spec["root_obligations"].append({"obligation_id": "root:explain", "obligation_type": "universal",
             "statement": "Explain the addition", "prerequisite_ids": ["root:value"]})
@@ -355,7 +355,7 @@ class FaithfulProtocolHandoffTest(StarJobFixture, unittest.TestCase):
         first["checkpoint"].update(objective=plan["steps"][0]["objective"], argument="1+1=2")
         first["checkpoint"]["claims"][0]["statement"] = "1+1=2 by integer addition."
         bad = deepcopy(first)
-        bad["checkpoint"]["status"] = "YIELD"
+        del bad["checkpoint"]["next_action"]
         second = deepcopy(first)
         second["checkpoint"].update(checkpoint_id="cp-2", objective=plan["steps"][1]["objective"])
         review = {"goal_gate": "YES", "logic_gate": "PASS", "verdict": "ACCEPT", "objection": "",

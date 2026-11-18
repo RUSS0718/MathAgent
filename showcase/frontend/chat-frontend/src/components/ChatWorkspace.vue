@@ -41,6 +41,7 @@ const presentationEnabled = ref(false)
 const solverMode = ref('')
 const faithful = ref<CapabilitiesResponse['faithful']>()
 const locallyStartedJob = ref<string | null>(null)
+const executionMode = ref<string>()
 const faithfulBlocked = computed(() => faithful.value?.enabled === true && !faithful.value.ready)
 const selectedFile = ref<string | undefined>()
 const selectedFileName = ref<string | undefined>()
@@ -65,6 +66,15 @@ const selectedProblem = computed(() => {
   return [...sessions.messages].reverse().find((message) => message.analysis_job_id === jobId && message.sender === 'user')?.text ?? ''
 })
 const workbenchResult = computed(() => selectedJob.value?.result)
+const jobProvenance = computed(() => {
+  const job = selectedJob.value
+  if (!job) return executionMode.value === 'fake' ? '模拟运行' : executionMode.value === 'live' ? '实时求解入口' : ''
+  const mode = job.result?.execution_mode ?? (locallyStartedJob.value === job.jobId ? executionMode.value : undefined)
+  if (mode === 'fake' || ['scripted', 'fault_injection'].includes(String(job.result?.evidence_kind))) return '模拟运行'
+  if (mode === 'live') return ['queued', 'running'].includes(job.status) ? '实时运行' : '真实历史记录'
+  return '来源待确认'
+})
+
 
 async function send(): Promise<void> {
   if (loading.value || loadFailed.value || faithfulBlocked.value) return
@@ -256,6 +266,7 @@ async function initialize(): Promise<void> {
   try {
   try {
     const capabilities = await api.capabilities()
+    executionMode.value = capabilities.execution?.mode
     faithful.value = capabilities.faithful?.enabled ? capabilities.faithful : undefined
     solverMode.value = ''
     if (capabilities.execution?.mode === 'live' && capabilities.execution.status !== 'configured') {
@@ -315,8 +326,8 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
     <main id="main-content" tabindex="-1" class="constellation-page">
       <header class="constellation-topbar">
         <UiButton icon-only variant="ghost" class="mobile-only" aria-label="打开会话栏" @click="sidebarOpen = true"><UiIcon name="menu" /></UiButton>
-        <div><small>因果推理智能体</small><h1>{{ selectedJob ? '因果推理智能体 · 求解工作台' : '新建求解 · 输入题干' }}</h1></div>
-        <div class="constellation-actions"><span v-if="!taskState">{{ current?.status === 'waiting_input' ? '等待输入' : current ? '任务执行中' : selectedJob ? '持久运行记录' : '准备提交' }}</span><UiButton v-if="!taskState && current && clarification?.clarification.status !== 'waiting'" variant="danger" @click="cancelCurrent">取消任务</UiButton><UiButton v-if="selectedJob" @click="newSession">新建求解</UiButton><UiButton v-if="selectedJob || notice" :disabled="submitting || checkingSubmission || !!current" @click="solveAgain">再次求解</UiButton><a v-if="selectedJob && auth.reviewer" :href="`/dashboard/run/${selectedJob.jobId}`">运行详情</a></div>
+        <div class="workspace-heading"><h1>{{ selectedJob ? '求解工作台' : '数学工作区' }}</h1><span v-if="jobProvenance">{{ jobProvenance }}</span></div>
+        <div class="constellation-actions"><span v-if="!taskState">{{ current?.status === 'waiting_input' ? '等待输入' : current ? '任务执行中' : selectedJob ? '已保存的求解' : '准备提交' }}</span><UiButton v-if="!taskState && current && clarification?.clarification.status !== 'waiting'" variant="danger" @click="cancelCurrent">取消任务</UiButton><UiButton v-if="selectedJob" @click="newSession">新建求解</UiButton><UiButton v-if="selectedJob || notice" :disabled="submitting || checkingSubmission || !!current" @click="solveAgain">再次求解</UiButton><a v-if="selectedJob && auth.reviewer" :href="`/dashboard/run/${selectedJob.jobId}`">运行详情</a></div>
       </header>
       <p v-if="notice" class="notice" role="status">{{ notice }}<UiButton v-if="!loadFailed && !submitting && !checkingSubmission" @click="recoverSubmission">核对原提交</UiButton><UiButton v-if="loadFailed" @click="initialize">重新加载</UiButton></p>
       <p v-if="!taskState && current?.status === 'waiting_input' && !clarification" class="notice notice--warning" role="status">运行已暂停。恢复执行不会追加新约束。<UiButton :disabled="submitting" @click="resumeCurrent">恢复执行</UiButton></p>
@@ -325,15 +336,15 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
       <section v-else-if="!selectedJob" class="workbench-entry" aria-label="提交数学题干">
         <div class="entry-heading"><h2>输入数学问题</h2></div>
         <ComposerBar :command-enabled="presentationEnabled" :submit-label="checkingSubmission ? '正在核对…' : submitting ? '正在提交…' : '发送'" v-model="draft" :disabled="loadFailed || submitting || checkingSubmission" :busy="submitting || checkingSubmission" :submit-disabled="faithfulBlocked" :running="false" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"></ComposerBar>
-        <div class="entry-examples"><span>示例题干 · 点击回填</span><button type="button" @click="useStarter('解方程 x² − 5x + 6 = 0，并验证候选根。')">方程与候选根</button><button type="button" @click="useStarter('分步推导 1 + 2 + … + n 的求和公式，n 为正整数。')">数列求和</button></div>
+        <div class="entry-examples"><span>示例题干 · 点击回填</span><button type="button" @click="useStarter('解方程 x² − 5x + 6 = 0，并验证候选根。')"><strong>方程与候选根</strong><span>解方程 x² − 5x + 6 = 0，并验证候选根。</span><UiIcon name="arrowRight" /></button><button type="button" @click="useStarter('分步推导 1 + 2 + … + n 的求和公式，n 为正整数。')"><strong>数列求和</strong><span>分步推导 1 + 2 + … + n 的求和公式。</span><UiIcon name="arrowRight" /></button></div>
       </section>
       <section v-else class="active-workbench">
         <article class="workbench-problem"><small>当前题干 · {{ { solve: '求解', teach: '教学', report: '报告' }[presentationMode ?? 'solve'] }}</small><p>{{ selectedProblem }}</p></article>
         <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" :resuming="submitting" @resume="resumeCurrent" @changed="clarificationChanged" @cancel="cancelCurrent" />
-        <TaskRevisionPanel :key="selectedJob.jobId + ':revision'" :job-id="selectedJob.jobId" :session-id="selectedJob.sessionId" :owner="auth.username" :mode="solverMode" :state="selectedJob.result?.faithful" :disabled="submitting || checkingSubmission" @changed="clarificationChanged" />
         <FinalAnswer :status="selectedJob.status" :key="selectedJob.jobId" :job-id="selectedJob.jobId" />
+        <TaskRevisionPanel :key="selectedJob.jobId + ':revision'" :job-id="selectedJob.jobId" :session-id="selectedJob.sessionId" :owner="auth.username" :mode="solverMode" :state="selectedJob.result?.faithful" :disabled="submitting || checkingSubmission" @changed="clarificationChanged" />
         <details :open="!['succeeded', 'failed', 'canceled'].includes(selectedJob.status)" class="execution-process"><summary>求解过程</summary>
-        <ConversationWorkbench :key="selectedJob.jobId" :job-id="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" :animate-live="locallyStartedJob === selectedJob.jobId" ordinary />
+        <ConversationWorkbench :key="selectedJob.jobId" :job-id="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" :animate-live="locallyStartedJob === selectedJob.jobId" :execution-mode="locallyStartedJob === selectedJob.jobId ? executionMode : undefined" ordinary />
         </details>
       </section>
     </main>
@@ -341,22 +352,28 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
 </template>
 
 <style scoped>
-.constellation-shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); height: 100dvh; overflow: hidden; background: var(--background); }
+.constellation-shell { display: grid; grid-template-columns: 264px minmax(0, 1fr); height: 100dvh; overflow: hidden; background: var(--background); }
 .constellation-page { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; }
 .constellation-topbar { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .constellation-topbar small, .entry-heading > small { font: 10px var(--font-mono); letter-spacing: .12em; color: var(--muted); }
-h1 { margin: 6px 0 0; font-size: 15px; }
+.workspace-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 12px; }
+.workspace-heading span { font-size: 12px; color: var(--muted); }
+h1 { margin: 0; font-size: 16px; }
 .constellation-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
 .workbench-entry { width: min(720px, calc(100% - 40px)); margin: auto; padding: 64px 0; }
 .entry-heading { text-align: center; margin-bottom: 24px; }
-.entry-heading h2 { font-size: clamp(22px, 2.2vw, 30px); line-height: 1.4; margin: 16px 0 8px; }
+.entry-heading h2 { font-size: clamp(28px, 3vw, 40px); font-weight: 500; letter-spacing: -.03em; line-height: 1.4; margin: 16px 0 8px; }
 .entry-heading p { max-width: 54ch; margin: auto; font-size: 13px; line-height: 1.8; color: var(--muted); }
-.workbench-entry :deep(.composer-shell) { width: 100%; margin: 0; box-shadow: var(--shadow-overlay); background: var(--surface); }
+.workbench-entry :deep(.composer-shell) { width: 100%; margin: 0; box-shadow: 0 12px 36px rgb(26 43 57 / 7%); background: var(--surface); }
 .workbench-entry :deep(textarea) { min-height: 160px; }
-.entry-examples { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 40px; font-size: 12px; color: var(--muted); }
-.entry-examples > span { flex-basis: 100%; text-align: center; }
-.entry-examples button { padding: 8px 12px; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); color: var(--muted); background: transparent; cursor: pointer; }
-.active-workbench { padding: 16px 24px 32px; }
+.entry-examples { display: grid; gap: 0; margin-top: 32px; font-size: 13px; color: var(--muted); }
+.entry-examples > span { padding-bottom: 12px; }
+.entry-examples button { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; padding: 18px 0; border: 0; border-top: 1px solid var(--border); color: var(--text); background: transparent; cursor: pointer; text-align: left; }
+.entry-examples button span { grid-column: 1; color: var(--muted); line-height: 1.6; }
+.entry-examples button .ui-icon { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+.entry-examples button:hover { color: var(--accent-strong); }
+.entry-examples button:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.active-workbench { width: min(1100px, 100%); margin-inline: auto; padding: 12px 32px 48px; }
 .workbench-problem { padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .workbench-problem small { color: var(--muted); font-size: 11px; }
 .workbench-problem p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.7; margin: 6px 0; }
