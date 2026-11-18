@@ -3,6 +3,7 @@
 import json
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +13,70 @@ from showcase.stream_activity import notify
 
 
 class StreamAuditScalingTest(unittest.TestCase):
+    def test_observer_event_mutations_do_not_leak_across_stream_callbacks(self):
+        snapshots = []
+        pristine = []
+
+        def observe(run, event):
+            if event['type'] == 'call_activity':
+                self.assertIsInstance(run['events'], list)
+                json.dumps(run)
+                snapshots.append(run['events'])
+                pristine.append(deepcopy(run['events']))
+                # The event argument is writable too, including nested values.
+                event['run_id'] = 'observer-local-event'
+                event['observer_note'] = {'items': ['local']}
+
+        config = {'max_model_calls': 4,
+                  'features': {'stream_recovery': True, 'stream_activity': True}}
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / 'observer.sqlite3'
+            with SolverHarness(database_path=database, config=config,
+                               event_observer=observe) as harness:
+                run = harness.solve('question', {'run_id': 'observer'})
+                run = harness.commit_event(
+                    'observer', expected_revision=run['state_revision'],
+                    event={'event_id': 'nested', 'type': 'checkpoint',
+                           'data': {'items': [{'value': 'original'}]}},
+                )
+
+                def nested(events):
+                    return next(e for e in events if e['event_id'] == 'nested')
+
+                def operation(request):
+                    notify(request['activity_observer'], 'content', content_bytes=1)
+                    # Mutate a retained snapshot after its callback has returned.
+                    nested(snapshots[0])['run_id'] = 'observer-local-history'
+                    nested(snapshots[0])['data']['items'][0]['value'] = 'first-local'
+                    yield {'type': 'text_delta', 'text': 'x'}
+                    notify(request['activity_observer'], 'content', content_bytes=2)
+                    nested(snapshots[1])['data']['items'].append({'value': 'second-local'})
+                    yield {'type': 'text_delta', 'text': 'y'}
+                    notify(request['activity_observer'], 'content', content_bytes=3)
+                    yield {'type': 'result', 'result': {'assessment': 'NEED_PLAN'}}
+
+                harness.dispatch(run, operation, {
+                    'run_id': 'observer', 'role': 'explore',
+                    'call_id': 'stream', 'problem': 'question',
+                })
+                saved = harness.get_run('observer')
+            self.assertEqual(3, len(snapshots))
+            for index in (1, 2):
+                with self.subTest(callback=index, field='identity'):
+                    self.assertTrue(all(e['run_id'] == 'observer' for e in pristine[index]))
+                with self.subTest(callback=index, field='nested'):
+                    self.assertEqual({'items': [{'value': 'original'}]},
+                                     nested(pristine[index])['data'])
+                with self.subTest(callback=index, field='event_argument'):
+                    self.assertFalse(any('observer_note' in e for e in pristine[index]))
+            self.assertEqual({'items': [{'value': 'first-local'}]},
+                             nested(snapshots[0])['data'])
+            self.assertEqual('xy', saved['state']['calls']['stream']['partial_text'])
+            self.assertEqual('completed', saved['state']['calls']['stream']['status'])
+            self.assertTrue(all(e['run_id'] == 'observer' for e in saved['events']))
+            self.assertEqual({'items': [{'value': 'original'}]}, nested(saved['events'])['data'])
+            self.assertFalse(any('observer_note' in e for e in saved['events']))
+
     def test_interleaved_commit_and_crash_keep_history_partial_and_unknown(self):
         class Crash(BaseException):
             pass

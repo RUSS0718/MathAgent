@@ -567,13 +567,14 @@ class SolverHarness:
             population_owner=self._population_owner,
         )
         if self._event_observer is not None:
-            last = result["events"][-1]
+            # Writable public snapshots must not share even nested event data
+            # with the storage-owned prefix or with earlier observer snapshots.
+            observer_run = {**result, "events": deepcopy(list(result["events"]))}
+            last = observer_run["events"][-1]
             observed = last if last["event_id"] == normalized_event["event_id"] else next(
-                item for item in result["events"] if item["event_id"] == normalized_event["event_id"]
+                item for item in observer_run["events"]
+                if item["event_id"] == normalized_event["event_id"]
             )
-            # The internal shared prefix is not part of the observer's JSON contract.
-            observer_run = (result if isinstance(result["events"], list)
-                            else {**result, "events": list(result["events"])})
             self._event_observer(observer_run, observed)
         for audit in candidate_events:
             result = self.commit_event(
