@@ -17,7 +17,8 @@ R05因S1同checkpoint身份变更内容停止，未进入S2；checkpoint消息�
 #206原D新版本R06取得真实S1→S2→S3消费、独立代数正确及完整终稿，16模型/3工具，
 单版1/1。原服务完整桌面观察及正常重启/REST不变性已核对；补充进度DOM观察失败保留。
 A-simple首次数学及交付1/1，但Intake把单一方程拆为依赖并误用最值类型，直解覆盖0/1；
-A02/B/C暂停，定点核查Intake忠实性。#206保持open、PR208保持draft，未推断普遍稳定；见
+A02/B/C暂停；Intake消息两项P2已修复、双轴复审及2fb5a426快速门禁通过，真实直解仍待
+另登记一次受影响复验。#206保持open、PR208保持draft，未推断普遍稳定；见
 [预登记、机制状态及真实结果](evals/mechanism-206-20261118.md)。
 
 2026-11-17 #189补充真实验收未全通过：最终UI真实启动/跨重启恢复通过；新自然S2正确，D因unsupported_graph_step_dependency失败、U未运行。#189重新打开，PR198退回draft，详见[补验记录](evals/dependency-routing-189-20261117.md)。
