@@ -69,6 +69,17 @@ def selection_verification(run, answer, verification):
 
 
 def replay_candidates(run):
+    if run['state'].get('population_policy', {}).get('enabled') is True:
+        from .solver_harness.population_schedule import replay_rating
+
+        history = run['state']['population'].get('rating_history', [])
+        return {'evidence_kind': 'replay', 'run_id': run['run_id'],
+                'state_revision': run['state_revision'],
+                'population': {'policy_version': run['state']['population_policy']['version'],
+                               'rating_count': len(history),
+                               'replay_matches': bool(history) and all(
+                                   replay_rating(item.get('rating')) for item in history)},
+                'audit': [], 'decision': None}
     replay = replay_snapshot(run)
     return {'evidence_kind': 'replay', 'run_id': run['run_id'],
             'state_revision': run['state_revision'], 'audit': replay['audit'],

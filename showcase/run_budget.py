@@ -134,9 +134,12 @@ class RunBudgetLedger:
             self.connection.rollback()
             raise
 
-    def ensure(self, run_id, limits, *, deadline_at=None):
+    def ensure(self, run_id, limits, *, deadline_at=None, stream_timeout_policy=None):
         if deadline_at is not None and (type(deadline_at) not in {int, float} or not math.isfinite(deadline_at)):
             raise ValueError("run_budget_deadline_invalid")
+        from .stream_timeout_policy import validate_snapshot
+
+        stream_timeout_policy = validate_snapshot(stream_timeout_policy)
         with self._transaction(run_id) as state:
             if state is None:
                 now = time.time()
@@ -147,9 +150,16 @@ class RunBudgetLedger:
                     if deadline_at is not None else now + limits.max_runtime_seconds,
                     "actions": [],
                 }
+                if stream_timeout_policy is not None:
+                    state["stream_timeout_policy"] = stream_timeout_policy
                 self.connection.execute(
                     "INSERT INTO run_budgets VALUES (?,?)", (run_id, json.dumps(state))
                 )
+            elif (
+                stream_timeout_policy is not None
+                and state.get("stream_timeout_policy") != stream_timeout_policy
+            ):
+                raise ValueError("run_timeout_policy_binding_mismatch")
         return RunBudget(self, run_id)
 
     def reserve(
@@ -170,26 +180,90 @@ class RunBudgetLedger:
             raise ValueError("run_budget_kind_invalid")
         if any(type(value) is not int or value < 0 for value in (input_estimate, output_cap)):
             raise ValueError("run_budget_reservation_invalid")
+        from .solver_harness.population_budget import current_population_action
+
+        population_scope = current_population_action()
+        population_action_id = population_scope[0] if population_scope else None
         with self._transaction(run_id) as state:
             if state is None:
                 raise BudgetExhausted("budget_uninitialized")
+            if population_scope is not None and kind in {"logical", "http", "tool"}:
+                self._assert_population_owner(run_id, population_action_id, population_scope[1])
             assert_dispatch_allowed(self.connection, run_id)
             summary = _summary(state)
             limits = state["limits"]
+            population = self._population_state(run_id)
+            closing_call = role in {"final_generator", "whole_solution_verifier"}
+            floor = (population.get("closing_reserve", {})
+                     if population is not None and not closing_call else {})
             if time.time() >= state["deadline_at"]:
                 raise BudgetExhausted("run_deadline_exhausted")
+            if kind == "http":
+                reserved = next((action for action in state["actions"]
+                                 if action.get("kind") == "http"
+                                 and action.get("status") == "pre_reserved"
+                                 and action.get("logical_call_id") == logical_call_id
+                                 and (population_action_id is None
+                                      or action.get("population_action_id") == population_action_id)), None)
+                if reserved is not None:
+                    if population_action_id is not None:
+                        self._assert_population_owner(run_id, population_action_id, population_scope[1])
+                    if input_estimate > reserved["input_estimate"] or output_cap > reserved["output_cap"]:
+                        raise BudgetExhausted("finalization_reservation_too_small")
+                    action_id = attempt_id or uuid4().hex
+                    if any(action.get("id") == action_id for action in state["actions"]):
+                        raise BudgetExhausted("run_attempt_identity_conflict")
+                    reserved.update(
+                        id=action_id,
+                        status="reserved",
+                        reservation_attempt_id=reserved["id"],
+                        attempt_event=attempt_event,
+                        public_attempt=(
+                            {**public_attempt(attempt_event, run_id=run_id, role=role),
+                             "started_at_utc": attempt_event.get("started_at_utc"),
+                             "dispatch_status": "reserved_dispatch_unconfirmed",
+                             "solver_call_id": public_solver_call_id(run_id, solver_call_id)}
+                            if attempt_event is not None else None
+                        ),
+                    )
+                    return action_id, max(0.001, state["deadline_at"] - time.time())
+                if population_action_id is not None:
+                    raise BudgetExhausted("population_http_reservation_exhausted")
+            if kind == "tool" and population_action_id is not None:
+                held_tool = next((action for action in state["actions"]
+                                  if action.get("kind") == "tool"
+                                  and action.get("status") == "pre_reserved"
+                                  and action.get("population_action_id") == population_action_id
+                                  and action.get("role") in {role, "*"}), None)
+                if held_tool is None:
+                    raise BudgetExhausted("population_tool_reservation_exhausted")
+                action_id = attempt_id or tool_call_id or uuid4().hex
+                if any(action.get("id") == action_id for action in state["actions"]):
+                    raise BudgetExhausted("run_tool_identity_conflict")
+                held_tool.update(id=action_id, role=role, tool_call_id=tool_call_id,
+                                 status="reserved")
+                return action_id, max(0.001, state["deadline_at"] - time.time())
+            if kind == "logical" and population_action_id is not None:
+                raise BudgetExhausted("population_model_reservation_exhausted")
             if kind == "logical":
-                if summary["logical_calls"] >= limits["max_model_calls"]:
+                held = floor.get("model_calls", 0) if population is not None else 0
+                if summary["logical_calls"] + 1 + held > limits["max_model_calls"]:
                     raise BudgetExhausted("run_model_budget_exhausted")
             elif kind == "http":
+                held_http = floor.get("http_attempts", 0) if population is not None else 0
+                held_tokens = floor.get("tokens", 0) if population is not None else 0
                 if (
-                    summary["http_attempts"] >= limits["max_http_attempts"]
-                    or summary["charged_tokens"] + input_estimate + output_cap
+                    summary["http_attempts"] + 1 + held_http > limits["max_http_attempts"]
+                    or summary["charged_tokens"] + input_estimate + output_cap + held_tokens
                     > limits["max_tokens"]
                 ):
                     raise BudgetExhausted("run_model_budget_exhausted")
-            elif kind == "tool" and summary["tool_calls"] >= limits["max_tool_calls"]:
+            elif kind == "tool" and summary["tool_calls"] + 1 + floor.get("tool_calls", 0) > limits["max_tool_calls"]:
                 raise BudgetExhausted("run_tool_budget_exhausted")
+            if population is not None and not closing_call and (
+                state["deadline_at"] - time.time() < floor.get("time_seconds", 0)
+            ):
+                raise BudgetExhausted("population_closing_time_reserve_unavailable")
             action_id = attempt_id or uuid4().hex
             state["actions"].append(
                 {
@@ -201,6 +275,8 @@ class RunBudgetLedger:
                     "tool_call_id": tool_call_id,
                     "input_estimate": input_estimate,
                     "output_cap": output_cap,
+                    **({"population_action_id": population_action_id}
+                       if population_action_id is not None else {}),
                     "public_attempt": ({**public_attempt(attempt_event, run_id=run_id, role=role), "started_at_utc": attempt_event.get("started_at_utc"), "dispatch_status": "reserved_dispatch_unconfirmed", "solver_call_id": public_solver_call_id(run_id, solver_call_id)} if attempt_event is not None else None),
                     "status": "reserved",
                     "usage": provider_usage(None),
@@ -208,12 +284,221 @@ class RunBudgetLedger:
             )
             return action_id, max(0.001, state["deadline_at"] - time.time())
 
+    def reserve_finalization_pair(
+        self,
+        run_id,
+        *,
+        reservation_id,
+        final_input_estimate,
+        final_output_cap,
+        review_input_estimate,
+        review_output_cap,
+    ):
+        """Atomically hold one generator and one whole-review call in this Run."""
+        if not isinstance(reservation_id, str) or not reservation_id.strip():
+            raise ValueError("finalization_reservation_id_invalid")
+        estimates = (final_input_estimate, final_output_cap,
+                     review_input_estimate, review_output_cap)
+        if any(type(value) is not int or value < 0 for value in estimates):
+            raise ValueError("run_budget_reservation_invalid")
+        reservation_id = reservation_id.strip()
+        roles = ("final_generator", "whole_solution_verifier")
+        with self._transaction(run_id) as state:
+            if state is None:
+                raise BudgetExhausted("budget_uninitialized")
+            assert_dispatch_allowed(self.connection, run_id)
+            if time.time() >= state["deadline_at"]:
+                raise BudgetExhausted("run_deadline_exhausted")
+            existing = [action for action in state["actions"]
+                        if action.get("reservation_id") == reservation_id]
+            if existing:
+                if len(existing) != 4:
+                    raise BudgetExhausted("finalization_reservation_incomplete")
+                expected = {
+                    "final_generator": (final_input_estimate, final_output_cap),
+                    "whole_solution_verifier": (review_input_estimate, review_output_cap),
+                }
+                if any(
+                    (action["input_estimate"], action["output_cap"])
+                    != expected[action["role"]]
+                    for action in existing if action["kind"] == "http"
+                ):
+                    raise BudgetExhausted("finalization_reservation_conflict")
+                return {role: next(action["logical_call_id"] for action in existing
+                                   if action["kind"] == "logical" and action["role"] == role)
+                        for role in roles}
+            summary = _summary(state)
+            limits = state["limits"]
+            if summary["logical_calls"] + 2 > limits["max_model_calls"]:
+                raise BudgetExhausted("run_model_budget_exhausted")
+            if summary["http_attempts"] + 2 > limits["max_http_attempts"]:
+                raise BudgetExhausted("run_model_budget_exhausted")
+            token_reserve = final_input_estimate + final_output_cap + review_input_estimate + review_output_cap
+            if summary["charged_tokens"] + token_reserve > limits["max_tokens"]:
+                raise BudgetExhausted("run_model_budget_exhausted")
+            logical_ids = {}
+            for role, input_estimate, output_cap in (
+                (roles[0], final_input_estimate, final_output_cap),
+                (roles[1], review_input_estimate, review_output_cap),
+            ):
+                logical_id = f"{reservation_id}:logical:{role}"
+                http_id = f"{reservation_id}:http:{role}"
+                logical_ids[role] = logical_id
+                state["actions"].extend((
+                    {
+                        "id": logical_id,
+                        "kind": "logical",
+                        "logical_call_id": logical_id,
+                        "solver_call_id": None,
+                        "role": role,
+                        "tool_call_id": None,
+                        "input_estimate": 0,
+                        "output_cap": 0,
+                        "reservation_id": reservation_id,
+                        "status": "pre_reserved",
+                        "usage": provider_usage(None),
+                    },
+                    {
+                        "id": http_id,
+                        "kind": "http",
+                        "logical_call_id": logical_id,
+                        "solver_call_id": None,
+                        "role": role,
+                        "tool_call_id": None,
+                        "input_estimate": input_estimate,
+                        "output_cap": output_cap,
+                        "reservation_id": reservation_id,
+                        "status": "pre_reserved",
+                        "usage": provider_usage(None),
+                    },
+                ))
+            return logical_ids
+
+    def claim_finalization_call(self, run_id, role, solver_call_id=None):
+        """Claim the oldest held logical slot for a closeout role, if one exists."""
+        with self._transaction(run_id) as state:
+            if state is None:
+                raise BudgetExhausted("budget_uninitialized")
+            for action in state["actions"]:
+                if (action.get("kind") == "logical"
+                        and action.get("role") == role
+                        and action.get("status") == "pre_reserved"):
+                    action["status"] = "reserved"
+                    action["solver_call_id"] = solver_call_id
+                    for reserved in state["actions"]:
+                        if (reserved.get("kind") == "http"
+                                and reserved.get("status") == "pre_reserved"
+                                and reserved.get("logical_call_id") == action["logical_call_id"]):
+                            reserved["solver_call_id"] = solver_call_id
+                    return action["logical_call_id"]
+        return None
+
+    def claim_population_call(self, run_id, population_action_id, *, role, solver_call_id=None):
+        """Claim one model-call slot already held for this specific WorkUnit."""
+        from .solver_harness.population_budget import current_population_action
+
+        scope = current_population_action()
+        if not scope or scope[0] != population_action_id:
+            raise BudgetExhausted("population_action_scope_missing")
+        with self._transaction(run_id) as state:
+            if state is None:
+                raise BudgetExhausted("budget_uninitialized")
+            self._assert_population_owner(run_id, population_action_id, scope[1])
+            for action in state["actions"]:
+                if (action.get("kind") == "logical"
+                        and action.get("population_action_id") == population_action_id
+                        and action.get("role") == role
+                        and action.get("status") == "pre_reserved"):
+                    action.update(status="reserved", solver_call_id=solver_call_id)
+                    return action["logical_call_id"]
+        return None
+
+    def _population_closing_floor(self, run_id):
+        population = self._population_state(run_id)
+        return dict(population.get("closing_reserve") or {}) if population is not None else {}
+
+    def _population_state(self, run_id):
+        if self.connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='solver_states'"
+        ).fetchone() is None:
+            return None
+        row = self.connection.execute(
+            "SELECT state_json FROM solver_states WHERE run_id=?", (run_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            state = json.loads(row[0])
+            if state.get("population_policy", {}).get("enabled") is not True:
+                return None
+            return state.get("population", {})
+        except (TypeError, ValueError):
+            raise BudgetExhausted("population_closing_reserve_unavailable") from None
+
+    def _assert_population_owner(self, run_id, action_id, owner):
+        row = self.connection.execute(
+            "SELECT state_json FROM solver_states WHERE run_id=?", (run_id,)
+        ).fetchone()
+        if row is None:
+            raise BudgetExhausted("population_owner_epoch_mismatch")
+        try:
+            state = json.loads(row[0])
+            if state.get("population", {}).get("owner") != owner:
+                raise BudgetExhausted("population_owner_epoch_mismatch")
+            if action_id is None:
+                if state.get("phase") == "TERMINAL":
+                    raise BudgetExhausted("population_exploration_frozen")
+                return
+            action = state.get("population", {}).get("actions", {}).get(action_id)
+            if state.get("phase") == "TERMINAL" or state.get("population", {}).get("freeze") is not None:
+                raise BudgetExhausted("population_exploration_frozen")
+            if (state.get("population", {}).get("owner") != owner or action is None
+                    or action.get("owner") != owner or action.get("status") != "inflight"):
+                raise BudgetExhausted("population_owner_epoch_mismatch")
+        except (TypeError, ValueError):
+            raise BudgetExhausted("population_owner_epoch_mismatch") from None
+
     def settle(self, run_id, action_id, event):
         with self.lock:
             if self._closed:
                 from .run_budget_late import settle_closed
                 return settle_closed(self, run_id, action_id, event)
-            return self._settle_open(run_id, action_id, event)
+            settled = self._settle_open(run_id, action_id, event)
+        if settled:
+            self._settle_population_resource(run_id, action_id)
+        return settled
+
+    def _settle_population_resource(self, run_id, attempt_id):
+        """Update population settlement after physical usage is committed."""
+        if not isinstance(attempt_id, str):
+            return
+        try:
+            with self.connection_lock:
+                row = self.connection.execute(
+                    "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
+                ).fetchone()
+                if row is None:
+                    return
+                action = next((item for item in json.loads(row[0])["actions"]
+                               if item.get("id") == attempt_id and item.get("kind") == "http"), None)
+                population_action_id = action.get("population_action_id") if action else None
+                if not isinstance(population_action_id, str):
+                    return
+                from types import SimpleNamespace
+
+                from .solver_harness.population_store import command
+                from .solver_harness.storage import SolverStateStore
+
+                command(SimpleNamespace(
+                    _state_store=SolverStateStore(self.connection),
+                    _population_owner=None, _event_observer=None,
+                ), run_id, "physical_settlement", action_id=population_action_id)
+        except sqlite3.OperationalError as exc:
+            # Physical usage remains in the budget ledger; a later population
+            # read or action outcome can reconcile the separate settlement view.
+            if getattr(exc, "sqlite_errorcode", None) not in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+                raise
+            return
 
     def _settle_open(self, run_id, action_id, event):
         with self._transaction(run_id) as state:
@@ -300,6 +585,16 @@ class RunBudgetLedger:
         row = self._read_row(run_id)
         return _summary(json.loads(row[0])) if row is not None else None
 
+    def stream_timeout_policy(self, run_id):
+        """Read the exact stream policy frozen in this Run's durable budget row."""
+
+        row = self._read_row(run_id)
+        if row is None:
+            return None
+        state = json.loads(row[0])
+        policy = state.get("stream_timeout_policy")
+        return dict(policy) if isinstance(policy, Mapping) else None
+
 
 class RunBudget:
     def __init__(self, ledger, run_id):
@@ -308,7 +603,23 @@ class RunBudget:
     def model_call(self, role=None, *, solver_call_id=None, deadline_at=None, strict_completion=False):
         if deadline_at is not None and deadline_at <= time.time():
             raise BudgetExhausted("scoped_deadline_exhausted")
-        action_id, _remaining = self.ledger.reserve(self.run_id, "logical", role=role, solver_call_id=solver_call_id)
+        from .solver_harness.population_budget import current_population_action
+
+        scope = current_population_action()
+        if scope and scope[0] is not None:
+            action_id = self.ledger.claim_population_call(
+                self.run_id, scope[0], role=role, solver_call_id=solver_call_id
+            )
+            if action_id is None:
+                raise BudgetExhausted("population_model_reservation_exhausted")
+        else:
+            action_id = self.ledger.claim_finalization_call(
+                self.run_id, role, solver_call_id=solver_call_id
+            )
+        if action_id is None:
+            action_id, _remaining = self.ledger.reserve(
+                self.run_id, "logical", role=role, solver_call_id=solver_call_id
+            )
         return ModelCallBudget(self.ledger, self.run_id, action_id, role, solver_call_id, deadline_at, strict_completion)
 
     def before_attempt(self, event, input_estimate):
@@ -330,6 +641,11 @@ class RunBudget:
 
     def snapshot(self):
         return self.ledger.snapshot(self.run_id)
+
+    def stream_timeout_policy(self):
+        """Return the frozen call policy, or ``None`` for legacy Runs."""
+
+        return self.ledger.stream_timeout_policy(self.run_id)
 
     def absolute_deadline(self):
         """Keep the original UTC deadline; never round-trip through duration clocks."""
@@ -365,12 +681,13 @@ class ModelCallBudget(RunBudget):
 def _summary(state):
     # Known counters sum only fields actually returned by the provider. Missing
     # fields retain their reservation even when a total-only usage is available.
-    attempts = [a for a in state["actions"] if a["kind"] == "http"]
+    http_actions = [a for a in state["actions"] if a["kind"] == "http"]
+    attempts = [a for a in http_actions if a.get("status") != "pre_reserved"]
     fields = ("prompt_tokens", "completion_tokens", "total_tokens")
     known = {field: sum(a["usage"][field] or 0 for a in attempts) for field in fields}
     missing = {field: sum(a["usage"][field] is None for a in attempts) for field in fields}
     charged = reserved = 0
-    for action in attempts:
+    for action in http_actions:
         usage = action["usage"]
         held = (action["input_estimate"] if usage["prompt_tokens"] is None else 0) + (
             action["output_cap"] if usage["completion_tokens"] is None else 0
@@ -390,8 +707,12 @@ def _summary(state):
         charged += max(usage["total_tokens"] or 0, accounted)
     return {
         "limits": state["limits"],
+        **({"intervention_resources": state["intervention_resources"]}
+           if "intervention_resources" in state else {}),
+        **({"stream_timeout_policy": state["stream_timeout_policy"]}
+           if "stream_timeout_policy" in state else {}),
         "logical_calls": sum(a["kind"] == "logical" for a in state["actions"]),
-        "http_attempts": len(attempts),
+        "http_attempts": len(http_actions),
         "tool_calls": sum(a["kind"] == "tool" for a in state["actions"]),
         "provider_known": {
             field: None if attempts and missing[field] == len(attempts) else value
@@ -400,7 +721,7 @@ def _summary(state):
         "provider_unknown_fields": missing,
         "reserved_tokens": reserved,
         "charged_tokens": charged,
-        "local_input_estimate": sum(a["input_estimate"] for a in attempts),
+        "local_input_estimate": sum(a["input_estimate"] for a in http_actions),
         "estimate_source": "local_utf8_bytes",
         "unknown_attempts": sum(
             any(a["usage"][field] is None for field in fields) for a in attempts
@@ -459,6 +780,11 @@ def budgeted_tool(function):
         budget = current_budget()
         if budget is None:
             return function(self, name, arguments, **kwargs)
+        from .solver_harness.population_budget import current_population_action
+
+        scope = current_population_action()
+        if scope and scope[0] is not None:
+            raise BudgetExhausted("population_tool_reservation_unavailable")
         action_id, _remaining = budget.ledger.reserve(
             budget.run_id, "tool", role=name, tool_call_id=kwargs.get("tool_call_id")
         )
@@ -488,6 +814,13 @@ def _tool_settlement(result, duration_seconds):
             for key in ("unknown_outcome", "cleanup_verified", "executed", "timeout")
             if type(value.get(key)) is bool
         }
+        # Formal receipts retain uncertainty inside the receipt cost object; this is
+        # execution evidence, never a second mathematical acceptance decision.
+        formal_cost = value.get("cost")
+        if isinstance(formal_cost, Mapping) and type(formal_cost.get("unknown")) is bool:
+            evidence["unknown_outcome"] = formal_cost["unknown"]
+        elif value.get("status") in {"unknown", "unknown_outcome"}:
+            evidence["unknown_outcome"] = True
         if evidence:
             settlement["execution_evidence"] = evidence
     return settlement

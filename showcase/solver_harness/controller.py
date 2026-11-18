@@ -20,6 +20,19 @@ def run_supplied_plan_or_explore(
     problem: str,
     metadata: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    if run["state"].get("population_policy", {}).get("enabled") is True:
+        plan = None if metadata is None else metadata.get("plan")
+        if plan is not None:
+            from .population_runtime import register_plans
+
+            return register_plans(harness, run, plan)
+        if run["state"]["phase"] == "SETUP":
+            return harness.commit_event(
+                run["run_id"], expected_revision=run["state_revision"],
+                event={"event_id": "population-planning-requested", "type": "population_planning_requested"},
+                state_updates={"phase": "PLAN"},
+            )
+        return run
     if harness._config.get("features", {}).get("star_routing") is True:
         from .star_routing import prepare_hint
 
@@ -83,6 +96,10 @@ def run_exploration_phase(harness, run: dict[str, Any], problem: str) -> dict[st
 
 
 def advance(harness, run, metadata, problem):
+    if run["state"].get("population_policy", {}).get("enabled") is True:
+        from .population_lifecycle import advance_population
+
+        return advance_population(harness, run, problem, metadata or {})
     run = run_meta(
         harness,
         run,
@@ -98,6 +115,10 @@ def advance(harness, run, metadata, problem):
     run = run_replan(
         harness, run, problem=problem, model_port=harness._model_port, config=harness._config
     )
+    if harness._config.get("features", {}).get("serial_routes") is True:
+        from .routes import sync_plan_route
+
+        run = sync_plan_route(harness, run)
     if (
         harness._model_port is not None
         and run["state"]["phase"] == "STEP_EXECUTE"
@@ -112,6 +133,10 @@ def advance(harness, run, metadata, problem):
         config=harness._config,
         metadata=metadata or {},
     )
+    if harness._config.get("features", {}).get("serial_routes") is True:
+        from .routes import sync_plan_route
+
+        run = sync_plan_route(harness, run)
     if (
         harness._model_port is not None
         and run["state"]["phase"] == "STEP_EXECUTE"
@@ -143,25 +168,40 @@ def protocol_failure_exit(harness, run, exc):
     call = run["state"].get("calls", {}).get(getattr(exc, "call_id", None))
     if (call is not None and call.get("status") == "policy_rejected"
             and run["state"]["phase"] != "TERMINAL"):
+        category = call.get("error_category") or "policy_rejected"
+        is_context = category.startswith("context_")
         decision = call.get("transport_decision") or call.get("transport") or {}
         return harness.commit_event(
             run["run_id"],
             expected_revision=run["state_revision"],
             event={
-                "event_id": f"transport-policy-terminal-{run['state_revision']}",
-                "type": "transport_policy_rejected",
-                "error_category": call.get("error_category"),
+                "event_id": f"{category}-terminal-{run['state_revision']}",
+                "type": "context_capacity_terminal" if is_context else "transport_policy_rejected",
+                "error_category": category,
                 "transport": decision.get("transport"),
                 "transport_reason": decision.get("reason"),
                 "transport_evidence_kind": decision.get("evidence_kind"),
                 "new_run_required": decision.get("new_run_required") is True,
-                "summary": "Transport policy rejected this call before provider dispatch",
+                "summary": ("Run terminated after context capacity rejected this call"
+                            if is_context else
+                            "Transport policy rejected this call before provider dispatch"),
             },
             state_updates={
                 "phase": "TERMINAL",
                 "status": "partial_aborted",
-                "result_reason": call.get("error_category") or "transport_policy_rejected",
-                "final_response": "No verified answer is available: the Run transport policy requires a new Run.",
+                "result_reason": category,
+                "final_response": (
+                    "This call was rejected before provider dispatch. Previously committed results "
+                    "and evidence are preserved. context_capacity_exceeded: split the task into smaller parts while "
+                    "retaining the original problem and relevant evidence."
+                    if category == "context_capacity_exceeded" else
+                    f"This call was rejected before provider dispatch. Previously committed results "
+                    f"and evidence are "
+                    f"preserved. Context policy rejected dispatch ({category}); verify the frozen "
+                    "provider profile or split the task while retaining the original requirements."
+                    if is_context else
+                    "No verified answer is available: the Run transport policy requires a new Run."
+                ),
             },
         )
     if call is None or call.get("status") != "protocol_failed" or run["state"]["phase"] == "TERMINAL":

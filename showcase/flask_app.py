@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import math
@@ -27,10 +26,12 @@ else:
 
 from .campaign_api import register_campaigns
 from .evidence import EvidencePackExporter, replay_evidence
+from .faithful_system_api import register_faithful_system_api
 from .final_evidence import checked_verification
 from .job_events import register_job_event_route
 from .loopback import AuthSession, LoopbackStore
 from .polynomial import PolynomialChecker
+from .presentation_api import register_presentation_api
 from .profile import SHOWCASE_PROFILE, ensure_showcase_profile
 from .run_budget import RunBudgetLimits
 from .run_service import (
@@ -74,13 +75,18 @@ def create_app(
         SHOWCASE_WAITING_INPUT_MARKER="",
         SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED=False,
         SHOWCASE_EXPERIMENT_PAIR_ENABLED=False,
+        SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION=None,
+        SHOWCASE_PRESENTATION_ENABLED=False,
+        SHOWCASE_F7_SYSTEM_VIEW_ENABLED=False,
+        SHOWCASE_POPULATION_MEMORY_ENABLED=False,
+        SHOWCASE_FAITHFUL_INTERVENTION_ENABLED=False,
     )
     if config:
         app.config.from_mapping(dict(config))
 
     storage_root, resolved_database = _storage_paths(app.config, database_path)
     service_database = getattr(getattr(service, '_store', None), 'database_path', ':memory:')
-    if service is not None and ((service_database == ':memory:' and (app.config.get('SHOWCASE_LIVE_PIPELINE') is not None or app.config.get('SHOWCASE_STAR_ENABLED') is True)) or (service_database != ':memory:' and Path(service_database).resolve() != resolved_database.resolve())):
+    if service is not None and ((service_database == ':memory:' and (app.config.get('SHOWCASE_LIVE_PIPELINE') is not None or app.config.get('SHOWCASE_STAR_ENABLED') is True or app.config.get('SHOWCASE_STAR_POPULATION_ENABLED') is True)) or (service_database != ':memory:' and Path(service_database).resolve() != resolved_database.resolve())):
         raise ValueError('service_database_mismatch')
     storage_root.mkdir(parents=True, exist_ok=True)
     (storage_root / "attachments").mkdir(exist_ok=True)
@@ -118,6 +124,7 @@ def create_app(
         waiting_input_marker=str(app.config.get("SHOWCASE_WAITING_INPUT_MARKER", "")),
         pipeline=live_pipeline,
         star_pipeline=star_pipeline,
+        stream_timeout_policy_version=app.config.get("SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION"),
     )
     app.extensions["loopback_store"] = loopback_store
     app.extensions["showcase_run_service"] = service
@@ -133,6 +140,23 @@ def create_app(
     app.extensions["showcase_files"] = persisted_files if isinstance(persisted_files, dict) else {}
     app.extensions["showcase_files_index"] = files_index
     register_campaigns(app, workspace_service, service, resolved_database, storage_root)
+    if app.config.get("SHOWCASE_FAITHFUL_MEMORY_ENABLED") is True:
+        from .faithful_goal_cache_api import register_goal_cache_api
+        from .faithful_memory_api import register_run_memory
+        from .faithful_memory_control_api import register_memory_control_api
+
+        register_goal_cache_api(app, resolved_database)
+        register_run_memory(app, resolved_database)
+        register_memory_control_api(app, resolved_database)
+    if app.config.get("SHOWCASE_FAITHFUL_INTERVENTION_ENABLED") is True:
+        from .faithful_intervention_api import register_faithful_intervention_api
+        from .faithful_intervention_runtime import runtime_hooks
+
+        register_faithful_intervention_api(app, resolved_database, enabled=True)
+        estimator, executor_factory = runtime_hooks(star_pipeline, resolved_database)
+        if estimator is not None:
+            app.config["SHOWCASE_FAITHFUL_INTERVENTION_RESERVATION_ESTIMATOR"] = estimator
+            app.config["SHOWCASE_FAITHFUL_INTERVENTION_EXECUTION_FACTORY"] = executor_factory
 
     @app.before_request
     def attach_request_context() -> Response | None:
@@ -214,12 +238,15 @@ def create_app(
             "max_bytes": MAX_PNG_BYTES,
         }
         solver_modes = star_capabilities(star_pipeline is not None, star_pipeline)
+        from .faithful_capabilities import faithful_capabilities
+
         response = jsonify(
             {
                 "profile": profile,
                 "jobs": {"enabled": True, "status": "available"},
                 "sse": {"enabled": True, "status": "available"},
                 "solver_modes": solver_modes,
+                "faithful": faithful_capabilities(app.config, solver_modes, star_pipeline),
                 "verification_mode": VERIFICATION_MODES,
                 "files": {"upload": upload},
                 "execution": {
@@ -233,6 +260,15 @@ def create_app(
                     "sse": True,
                     "verification_mode": VERIFICATION_MODES,
                     "file_upload": upload,
+                },
+                "presentation": {
+                    "enabled": bool(app.config.get("SHOWCASE_PRESENTATION_ENABLED", False)),
+                    "modes": ["solve", "teach", "report"] if app.config.get("SHOWCASE_PRESENTATION_ENABLED", False) else [],
+                    "status": "available" if app.config.get("SHOWCASE_PRESENTATION_ENABLED", False) else "unavailable",
+                },
+                "faithful_system_view": {
+                    "enabled": bool(app.config.get("SHOWCASE_F7_SYSTEM_VIEW_ENABLED", False)),
+                    "status": "available" if app.config.get("SHOWCASE_F7_SYSTEM_VIEW_ENABLED", False) else "unavailable",
                 },
             }
         )
@@ -357,6 +393,8 @@ def create_app(
         if len(message.strip()) > 100_000:
             return _json_error("message_too_large", 400)
         file_id = payload.get("input_user_file_id")
+        if payload.get("presentation_mode") is not None and not app.config.get("SHOWCASE_PRESENTATION_ENABLED", False):
+            return _json_error("capability_unavailable", 503)
         if file_id is not None:
             if not app.config.get("SHOWCASE_VISION_ENABLED"):
                 return _json_error("capability_unavailable", 503)
@@ -396,9 +434,13 @@ def create_app(
                 verification_mode=payload.get("verification_mode", "auto"),
                 budget_limits=budget_limits,
                 deadline_at=deadline_at,
-                solver_mode=payload.get("solver_mode", "legacy"),
+                solver_mode=payload.get("solver_mode", "star_reference"
+                    if app.config.get("SHOWCASE_FAITHFUL_AUTONOMOUS") is True else "legacy"),
                 solver_options=payload.get("solver_options"),
                 solver_hint=payload.get("solver_hint"),
+                problem_spec=payload.get("problem_spec"),
+                presentation_mode=payload.get("presentation_mode"),
+                formal_policy=payload.get("formal_policy"),
             )
         except WorkspaceError as exc:
             return _workspace_error(exc)
@@ -626,6 +668,29 @@ def create_app(
         except WorkspaceError as exc:
             return _workspace_error(exc)
 
+    @app.post("/api/agent/jobs/<job_id>/formal-attempts")
+    def create_formal_attempt(job_id: str) -> tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        payload = _request_object()
+        if isinstance(payload, tuple):
+            return payload
+        if set(payload) - {"expected_attempt_id", "operation", "requested_backend"}:
+            return _json_error("formal_attempt_request_invalid", 400)
+        requested_backend = payload.get("requested_backend")
+        if requested_backend is not None and not isinstance(requested_backend, str):
+            return _json_error("formal_attempt_request_invalid", 400)
+        try:
+            result, existing = workspace_service.formal_attempt(
+                user_id=session.user_id, job_id=job_id,
+                idempotency_key=request.headers.get("Idempotency-Key", ""),
+                expected_attempt_id=str(payload.get("expected_attempt_id", "")),
+                operation=str(payload.get("operation", "")),
+                requested_backend=requested_backend,
+            )
+            return jsonify({**result, "existing": existing}), 200 if existing else 202
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
+
     @app.post("/api/agent/jobs/<job_id>/cancel")
     def cancel_job(job_id: str) -> tuple[Response, int]:
         session = _require_auth(g.auth_session)
@@ -755,14 +820,12 @@ def create_app(
         run, _ = persisted
         return jsonify(replay_candidates(run))
 
-    @app.get("/api/agent/jobs/<job_id>/report")
-    def get_job_report(job_id: str) -> Response | tuple[Response, int]:
-        session = _require_auth(g.auth_session)
-        try:
-            job = workspace_service.get_job(job_id, session.user_id)
-            events = workspace_service.events(job_id, session.user_id)
-        except WorkspaceError as exc:
-            return _workspace_error(exc)
+    def job_report_payload(job_id: str, user_id: str) -> dict[str, Any]:
+        job = workspace_service.get_job(job_id, user_id)
+        events = [
+            event for event in workspace_service.events(job_id, user_id)
+            if event.get("event") != "presentation_artifact_saved"
+        ]
         result = job.get("result") if isinstance(job.get("result"), Mapping) else {}
         snapshot = {
             "run_id": job_id,
@@ -798,7 +861,15 @@ def create_app(
         if job.get("verification_mode") == "required" and not tool_results:
             verification["findings"] = ["needs_review", "tool_evidence_missing"]
         report = app.extensions["showcase_evidence_exporter"].report(snapshot, tool_results=tool_results, verification=verification)
-        return jsonify({"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": snapshot["execution_mode"], "solver": {key: (job.get("result") or {}).get(key) for key in ("solver_mode", "missing_capabilities", "evidence_kind", "solver")}, "report": report})
+        return {"version": app.extensions["showcase_evidence_exporter"].report_version, "evidence_id": job_id, "status": job.get("status"), "mode": snapshot["execution_mode"], "solver": {key: (job.get("result") or {}).get(key) for key in ("solver_mode", "missing_capabilities", "evidence_kind", "solver")}, "report": report}
+
+    @app.get("/api/agent/jobs/<job_id>/report")
+    def get_job_report(job_id: str) -> Response | tuple[Response, int]:
+        session = _require_auth(g.auth_session)
+        try:
+            return jsonify(job_report_payload(job_id, session.user_id))
+        except WorkspaceError as exc:
+            return _workspace_error(exc)
 
     @app.post("/api/runs/<run_id>/resume")
     def resume_run(run_id: str) -> tuple[Response, int]:
@@ -813,6 +884,15 @@ def create_app(
         except RunResumeUnavailable as exc:
             return _json_error(exc.category, 409)
 
+    if app.config.get("SHOWCASE_PRESENTATION_ENABLED", True):
+        register_presentation_api(
+            app,
+            workspace_service=workspace_service,
+            job_loader=workspace_service.get_job,
+            report_loader=job_report_payload,
+        )
+    if app.config.get("SHOWCASE_F7_SYSTEM_VIEW_ENABLED") is True:
+        register_faithful_system_api(app, workspace_service=workspace_service)
     return app
 
 
@@ -882,24 +962,13 @@ def _applied_model_config(star_pipeline: Any, solver_modes: list[dict[str, Any]]
 def main() -> None:
     """Run the loopback Flask Showcase server."""
 
-    parser = argparse.ArgumentParser(description="Local v0.2 Flask Showcase API")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8090)
-    parser.add_argument("--mode", choices=("fake", "live"), default="fake")
-    parser.add_argument("--data-dir", default=None)
-    parser.add_argument("--star-limited", action="store_true", help="Enable explicit limited STAR selection")
-    parser.add_argument("--star-full", action="store_true", help="Enable full STAR presets after isolated runtime preflight; requires exact image configuration")
-    parser.add_argument(
-        "--experiment-idempotency-lookup",
-        action="store_true",
-        help="Enable the experiment CLI's idempotency lookup Job route",
-    )
-    args = parser.parse_args()
-    config: dict[str, Any] = {"SHOWCASE_MODE": args.mode, "SHOWCASE_STAR_ENABLED": args.star_limited,
-                              "SHOWCASE_STAR_FULL_ENABLED": args.star_full,
-                              "SHOWCASE_EXPERIMENT_IDEMPOTENCY_LOOKUP_ENABLED": args.experiment_idempotency_lookup}
-    if args.data_dir:
-        config["SHOWCASE_DATA_DIR"] = args.data_dir
+    from .server_cli import parse_server_args
+
+    args, config = parse_server_args()
+    if args.check_runtime:
+        from .faithful_service_check import run_runtime_check
+
+        raise SystemExit(run_runtime_check(config))
     app = create_app(config)
     app.run(host=args.host, port=args.port, debug=False)
 

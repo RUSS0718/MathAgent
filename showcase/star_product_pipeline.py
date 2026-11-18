@@ -1,8 +1,12 @@
 """Limited STAR bridge inside the existing Job/S3 execution boundary."""
 
+import json
+from collections.abc import Mapping
+
 from langgraph.graph import END, START, StateGraph
 
 from .adapters import InternModelAdapter
+from .faithful_intervention_control import maybe_pause
 from .run_budget import RunBudgetLimits, current_budget, public_solver_call_id
 from .run_control import RunStopped, check_control
 from .solver_harness import SolverHarness
@@ -12,10 +16,11 @@ from .solver_harness.intern_port import InternModelPort
 from .solver_harness.result import export_result
 from .solver_harness.tool_ports import RegistryToolPort
 from .star_product_candidates import candidate_projection
-from .star_product_config import core_gaps, full_config, limited_config
+from .star_product_config import core_gaps, full_config, limited_config, population_config
 from .star_product_events import decision_fields, public_solver_event_id
 from .star_product_modes import BEST_EFFORT_MODES, FULL_MODES, STAR_MODES, mode_identity
 from .star_product_recovery import recovery_projection, resume_solver
+from .stream_preference import profile_set_fingerprint
 
 PUBLIC_TOOL_NAMES = frozenset({"polynomial_check", "python_math"})
 
@@ -26,7 +31,12 @@ class StarProductPipeline:
     def __init__(self, database_path, *, adapter=None, evidence_kind="live", budget=None,
                  features=None, registry=None, hint_mode="none", full_enabled=False,
                  full_features=None, full_budget=None, experiment_policy=None,
-                 transport_policy="legacy", stream_profiles=None, acceptance_mode="strict"):
+                 transport_policy="legacy", stream_profiles=None, acceptance_mode="strict",
+                 context_capacity=None, population_capacity=None, population_budget=None,
+                 limited_enabled=True,
+                 population_enabled=None, population_memory_enabled=False,
+                 intervention_enabled=False, formal_backend=None,
+                 formal_registry=None, formal_server_policy=None):
         from .star_experiment_policy import ExperimentRunPolicy
 
         if experiment_policy is not None and not isinstance(experiment_policy, ExperimentRunPolicy):
@@ -46,21 +56,58 @@ class StarProductPipeline:
         self.transport_policy = transport_policy
         self.stream_profiles = stream_profiles
         self.evidence_kind = evidence_kind
+        self.limited_enabled = limited_enabled is True
         if budget is not None and not isinstance(budget, RunBudgetLimits):
             raise ValueError("star_budget_invalid")
         self.budget = budget or RunBudgetLimits(max_model_calls=3, max_http_attempts=3, max_tool_calls=0)
-        self.config = limited_config(self.budget, features, registry)
+        self.population_budget = population_budget or self.budget
+        self.config = limited_config(self.budget, features, registry,
+                                     context_capacity=context_capacity)
+        self.population_config = None
+        self.population_capacity_gap = "population_capacity_unverified"
+        self.population_enabled = (population_capacity is not None if population_enabled is None
+                                   else population_enabled is True)
+        self.population_memory_enabled = population_memory_enabled is True
+        self.intervention_enabled = intervention_enabled is True
+        if population_capacity is not None and self.population_enabled:
+            try:
+                timeout = (self.adapter.applied_config().get("request_timeout_seconds")
+                           or self.adapter.client_timeout)
+                self.population_config = population_config(
+                    self.population_budget, population_capacity, evidence_kind=evidence_kind,
+                    request_timeout_seconds=timeout,
+                )
+                self.population_config["transport_identity"] = {
+                    "transport_policy": self.transport_policy,
+                    "stream_profiles_fingerprint": profile_set_fingerprint(self.stream_profiles),
+                }
+                self.population_capacity_gap = None
+            except ValueError as exc:
+                self.population_capacity_gap = str(exc)
+        if acceptance_mode == "handoff" and self.config["features"].get("problem_spec") is True:
+            raise ValueError("problem_spec_requires_strict_acceptance")
         if hint_mode not in {"none", "meta_auto"}:
             raise ValueError("star_hint_mode_invalid")
         self.config["hint_mode"] = hint_mode
         self.registry = registry
+        self.formal_backend = formal_backend
+        self.formal_registry = formal_registry
+        if self.formal_backend is not None and self.formal_registry is None:
+            from .formal import BackendRegistry, register_formal_backend
+
+            self.formal_registry = BackendRegistry()
+            register_formal_backend(self.formal_registry, self.formal_backend)
+        self.formal_server_policy = dict(formal_server_policy) if isinstance(formal_server_policy, Mapping) else None
         self.checkpointer = None
         self.full_enabled = full_enabled is True
         self.full_budget = full_budget or RunBudgetLimits(
             max_model_calls=48, max_http_attempts=48, max_tool_calls=8)
         if not isinstance(self.full_budget, RunBudgetLimits):
             raise ValueError("star_budget_invalid")
-        self.full_config = full_config(self.full_budget, full_features)
+        self.full_config = full_config(self.full_budget, full_features,
+                                       context_capacity=context_capacity)
+        if acceptance_mode == "handoff" and self.full_config["features"].get("problem_spec") is True:
+            raise ValueError("problem_spec_requires_strict_acceptance")
         if acceptance_mode == "handoff":
             self.config["acceptance_mode"] = self.full_config["acceptance_mode"] = acceptance_mode
         self.full_config["hint_mode"] = hint_mode
@@ -104,6 +151,19 @@ class StarProductPipeline:
             return ["model_configuration_unavailable"]
         if self.adapter.model_id != "intern-s2":
             return ["intern_s2_required"]
+        if self.transport_policy == "stream_first":
+            from .stream_preference import select_transport
+
+            if not callable(getattr(self.adapter, "stream_complete", None)):
+                return ["stream_adapter_unavailable"]
+            decision = select_transport(
+                self.adapter, [{"role": "user", "content": "readiness"}],
+                policy=self.transport_policy, profiles=self.stream_profiles)
+            if decision["transport"] == "reject":
+                # Synthetic fixtures require per-schema checks at dispatch;
+                # live profiles admit ordinary text messages of any shape.
+                if not (self.evidence_kind != "live" and self.stream_profiles is not None):
+                    return [decision["reason"]]
         return []
 
     def readiness_state(self):
@@ -112,19 +172,39 @@ class StarProductPipeline:
 
     def preset_config(self, mode):
         """The trusted server preset configuration that would execute this mode."""
+        if mode == "star_population":
+            return self.population_config
         return self.full_config if mode in FULL_MODES else self.config
+
+    def population_gaps(self):
+        from .star_product_modes import _population_gaps
+
+        if self.population_config is None:
+            return [self.population_capacity_gap or "population_capacity_unverified"]
+        return _population_gaps(self.population_config)
+
+    def mode_enabled(self, mode):
+        if mode == "star_population":
+            return self.population_enabled
+        if mode in FULL_MODES:
+            return self.full_enabled
+        return self.limited_enabled
 
     def budget_for_mode(self, mode):
         if mode in FULL_MODES and self.experiment_policy is not None:
             return self.experiment_policy.budget()
+        if mode == "star_population":
+            return self.population_budget
         return self.full_budget if mode in FULL_MODES else self.budget
 
     def run(self, run_id, problem, *, verification_mode="auto", emit=None, solver_hint=None,
             retry_call=None, solver_mode="star_limited", component_features=None,
-            on_component_config_applied=None):
+            on_component_config_applied=None, problem_spec=None):
         """Execute STAR, applying and recording pair-only feature overrides when present."""
         if solver_mode not in STAR_MODES:
             raise ValueError("star_mode_invalid")
+        if solver_mode == "star_population" and self.population_gaps():
+            raise ValueError("population_prerequisites_unverified")
         if solver_mode in FULL_MODES and self.full_gaps():
             raise ValueError("star_prerequisites_unverified")
         check_control()
@@ -134,11 +214,17 @@ class StarProductPipeline:
         deadlines = ({"phase_deadline_at": self.experiment_policy.phase_deadline_at,
                       "batch_deadline_at": self.experiment_policy.round_deadline_at}
                      if self.experiment_policy is not None else None)
-        base = self.full_config if solver_mode in FULL_MODES else self.config
+        base = (self.population_config if solver_mode == "star_population" else
+                self.full_config if solver_mode in FULL_MODES else self.config)
         features = dict(base["features"])
+        if features.get("problem_spec") is True:
+            if problem_spec is None and features.get("auto_problem_spec") is not True:
+                raise ValueError("problem_spec_required")
+        elif problem_spec is not None:
+            raise ValueError("problem_spec_feature_disabled")
         # SP-13 合同：reference 核心恰为 9 项；candidate_registry/best_effort 仅由
         # Best-Effort 附加；受限模式保留 SP-11 已验收的候选历史行为。
-        if solver_mode != "star_reference":
+        if solver_mode not in {"star_reference", "star_population"}:
             features["candidate_registry"] = True
         if solver_mode in BEST_EFFORT_MODES:
             features["best_effort"] = True
@@ -181,18 +267,29 @@ class StarProductPipeline:
             }
             on_component_config_applied(applied_components)
 
+        harness_ref = {}
+
         def observe(run, event):
             if event:
                 public_event_id = public_solver_event_id(run, event)
                 sink({"type": "solver_progress", "job_id": run_id,
+                      "evidence_kind": self.evidence_kind,
                       "solver_event_id": public_event_id,
                       "solver_revision": event.get("state_revision", 0),
                       "solver_event_type": event["type"],
                       "node_name": "star", "step_id": public_event_id,
                       "title": "STAR " + event["type"],
                       "summary": event["type"],
-                      "solver": projection(run, verification_mode=verification_mode),
+                      "solver": projection(run, verification_mode=verification_mode,
+                                           include_prover_routes=False),
                       **decision_fields(event, run["state"], port.invocations)})
+                if self.intervention_enabled and solver_mode != "star_population":
+                    harness = harness_ref["harness"]
+                    maybe_pause(
+                        harness._state_store._connection, run, event, config, problem,
+                        applied_config=self.adapter.applied_config(),
+                        harness=harness, model_port=port,
+                    )
 
         def solve():
             with SolverHarness(database_path=self.database_path, config=config,
@@ -200,6 +297,7 @@ class StarProductPipeline:
                                meta_port=port,
                                tool_port=RegistryToolPort(self.registry) if self.registry else None,
                                event_observer=observe) as harness:
+                harness_ref["harness"] = harness
                 existing = harness._state_store.get_run(run_id)
                 harness._product_recovery = existing is not None
                 if existing is not None:
@@ -210,8 +308,25 @@ class StarProductPipeline:
                 from .solver_harness.calls import CallInterrupted
 
                 try:
-                    run = (resume_solver(harness, problem, run_id, retry_call) if existing else
-                           harness.solve(problem, {"run_id": run_id, "user_hint": solver_hint}))
+                    if existing:
+                        run = resume_solver(harness, problem, run_id, retry_call)
+                    else:
+                        metadata = {"run_id": run_id, "user_hint": solver_hint}
+                        if problem_spec is not None:
+                            metadata["problem_spec"] = problem_spec
+                        if self.population_memory_enabled and problem_spec is not None:
+                            from .solver_harness.faithful_memory_injection import (
+                                load_population_memory,
+                            )
+
+                            memory = load_population_memory(
+                                harness._state_store._connection,
+                                run_id=run_id,
+                                problem_spec=problem_spec,
+                            )
+                            if memory["observations"]:
+                                metadata["population_memory_advisory"] = memory
+                        run = harness.solve(problem, metadata)
                 except (CallInterrupted, HardBudgetStop) as exc:
                     run = harness.get_run(run_id)
                     from .solver_harness.controller import protocol_failure_exit
@@ -224,7 +339,17 @@ class StarProductPipeline:
                         raise
                     run = harness.get_run(run_id)
                 try:
-                    run = advance_product(harness, run, problem)
+                    if solver_mode == "star_population":
+                        from .solver_harness.population_lifecycle import (
+                            drive_population,
+                            record_delivery,
+                        )
+
+                        run = drive_population(harness, run, problem)
+                        if run["state"]["phase"] == "TERMINAL":
+                            run = record_delivery(harness, run)
+                    else:
+                        run = advance_product(harness, run, problem)
                 except RunStopped as exc:
                     if solver_mode not in BEST_EFFORT_MODES or exc.category != "run_deadline_exhausted":
                         raise
@@ -233,12 +358,82 @@ class StarProductPipeline:
 
                 run = run_best_effort(harness, run)
                 math = run["state"]
+                if math.get("population_policy", {}).get("enabled") is True:
+                    from .solver_harness.population_projection import population_projection
+
+                    math["population_public"] = population_projection(math)
                 answer = export_result(run)["final_response"]
                 bound, verification = delivery_verification(run, answer)
                 from .star_product_candidates import selection_verification
 
                 verification = selection_verification(run, answer, verification)
                 reviewed = math["status"] == "completed_llm_reviewed" and bound
+                identity_row = harness._state_store._connection.execute(
+                    "SELECT result_json FROM workspace_jobs WHERE job_id=?", (run_id,)
+                ).fetchone()
+                formal_identity = json.loads(identity_row[0]) if identity_row and identity_row[0] else {}
+                formal_policy = formal_identity.get("formal_policy")
+                formal_verification = None
+                if formal_policy is not None:
+                    from .solver_harness.formal_integration import (
+                        FormalIntegrationState,
+                        execute_reserved_attempt,
+                        mark_inflight_unknown,
+                        reserve_formal_attempt,
+                    )
+
+                    target = dict(formal_policy["target"])
+                    current_state = harness.get_run(run_id)
+                    formal_state = FormalIntegrationState(
+                        job_id=run_id, run_id=run_id, problem=problem,
+                        problem_spec=current_state["state"].get("problem_spec", {}),
+                        policy=formal_policy, target=target,
+                    )
+                    existing_formal = current_state["state"].get("formal_verification")
+                    if (isinstance(existing_formal, Mapping)
+                            and existing_formal.get("status") == "dispatched"):
+                        reserved = mark_inflight_unknown(existing_formal)
+                        event_type = "formal_verification_recovered_unknown"
+                    elif isinstance(existing_formal, Mapping):
+                        reserved = existing_formal
+                        event_type = None
+                    else:
+                        reserved = reserve_formal_attempt(formal_state)
+                        event_type = "formal_verification_dispatched"
+                    if event_type is not None:
+                        run = harness.commit_event(
+                            run_id,
+                            expected_revision=current_state["state_revision"],
+                            event={
+                                "event_id": f"formal-{reserved['current_attempt_id']}-{reserved['status']}",
+                                "type": event_type,
+                                "status": reserved["status"],
+                                "grade": None,
+                            },
+                            state_updates={"formal_verification": reserved},
+                        )
+                        current_state = run
+                    if reserved.get("status") == "dispatched":
+                        formal_verification = execute_reserved_attempt(
+                            formal_state, backend=self.formal_backend,
+                            record=reserved, budget=current_budget(),
+                            registry=self.registry, backend_registry=self.formal_registry,
+                            goal_cache_connection=harness._state_store._connection,
+                        )
+                        run = harness.commit_event(
+                            run_id,
+                            expected_revision=current_state["state_revision"],
+                            event={
+                                "event_id": f"formal-{formal_verification['current_attempt_id']}-{formal_verification['status']}",
+                                "type": "formal_verification_completed",
+                                "status": formal_verification["status"],
+                                "grade": formal_verification["grade"],
+                            },
+                            state_updates={"formal_verification": formal_verification},
+                        )
+                        math = run["state"]
+                    else:
+                        formal_verification = reserved
                 attempts = []
                 for call in port.invocations:
                     for attempt in call["request_attempts"]:
@@ -266,6 +461,8 @@ class StarProductPipeline:
                     "error": None if reviewed and verification_mode != "required" else {
                         "category": ("provider_generation_error"
                                      if math.get("result_reason") == "provider_generation_error"
+                                     else math.get("result_reason")
+                                     if str(math.get("result_reason", "")).startswith("context_")
                                      else "protocol_failure_unrepaired"
                                      if math.get("result_reason") == "protocol_failure_unrepaired"
                                      else "invalid_verifier_verdict"
@@ -278,6 +475,18 @@ class StarProductPipeline:
 
                     result["engineering_delivery"] = delivery_check(run, answer)
                 check_control(allow_expired_selection=math.get("best_effort_decision") is not None)
+                if self.population_memory_enabled:
+                    from .solver_harness.faithful_memory_capture import (
+                        capture_population_observation,
+                    )
+
+                    capture_population_observation(
+                        harness._state_store._connection,
+                        run_id=run_id,
+                        state=math,
+                        budget=current_budget().snapshot(),
+                        reviewed=result["status"] == "COMPLETED",
+                    )
                 return result
 
         builder = StateGraph(dict)
@@ -294,11 +503,16 @@ class StarProductPipeline:
               "message": "star_completed_llm_reviewed" if result["status"] == "COMPLETED"
                          else result["error"]["category"],
               "semantics": result["solver"]["semantics"],
+              "evidence_chain": [
+                  {"step_label": step["label"], "verdict": "ACCEPT", "valid": True}
+                  for step in result["solver"]["progress"]["steps"]
+                  if step.get("verdict") == "ACCEPT" and step.get("valid") is True
+              ],
               "data": {"type": "text", "summary": result["summary"]}})
         return result
 
 
-def projection(run, *, answer=None, verification_mode="auto"):
+def projection(run, *, answer=None, verification_mode="auto", include_prover_routes=True):
     from .star_product_summary import progress_summary
     from .star_result_semantics import result_semantics
 
@@ -308,13 +522,33 @@ def projection(run, *, answer=None, verification_mode="auto"):
         bound, _ = delivery_verification(run, answer)
         if not bound:
             status = "completed_unverified"
-    return {"run_id": run["run_id"], "state_revision": run["state_revision"],
+    result = {"run_id": run["run_id"], "state_revision": run["state_revision"],
             "phase": state["phase"], "status": status,
+            "specification_version": state.get("specification_version"),
+            "intake_status": state.get("problem_intake", {}).get("status"),
+            "result_reason": state.get("result_reason"),
+            "budget_exhaustion_reason": state.get("budget", {}).get("exhaustion_reason"),
             "config_hash": state["config_hash"], "checkpoint_thread_id": run["run_id"],
             "recovery": recovery_projection(run),
             "progress": progress_summary(state),
             "semantics": result_semantics(run, answer if answer is not None else state.get("final_response", ""), verification_mode=verification_mode, execution_status=run.get("execution_status")),
-            **candidate_projection(run)}
+            **candidate_projection(run),
+            **({'formal_verification': state['formal_verification']}
+               if isinstance(state.get('formal_verification'), Mapping) else {})}
+    if include_prover_routes:
+        from .prover_routes import prover_route_projection
+
+        result["prover_routes"] = prover_route_projection(state)
+    if state.get("proof_graph") is not None or state.get("specification_version") is not None:
+        from .presentation_evidence import presentation_evidence
+
+        result["presentation_evidence"] = presentation_evidence(
+            state, answer if answer is not None else state.get("final_response", ""))
+    if state.get("population_policy", {}).get("enabled") is True:
+        from .solver_harness.population_projection import population_projection
+
+        result["population"] = population_projection(state)
+    return result
 
 
 def public_tools(state):

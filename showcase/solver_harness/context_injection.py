@@ -16,6 +16,12 @@ def prepare_role_context(run, request, *, include_exploration=False):
         "confirmed_failures_ledger",
     )
     context = {key: deepcopy(state[key]) for key in keys if key in state}
+    for key in ("problem_spec", "specification_version", "obligation_ledger"):
+        if key in state:
+            context[key] = deepcopy(state[key])
+    memory = state.get("population_memory_advisory", request.get("population_memory_advisory"))
+    if isinstance(memory, dict) and memory.get("authority") == "advisory_only":
+        context["population_memory_advisory"] = deepcopy(memory)
     if request.get("acceptance_mode") == "handoff":
         context["acceptance_mode"] = "handoff"
         if "reviewed_drafts" in request:

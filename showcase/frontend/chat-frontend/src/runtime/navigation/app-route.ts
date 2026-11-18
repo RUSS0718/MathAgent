@@ -1,7 +1,7 @@
 export const DASHBOARD_BASE = '/dashboard'
 export const DASHBOARD_ASSETS_BASE = '/dashboard-assets'
 export const DASHBOARD_SETTINGS_PATH = '/dashboard/settings'
-export type DashboardRoute = { view: 'workspace' | 'settings' | 'campaigns' | 'run'; runId?: string; sessionId: string | null; path: string }
+export type DashboardRoute = { view: 'workspace' | 'settings' | 'campaigns' | 'run' | 'system'; runId?: string; sessionId: string | null; path: string }
 const SESSION_PATH_PATTERN = /^\/dashboard\/session\/([A-Za-z0-9._-]{1,64})$/
 
 function normalize(pathname: string): string {
@@ -13,6 +13,9 @@ export function readDashboardRoute(pathname: string): DashboardRoute {
   const path = normalize(pathname)
   if (path === DASHBOARD_SETTINGS_PATH) return { view: 'settings', sessionId: null, path }
   if (path === '/dashboard/campaigns') return { view: 'campaigns', sessionId: null, path }
+  if (path === '/dashboard/system' && import.meta.env?.VITE_F7_SYSTEM_VIEW_ENABLED === 'true') {
+    return { view: 'system', sessionId: null, path }
+  }
   const run = /^\/dashboard\/run\/([A-Za-z0-9._-]{1,64})$/.exec(path)
   if (run) return { view: 'run', runId: run[1], sessionId: null, path }
   const match = SESSION_PATH_PATTERN.exec(path)

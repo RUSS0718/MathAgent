@@ -263,9 +263,10 @@ class CP05PublicJobTest(unittest.TestCase):
         self.assertNotIn("prove the result", stream)
         self.assertNotIn("close the implication symbolically", stream)
 
-    def test_public_job_stops_on_empty_planner_yield_without_continuation(self):
+    def test_public_job_stops_on_repeated_empty_planner_yield_after_one_format_repair(self):
         client, headers, session = self.open_app([
             {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []},
+            {"checkpoint": planner_checkpoint(gaps=[])},
             {"checkpoint": planner_checkpoint(gaps=[])},
         ])
         created = client.post(
@@ -277,7 +278,13 @@ class CP05PublicJobTest(unittest.TestCase):
         job = self.wait_for_terminal(client, created.get_json()["job_id"])
 
         self.assertEqual("failed", job["status"], job)
-        self.assertEqual(["explore", "planner"], [request["role"] for request in self.requests])
+        self.assertEqual(["explore", "planner", "planner"], [request["role"] for request in self.requests])
+        first, repair = self.requests[1:]
+        self.assertEqual(first["call_id"] + ":repair-1", repair["call_id"])
+        self.assertEqual(first["checkpoint_round"], repair["checkpoint_round"])
+        self.assertTrue(repair["format_repair"])
+        self.assertEqual("protocol_failure_unrepaired", job["result"]["solver"]["result_reason"])
+        self.assertEqual(3, len(job["result"]["request_attempts"]))
 
     def test_public_planner_rejects_invalid_progress_and_budget_before_continuation(self):
         cases = (

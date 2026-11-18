@@ -3,6 +3,30 @@ import test from 'node:test'
 import { decodeSseBlock, SseParser, SseProtocolError } from '../src/api/events.schemas.ts'
 import { readJobEvents } from '../src/runtime/jobs/sse-transport.ts'
 
+test('terminal does not discard committed tail events and minimal interrupt is readable', async () => {
+  const events = await readJobEvents('job-tail', 0, { fetchImpl: async () => new Response(
+    'id: 1\nevent: final_result\ndata: {"type":"final_result","data":{}}\n\n' +
+    'id: 2\nevent: presentation_artifact_saved\ndata: {"type":"presentation_artifact_saved"}\n\n'), maxRetries: 0 })
+  assert.deepEqual(events.map(event => event.id), [1, 2])
+  assert.equal(decodeSseBlock({ event: 'interrupt', id: '3', hasIdField: true,
+    data: '{"type":"interrupt","job_id":"job-tail","status":"waiting_input"}' }).event, 'interrupt')
+})
+
+test('terminal observation survives a tail disconnect and empty reconnect EOF', async () => {
+  let calls = 0
+  let controller: ReadableStreamDefaultController<Uint8Array>
+  const body = new ReadableStream<Uint8Array>({ start(value) {
+    controller = value
+    value.enqueue(new TextEncoder().encode('id: 1\nevent: final_result\ndata: {"type":"final_result","data":{}}\n\n'))
+  } })
+  const events = await readJobEvents('tail-drop', 0, {
+    fetchImpl: async () => ++calls === 1 ? new Response(body) : new Response(''), retryDelayMs: 0,
+    onEvent: () => controller.error(new Error('tail dropped')),
+  })
+  assert.equal(calls, 2)
+  assert.equal(events[0]?.event, 'final_result')
+})
+
 test('interrupt ends observation without reporting a dropped stream or retrying', async () => {
   let calls = 0
   const events = await readJobEvents('job-wait', 0, {

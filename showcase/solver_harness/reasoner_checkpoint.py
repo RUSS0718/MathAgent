@@ -17,13 +17,15 @@ def enabled(config):
 
 
 def parse(reply):
+    """Validate the role payload, excluding only the runtime's stream usage envelope."""
     if (
         not isinstance(reply, Mapping)
-        or set(reply) != {"checkpoint"}
+        or "checkpoint" not in reply
+        or set(reply) - {"checkpoint", "usage"}
         or not isinstance(reply.get("checkpoint"), Mapping)
     ):
         raise ValueError("invalid_reasoner_checkpoint")
-    if schema_error(reply, response_schema({"role": "reasoner", "checkpoint_protocol": True})):
+    if schema_error({"checkpoint": reply["checkpoint"]}, response_schema({"role": "reasoner", "checkpoint_protocol": True})):
         raise ValueError("invalid_reasoner_checkpoint")
     checkpoint = dict(reply["checkpoint"])
     expected = {
@@ -92,6 +94,9 @@ def request(base, *, call_id, round_number, parent=None, objection=None, guidanc
         "call_id": call_id,
         "checkpoint_protocol": True,
         "checkpoint_round": round_number,
+        "checkpoint_max_rounds": MAX_CHECKPOINT_ROUNDS,
+        "checkpoint_remaining_rounds": MAX_CHECKPOINT_ROUNDS - round_number,
+        "checkpoint_last_round": round_number == MAX_CHECKPOINT_ROUNDS,
     }
     if parent is not None:
         result.update({

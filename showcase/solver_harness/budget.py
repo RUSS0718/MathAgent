@@ -1,17 +1,29 @@
 """Run-wide model and time ceilings; tool quotas apply at tool admission."""
 
+import json
 import time
 from datetime import UTC, datetime
 
 from ..run_budget import current_budget
 
 
-def budget_reason(state, config):
+def budget_reason(state, config, *, role=None):
     shared = current_budget()
     if shared is not None:
         budget = shared.snapshot()
         if time.time() >= budget["deadline_at"]:
             return "runtime_budget_exhausted"
+        if state.get("phase") == "FINAL_GENERATE":
+            attempts = state.get("final_solution_attempts", [])
+            owner = role or ("whole_solution_verifier" if attempts
+                             and attempts[-1].get("review") is None else "final_generator")
+            row = shared.ledger._read_row(shared.run_id)
+            actions = json.loads(row[0])["actions"] if row is not None else []
+            if any(item.get("kind") == "logical" and item.get("role") == owner
+                   and item.get("status") == "pre_reserved" for item in actions):
+                # The slot is already charged. Dispatch/transport still claims
+                # it under the original control, deadline and exact input cap.
+                return None
         if budget["logical_calls"] >= budget["limits"]["max_model_calls"]:
             return "model_call_budget_exhausted"
         if budget["http_attempts"] >= budget["limits"]["max_http_attempts"]:

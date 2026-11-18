@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import secrets
 import sqlite3
 import threading
@@ -22,6 +23,7 @@ from typing import Any
 
 from .evidence_store import append_check
 from .final_evidence import bind_verification
+from .presentation import MODES, POLICY_VERSION, SCHEMA_VERSION, normalize_mode
 from .redaction import redact
 from .run_budget import RunBudgetLedger, RunBudgetLimits, bind_budget, freeze_budget
 from .run_checkpoints import RunCheckpointSaver
@@ -31,6 +33,28 @@ from .star_product_modes import STAR_MODES
 
 ACTIVE_JOB_STATUSES = ("queued", "running", "waiting_input")
 TERMINAL_JOB_STATUSES = ("succeeded", "failed", "canceled")
+
+
+def _apply_formal_requirement(result: dict[str, Any]) -> None:
+    policy = result.get("formal_policy")
+    solver = result.get("solver")
+    if not isinstance(policy, Mapping) or not isinstance(solver, Mapping):
+        return
+    semantics = solver.get("semantics")
+    if not isinstance(semantics, Mapping):
+        return
+    formal = result.get("formal_verification")
+    if not isinstance(formal, Mapping):
+        formal = solver.get("formal_verification")
+    met = (isinstance(formal, Mapping) and formal.get("status") == "solved"
+           and formal.get("grade") in {"L2", "L3"})
+    updated_solver = dict(solver)
+    updated_solver["semantics"] = {
+        **dict(semantics),
+        "formal_requirement": ("met" if met else "unmet")
+        if policy.get("require_formal") is True else "default",
+    }
+    result["solver"] = updated_solver
 
 
 class WorkspaceError(RuntimeError):
@@ -82,6 +106,7 @@ class WorkspaceStore:
                 error_code TEXT,
                 input_user_file_id TEXT,
                 verification_mode TEXT NOT NULL DEFAULT 'auto',
+                problem_spec_json TEXT,
                 idempotency_key TEXT NOT NULL,
                 request_digest TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -116,6 +141,17 @@ class WorkspaceStore:
                 PRIMARY KEY (user_id, idempotency_key),
                 FOREIGN KEY (job_id) REFERENCES workspace_jobs(job_id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS presentation_artifacts (
+                job_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                source_fingerprint TEXT NOT NULL,
+                artifact_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(job_id, mode, source_fingerprint),
+                FOREIGN KEY (job_id) REFERENCES workspace_jobs(job_id) ON DELETE CASCADE
+            );
             CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_updated
                 ON chat_sessions(user_id, updated_at DESC);
             CREATE INDEX IF NOT EXISTS idx_chat_messages_session_order
@@ -131,6 +167,8 @@ class WorkspaceStore:
             self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN verification_mode TEXT NOT NULL DEFAULT 'auto'")
         if "input_user_file_id" not in columns:
             self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN input_user_file_id TEXT")
+        if "problem_spec_json" not in columns:
+            self._connection.execute("ALTER TABLE workspace_jobs ADD COLUMN problem_spec_json TEXT")
         migrate_hints(self._connection, columns)
         self._connection.commit()
 
@@ -218,6 +256,8 @@ class WorkspaceStore:
         solver_identity: Mapping[str, Any] | None = None,
         experiment_binding: Mapping[str, Any] | None = None,
         solver_hint: str | None = None,
+        problem_spec: Mapping[str, Any] | None = None,
+        presentation_config: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Durably accept one Job and its user message before returning."""
 
@@ -245,9 +285,9 @@ class WorkspaceStore:
                 job_id = f"run_{secrets.token_hex(16)}"
                 now = _utc_now()
                 self._connection.execute(
-                    "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,input_user_file_id,verification_mode,idempotency_key,request_digest,created_at,updated_at) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (job_id, session_id, user_id, problem, "queued", _json({"execution_mode": execution_mode, **(solver_identity or {}), **({"experiment_pair": dict(experiment_binding)} if experiment_binding else {})}), None, input_user_file_id, verification_mode, idempotency_key, request_digest, now, now),
+                    "INSERT INTO workspace_jobs(job_id,session_id,user_id,problem,status,result_json,error_code,input_user_file_id,verification_mode,problem_spec_json,idempotency_key,request_digest,created_at,updated_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (job_id, session_id, user_id, problem, "queued", _json({"execution_mode": execution_mode, **(solver_identity or {}), **(dict(presentation_config or {})), **({"experiment_pair": dict(experiment_binding)} if experiment_binding else {})}), None, input_user_file_id, verification_mode, _json(problem_spec) if problem_spec is not None else None, idempotency_key, request_digest, now, now),
                 )
                 self._connection.execute(
                     "INSERT INTO chat_messages(session_id,sender,text,analysis_job_id,created_at) VALUES(?,?,?,?,?)",
@@ -358,7 +398,7 @@ class WorkspaceStore:
                     return
                 now = _utc_now()
                 prior = _loads(row["result_json"]) if row["result_json"] else {}
-                result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response), "execution_mode": prior.get("execution_mode", "unavailable")}
+                result = {"final_response": final_response, "summary": summary, "verification": bind_verification(final_response), "execution_mode": prior.get("execution_mode", "unavailable"), **_presentation_identity(prior)}
                 if isinstance(prior.get("experiment_pair"), dict):
                     result["experiment_pair"] = prior["experiment_pair"]
                     _mark_pair_config_not_applied(result)
@@ -448,6 +488,14 @@ class WorkspaceStore:
                         self._insert_event(job_id, "canceled", {"type": "canceled", "job_id": job_id, "status": "canceled", "scope": "future_dispatch", "remote_request": "cannot_revoke"})
                     result = {"success": True, "job_id": job_id, "status": "canceled"}
                 else:
+                    intervention_control = self._connection.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' "
+                        "AND name='faithful_intervention_control'"
+                    ).fetchone()
+                    if intervention_control is not None:
+                        from .faithful_intervention_control import resume_guard
+
+                        resume_guard(self._connection, job_id)
                     from .star_product_recovery import authorize_resume
 
                     star_resume = authorize_resume(self._connection, row, retry_call)
@@ -476,10 +524,21 @@ class WorkspaceStore:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             rows = self._connection.execute("SELECT job_id,status,result_json FROM workspace_jobs WHERE status IN ('queued','running','waiting_input')").fetchall()
+            intervention_table = self._connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='faithful_intervention_control'"
+            ).fetchone()
             for row in rows:
                 job_id = row["job_id"]
                 if row["status"] == "waiting_input" and checkpointer is not None and checkpointer.is_interrupted(job_id):
                     continue
+                if row["status"] == "waiting_input" and intervention_table is not None:
+                    paused = self._connection.execute(
+                        "SELECT 1 FROM faithful_intervention_control "
+                        "WHERE job_id=? AND status='paused'", (job_id,),
+                    ).fetchone()
+                    if paused is not None:
+                        continue
                 now = _utc_now()
                 result = _loads(row["result_json"]) if row["result_json"] else {}
                 _mark_pair_config_not_applied(result)
@@ -566,7 +625,7 @@ class WorkspaceStore:
             if isinstance(state.get("verification"), Mapping)
             else {"status": "unknown"},
         }
-        result.update({key: state[key] for key in ("solver_mode", "preset_version", "missing_capabilities", "evidence_kind", "solver", "acceptance_mode", "engineering_delivery") if key in state})
+        result.update({key: state[key] for key in ("solver_mode", "preset_version", "population_policy_hash", "missing_capabilities", "evidence_kind", "solver", "acceptance_mode", "engineering_delivery", "presentation_mode", "presentation_schema_version", "presentation_policy_version", "formal_policy", "formal_policy_hash", "formal_verification") if key in state})
         result["verification"] = bind_verification(result["final_response"], result["verification"])
         error = state.get("error") if isinstance(state.get("error"), Mapping) else None
         error_code = str(error.get("category")) if error else None
@@ -580,6 +639,11 @@ class WorkspaceStore:
                     self._connection.rollback()
                     return
                 prior = _loads(row["result_json"]) if row["result_json"] else {}
+                result.update(_presentation_identity(prior))
+                for frozen_key in ("formal_policy", "formal_policy_hash", "faithful"):
+                    if frozen_key in prior:
+                        result[frozen_key] = prior[frozen_key]
+                _apply_formal_requirement(result)
                 if isinstance(prior.get("experiment_pair"), dict):
                     result["experiment_pair"] = prior["experiment_pair"]
                     _mark_pair_config_not_applied(result)
@@ -631,6 +695,79 @@ class WorkspaceStore:
                 lambda: self._insert_event(job_id, "verification_completed", {"type": "verification_completed", "job_id": job_id, "status": result.get("candidate_status", "unknown"), "data": payload}),
             )
 
+    def save_presentation(self, job_id: str, user_id: str, artifact: Mapping[str, Any]) -> dict[str, Any]:
+        source = artifact.get("source_fingerprint")
+        mode = artifact.get("mode")
+        if not isinstance(source, str) or mode not in MODES:
+            raise WorkspaceError("presentation_artifact_invalid", status=400)
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._connection.execute(
+                    "SELECT status,updated_at,result_json FROM workspace_jobs WHERE job_id=? AND user_id=?",
+                    (job_id, user_id),
+                ).fetchone()
+                if row is None:
+                    raise WorkspaceError("job_not_found", status=404)
+                expected = artifact.get("source_versions") or {}
+                event = self._connection.execute(
+                    "SELECT COALESCE(MAX(event_id),0) FROM workspace_events "
+                    "WHERE job_id=? AND event_type!='presentation_artifact_saved'", (job_id,),
+                ).fetchone()
+                solver_row = self._connection.execute(
+                    "SELECT state_revision,state_json FROM solver_states WHERE run_id=?", (job_id,)
+                ).fetchone()
+                state = _loads(solver_row["state_json"]) if solver_row is not None else {}
+                actual = {
+                    "job_status": row["status"], "job_updated_at": row["updated_at"],
+                    "source_event_id": int(event[0]),
+                    "state_revision": int(solver_row["state_revision"]) if solver_row is not None else None,
+                    "specification_version": state.get("specification_version"),
+                    "graph_version": (state.get("proof_graph") or {}).get("current_version"),
+                }
+                if any(expected.get(key) != value for key, value in actual.items()):
+                    raise WorkspaceError("presentation_source_changed", status=409)
+                current_result = _loads(row["result_json"]) if row["result_json"] else {}
+                if (current_result.get("final_response") or "") != (artifact.get("answer") or ""):
+                    raise WorkspaceError("presentation_source_changed", status=409)
+                now = _utc_now()
+                inserted = self._connection.execute(
+                    "INSERT OR IGNORE INTO presentation_artifacts(job_id,user_id,mode,source_fingerprint,artifact_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                    (job_id, user_id, mode, source, _json(dict(artifact)), now, now),
+                ).rowcount
+                if inserted:
+                    self._insert_event(job_id, "presentation_artifact_saved", {
+                        "type": "presentation_artifact_saved", "job_id": job_id,
+                        "mode": mode, "status": artifact.get("status"),
+                        "schema_version": artifact.get("schema_version"),
+                        "artifact_sha256": (artifact.get("artifact") or {}).get("sha256"),
+                    })
+                stored = self._connection.execute(
+                    "SELECT artifact_json FROM presentation_artifacts WHERE job_id=? AND user_id=? AND mode=? AND source_fingerprint=?",
+                    (job_id, user_id, mode, source),
+                ).fetchone()
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
+        return _loads(stored["artifact_json"])
+
+    def get_presentation(self, job_id: str, user_id: str, mode: str, source_fingerprint: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT artifact_json FROM presentation_artifacts WHERE job_id=? AND user_id=? AND mode=? AND source_fingerprint=?",
+                (job_id, user_id, mode, source_fingerprint),
+            ).fetchone()
+        return _loads(row["artifact_json"]) if row is not None else None
+
+    def list_presentations(self, job_id: str, user_id: str, mode: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT artifact_json FROM presentation_artifacts WHERE job_id=? AND user_id=? AND mode=? ORDER BY created_at",
+                (job_id, user_id, mode),
+            ).fetchall()
+        return [_loads(row["artifact_json"]) for row in rows]
+
     def get_job(self, job_id: str, user_id: str) -> dict[str, Any]:
         with self._lock:
             row = self._connection.execute("SELECT * FROM workspace_jobs WHERE job_id=? AND user_id=?", (job_id, user_id)).fetchone()
@@ -638,6 +775,7 @@ class WorkspaceStore:
                 raise WorkspaceError("job_not_found", status=404)
         payload = self._job_payload(row, include_result=True)
         payload["last_event_id"] = self.last_event_id(job_id, user_id)
+        payload["source_event_id"] = self.source_event_id(job_id, user_id)
         return payload
 
     def get_job_by_idempotency_key(
@@ -681,6 +819,14 @@ class WorkspaceStore:
         with self._lock:
             row = self._connection.execute("SELECT solver_hint FROM workspace_jobs WHERE job_id=?", (job_id,)).fetchone()
         return str(row["solver_hint"]) if row is not None and row["solver_hint"] is not None else None
+
+    def problem_spec(self, job_id: str) -> dict[str, Any] | None:
+        """Read the private frozen ProblemSpec supplied at Job creation."""
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT problem_spec_json FROM workspace_jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+        return _loads(row["problem_spec_json"]) if row is not None and row["problem_spec_json"] else None
 
     def active_jobs(self, user_id: str, session_id: str | None = None) -> list[dict[str, Any]]:
         with self._lock:
@@ -751,6 +897,19 @@ class WorkspaceStore:
             ).fetchone()
         return int(event["last_event_id"])
 
+    def source_event_id(self, job_id: str, user_id: str) -> int:
+        with self._lock:
+            owned = self._connection.execute(
+                "SELECT 1 FROM workspace_jobs WHERE job_id=? AND user_id=?", (job_id, user_id)
+            ).fetchone()
+            if owned is None:
+                raise WorkspaceError("job_not_found", status=404)
+            event = self._connection.execute(
+                "SELECT COALESCE(MAX(event_id),0) FROM workspace_events "
+                "WHERE job_id=? AND event_type!='presentation_artifact_saved'", (job_id,),
+            ).fetchone()
+        return int(event[0])
+
     def close(self) -> None:
         with self._lock:
             if self._owns_connection:
@@ -801,6 +960,7 @@ class WorkspaceStore:
             "job_id": row["job_id"],
             "session_id": row["session_id"],
             "status": row["status"],
+            "updated_at": row["updated_at"],
             "verification_mode": row["verification_mode"],
             "input_user_file_id": row["input_user_file_id"],
             "last_event_id": None,
@@ -827,7 +987,10 @@ class WorkspaceService:
         waiting_input_marker: str = "",
         pipeline: Any | None = None,
         star_pipeline: Any | None = None,
+        stream_timeout_policy_version: str | None = None,
     ) -> None:
+        from .stream_timeout_policy import policy_for_version
+
         self.store = WorkspaceStore(database_path, connection=connection)
         self.execution_mode = execution_mode
         self.execution_delay = max(0.0, float(execution_delay))
@@ -835,6 +998,7 @@ class WorkspaceService:
         self.waiting_input_marker = waiting_input_marker
         self.pipeline = pipeline
         self.star_pipeline = star_pipeline
+        self.stream_timeout_policy = policy_for_version(stream_timeout_policy_version)
         self.budget_ledger = RunBudgetLedger(
             self.store._connection, connection_lock=self.store._lock
         )
@@ -882,12 +1046,64 @@ class WorkspaceService:
         solver_options: Any = None,
         solver_hint: Any = None,
         experiment_binding: Mapping[str, Any] | None = None,
+        problem_spec: Mapping[str, Any] | None = None,
+        presentation_mode: str | None = None,
+        formal_policy: Mapping[str, Any] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         from .star_product_modes import validate_mode
+        requested_presentation_mode = normalize_mode(presentation_mode)
 
         identity = validate_mode(solver_mode, enabled=self.star_pipeline is not None, verification_mode=verification_mode, options=solver_options, pipeline=self.star_pipeline)
         validate_hint(solver_hint, solver_mode)
+        presentation_identity = ({
+            "presentation_mode": requested_presentation_mode,
+            "presentation_schema_version": SCHEMA_VERSION,
+            "presentation_policy_version": POLICY_VERSION,
+        } if presentation_mode is not None else {})
         selected = self.star_pipeline if solver_mode in STAR_MODES else self.pipeline
+        from .solver_harness.formal_policy import FormalPolicyError, normalize_formal_policy
+
+        formal_identity = {}
+        if formal_policy is not None:
+            if solver_mode not in STAR_MODES:
+                raise WorkspaceError("formal_policy_requires_star_mode", status=400)
+            try:
+                if not isinstance(formal_policy, Mapping):
+                    raise FormalPolicyError("formal_policy_invalid")
+                if "timeout_seconds" in formal_policy:
+                    timeout = formal_policy["timeout_seconds"]
+                    if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+                            or not math.isfinite(timeout) or timeout <= 0):
+                        raise FormalPolicyError("formal_timeout_invalid")
+                formal_policy = normalize_formal_policy(
+                    formal_policy,
+                    configured=(getattr(selected, "formal_backend", None) is not None),
+                    server_template=getattr(selected, "formal_server_policy", None),
+                )
+            except FormalPolicyError as exc:
+                raise WorkspaceError(exc.category, status=400) from exc
+            formal_identity = {
+                "formal_policy": formal_policy,
+                "formal_policy_hash": _request_digest(formal_policy),
+            }
+        if problem_spec is not None:
+            if solver_mode not in STAR_MODES:
+                raise WorkspaceError("problem_spec_requires_star_mode", status=400)
+            preset = selected.preset_config(solver_mode)
+            if preset.get("features", {}).get("problem_spec") is not True:
+                raise WorkspaceError("problem_spec_feature_disabled", status=400)
+            from .solver_harness.specification import normalize_problem_spec
+
+            try:
+                problem_spec = normalize_problem_spec(problem_spec)
+            except (TypeError, ValueError) as exc:
+                raise WorkspaceError("problem_spec_invalid", status=400) from exc
+            if problem_spec["original_problem"] != problem:
+                raise WorkspaceError("problem_spec_original_problem_mismatch", status=400)
+        elif (solver_mode in STAR_MODES
+              and selected.preset_config(solver_mode).get("features", {}).get("problem_spec") is True
+              and selected.preset_config(solver_mode).get("features", {}).get("auto_problem_spec") is not True):
+            raise WorkspaceError("problem_spec_required", status=400)
         if web_search_enabled:
             raise WorkspaceError("capability_unavailable", status=503)
         if input_user_file_id is not None and (not isinstance(input_user_file_id, str) or not input_user_file_id):
@@ -909,7 +1125,13 @@ class WorkspaceService:
             budget_limits=budget_limits,
             deadline_at=deadline_at,
             experiment_binding=experiment_binding,
+            problem_spec=problem_spec,
+            presentation_mode=presentation_mode,
+            population_policy_hash=identity.get("population_policy_hash"),
+            formal_policy=formal_policy,
         )
+        from .faithful_task import task_identity
+
         payload, existing = self.store.create_job(
             user_id=user_id,
             session_id=session_id,
@@ -917,15 +1139,28 @@ class WorkspaceService:
             idempotency_key=idempotency_key,
             request_digest=digest,
             execution_mode=solver_mode if solver_mode in STAR_MODES else getattr(selected, "execution_mode", self.execution_mode),
-            solver_identity={**identity, "evidence_kind": getattr(selected, "evidence_kind", self.execution_mode)},
+            solver_identity={
+                **identity,
+                "evidence_kind": getattr(selected, "evidence_kind", self.execution_mode),
+                **({"stream_timeout_policy": self.stream_timeout_policy}
+                   if self.stream_timeout_policy is not None else {}),
+                **presentation_identity,
+                **formal_identity,
+                **task_identity(selected, solver_mode),
+            },
             experiment_binding=experiment_binding,
+            problem_spec=problem_spec,
             solver_hint=solver_hint,
             verification_mode=verification_mode,
             input_user_file_id=input_user_file_id,
         )
         if budget_limits is not None:
+            frozen_identity = self.store.job_identity(payload["job_id"])
             self.budget_ledger.ensure(
-                payload["job_id"], budget_limits, deadline_at=deadline_at
+                payload["job_id"],
+                budget_limits,
+                deadline_at=deadline_at,
+                stream_timeout_policy=frozen_identity.get("stream_timeout_policy"),
             )
             snapshot = self.budget_ledger.snapshot(payload["job_id"])
             expected_limits = {
@@ -958,6 +1193,207 @@ class WorkspaceService:
             self._submit(job_id)
         return result, existing
 
+    def formal_attempt(
+        self, *, user_id: str, job_id: str, idempotency_key: str,
+        expected_attempt_id: str, operation: str,
+        requested_backend: str | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Append one explicit formal child attempt without re-solving the Run."""
+        if not _is_uuid_v4(idempotency_key):
+            raise WorkspaceError("idempotency_key_invalid", status=400)
+        payload = {"expected_attempt_id": expected_attempt_id, "operation": operation}
+        if requested_backend is not None:
+            payload["requested_backend"] = requested_backend
+        digest = _request_digest("formal_attempt", job_id, payload)
+        from .solver_harness.formal_integration import (
+            FormalIntegrationError,
+            FormalIntegrationState,
+            commit_formal_retry_reservation,
+        )
+        from .solver_harness.storage import (
+            SolverEventConflictError,
+            SolverPersistenceError,
+            SolverStateStore,
+        )
+
+        state_store = SolverStateStore(self.store._connection)
+        with self.store._lock:
+            existing = self.store._connection.execute(
+                "SELECT operation,job_id,request_digest,response_json FROM workspace_actions "
+                "WHERE user_id=? AND idempotency_key=?",
+                (user_id, idempotency_key),
+            ).fetchone()
+            if existing is not None:
+                if (existing["operation"] != "formal_attempt"
+                        or existing["job_id"] != job_id
+                        or existing["request_digest"] != digest):
+                    raise WorkspaceError("idempotency_conflict", status=409)
+                return _loads(existing["response_json"]), True
+            row = self.store._connection.execute(
+                "SELECT status,result_json FROM workspace_jobs WHERE job_id=? AND user_id=?",
+                (job_id, user_id),
+            ).fetchone()
+            if row is None:
+                raise WorkspaceError("job_not_found", status=404)
+            if row["status"] != "succeeded":
+                raise WorkspaceError("formal_retry_job_not_terminal", status=409)
+            identity = _loads(row["result_json"]) if row["result_json"] else {}
+            policy = identity.get("formal_policy")
+            if identity.get("solver_mode") not in STAR_MODES or not isinstance(policy, dict):
+                raise WorkspaceError("formal_retry_unavailable", status=409)
+            registry = getattr(self.star_pipeline, "formal_registry", None)
+            if registry is None:
+                raise WorkspaceError("formal_retry_unavailable", status=409)
+            if operation == "switch":
+                if not isinstance(requested_backend, str) or not requested_backend.strip():
+                    raise WorkspaceError("formal_backend_required", status=400)
+                selected_policy = {
+                    **policy, "backend": requested_backend.strip(),
+                    "requested_backend": requested_backend.strip(),
+                }
+            else:
+                if requested_backend is not None:
+                    raise WorkspaceError("formal_retry_request_invalid", status=400)
+                selected_policy = policy
+            try:
+                backend = registry.select(policy["target"], selected_policy)
+            except ValueError as exc:
+                raise WorkspaceError("formal_backend_unsupported", status=409) from exc
+            current = state_store.get_run(job_id)
+            if current is None:
+                raise WorkspaceError("formal_retry_unavailable", status=409)
+            formal = current["state"].get("formal_verification")
+            if not isinstance(formal, Mapping):
+                raise WorkspaceError("formal_retry_unavailable", status=409)
+            formal_state = FormalIntegrationState(
+                job_id=job_id, run_id=job_id, problem=self.store.problem(job_id),
+                problem_spec=current["state"].get("problem_spec", {}),
+                policy=policy, target=policy["target"],
+            )
+            event = {
+                "event_id": f"formal-retry-{uuid.uuid4().hex}",
+                "type": "formal_verification_dispatched", "status": "dispatched",
+                "grade": None,
+            }
+
+            def transaction_hook_factory(record):
+                result = {"success": True, "job_id": job_id, "status": "queued",
+                          "attempt_id": record["current_attempt_id"]}
+
+                def persist(connection):
+                    prior = connection.execute(
+                        "SELECT operation,job_id,request_digest FROM workspace_actions "
+                        "WHERE user_id=? AND idempotency_key=?",
+                        (user_id, idempotency_key),
+                    ).fetchone()
+                    if prior is not None:
+                        raise SolverEventConflictError(job_id, event["event_id"])
+                    connection.execute(
+                        "INSERT INTO workspace_actions(user_id,idempotency_key,operation,job_id,request_digest,response_json,created_at) "
+                        "VALUES(?,?,?,?,?,?,?)",
+                        (user_id, idempotency_key, "formal_attempt", job_id, digest,
+                         _json(result), _utc_now()),
+                    )
+                    updated = connection.execute(
+                        "UPDATE workspace_jobs SET status='running',updated_at=? "
+                        "WHERE job_id=? AND user_id=? AND status='succeeded'",
+                        (_utc_now(), job_id, user_id),
+                    )
+                    if updated.rowcount != 1:
+                        raise SolverPersistenceError("formal_retry_job_not_terminal")
+
+                return persist
+
+            try:
+                preview = commit_formal_retry_reservation(
+                    self.store, job_id, snapshot=current, state=formal_state,
+                    existing=formal, expected_attempt_id=expected_attempt_id,
+                    operation=operation,
+                    backend=backend, requested_backend=requested_backend,
+                    event=event,
+                    transaction_hook_factory=transaction_hook_factory,
+                )
+            except FormalIntegrationError as exc:
+                raise WorkspaceError(exc.category, status=409) from exc
+            except SolverEventConflictError as exc:
+                with self.store._lock:
+                    prior = self.store._connection.execute(
+                        "SELECT operation,job_id,request_digest,response_json FROM workspace_actions "
+                        "WHERE user_id=? AND idempotency_key=?",
+                        (user_id, idempotency_key),
+                    ).fetchone()
+                if (prior is not None and prior["operation"] == "formal_attempt"
+                        and prior["job_id"] == job_id and prior["request_digest"] == digest):
+                    return _loads(prior["response_json"]), True
+                raise WorkspaceError("idempotency_conflict", status=409) from exc
+            except SolverPersistenceError as exc:
+                raise WorkspaceError("formal_retry_persistence_failed", status=409) from exc
+            result = {"success": True, "job_id": job_id, "status": "queued",
+                      "attempt_id": preview["current_attempt_id"]}
+            with self._submit_lock:
+                self._submitted.add(job_id)
+            self._executor.submit(self._execute_formal_attempt, job_id)
+            return result, False
+
+    def _execute_formal_attempt(self, job_id: str) -> None:
+        """Run one child formal attempt through the bounded formal helper."""
+        from .solver_harness.formal_integration import run_explicit_formal_retry
+        from .solver_harness.storage import SolverStateStore
+
+        identity = self.store.job_identity(job_id)
+        state_store = SolverStateStore(self.store._connection)
+        with self.store._lock:
+            current = state_store.get_run(job_id)
+        if current is None:
+            return
+        record = current["state"].get("formal_verification")
+        if not isinstance(record, Mapping):
+            return
+        try:
+            result = run_explicit_formal_retry(
+                self, job_id, run_id=job_id,
+                problem=self.store.problem(job_id), policy=identity["formal_policy"],
+                expected_attempt_id=record["current"].get("parent_attempt_id"),
+                operation=record["current"].get("requested_operation", "retry"),
+                reserved_attempt_id=record["current_attempt_id"],
+            )
+            formal = result["record"]
+            budget = result["budget"]
+        except Exception:  # noqa: BLE001 - do not leave an accepted retry inflight
+            from .solver_harness.formal_integration import mark_inflight_unknown
+
+            with self.store._lock:
+                current = state_store.get_run(job_id)
+            saved = current["state"].get("formal_verification") if current else None
+            if (isinstance(saved, Mapping) and saved.get("current_attempt_id") == record["current_attempt_id"]
+                    and saved.get("status") == "dispatched"):
+                formal = mark_inflight_unknown(saved)
+                from .solver_harness.formal_integration import commit_formal_state_with_one_retry
+
+                commit_formal_state_with_one_retry(
+                    self.store, job_id, expected_revision=current["state_revision"],
+                    formal_verification=formal,
+                    event={"event_id": f"formal-{record['current_attempt_id']}-recovered-unknown",
+                           "type": "formal_verification_recovered_unknown",
+                           "status": "unknown", "grade": None},
+                    expected_attempt_id=record["current_attempt_id"],
+                    expected_status="dispatched",
+                )
+            else:
+                formal = saved if isinstance(saved, Mapping) else record
+            budget = self.budget_ledger.snapshot(job_id)
+        persisted = self.store.job_identity(job_id)
+        persisted["formal_verification"] = formal
+        if budget is not None:
+            persisted["budget"] = budget
+        _apply_formal_requirement(persisted)
+        with self.store._lock:
+            self.store._connection.execute(
+                "UPDATE workspace_jobs SET status='succeeded',error_code=NULL,result_json=?,updated_at=? WHERE job_id=?",
+                (_json(persisted), _utc_now(), job_id),
+            )
+            self.store._connection.commit()
+
     def cancel_job(self, *, user_id: str, job_id: str, idempotency_key: str) -> tuple[dict[str, Any], bool]:
         if not _is_uuid_v4(idempotency_key):
             raise WorkspaceError("idempotency_key_invalid", status=400)
@@ -977,6 +1413,8 @@ class WorkspaceService:
             self._executor.submit(self._execute, job_id)
 
     def _execute(self, job_id: str) -> None:
+        from .faithful_intervention_control import InterventionPaused
+
         try:
             identity = self.store.job_identity(job_id)
             pair_binding = identity.get("experiment_pair")
@@ -998,7 +1436,11 @@ class WorkspaceService:
             # the HTTP contract never waits for execution.
             time.sleep(self.execution_delay)
             if self.execution_mode == "fake" and self.budget_ledger.snapshot(job_id) is not None:
-                budget = self.budget_ledger.ensure(job_id, RunBudgetLimits())
+                budget = self.budget_ledger.ensure(
+                    job_id,
+                    RunBudgetLimits(),
+                    stream_timeout_policy=identity.get("stream_timeout_policy"),
+                )
                 RunControl(self.store, job_id, budget).check()
             if self.execution_mode == "live" or execution_mode in STAR_MODES:
                 if pipeline is None:
@@ -1027,7 +1469,12 @@ class WorkspaceService:
                 limits = (pipeline.budget_for_mode(identity.get("solver_mode"))
                           if execution_mode in STAR_MODES else getattr(pipeline, "budget", RunBudgetLimits()))
                 deadline = getattr(getattr(pipeline, "experiment_policy", None), "deadline_at", None)
-                with bind_budget(self.budget_ledger.ensure(job_id, limits, deadline_at=deadline)) as budget, bind_control(RunControl(self.store, job_id, budget, self.checkpointer)) as control:
+                with bind_budget(self.budget_ledger.ensure(
+                    job_id,
+                    limits,
+                    deadline_at=deadline,
+                    stream_timeout_policy=identity.get("stream_timeout_policy"),
+                )) as budget, bind_control(RunControl(self.store, job_id, budget, self.checkpointer)) as control:
                     control.check()
                     state = pipeline.run(
                         job_id,
@@ -1036,7 +1483,9 @@ class WorkspaceService:
                         emit=lambda event: self.store.append_event(job_id, event),
                         **({"solver_hint": self.store.solver_hint(job_id),
                             "retry_call": identity.get("retry_call"),
-                            "solver_mode": identity.get("solver_mode")} if execution_mode in STAR_MODES else {}),
+                            "solver_mode": identity.get("solver_mode"),
+                            "problem_spec": self.store.problem_spec(job_id)}
+                           if execution_mode in STAR_MODES else {}),
                         **({"component_features": component_features,
                             "on_component_config_applied": lambda config: self.store.record_pair_applied_config(
                                 job_id, pair_binding, config
@@ -1060,6 +1509,8 @@ class WorkspaceService:
                 self.store.fail_job(job_id, "needs_review")
             else:
                 self.store.complete_job(job_id, "Fake Agent completed a deterministic showcase run.", "fake adapter")
+        except InterventionPaused:
+            return
         except RunStopped as exc:
             if exc.category == "run_deadline_exhausted":
                 self.store.fail_job(job_id, exc.category)
@@ -1113,6 +1564,17 @@ class WorkspaceService:
     def record_verification(self, *, user_id: str, job_id: str, result: Mapping[str, Any]) -> None:
         self.store.get_job(job_id, user_id)
         self.store.record_verification(job_id, result)
+
+    def get_presentation(self, *, user_id: str, job_id: str, mode: str, source_fingerprint: str) -> dict[str, Any] | None:
+        self.store.get_job(job_id, user_id)
+        return self.store.get_presentation(job_id, user_id, mode, source_fingerprint)
+
+    def save_presentation(self, *, user_id: str, job_id: str, artifact: Mapping[str, Any]) -> dict[str, Any]:
+        return self.store.save_presentation(job_id, user_id, artifact)
+
+    def list_presentations(self, *, user_id: str, job_id: str, mode: str) -> list[dict[str, Any]]:
+        self.store.get_job(job_id, user_id)
+        return self.store.list_presentations(job_id, user_id, mode)
 
     def last_event_id(self, job_id: str, user_id: str) -> int:
         return self.store.last_event_id(job_id, user_id)
@@ -1176,6 +1638,14 @@ def _request_digest(*args: Any) -> str:
     return hashlib.sha256(_json(payload).encode("utf-8")).hexdigest()
 
 
+def _presentation_identity(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: value[key]
+        for key in ("presentation_mode", "presentation_schema_version", "presentation_policy_version")
+        if key in value
+    }
+
+
 def workspace_job_request_digest(
     *,
     session_id: str,
@@ -1188,6 +1658,10 @@ def workspace_job_request_digest(
     budget_limits: RunBudgetLimits | None = None,
     deadline_at: float | None = None,
     experiment_binding: Mapping[str, Any] | None = None,
+    problem_spec: Mapping[str, Any] | None = None,
+    presentation_mode: str | None = None,
+    population_policy_hash: str | None = None,
+    formal_policy: Mapping[str, Any] | None = None,
 ) -> str:
     """Fingerprint the exact public Job request, including any frozen budget."""
     request_parts = (session_id, message, web_search_enabled, input_user_file_id, verification_mode)
@@ -1214,6 +1688,14 @@ def workspace_job_request_digest(
         )
     if experiment_binding is not None:
         digest = _request_digest(digest, {"experiment_pair": dict(experiment_binding)})
+    if problem_spec is not None:
+        digest = _request_digest(digest, {"problem_spec": dict(problem_spec)})
+    if presentation_mode is not None:
+        digest = _request_digest(digest, {"presentation_mode": presentation_mode})
+    if population_policy_hash is not None:
+        digest = _request_digest(digest, {"population_policy_hash": population_policy_hash})
+    if formal_policy is not None:
+        digest = _request_digest(digest, {"formal_policy": dict(formal_policy)})
     return digest
 
 

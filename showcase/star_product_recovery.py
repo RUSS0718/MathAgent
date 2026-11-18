@@ -42,6 +42,14 @@ def recovery_projection(run):
              and other["request_revision"] > item["request_revision"])}
         for item in calls.values() if item["status"] == "protocol_failed"
     ]
+    processing_failures = [
+        {"call_id": public_solver_call_id(run["run_id"], item["call_id"]),
+         "role": item["role"], "status": item["status"],
+         "error_category": item.get("error_category"),
+         "finish_reason": item.get("finish_reason"),
+         "usage": item.get("usage")}
+        for item in calls.values() if item["status"] == "local_processing_failed"
+    ]
     events = run.get("events", [])
     receipts = {event["event_id"] for event in events if event["type"] == "tool_receipt"}
     unknown_tools = [
@@ -49,12 +57,17 @@ def recovery_projection(run):
         for event in events if event["type"] == "tool_dispatched"
         and event["event_id"].removesuffix(":dispatch") not in receipts
     ]
-    return {"status": "needs_review" if unknown or unknown_tools else "safe",
-            "unknown_calls": unknown, "unknown_tools": unknown_tools, "retries": retries,
-            "protocol_failures": protocol_failures}
+    projection = {
+        "status": "needs_review" if unknown or unknown_tools or processing_failures else "safe",
+        "unknown_calls": unknown, "unknown_tools": unknown_tools, "retries": retries,
+        "protocol_failures": protocol_failures,
+    }
+    if processing_failures:
+        projection["processing_failures"] = processing_failures
+    return projection
 
 
-def authorize_resume(connection, row, decision):
+def authorize_resume(connection, row, decision, *, read_only=False):
     """Validate before Job CAS; no network or math writes occur here."""
     from .workspace import WorkspaceError
 
@@ -97,7 +110,15 @@ def authorize_resume(connection, row, decision):
     if orphan_tools:
         raise WorkspaceError("star_tool_recovery_needs_review", status=409)
     run = {"run_id": row["job_id"], "state": state}
-    unknown = recovery_projection(run)["unknown_calls"]
+    recovery = recovery_projection(run)
+    if recovery.get("processing_failures"):
+        raise WorkspaceError("star_processing_failure_requires_new_job", status=409)
+    population_enabled = state.get("population_policy", {}).get("enabled") is True
+    if population_enabled and decision is None:
+        # A new owner can advance independent routes while the old action stays
+        # fenced and reserved. It never reconstructs or resends that HTTP body.
+        return True
+    unknown = recovery["unknown_calls"]
     if unknown:
         if not isinstance(decision, dict) or set(decision) != {"call_id", "new_call_id"}:
             raise WorkspaceError("star_retry_decision_required", status=409)
@@ -114,16 +135,78 @@ def authorize_resume(connection, row, decision):
         identity["retry_call"] = {"call_id": old["call_id"], "new_call_id": new_id}
     elif decision is not None:
         raise WorkspaceError("star_retry_not_unknown", status=409)
-    connection.execute("UPDATE workspace_jobs SET result_json=? WHERE job_id=?",
-                       (json.dumps(identity), row["job_id"]))
+    if not read_only:
+        connection.execute("UPDATE workspace_jobs SET result_json=? WHERE job_id=?",
+                           (json.dumps(identity), row["job_id"]))
     return True
+
+
+def allowed_job_actions(connection, row):
+    """Preview the existing control admission without persisting a retry decision."""
+    from .workspace import WorkspaceError
+
+    actions = ["cancel"] if row["status"] in {"queued", "running", "waiting_input"} else []
+    if not isinstance(json.loads(row["result_json"] or "{}").get("faithful"), dict):
+        return actions
+    if row["status"] not in {"waiting_input", "failed"}:
+        return actions
+    try:
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='faithful_intervention_control'"
+        ).fetchone():
+            from .faithful_intervention_control import resume_guard
+
+            resume_guard(connection, row["job_id"], read_only=True)
+        try:
+            admitted = authorize_resume(connection, row, None, read_only=True)
+        except WorkspaceError as exc:
+            if str(exc) != "star_retry_decision_required":
+                raise
+            admitted = False
+        if admitted or row["status"] == "waiting_input":
+            actions.append("resume")
+        stored = connection.execute(
+            "SELECT state_json FROM solver_states WHERE run_id=?", (row["job_id"],)
+        ).fetchone()
+        if stored:
+            state = json.loads(stored[0])
+            unknown = recovery_projection({"run_id": row["job_id"], "state": state})["unknown_calls"]
+            if unknown and authorize_resume(connection, row, {
+                "call_id": unknown[0]["call_id"], "new_call_id": str(uuid.uuid4()),
+            }, read_only=True):
+                actions.append("retry_unknown_call")
+    except WorkspaceError:
+        pass
+    return actions
 
 
 def resume_solver(harness, problem, run_id, retry):
     """Re-enter the owning STAR phase using audited responses when available."""
     from .solver_harness.controller import run_supplied_plan_or_explore
+    from .solver_harness.problem_intake import ensure_problem_spec, intake_pending
 
     run = harness.get_run(run_id, problem=problem)
+    formal = run["state"].get("formal_verification")
+    if isinstance(formal, dict) and formal.get("status") == "dispatched":
+        from .solver_harness.formal_integration import mark_inflight_unknown
+
+        recovered_formal = mark_inflight_unknown(formal)
+        run = harness.commit_event(
+            run_id,
+            expected_revision=run["state_revision"],
+            event={
+                "event_id": f"formal-{recovered_formal['current_attempt_id']}-recovered-unknown",
+                "type": "formal_verification_recovered_unknown",
+                "status": "unknown",
+                "grade": None,
+            },
+            state_updates={"formal_verification": recovered_formal},
+        )
+    if (run["state"].get("population_policy", {}).get("enabled") is True
+            and not intake_pending(run)):
+        from .solver_harness.population_lifecycle import resume_population
+
+        return resume_population(harness, run, problem, {"retry_call": retry} if retry else {})
     if retry is not None:
         run = harness.commit_event(
             run_id, expected_revision=run["state_revision"],
@@ -131,6 +214,14 @@ def resume_solver(harness, problem, run_id, retry):
                    "type": "call_retry_authorized", "retry_of": retry["call_id"]},
             state_updates={"authorized_retry": retry, "status": "running"},
         )
+    if intake_pending(run):
+        run = ensure_problem_spec(harness, run, problem)
+        if intake_pending(run) or run["state"]["phase"] == "TERMINAL":
+            return run
+        if run["state"].get("population_policy", {}).get("enabled") is True:
+            from .solver_harness.population_lifecycle import resume_population
+
+            return resume_population(harness, run, problem, {})
     if recovery_projection(run)["unknown_calls"] and retry is None:
         return run
     if run["state"]["phase"] in {"STEP_EXECUTE", "STEP_VERIFY", "CHALLENGE"}:

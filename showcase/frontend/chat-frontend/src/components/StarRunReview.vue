@@ -4,10 +4,19 @@ import type { JobReport } from '../api/reports.schemas'
 import { api } from '../api/client'
 import UiButton from './ui/UiButton.vue'
 import StatusBadge from './ui/StatusBadge.vue'
+import ProofGraphView from './ProofGraphView.vue'
 const props = defineProps<{ report: JobReport; jobId: string }>()
 const solver = computed(() => props.report.solver?.solver)
+const population = computed(() => solver.value?.population)
 const steps = computed(() => (solver.value?.progress?.steps ?? []) as Record<string, unknown>[])
 const failures = computed(() => (solver.value?.progress?.failures ?? []) as Record<string, unknown>[])
+const obligations = computed(() => solver.value?.progress?.root_obligations)
+const plans = computed(() => solver.value?.progress?.plan_history ?? [])
+const retries = computed(() => solver.value?.recovery?.retries ?? [])
+const candidateFields = [
+  'candidate_id', 'answer_hash', 'source_phase', 'plan_version', 'attempt_index',
+  'review_state', 'selection_eligible', 'invalidated_by', 'evidence_grade', 'dependency_refs',
+]
 const replay = ref<Awaited<ReturnType<typeof api.candidateReplay>> | null>(null)
 const notice = ref('')
 const busy = ref(false)
@@ -22,12 +31,27 @@ async function loadReplay(): Promise<void> {
 </script>
 <template>
   <template v-if="report.solver?.solver_mode?.startsWith('star_')">
+    <ProofGraphView v-if="solver?.progress?.proof_graph" :graph="solver.progress.proof_graph" :run-id="jobId" />
     <section class="evidence-section" aria-label="STAR 持久进展">
       <h2>STAR 持久进展</h2>
       <div class="review-meta"><StatusBadge :value="report.solver.solver_mode" /><StatusBadge :value="report.solver.evidence_kind ?? 'unknown'" /></div>
       <p>以下状态来自同一 Run 的持久记录；工程注入与回放不代表真实模型效果。</p>
       <dl class="data-list"><template v-for="field in ['run_id', 'state_revision', 'phase', 'status']" :key="field"><dt>{{ field }}</dt><dd>{{ display(solver?.[field]) }}</dd></template></dl>
       <p v-if="report.solver.missing_capabilities?.length">模式限制：{{ report.solver.missing_capabilities.join('、') }}</p>
+      <section v-if="population" class="evidence-section" aria-label="并发路线执行">
+        <h3>并发路线执行</h3>
+        <dl class="data-list">
+          <dt>调度轮次</dt><dd>{{ display(population.scheduler?.round) }}</dd>
+          <dt>本轮路线 / 已用机会</dt><dd>{{ display(population.scheduler?.member_count) }} / {{ display(population.scheduler?.opportunities_used) }}</dd>
+          <dt>已验证根义务</dt><dd>{{ display(population.scheduler?.verified_gain_count) }}</dd>
+          <dt>路线状态</dt><dd>{{ display(population.scheduler?.route_counts) }}</dd>
+          <dt>执行槽 / 在途 HTTP</dt><dd>{{ display(population.resources?.worker_slots_in_use) }} / {{ display(population.resources?.http_inflight) }}</dd>
+          <dt>未知路线 / 未知请求</dt><dd>{{ display(population.resources?.unknown_routes) }} / {{ display(population.resources?.unknown_requests) }}</dd>
+          <dt>数学交付</dt><dd>{{ population.delivery?.status === 'delivered' ? '已交付' : display(population.delivery?.status) }}<span v-if="population.delivery?.reason"> · {{ population.delivery.reason }}</span></dd>
+          <dt>请求结算</dt><dd>{{ population.settlement?.status === 'settled' ? '已结清' : population.settlement?.status === 'pending' ? '结算中' : display(population.settlement?.status) }}<span v-if="population.settlement?.unknown_count != null"> · 未知请求 {{ population.settlement.unknown_count }}</span></dd>
+        </dl>
+        <p>数学答案交付与远端请求费用结算分别记录；迟到回执不会改写已交付答案。</p>
+      </section>
       <details open><summary>当前计划、步骤与回退记录</summary>
         <p>计划版本 {{ display(solver?.progress?.plan_version) }} · 尝试 {{ display(solver?.progress?.attempt_index) }} · Meta 裁定 {{ display(solver?.progress?.meta_decision) }}</p>
         <ol v-if="steps.length"><li v-for="(step, index) in steps" :key="index">{{ step.label }}{{ step.current ? '（当前）' : '' }} · 目标 {{ display(step.goal_gate) }} · 逻辑 {{ display(step.logic_gate) }} · {{ display(step.verdict) }} · {{ step.valid === true && step.verdict === 'ACCEPT' ? '已接受' : '尚未接受' }}</li></ol>
@@ -35,13 +59,35 @@ async function loadReplay(): Promise<void> {
         <p v-if="!failures.length">未触发回退或重规划。</p>
         <ul v-else><li v-for="(failure, index) in failures" :key="index">{{ failure.kind }} · 原计划 {{ failure.plan_version }} · 尝试 {{ failure.attempt_index }} · 失效 {{ failure.invalidated_count }} 项 · 救援 {{ failure.rescued_count }} 项</li></ul>
       </details>
+      <section v-if="obligations" class="evidence-section" aria-label="根义务台账">
+        <h3>根义务台账 · {{ obligations.covered }} / {{ obligations.total }}</h3>
+        <ol>
+          <li v-for="item in obligations.items" :key="item.ordinal">
+            义务 {{ item.ordinal }} · {{ item.type ?? '未分类' }} · {{ item.status }}
+          </li>
+        </ol>
+      </section>
+      <section v-if="plans.length" class="evidence-section" aria-label="计划与尝试历史">
+        <h3>计划与尝试历史</h3>
+        <ol>
+          <li v-for="attempt in plans" :key="attempt.plan_version + ':' + attempt.attempt_index">
+            计划 {{ attempt.plan_version }} · 尝试 {{ attempt.attempt_index }} ·
+            {{ attempt.status === 'current' ? '当前' : attempt.status === 'retried' ? '已回退并重试' : '已归档' }} ·
+            {{ attempt.step_count == null ? '完整步骤数未知' : attempt.step_count + ' 步' }}
+            <span v-if="attempt.outcome"> · {{ attempt.outcome }}</span>
+          </li>
+        </ol>
+      </section>
+      <details v-if="retries.length"><summary>请求重试（{{ retries.length }} 次）</summary>
+        <ul><li v-for="retry in retries" :key="retry.call_id">{{ retry.status }} · 原调用 {{ retry.retry_of }} · 新调用 {{ retry.call_id }}</li></ul>
+      </details>
       <details><summary>累计预算与未知消耗</summary><dl class="data-list"><template v-for="(value, field) in report.report.budget" :key="field"><dt>{{ field }}</dt><dd>{{ display(value) }}</dd></template></dl><p v-if="!report.report.budget">预算记录不可用；不按零消耗解释。</p></details>
     </section>
     <section class="evidence-section" aria-label="候选版本与选择">
       <h2>候选版本与选择</h2>
       <p>候选接受、有限计算与完整数学证明不同；失效版本保留供审阅。</p>
       <p v-if="!solver?.candidate_history?.length">尚无完整候选记录；不能据此判断求解成功。</p>
-      <details v-for="(candidate, index) in solver?.candidate_history" :key="index"><summary>候选 {{ index + 1 }} · 版本 {{ candidate.version }} · {{ candidate.review_state }}</summary><dl class="data-list"><template v-for="field in ['candidate_id', 'answer_text', 'answer_hash', 'source_phase', 'plan_version', 'attempt_index', 'review_state', 'selection_eligible', 'invalidated_by', 'evidence_grade', 'dependency_refs']" :key="field"><dt>{{ field }}</dt><dd>{{ display(candidate[field]) }}</dd></template></dl></details>
+      <details v-for="(candidate, index) in solver?.candidate_history" :key="index"><summary>候选 {{ index + 1 }} · 版本 {{ candidate.version }} · {{ candidate.review_state }}</summary><dl class="data-list"><template v-for="field in candidateFields" :key="field"><dt>{{ field }}</dt><dd>{{ display(candidate[field]) }}</dd></template></dl></details>
       <details v-if="solver?.best_effort" open><summary>Best-Effort 确定性选择</summary><dl class="data-list"><template v-for="(value, field) in solver.best_effort" :key="field"><dt>{{ field }}</dt><dd>{{ display(value) }}</dd></template></dl></details>
       <UiButton :busy="busy" @click="loadReplay">零调用重放候选选择</UiButton>
       <p v-if="notice" role="status">{{ notice }}</p>

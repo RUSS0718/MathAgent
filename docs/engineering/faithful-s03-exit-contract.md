@@ -1,0 +1,65 @@
+# S03 技术设计与完整工程退出合同
+
+日期：2026-11-08。状态：工程退出通过（`engineering-preview`）。实现提交 `3a6943f26564db250b96e21044bb4b28511f599f`，集成分支 `mathagent-faithful`。依据 #137、#136、#144、#146 和 S03 交接合同。完整门禁及逐项证据见 [S03 工程退出验收](../evals/faithful-s03-exit-20261108.md)。
+
+## 实施前快照与设计边界
+
+下段现状对应 2026-11-08 开工前的 S02 源码基线 `d19aa56`，用于解释设计起因。实施结果以验收记录为准。
+
+当前 `initial_state.py` 没有 ProblemSpec。`plan.py` 只检查步骤和更早的依赖引用；`verification.py` 在 ACCEPT 后按步骤顺序推进，最后进入 FINAL_GENERATE。`classified.py` 已核验成果来源、类型和依赖，`traceback.py` 已做步骤与结果依赖闭包失效；`finalize.py` 已使用有效完整推导做综合及独立整题审查。S02 ContextPack 接受规格版本，但当前没有生产者保证真实版本。旧 RB03 测试证明方向审查，不能证明根义务合同。
+
+采用现有 SolverHarness 状态机、SQLite CAS 及事件事务。新增规格领域逻辑保持独立文件，现有阶段只放接入调用，避免复制循环。根义务来源为完整原题的结构化交付要求，独立于 Plan；Plan 的步骤作为 WorkUnit，以根义务 ID 关联，可多对多。辅助目标只参与依赖，不参与根义务计数。规格字段保留原题、定义域、量词、假设、方向和输出要求；结构检查不宣称数学规格对应已被证明。
+
+新 Run 显式选择版本化规格策略；未启用及历史缺字段 Run 保持原语义。恢复读取冻结策略。规格版本与 plan_version、state_revision 分离，不能用重规划次数冒充。原题/约束变更采用公共 CAS 操作；保留不可变历史并定向标记失效，不能覆盖身份或静默恢复旧证据。
+
+验收依据为控制器接受的、与义务类型匹配的审查记录及实际报告/成果引用。证据要绑定 Run、规格版本、WorkUnit、plan/attempt、审查调用及来源报告；Reasoner 自报覆盖不取得权威。所有 AND 前提有效才执行/接受依赖动作。旧证据失效不可因重新读取或改名复活；无关有效分支明确保留来源版本。
+
+根义务全部满足后，可跳过非必要辅助动作，但必须先通过共享真实资源账本为答案综合和整题审查预留，再进入既有 finalization。仅检查剩余调用数或保存 `reserved=true` 不构成预留。未知消耗、deadline、实际输入输出预算、调用身份及 exact-text 绑定继续由已有执行控制链负责；无法取得预留时保持部分完成。
+
+## 公共测试接缝
+
+沿用用户交接合同授权的 `SolverHarness.solve/get_run`、公开状态事件、实际角色出站，以及公共 Job/Run/SSE/report/Evidence、预算与最终绑定接口。Harness 验收定位领域迁移，不能代替产品端恢复、预算、脱敏和身份验证；Job 验收补齐这部分。受控模型只能证明工程合同，不能证明自然题规格提取与数学效果。
+
+## 实施顺序与退出清单
+
+按行为分组编写失败验收并逐个实现，运行聚焦与相关回归。审查、提交及最终门禁频率遵循根 [AGENTS.md](../../AGENTS.md) 和[工程门禁](development-gates.md)；C01–C12 是覆盖清单，不要求每项独立双轴审查或提交。
+
+| 项 | 可观察退出条件 | 当前 |
+| --- | --- | --- |
+| C01 | 显式开关、策略冻结、旧 Run 不迁移；ProblemSpec 独立版本与完整字段 | pass |
+| C02 | 充分必要两个根义务，单方向不能完成 | pass |
+| C03 | 最值界和可达性分别验收，候选数值不算证明 | pass |
+| C04 | Pell 列表、完备性、筛选和格式全部覆盖；辅助目标不刷进度 | pass |
+| C05 | 合并/细拆 WorkUnit 不改分母；AND 缺任一前提拒绝 | pass |
+| C06 | 类型匹配证据有实际审查来源；拒绝样例替代普遍性/完备性 | pass |
+| C07 | 规格变更定向失效义务、辅助依赖、候选、结果、最终候选与整题审查；无关分支保留 | pass |
+| C08 | 收尾真实资源预留失败不进入最终审查；成功跳过非必要动作 | pass |
+| C09 | 独立完整 Whole Verifier 检查组合、假设及实际交付；文本变更降级 | pass |
+| C10 | 真实规格版本进入 S02 packs；容量拒绝不截断题意或答案 | pass |
+| C11 | 公开产品端身份、规格持久化/恢复、重连、deadline、unknown 预留保持 | pass |
+| C12 | baseline 字节、聚焦/相关回归、双轴审查、唯一六阶段门禁及 ProblemSpec 浏览器接缝证据 | pass |
+
+## 退出证据映射
+
+| 项 | 验收结果 | 主要证据 |
+| --- | --- | --- |
+| C01 | pass | `test_faithful_s03_specification.py`：显式启用、冻结版本、旧 Run 不迁移及完整字段 |
+| C02 | pass | `test_faithful_s03_harness.py`：必要与充分方向分别覆盖，单方向不能完成 |
+| C03 | pass | `test_faithful_s03_specification.py`：最值界不覆盖可达性 |
+| C04 | pass | `test_faithful_s03_pell.py`：候选列表不覆盖完备性；列表、完备性、筛选、格式各自审查后才收尾 |
+| C05 | pass | `test_faithful_s03_specification.py`、`test_faithful_s03_harness.py`：WorkUnit 映射、多对多进度与 AND 前提 |
+| C06 | pass | `test_faithful_s03_job.py`、`test_faithful_s03_pell.py`：Verifier 只可为当前 WorkUnit 声明类别匹配、报告引用的义务证据；候选值不关闭完备性 |
+| C07 | pass | `test_faithful_s03_revision.py`、`test_faithful_s03_harness.py`：定向失效结果、证据、候选、最终候选与 Whole Verifier 记录，保留无关分支 |
+| C08 | pass | `test_faithful_s03_budget.py`、`test_faithful_s03_harness.py`：共享账本未能原子预留收尾时不派发最终生成或审查 |
+| C09 | pass | `test_faithful_s03_harness.py`、`test_star_product_final_binding.py`：独立 Whole Verifier、实际审查来源和 exact-text 绑定 |
+| C10 | pass | `test_faithful_s03_harness.py`、`test_faithful_s03_job.py`：规格版本进入 S02 pack；超限 Job 保留完整规格且不派发新 HTTP |
+| C11 | pass | `test_faithful_s03_recovery.py`、`test_faithful_s03_job.py`：进程退出后恢复冻结规格、原 deadline 与 unknown 预留，显式新身份重试 |
+| C12 | pass | commit `3a6943f` 的唯一六阶段门禁 `faithful-s03-exit-3a6943f-20261108-1355`、13 项隔离 Chromium、基线哈希及双轴审查 |
+
+### 公开进度合同
+
+仅在 ProblemSpec 明确启用时，公开进度增加 `root_obligations`：`covered` 与 `total` 是满足根义务数和原题根义务总数；`items` 按规格顺序提供从 1 开始的 `ordinal`、公开类型 `type` 和 `open` / `satisfied` 状态。投影不包含义务 ID、原题/义务文本、假设或证明内容。关闭开关及 legacy Run 不增加此字段，保持既有 shape。
+
+S03 工程退出通过，状态限定为 `engineering-preview`。真实隔离工具、provider-live、容量/SLA、自然题和数学效果分别留证；本任务未启动付费实验。S03 退出解除 S04 与 S05 的 S03 工程前置；F1 仍等待 S04，不提前引入 S07。
+
+后续窗口的模型继承要求见根 [AGENTS.md](../../AGENTS.md)。

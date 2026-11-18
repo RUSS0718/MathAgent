@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -86,7 +86,20 @@ class SolverStateStore:
 
         run_id = state["run_id"]
         try:
+            state = dict(state)
+            event = dict(event)
             with _SOLVER_STORAGE_LOCK, self._connection:
+                if state.get("route_policy", {}).get("enabled") is True:
+                    from .route_budget import derive_route_budget
+
+                    state["route_budget"] = derive_route_budget(self._connection, run_id)
+                if state.get("proof_graph_policy", {}).get("enabled") is True:
+                    from .proof_graph import evolve_proof_graph
+
+                    graph_patch, graph_summary = evolve_proof_graph(state, event)
+                    if graph_patch is not None:
+                        state["proof_graph"] = graph_patch
+                        event["proof_graph"] = graph_summary
                 cursor = self._connection.execute(
                     """
                     INSERT INTO solver_states(
@@ -121,6 +134,33 @@ class SolverStateStore:
                         event["created_at"],
                     ),
                 )
+                if state.get("proof_graph_policy", {}).get("enabled") is True:
+                    graph_event = {
+                        "run_id": run_id,
+                        "sequence": 2,
+                        "event_id": "proof-graph-bootstrap-v1",
+                        "state_revision": state["state_revision"],
+                        "event_json": _json({
+                            "run_id": run_id,
+                            "sequence": 2,
+                            "event_id": "proof-graph-bootstrap-v1",
+                            "state_revision": state["state_revision"],
+                            "type": "proof_graph_bootstrapped",
+                            "graph_version": state["proof_graph"]["current_version"],
+                            "imported_count": len(state["proof_graph"]["snapshots"][-1]["derivations"]),
+                            "not_imported_count": len(state["proof_graph"]["snapshots"][-1]["not_imported_records"]),
+                            "created_at": event["created_at"],
+                        }),
+                        "created_at": event["created_at"],
+                    }
+                    self._connection.execute(
+                        """
+                        INSERT INTO solver_events(
+                            run_id, sequence, event_id, state_revision, event_json, created_at
+                        ) VALUES (:run_id, :sequence, :event_id, :state_revision, :event_json, :created_at)
+                        """,
+                        graph_event,
+                    )
         except (sqlite3.Error, KeyError, TypeError, ValueError) as exc:
             raise SolverPersistenceError("create_run") from exc
         return True
@@ -155,11 +195,16 @@ class SolverStateStore:
         event: Mapping[str, Any],
         request_hash: str,
         validated_run: Mapping[str, Any] | None = None,
+        route_authorized: bool = False,
+        population_owner: Mapping[str, Any] | None = None,
+        transaction_hook: Callable[[sqlite3.Connection], None] | None = None,
     ) -> dict[str, Any]:
         """Compare-and-swap one event, reusing a matching validated history when supplied."""
 
         connection = self._connection
         with _SOLVER_STORAGE_LOCK:
+            if {"proof_graph", "proof_graph_policy"} & state_updates.keys():
+                raise SolverPersistenceError("graph_fields_are_storage_managed")
             if connection.in_transaction:
                 raise SolverPersistenceError("commit_event")
             try:
@@ -178,6 +223,12 @@ class SolverStateStore:
                     current = self._read_run(run_id)
                     if current is None:
                         raise SolverPersistenceError("commit_event")
+                    if transaction_hook is not None:
+                        try:
+                            transaction_hook(connection)
+                        except BaseException:
+                            connection.rollback()
+                            raise
                     connection.commit()
                     return current
 
@@ -199,7 +250,86 @@ class SolverStateStore:
                 state = json.loads(row["state_json"])
                 if not isinstance(state, dict):
                     raise SolverPersistenceError("commit_event")
+                if state.get("population_policy", {}).get("enabled") is True:
+                    if state.get("population", {}).get("owner") != population_owner:
+                        raise SolverPersistenceError("population_owner_epoch_mismatch")
+                    if {"population", "population_policy"} & state_updates.keys():
+                        raise SolverPersistenceError("population_fields_are_storage_managed")
                 state_updates = controlled_patch(connection, run_id, event, state_updates)
+                if route_authorized or any(
+                    key in state_updates
+                    for key in {
+                        "route_registry", "route_lineage", "route_evaluations",
+                        "aprs_decisions", "route_invalidations", "active_route_id",
+                        "route_budget",
+                    }
+                ):
+                    from .routes import validate_route_state_patch
+
+                    try:
+                        validate_route_state_patch(
+                            state, event, state_updates, authorized=route_authorized
+                        )
+                    except ValueError as exc:
+                        raise SolverPersistenceError(str(exc)) from exc
+                graph_candidate = dict(state)
+                graph_candidate.update(state_updates)
+                graph_candidate["proof_graph"] = state.get("proof_graph")
+                graph_candidate["proof_graph_policy"] = state.get("proof_graph_policy")
+                if (graph_candidate.get("proof_graph_policy") or {}).get("enabled") is True:
+                    from .proof_graph import evolve_proof_graph
+
+                    receipt_rows = connection.execute(
+                        "SELECT event_json FROM solver_events WHERE run_id = ? ORDER BY sequence",
+                        (run_id,),
+                    ).fetchall()
+                    persisted_receipts = {}
+                    for receipt_row in receipt_rows:
+                        saved = json.loads(receipt_row["event_json"])
+                        receipt = saved.get("receipt")
+                        if (saved.get("type") == "tool_receipt" and isinstance(receipt, Mapping)
+                                and isinstance(receipt.get("receipt_id"), str)):
+                            persisted_receipts[receipt["receipt_id"]] = receipt
+                    graph_patch, graph_summary = evolve_proof_graph(
+                        graph_candidate, event, persisted_receipts
+                    )
+                    if graph_patch is not None:
+                        state_updates = {**state_updates, "proof_graph": graph_patch}
+                        event = {**event, "proof_graph": graph_summary}
+                        if graph_candidate.get("route_policy", {}).get("enabled") is True:
+                            from .routes import invalidate_routes
+
+                            route_patch = invalidate_routes(
+                                graph_candidate, graph_patch.get("current_version")
+                            )
+                            if route_patch:
+                                state_updates = {**state_updates, **route_patch}
+                                event = {**event, "route_invalidation": route_patch["route_invalidations"][-1]}
+                    # The fixed deadline may pass while the derived graph is built.
+                    guarded_updates = controlled_patch(connection, run_id, event, state_updates)
+                    if guarded_updates != state_updates:
+                        state_updates = guarded_updates
+                        event = {key: value for key, value in event.items() if key != "proof_graph"}
+                if state.get("route_policy", {}).get("enabled") is True:
+                    from .route_budget import derive_route_budget
+                    from .route_commits import rating_patch, rating_required, terminal_route_patch
+
+                    candidate = {**state, **state_updates}
+                    candidate["route_budget"] = derive_route_budget(
+                        connection, run_id, candidate.get("route_budget")
+                    )
+                    if candidate.get("phase") == "TERMINAL":
+                        terminal_patch = terminal_route_patch(run_id, candidate)
+                        candidate.update(terminal_patch)
+                        state_updates = {**state_updates, **terminal_patch}
+                        if terminal_patch:
+                            event = {**event, "route_terminal": True}
+                    if rating_required(state, candidate):
+                        derived = rating_patch(candidate, current_revision + 1)
+                        candidate.update(derived)
+                        state_updates = {**state_updates, **derived}
+                        event = {**event, "route_rated": True}
+                    state_updates = {**state_updates, "route_budget": candidate["route_budget"]}
                 next_revision = current_revision + 1
                 now = datetime.now(UTC).isoformat()
                 state.update(state_updates)
@@ -292,6 +422,12 @@ class SolverStateStore:
                 )
                 if result is None:
                     raise SolverPersistenceError("commit_event")
+                if transaction_hook is not None:
+                    try:
+                        transaction_hook(connection)
+                    except BaseException:
+                        connection.rollback()
+                        raise
                 connection.commit()
                 return result
             except (SolverRevisionConflictError, SolverEventConflictError, RunStopped):

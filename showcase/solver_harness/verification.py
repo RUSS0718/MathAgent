@@ -1,9 +1,10 @@
 """Strict step review and evidence persistence for supplied plans."""
 
+import hashlib
 from collections.abc import Mapping
 from typing import Any
 
-from .calls import CallInterrupted
+from .calls import CallInterrupted, latest_retry_id
 from .explore import _HarnessOperations
 from .review import VerifierPort
 
@@ -131,7 +132,9 @@ def verify_step(
         state_updates={"counters": counters},
     )
     report = state["steps"][step_id]["report"]
-    call_id = f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
+    call_id = getattr(harness, "namespace_call_id", lambda value: value)(
+        f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
+    )
     request = {
         "run_id": run["run_id"],
         "call_id": call_id,
@@ -152,7 +155,11 @@ def verify_step(
 
     def reserve_and_dispatch(current, seq, continuation_call_id, continuation_request,
                              *, purpose="compute"):
-        event_suffix = f"{purpose}-{seq + 1}"
+        nonlocal call_id
+        # Claim-target repairs may continue an already answered computation.
+        # Its call identity must own a distinct reservation event.
+        identity = hashlib.sha256(continuation_call_id.encode()).hexdigest()[:16]
+        event_suffix = f"{purpose}-{seq + 1}-{identity}"
         reserved = harness.commit_event(
             current["run_id"],
             expected_revision=current["state_revision"],
@@ -170,7 +177,9 @@ def verify_step(
             },
         )
         reply = harness.dispatch(reserved, verifier_port.verify, continuation_request)
-        return harness.get_run(current["run_id"]), reply
+        latest = harness.get_run(current["run_id"])
+        call_id = latest_retry_id(latest["state"].get("calls", {}), continuation_call_id)
+        return latest, reply
 
     try:
         if pending:
@@ -374,11 +383,33 @@ def verify_step(
             state, reply, step_id=step_id, report=report, review_call_id=call_id,
             suffix=suffix, plan_version=plan["version"], attempt_index=attempt,
         )
+    obligation_evidence, obligation_rejections = [], []
+    if (verification["valid"] and verification["verdict"] == "ACCEPT"
+            and (not checkpoint_mode or checkpoint_status == "FINAL")
+            and isinstance(state.get("problem_spec"), Mapping)):
+        from .obligation_evidence import collect_obligation_evidence
+
+        obligation_evidence, obligation_rejections = collect_obligation_evidence(
+            state["problem_spec"],
+            reply.get("obligation_evidence") if isinstance(reply, Mapping) else [],
+            report=report,
+            run_id=run["run_id"],
+            review_call_id=call_id,
+            state_revision=reserved["state_revision"],
+            work_unit_id=step_id,
+            work_unit_obligation_ids=step.get("obligation_ids", []),
+            plan_version=plan["version"],
+            attempt_index=attempt,
+        )
     accepted = (
         verification["valid"]
         and verification["verdict"] == "ACCEPT"
         and (not checkpoint_mode or checkpoint_status == "FINAL")
     )
+    combined_obligation_evidence = [
+        *state.get("obligation_evidence_ledger", []), *obligation_evidence,
+    ]
+    next_ledger = state.get("obligation_ledger", [])
     checkpoint_accepted = (
         verification["valid"]
         and verification["verdict"] == "ACCEPT"
@@ -413,6 +444,22 @@ def verify_step(
             }
             for statement in statements
         ]
+        if isinstance(state.get("problem_spec"), Mapping):
+            from .obligation_evidence import (
+                all_root_obligations_satisfied,
+                update_obligation_ledger,
+            )
+
+            next_ledger = update_obligation_ledger(
+                state["problem_spec"], state.get("obligation_ledger", []),
+                combined_obligation_evidence,
+            )
+            if all_root_obligations_satisfied(next_ledger):
+                phase = "FINAL_GENERATE"
+                current_step = None
+            elif index + 1 == len(plan["steps"]):
+                phase = "TERMINAL"
+                current_step = None
     elif checkpoint_accepted:
         phase = "STEP_EXECUTE"
         current_step = step_id
@@ -426,9 +473,12 @@ def verify_step(
 
     reviewed = (enabled(harness._config) and verification["valid"] and not checkpoint_accepted
                 and verification["verdict"] in {"ACCEPT", "CHALLENGE"})
-    if reviewed:
+    if reviewed and not isinstance(state.get("problem_spec"), Mapping):
         phase = "STEP_EXECUTE" if index + 1 < len(plan["steps"]) else "FINAL_GENERATE"
         current_step = plan["steps"][index + 1]["step_id"] if index + 1 < len(plan["steps"]) else None
+    if (accepted and isinstance(state.get("problem_spec"), Mapping)
+            and phase == "TERMINAL"):
+        current_step = None
     # The classified ledger is the single authoritative record: proven entries
     # reach final synthesis and rescue through its dependency-checked readers,
     # while Conjectures stay confined there and never become proven premises.
@@ -452,6 +502,19 @@ def verify_step(
             *state.get("verified_results_ledger", []), *outcomes
         ],
     }
+    if isinstance(state.get("problem_spec"), Mapping):
+        state_updates["obligation_evidence_ledger"] = combined_obligation_evidence
+        state_updates["obligation_ledger"] = next_ledger
+        if obligation_rejections:
+            state_updates["obligation_evidence_rejections"] = [
+                *state.get("obligation_evidence_rejections", []), *obligation_rejections
+            ]
+        if phase == "TERMINAL" and accepted:
+            state_updates.update(
+                status="partial_aborted",
+                result_reason="root_obligations_incomplete",
+                final_response="Root obligations remain unverified; final synthesis was not admitted.",
+            )
     if not verification["valid"] and not checkpoint_accepted:
         state_updates["status"] = "partial_aborted"
         if verification.get("reason") == "invalid_verifier_verdict":
@@ -469,6 +532,10 @@ def verify_step(
         event["classified_outcomes"] = outcome_counts(outcomes)
     if rejections:
         event["rejected_outcomes"] = len(rejections)
+    if obligation_evidence:
+        event["obligation_evidence_count"] = len(obligation_evidence)
+    if obligation_rejections:
+        event["obligation_evidence_rejections"] = len(obligation_rejections)
     return harness.commit_event(
         run["run_id"],
         expected_revision=reserved["state_revision"],

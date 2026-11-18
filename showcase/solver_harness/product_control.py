@@ -27,6 +27,9 @@ def controlled_patch(connection, run_id, event, updates):
         return updates
     if event["type"] == "call_audit" and set(updates) <= {"calls", "status"}:
         return {"calls": updates["calls"]} if "calls" in updates else {}
+    if (event["type"].startswith("formal_verification_")
+            and set(updates) == {"formal_verification"}):
+        return updates
     raise RunStopped("run_deadline_exhausted" if expired else "run_stopped")
 
 

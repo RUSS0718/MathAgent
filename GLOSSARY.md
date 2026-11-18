@@ -17,7 +17,9 @@
 - **Solver Run**：Solver Harness 的一次隔离执行，拥有独立的 `run_id`、状态版本和事件记录；与产品 Run 共用数据库，但状态存在独立表中。
 - **Plan Attempt**：同一 Solver Run 内一次可被回退或重规划替换的计划尝试；它也是 Reasoner 会话的隔离边界。
 - **ReplanDecision**：`Guidance.action_type=replan` 之后进入的独立审批裁决；只有当前转换的有效 `APPROVE_REPLAN` 才归档换计划并传入本次禁止方向与救援成果，Guidance 请求本身不取得执行权（ALIGN-03）。
-- **Candidate**：可被最终选择的完整答案版本；候选不是已证定理，必须保留来源、证据和失效状态。
+- **Candidate / AnswerCandidate（答案候选）**：可被最终选择的完整答案版本；候选不是已证定理，必须保留来源、证据和失效状态。
+- **CandidateRoute（搜索路线）**：带父子谱系、搜索前沿及停止原因的求解方向，区别于可交付的答案候选；路线被选中不代表其答案取得交付资格。
+- **PresentationArtifact（表达产物）**：绑定原答案及其来源版本的独立表达内容；表达整理成功不改变原答案的验证等级。
 - **Best-Effort Finalization**：预算耗尽后仅根据已持久化候选和证据选择答案的过程；它不新增模型或工具调用。
 - **State Revision**：Solver Run 状态快照的单调版本号，用于拒绝基于过期快照的写入。
 - **STAR AC**：STAR Core 实施规格中的验收编号；引用时写作 `STAR AC-06`，不得与 v0.2 或 Solver Harness 的同号用例混用。
@@ -27,3 +29,7 @@
 - **Verifier 计算续接（Verifier Compute Continuation）**：审查者通过回复协议提出 `tool_request`、运行时经既有 Registry 与隔离执行器实际执行、真实回执进入相同审查会话续接的机制；未完成或被拒绝的请求不得解析为接受裁决或证据升级，请求次数有界且全部计入原 Run 账本。
 - **探索计算续接（Explore Compute Continuation）**：Explore 通过回复协议提出受控 `tool_request`、运行时经既有 Registry 与隔离执行器实际执行、真实回执以 `explore-tool:` 身份进入相同探索会话续接的机制；计算产出与来源随探索发现进入后续探索与 Planner 实际请求，探索发现始终保持 `unverified_exploration` 身份、不得进入已证引理账本，未完成或重复的请求不得解析为探索结论，请求次数有界且全部计入原 Run 账本。
 - **分类成果（Classified Outcome）**：Verifier 在步骤裁决回复中明确裁定的 Lemma、Conjecture、Computation、Definition 或 Answer；控制器核验分类、报告来源、真实工具回执与依赖后原子追加权威账本（`verified_results_ledger`）。部分成果的成立与整步是否推进无关；Conjecture 的证据等级为 `conjecture`，永不进入已证前提；失效按来源与依赖闭包就地标记，救援由当前裁决控制。
+- **ContextPack**：一次角色调用所用上下文的版本化视图及其来源和容量审计记录。历史摘录与摘要只提供参考，不取得数学证明的权威地位。
+- **Run 能力范围**：一次数学任务开始时获准自主选择的能力集合；它界定选择边界，不是必须逐项执行的清单。
+- **能力准入**：某项能力在当前任务、当前状态和既定授权内获得执行资格；取得资格不代表已被选择、已执行或数学结论已验证。
+- **实验性能力**：已有工程证据但尚缺相应真实求解验收的能力；实验性说明证据成熟度，不等同于运行时不可用。

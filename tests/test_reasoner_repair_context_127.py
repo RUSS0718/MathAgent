@@ -1,5 +1,6 @@
 """A serialization repair receives the actual failed text, rather than a blind retry."""
 
+import json
 import unittest
 from copy import deepcopy
 
@@ -17,6 +18,29 @@ BAD = ('{"argument":"proof","claims":[{"statement":"count","label":"easy-verify"
 
 
 class ReasonerRepairContextTest(StarJobFixture, unittest.TestCase):
+    def test_schema_repair_reports_extra_fields_and_rejects_unknown_or_unrelated_context(self):
+        request = {"run_id": "one", "call_id": "call", "role": "planner",
+                   "checkpoint_protocol": True}
+        from tests.test_solver_harness_planner_checkpoint import checkpoint
+
+        text = json.dumps({"checkpoint": checkpoint("FINAL"), "plan": {
+            "version": 1, "steps": [{"step_id": "s", "title": "Add", "objective": "Compute"}],
+            "required": ["steps"], "additionalProperties": False}})
+        failed = {**request, "request": request, "status": "protocol_failed",
+                  "error_category": "invalid_role_schema", "partial_text": text}
+        before = deepcopy(failed)
+        result = repair_request(request, failed_call=failed)
+        self.assertEqual(text, result["format_repair"]["previous_response"])
+        self.assertIn({"path": "$.plan.required", "message": "additional property not allowed"},
+                      result["format_repair"]["schema_errors"])
+        self.assertIn({"path": "$.plan.additionalProperties", "message": "additional property not allowed"},
+                      result["format_repair"]["schema_errors"])
+        self.assertEqual(before, failed)
+        for changed in ({"run_id": "other"}, {"call_id": "other"}, {"role": "meta"},
+                        {"status": "unknown_outcome"}):
+            with self.subTest(changed=changed):
+                self.assertNotIn("format_repair", repair_request(request, failed_call={**failed, **changed}))
+
     def test_unknown_or_unrelated_reply_never_enters_repair_context(self):
         request = {"run_id": "one", "call_id": "call", "role": "reasoner"}
         failed = {**request, "status": "protocol_failed", "error_category": "invalid_json",

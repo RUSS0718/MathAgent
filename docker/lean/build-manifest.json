@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "lean_version": "4.19.0",
+  "lean_commit": "6caaee842e9495688c1567e78c0e68dbb96942aa",
+  "lean_archive_sha256": "6fe3ce97a58f44e2b3567d455b994eacec5bfe9ae7774f2a573444480ba813fe",
+  "mathlib_version": "v4.19.0",
+  "mathlib_commit": "c44e0c8ee63ca166450922a373c7409c5d26b00b",
+  "toolchain": "leanprover/lean4:v4.19.0",
+  "template_version": "rational-polynomial-v1",
+  "policy": {
+    "allowed_axioms": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "forbidden_axioms": [
+      "sorryAx"
+    ]
+  },
+  "base_image": "ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852",
+  "mathlib_probe_imports": [
+    "Mathlib.Tactic"
+  ],
+  "build_script_sha256": "deb0fb04b7686e388ba5ba1708cb4f82f1a9c8a75f90996374ed2918366bfe98",
+  "source_files": {
+    "Dockerfile": "960771ec664259ce7e34e3e82d31af8f1b9cacd1d43b93b8d925930e5067d436",
+    "Dockerfile.preimage": "48c5367f0fce2e87e06485cbb326e896c0f60d861207c6d83d35262180ca0e4f",
+    "prepare.sh": "deb0fb04b7686e388ba5ba1708cb4f82f1a9c8a75f90996374ed2918366bfe98",
+    "runtime.sh": "ddcc487ba35718b63217491e90aa1117f1e705b96626d6a428e056d0e9be336f",
+    "commit.sh": "68b339a01cf9d185dfd327d73b0bbb4ff0c09781683470c105892c197e7c1ef6"
+  },
+  "prepared_image_id": "sha256:abc4d1c5f8d18f823cd8eb0bbce0e1357ee168f027a1df6c915940e0687bf862",
+  "build_manifest_sha256": "c843eb8a87a2d7a543c8127a466402f0496be3a31dfbd9ffabe89aec28623fe4"
+}

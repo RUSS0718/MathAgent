@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /** Shared navigation and reading width for settings and public evidence screens. */
 import UiIcon from './UiIcon.vue'
-defineProps<{ title: string; description?: string; active: 'settings' | 'campaigns' | 'run' }>()
+const faithfulSystemViewEnabled = import.meta.env.VITE_F7_SYSTEM_VIEW_ENABLED === 'true'
+defineProps<{ title: string; description?: string; active: 'settings' | 'campaigns' | 'run' | 'system' }>()
 </script>
 
 <template>
@@ -12,6 +13,7 @@ defineProps<{ title: string; description?: string; active: 'settings' | 'campaig
       <nav class="app-nav" aria-label="主导航">
         <a href="/dashboard"><UiIcon name="message" />数学工作区</a>
         <a href="/dashboard/campaigns" :aria-current="active === 'campaigns' || active === 'run' ? 'page' : undefined"><UiIcon name="experiments" />配对实验</a>
+        <a v-if="faithfulSystemViewEnabled" href="/dashboard/system" :aria-current="active === 'system' ? 'page' : undefined"><UiIcon name="activity" />系统视图</a>
         <a href="/dashboard/settings" :aria-current="active === 'settings' ? 'page' : undefined"><UiIcon name="settings" />设置</a>
       </nav>
     </header>

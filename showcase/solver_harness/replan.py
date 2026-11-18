@@ -126,6 +126,43 @@ def run_replan(harness, run, *, problem, model_port, config):
                 ],
             },
         )
+    if config.get("features", {}).get("serial_routes") is True:
+        from .routes import prepare_route_switch
+
+        if state.get("progress_policy") != {"enabled": True, "version": "progress-v1"}:
+            return _stop(harness, run, "route_progress_policy_required")
+        state_routes = state.get("route_registry") or []
+        if state_routes:
+            progress = state.get("progress", {})
+            if progress.get("trigger") not in {"stagnation", "local_action_blocked"}:
+                return _stop(harness, run, "route_switch_requires_s04_stagnation")
+            from .route_budget import expansion_budget
+            from .routes import ROUTE_COMMIT_TOKEN
+
+            reserve = expansion_budget(harness, run, problem, model_port, {
+                "role": "planner", "problem": problem,
+                "session_key": f"planner:{run['run_id']}:plan{state['plan_version'] + 1}",
+                "plan_version": state["plan_version"] + 1,
+                "failure_records": state.get("failure_records", []),
+                "accepted_results": state.get("accepted_results", []),
+            })
+            run = harness._commit_route_event(
+                run["run_id"], expected_revision=run["state_revision"],
+                event={"event_id": f"route-preflight-{run['state_revision']}", "type": "route_budget_checked"},
+                state_updates={"route_budget": reserve}, authorization=ROUTE_COMMIT_TOKEN,
+            )
+            state = run["state"]
+            if state.get("route_budget", {}).get("expansion_allowed") is False:
+                return _stop(harness, run, "route_expansion_budget_reserved")
+            if state.get("budget", {}).get("exhaustion_reason"):
+                return _stop(harness, run, "route_expansion_budget_exhausted")
+            if any(item.get("kind") == "alternate" for item in state_routes):
+                return _stop(harness, run, "alternate_route_limit_reached")
+            try:
+                run = prepare_route_switch(harness, run)
+            except ValueError as exc:
+                return _stop(harness, run, str(exc))
+            state = run["state"]
     rescued, excluded = _reusable(state, decision)
     # The same established result can be visible through both the accepted
     # ledger and the classified ledger; a ruling rescues the outcome once.
@@ -256,6 +293,20 @@ def run_replan(harness, run, *, problem, model_port, config):
                 raise ValueError("wrong_plan_version")
         except ValueError:
             return _stop(harness, run, "invalid_replacement_plan")
+    work_units = None
+    if isinstance(run["state"].get("problem_spec"), dict):
+        from .specification import bind_plan_work_units
+
+        try:
+            plan, work_units = bind_plan_work_units(plan, run["state"]["problem_spec"])
+        except (TypeError, ValueError):
+            return _stop(harness, run, "invalid_replacement_work_units")
+    if config.get("features", {}).get("serial_routes") is True:
+        from .routes import validate_route_frontier
+
+        route_reason = validate_route_frontier(run["state"], plan)
+        if route_reason is not None:
+            return _stop(harness, run, f"route_{route_reason}")
     return _commit(
         harness,
         run,
@@ -263,6 +314,7 @@ def run_replan(harness, run, *, problem, model_port, config):
         {
             "phase": "STEP_EXECUTE",
             "plan": redact(plan),
+            **({"work_units": work_units} if work_units is not None else {}),
             "current_step": plan["steps"][0]["step_id"],
             "pending_guidance_task": None,
         },

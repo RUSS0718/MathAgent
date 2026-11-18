@@ -114,7 +114,7 @@ def prepare_candidates(run, event, updates):
             targets = [record for record in targets if record["answer_hash"] == reviewed_hash][-1:]
         for record in targets:
             _review(registry, actions, record, event, review, source == "STEP_EXECUTE")
-    elif kind in {"trace_back_applied", "plan_archived"}:
+    elif kind in {"trace_back_applied", "plan_archived", "problem_spec_revised"}:
         failure = state["failure_records"][-1]
         invalid_steps = set(failure.get("archived_steps", {}))
         if kind == "plan_archived":
@@ -125,6 +125,11 @@ def prepare_candidates(run, event, updates):
             r["result_id"] for r in failure.get("invalidated_results", []) if r.get("result_id")
         }
         invalid = invalid_steps | invalid_results
+        if kind == "problem_spec_revised":
+            invalid.update(
+                record["candidate_id"] for record in latest_records(registry)
+                if record.get("source_phase") == "FINAL_GENERATE"
+            )
         plan_steps = state.get("plan", {}).get("steps", [])
         changed = True
         while changed:

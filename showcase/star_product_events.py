@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from .redaction import redact
 from .run_budget import public_solver_call_id
 from .solver_harness.skills import PROTOCOLS
+from .workbench_projection import collaboration_fields
 
 _PUBLIC_CALL_ROLES = frozenset({
     "reasoner", "reason_noncoding", "explore", "explore_polish", "planner", "researcher",
@@ -45,7 +46,13 @@ def decision_fields(event, state, invocations=()):
         "transport_evidence_kind", "transport_profile_fingerprint",
         "transport_profile_set_fingerprint",
         "transport_policy", "new_run_required",
+        "route_id", "parent_route_id", "route_kind", "frontier_digest",
+        "route_status", "route_reason", "policy_version", "pareto_route_ids",
+        "selected_route_id", "route_count", "route_replayable",
     ) if key in event}
+    workbench = collaboration_fields(event, state)
+    if workbench is not None:
+        fields["workbench"] = workbench
     run_id = state.get("run_id")
     if isinstance(run_id, str) and run_id:
         fields["run_id"] = run_id
@@ -69,6 +76,11 @@ def decision_fields(event, state, invocations=()):
         "meta_invalid": "meta",
         "challenge_stalemate": "controller",
         "challenge_escalation_stopped": "controller",
+        "route_created": "controller",
+        "route_transition": "controller",
+        "route_rated": "controller",
+        "aprs_decided": "controller",
+        "route_rejected": "controller",
     }
     role = event.get("role") or roles.get(event["type"])
     if role in {"reasoner", "reason_noncoding", "explore", "planner", "researcher",
@@ -94,6 +106,13 @@ def decision_fields(event, state, invocations=()):
         identity_value = state.get(identity_field)
         if type(identity_value) is int and identity_value >= 0:
             fields[identity_field] = identity_value
+    if state.get("population_policy", {}).get("enabled") is True:
+        for key in ("route_id", "parent_route_id", "frontier_digest", "selected_route_id",
+                    "pareto_route_ids", "route_count", "route_status", "route_reason"):
+            fields.pop(key, None)
+        from .solver_harness.population_projection import population_projection
+
+        fields["population"] = population_projection(state)
     if isinstance(event.get("decision"), dict):
         fields["decision"] = event["decision"].get("decision")
     if event["type"] == "hint_prepared":

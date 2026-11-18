@@ -1,21 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '../api/client'
+import type { CapabilitiesResponse } from '../api/capabilities.schemas'
 import { createIdempotencyKey } from '../runtime/jobs/idempotency'
 import { sessionHref, settingsHref, workspaceHref } from '../runtime/navigation/app-route'
 import { useJobsStore } from '../stores/jobs.store'
 import { useSessionsStore } from '../stores/sessions.store'
 import { useFilesStore } from '../stores/files.store'
 import ReportSection from './ReportSection.vue'
+import PresentationSection from './PresentationSection.vue'
 import { JobController } from '../runtime/jobs/job-controller'
+import { parsePresentationInput } from '../runtime/presentation/mode'
+import type { PresentationMode } from '../runtime/presentation/mode'
 import SessionSidebar from './SessionSidebar.vue'
-import MessageList from './MessageList.vue'
 import ComposerBar from './ComposerBar.vue'
 import StarModeSelector from './StarModeSelector.vue'
-import WorkspaceInspector from './WorkspaceInspector.vue'
+import FaithfulEntryControls from './FaithfulEntryControls.vue'
+import PresentationCommandHint from './PresentationCommandHint.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
-import StatusBadge from './ui/StatusBadge.vue'
+import ConversationWorkbench from './ConversationWorkbench.vue'
 
 const sessions = useSessionsStore()
 const jobs = useJobsStore()
@@ -24,34 +28,66 @@ const files = useFilesStore()
 const draft = ref('')
 const notice = ref('')
 const visionEnabled = ref(false)
-const executionMode = ref('unavailable')
+const presentationEnabled = ref(false)
 const solverMode = ref('legacy')
+const faithful = ref<CapabilitiesResponse['faithful']>()
+const faithfulBlocked = computed(() => faithful.value?.enabled === true && !faithful.value.ready)
+const autonomous = computed(() => faithful.value?.enabled === true && solverMode.value === faithful.value.solver_mode)
 const solverModes = ref<Array<{ solver_mode: string; enabled: boolean }>>([])
 const selectedFile = ref<string | undefined>()
 const selectedFileName = ref<string | undefined>()
 const sidebarOpen = ref(false)
-const inspectorOpen = ref(!globalThis.matchMedia('(max-width: 1180px)').matches)
 const submitting = ref(false)
+const pendingCreate = ref<{ fingerprint: string; key: string } | null>(null)
 const loading = ref(true)
 const loadFailed = ref(false)
 const report = ref<Awaited<ReturnType<typeof api.jobReport>> | null>(null)
+let reportDisposed = false
 const props = defineProps<{ path: string; sessionId: string | null }>()
 const current = computed(() => sessions.currentId ? jobs.activeForSession(sessions.currentId) : undefined)
 const selectedJob = computed(() => {
+  if (current.value) return current.value
   const jobId = sessions.messages.at(-1)?.analysis_job_id
   return jobId ? jobs.byId(jobId) : undefined
 })
+const presentationMode = computed(() => selectedJob.value?.presentationMode ?? null)
+const selectedProblem = computed(() => {
+  const jobId = selectedJob.value?.jobId
+  return [...sessions.messages].reverse().find((message) => message.analysis_job_id === jobId && message.sender === 'user')?.text ?? ''
+})
+const workbenchResult = computed(() => ({ ...selectedJob.value?.result,
+  ...(report.value?.mode === 'fake' ? { execution_mode: 'fake' } : {}) }))
 
 async function send(): Promise<void> {
-  if (current.value?.status === 'waiting_input') { await resumeCurrent(); return }
-  const message = draft.value.trim()
-  if (!message || current.value || !sessions.currentId || submitting.value) return
+  if (loading.value || loadFailed.value || faithfulBlocked.value) return
+  if (current.value?.status === 'waiting_input') { notice.value = '文本插话尚未接入；请使用恢复执行按钮。'; return }
+  const parsed = parsePresentationInput(draft.value)
+  const message = parsed.problem
+  if (parsed.presentationMode && !presentationEnabled.value) {
+    notice.value = 'S06 输出模式当前不可用；原题未提交。'
+    return
+  }
+  if (!message || current.value || !sessions.currentId || submitting.value) {
+    if (!message && parsed.presentationMode) notice.value = '请在输出命令后输入数学题目，例如：/teach 证明 1+1=2。'
+    return
+  }
   submitting.value = true
   notice.value = ''
   try {
-    const result = await api.createJob(message, sessions.currentId, createIdempotencyKey(), selectedFile.value, solverMode.value)
+    const sessionId = sessions.currentId
+    const fileId = selectedFile.value
+    const mode = solverMode.value
+    const fingerprint = JSON.stringify({
+      sessionId, message, fileId: fileId ?? null, mode,
+      presentationMode: parsed.presentationMode ?? null,
+    })
+    if (pendingCreate.value?.fingerprint !== fingerprint) {
+      pendingCreate.value = { fingerprint, key: createIdempotencyKey() }
+    }
+    const result = await api.createJob(message, sessionId, pendingCreate.value.key, fileId, mode, parsed.presentationMode)
     if (!result.success || !result.job_id || !result.status) throw new Error(result.error ?? '任务未被接受')
-    jobs.start(result.job_id, sessions.currentId, result.status)
+    pendingCreate.value = null
+    jobs.start(result.job_id, sessions.currentId, result.status, 0, parsed.presentationMode ?? null)
     observeJob(result.job_id)
     sessions.addUser(message, result.job_id)
     report.value = null
@@ -76,15 +112,14 @@ async function cancelCurrent(): Promise<void> {
   } catch (error) { notice.value = error instanceof Error ? error.message : '取消失败。' }
 }
 async function resumeCurrent(): Promise<void> {
-  if (!current.value || !draft.value.trim() || submitting.value) return
-  const answer = draft.value.trim()
+  if (!current.value || submitting.value) return
   submitting.value = true
   try {
-    const result = await api.resumeJob(current.value.jobId, answer, createIdempotencyKey())
+    const result = await api.resumeJob(current.value.jobId, '', createIdempotencyKey())
     jobs.start(current.value.jobId, current.value.sessionId, result.status ?? 'queued')
     observeJob(current.value.jobId)
     draft.value = ''
-    notice.value = result.existing ? '已重放恢复结果。' : '任务已恢复。'
+    notice.value = result.existing ? '已重放恢复结果。' : '已请求恢复执行；没有追加文本约束。'
   } catch (error) { notice.value = error instanceof Error ? error.message : '恢复失败。' }
   finally { submitting.value = false }
 }
@@ -97,7 +132,18 @@ function useStarter(value: string): void { draft.value = value; document.getElem
 function openSettings(): void { globalThis.location.assign(settingsHref()) }
 async function chooseFile(event: Event): Promise<void> { const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (!file) return; try { await files.upload(file); selectedFile.value = files.items.at(-1)?.file_id; selectedFileName.value = file.name } catch (error) { notice.value = error instanceof Error ? error.message : '题图上传失败，请重试。' } finally { input.value = '' } }
 function clearFile(): void { selectedFile.value = undefined; selectedFileName.value = undefined }
-async function loadReport(jobId: string): Promise<void> { try { report.value = await api.jobReport(jobId) } catch { report.value = null } }
+async function loadReport(jobId: string): Promise<void> {
+  if (sessions.messages.at(-1)?.analysis_job_id !== jobId) return
+  const sessionId = sessions.currentId
+  const isCurrent = () => !reportDisposed && sessions.currentId === sessionId
+    && sessions.messages.at(-1)?.analysis_job_id === jobId
+  try {
+    jobs.observe(await api.getJob(jobId))
+    const loaded = await api.jobReport(jobId)
+    if (isCurrent() && loaded.evidence_id === jobId
+        && (loaded.solver?.solver?.state_revision ?? 0) >= (report.value?.solver?.solver?.state_revision ?? 0)) report.value = loaded
+  } catch { if (isCurrent()) report.value = null }
+}
 function observeJob(jobId: string): void {
   void jobController.subscribe(jobId).then(async () => {
     await loadReport(jobId)
@@ -105,6 +151,19 @@ function observeJob(jobId: string): void {
     if (record?.error) notice.value = record.error
   })
 }
+async function refreshActive(): Promise<void> {
+  const sessionId = sessions.currentId
+  if (!sessionId || reportDisposed) return
+  try {
+    const response = await api.activeJobs(sessionId)
+    if (sessions.currentId !== sessionId || reportDisposed) return
+    for (const job of response.jobs ?? []) {
+      jobs.observe(job)
+      observeJob(job.job_id)
+    }
+  } catch (error) { notice.value = error instanceof Error ? error.message : '活跃任务查询失败。' }
+}
+function onVisibility(): void { if (document.visibilityState === 'visible') void refreshActive() }
 async function initialize(): Promise<void> {
   loading.value = true
   loadFailed.value = false
@@ -112,14 +171,17 @@ async function initialize(): Promise<void> {
   try {
   try {
     const capabilities = await api.capabilities()
-    executionMode.value = capabilities.execution?.mode ?? 'unavailable'
+    faithful.value = capabilities.faithful?.enabled ? capabilities.faithful : undefined
+    solverMode.value = faithful.value?.solver_mode ?? 'legacy'
     if (capabilities.execution?.mode === 'live' && capabilities.execution.status !== 'configured') {
       notice.value = 'live 模式未检测到 Intern API 凭证。'
     }
     solverModes.value = capabilities.solver_modes ?? []
+    presentationEnabled.value = capabilities.presentation?.enabled ?? false
     visionEnabled.value = capabilities.files.upload.enabled
     if (visionEnabled.value) await files.load()
   } catch (error) {
+    loadFailed.value = true
     notice.value = error instanceof Error ? error.message : '能力检查失败。'
   }
   if (props.path === settingsHref()) return
@@ -130,10 +192,13 @@ async function initialize(): Promise<void> {
     const sessionId = await sessions.create()
     globalThis.history.replaceState({}, '', sessionHref(sessionId))
   }
+  await refreshActive()
   const latest = sessions.messages.at(-1)
   if (latest?.analysis_job_id) {
     try {
       jobs.observe(await api.getJob(latest.analysis_job_id))
+      const restored = jobs.byId(latest.analysis_job_id)
+      if (restored) restored.replay = ['succeeded', 'failed', 'canceled'].includes(restored.status)
     } catch (error) {
       notice.value = error instanceof Error ? error.message : '任务状态加载失败。'
     }
@@ -143,27 +208,57 @@ async function initialize(): Promise<void> {
   } catch (error) { loadFailed.value = true; notice.value = error instanceof Error ? error.message : '会话加载失败，请重试。' }
   finally { loading.value = false }
 }
-onMounted(initialize)
-onUnmounted(() => jobController.stopAll())
+onMounted(() => { void initialize(); document.addEventListener('visibilitychange', onVisibility) })
+onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.removeEventListener('visibilitychange', onVisibility) })
 </script>
 
 <template>
-  <div class="workspace-shell" :class="{ 'sidebar-open': sidebarOpen, 'inspector-open': inspectorOpen }">
+  <div class="constellation-shell" data-workspace="conversation-workbench">
     <a class="skip-link" href="#main-content">跳到主要内容</a>
     <SessionSidebar :items="sessions.items" :current-id="sessions.currentId" :open="sidebarOpen" @new="newSession" @select="selectSession" @rename="rename" @remove="remove" @settings="openSettings" @close="sidebarOpen = false" />
-    <main id="main-content" tabindex="-1">
-      <header class="workspace-topbar">
-        <UiButton icon-only variant="ghost" class="mobile-only" aria-label="打开会话栏" aria-controls="session-panel" :aria-expanded="sidebarOpen" @click="sidebarOpen = true"><UiIcon name="menu" /></UiButton>
-        <div class="topbar-title"><h1>{{ sessions.items.find((item) => item.id === sessions.currentId)?.preview ?? '新数学会话' }}</h1></div>
-        <div class="topbar-actions"><StatusBadge :value="report?.mode ?? executionMode" /><UiButton icon-only variant="ghost" :aria-label="inspectorOpen ? '隐藏运行观察' : '显示运行观察'" :title="inspectorOpen ? '隐藏运行观察' : '显示运行观察'" aria-controls="inspector-panel" :aria-expanded="inspectorOpen" @click="inspectorOpen = !inspectorOpen"><UiIcon name="panel" /></UiButton></div>
+    <main id="main-content" tabindex="-1" class="constellation-page">
+      <header class="constellation-topbar">
+        <UiButton icon-only variant="ghost" class="mobile-only" aria-label="打开会话栏" @click="sidebarOpen = true"><UiIcon name="menu" /></UiButton>
+        <div><small>MATHAGENT · 数学推理工作台</small><h1>{{ selectedJob ? '对话式求解工作台' : '新建求解 · 输入题干' }}</h1></div>
+        <div class="constellation-actions"><span>{{ current ? '任务执行中' : selectedJob ? '持久运行记录' : '准备提交' }}</span><UiButton v-if="current" variant="danger" @click="cancelCurrent">取消任务</UiButton><UiButton v-if="selectedJob" @click="newSession">新建求解</UiButton><a v-if="selectedJob" :href="`/dashboard/run/${selectedJob.jobId}`">运行详情</a></div>
       </header>
-      <div v-if="notice" class="notice workspace-notice" role="status">{{ notice }}<UiButton v-if="loadFailed" @click="initialize">重新加载</UiButton></div>
-      <div v-if="current?.status === 'waiting_input'" class="notice notice--warning workspace-notice" role="status">运行需要补充条件，请在输入栏填写后继续。</div>
-      <section class="conversation-area" aria-label="数学对话">
-        <div class="conversation-scroll"><div v-if="loading" class="loading-state" role="status" aria-busy="true">正在加载会话…<div v-for="n in 3" :key="n" class="skeleton"></div></div><MessageList v-else-if="!loadFailed" :messages="sessions.messages" @starter="useStarter" /><ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" /></div>
-        <ComposerBar v-model="draft" :disabled="loading || loadFailed || submitting || Boolean(current && current.status !== 'waiting_input')" :running="Boolean(current)" :waiting="current?.status === 'waiting_input'" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><StarModeSelector v-model="solverMode" :modes="solverModes" :disabled="Boolean(current) || submitting" /></template></ComposerBar>
+      <p v-if="notice" class="notice" role="status">{{ notice }}<UiButton v-if="loadFailed" @click="initialize">重新加载</UiButton></p>
+      <p v-if="current?.status === 'waiting_input'" class="notice notice--warning" role="status">运行已暂停。文本插话待接入；恢复执行不会追加新约束。<UiButton :disabled="submitting" @click="resumeCurrent">恢复执行</UiButton></p>
+      <div v-if="loading" class="loading-state" role="status">正在加载工作台…</div>
+      <section v-else-if="!selectedJob" class="workbench-entry" aria-label="提交数学题干">
+        <div class="entry-heading"><small>{{ faithful ? 'FAITHFUL AGENT' : 'PLANNER → REASONER → GATE' }}</small><h2>{{ faithful ? 'Faithful 自主求解' : '把题干交给一组会互相质疑的子智能体' }}</h2><p>{{ faithful ? '直接输入数学题，Faithful 自主选择已配置能力与求解步骤。提交后可查看公开执行摘要、实时计划与协作星图。' : '提交后查看公开执行摘要、实时计划与协作星图。运行能力取决于所选模式；模拟数据和历史回放始终单独标记。' }}</p></div>
+        <ComposerBar :submit-label="submitting ? '正在提交…' : autonomous ? 'Faithful 自主求解' : '开始求解'" v-model="draft" :disabled="loadFailed || submitting" :submit-disabled="faithfulBlocked" :running="false" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"><template #mode><FaithfulEntryControls v-if="faithful" v-model="solverMode" :faithful="faithful" :modes="solverModes" :disabled="submitting" /><StarModeSelector v-else v-model="solverMode" :modes="solverModes" :disabled="submitting" /><PresentationCommandHint :enabled="presentationEnabled" /></template></ComposerBar>
+        <div class="entry-examples"><span>示例题干 · 点击回填</span><button type="button" @click="useStarter('解方程 x² − 5x + 6 = 0，并验证候选根。')">方程与候选根</button><button type="button" @click="useStarter('分步推导 1 + 2 + … + n 的求和公式，n 为正整数。')">数列求和</button></div>
+      </section>
+      <section v-else class="active-workbench">
+        <article class="workbench-problem"><small>当前题干</small><p>{{ selectedProblem }}</p></article>
+        <ConversationWorkbench :key="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" />
+        <PresentationSection :source-version="report" v-if="report && presentationMode" :job-id="selectedJob.jobId" :mode="presentationMode" :job-status="selectedJob.status" :problem="selectedProblem" :fallback-answer="report.report.answer" />
+        <ReportSection v-else-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
       </section>
     </main>
-    <WorkspaceInspector :open="inspectorOpen" :job="selectedJob" :report="report" @close="inspectorOpen = false" />
   </div>
 </template>
+
+<style scoped>
+.constellation-shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); height: 100dvh; overflow: hidden; background: var(--background); }
+.constellation-page { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; }
+.constellation-topbar { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.constellation-topbar small, .entry-heading > small { font: 10px var(--font-mono); letter-spacing: .12em; color: var(--muted); }
+h1 { margin: 6px 0 0; font-size: 15px; }
+.constellation-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.workbench-entry { width: min(720px, calc(100% - 40px)); margin: auto; padding: 64px 0; }
+.entry-heading { text-align: center; margin-bottom: 24px; }
+.entry-heading h2 { font-size: clamp(22px, 2.2vw, 30px); line-height: 1.4; margin: 16px 0 8px; }
+.entry-heading p { max-width: 54ch; margin: auto; font-size: 13px; line-height: 1.8; color: var(--muted); }
+.workbench-entry :deep(.composer-shell) { width: 100%; margin: 0; box-shadow: var(--shadow-overlay); background: var(--surface); }
+.workbench-entry :deep(textarea) { min-height: 160px; }
+.entry-examples { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 40px; font-size: 12px; color: var(--muted); }
+.entry-examples > span { flex-basis: 100%; text-align: center; }
+.entry-examples button { padding: 8px 12px; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); color: var(--muted); background: transparent; cursor: pointer; }
+.active-workbench { padding: 16px 24px 32px; }
+.workbench-problem { padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.workbench-problem small { color: var(--muted); font-size: 11px; }
+.workbench-problem p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.7; margin: 6px 0; }
+@media(max-width: 760px) { .constellation-shell { grid-template-columns: minmax(0, 1fr); } .constellation-topbar { padding: 12px; flex-wrap: wrap; } .constellation-actions { gap: 8px; } .active-workbench { padding: 12px; } .workbench-entry { padding: 32px 0; } }
+</style>

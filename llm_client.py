@@ -170,6 +170,7 @@ class InternChatClient:
         _tool_calls_capture: list[Any] | None = None,
         _allow_empty_content: bool = False,
         _attempt_budget: Any = None,
+        _serialized_payload_observer: Any = None,
     ) -> str:
         """Send a request; explicit reasoning_mode wins over thinking_mode and defaults."""
         effective_timeout = (
@@ -192,6 +193,9 @@ class InternChatClient:
             effective_thinking_mode = thinking_mode
         if effective_thinking_mode is not None:
             payload["thinking_mode"] = effective_thinking_mode
+        request_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        if _serialized_payload_observer is not None:
+            _serialized_payload_observer(request_data, self.api_base, "intern")
         headers = {
             "Content-Type": "application/json",
             "Authorization": self.authorization,
@@ -277,7 +281,6 @@ class InternChatClient:
             late_response_settled = False
             local_processing_timeout = False
             try:
-                request_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                 if _attempt_budget is not None:
                     from showcase.request_transport import response_events
 

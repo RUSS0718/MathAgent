@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "typecheck": "vue-tsc -b",
     "build": "vue-tsc -b && vite build",
-    "test:unit": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:unit": "node --experimental-strip-types --test --test-concurrency=1 tests/*.test.ts",
     "check:deps": "node scripts/check-dependencies.mjs",
     "test:browser": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",

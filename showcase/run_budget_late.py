@@ -166,6 +166,8 @@ def settle_late_with_retry(budget, event):
                     if budget.ledger._closed and not budget.ledger.database_path:
                         break
                     budget.after_attempt(event)
+                    _settle_population_action(budget.ledger, budget.run_id,
+                                              event.get("attempt_id"))
                     return
                 except sqlite3.OperationalError as exc:
                     if not _sqlite_busy(exc):
@@ -216,6 +218,7 @@ def settle_closed(original, run_id, attempt_id, event):
             return
         if not ledger.settle(run_id, attempt_id, event):
             return
+        _settle_population_action(ledger, run_id, attempt_id)
         evidence = dict(run_id=run_id, attempt_id=attempt_id, observed_at=time.time(), usage=usage)
         if original.late_usage_evidence_dir is not None:
             directory = Path(original.late_usage_evidence_dir)
@@ -224,3 +227,39 @@ def settle_closed(original, run_id, attempt_id, event):
                 json.dump(evidence, stream, sort_keys=True)
     finally:
         ledger.close()
+
+
+def _settle_population_action(ledger, run_id, attempt_id):
+    """Settle only the physical resource state; mathematical outcome stays frozen."""
+    if not ledger.database_path or not isinstance(attempt_id, str):
+        return
+    row = ledger.connection.execute(
+        "SELECT ledger_json FROM run_budgets WHERE run_id=?", (run_id,)
+    ).fetchone()
+    if row is None:
+        return
+    actions = json.loads(row[0])["actions"]
+    http = next((item for item in actions if item.get("id") == attempt_id
+                 and item.get("kind") == "http"), None)
+    population_action_id = http.get("population_action_id") if http else None
+    if not isinstance(population_action_id, str):
+        return
+    connection = sqlite3.connect(ledger.database_path, timeout=1, check_same_thread=False)
+    try:
+        connection.row_factory = sqlite3.Row
+        from types import SimpleNamespace
+
+        from .solver_harness.population_store import command
+        from .solver_harness.storage import SolverStateStore
+
+        harness = SimpleNamespace(
+            _state_store=SolverStateStore(connection),
+            _population_owner=None,
+            _event_observer=None,
+        )
+        command(harness, run_id, "physical_settlement", action_id=population_action_id)
+    except sqlite3.OperationalError as exc:
+        if not _sqlite_busy(exc):
+            raise
+    finally:
+        connection.close()

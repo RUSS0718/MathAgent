@@ -3,6 +3,7 @@
 from .budget import budget_reason, stop
 from .finalize import finish
 from .plan import validate_plan
+from .specification import bind_plan_work_units
 
 
 def generated_plan(harness, run, invoke, request, version, config):
@@ -62,6 +63,8 @@ def generated_plan(harness, run, invoke, request, version, config):
             validate_plan(plan)
             if plan["version"] != version:
                 raise ValueError("wrong_plan_version")
+            if isinstance(run["state"].get("problem_spec"), dict):
+                plan, _units = bind_plan_work_units(plan, run["state"]["problem_spec"])
             return run, plan
         except (TypeError, ValueError) as exc:
             repair = {"invalid_plan": plan, "validation_error": str(exc)}

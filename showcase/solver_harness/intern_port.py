@@ -13,8 +13,9 @@ from ..adapters import AdapterError, InternModelAdapter
 from ..redaction import redact
 from ..stream_preference import profile_set_fingerprint, select_transport
 from ..tool_schemas import POLYNOMIAL_CHECK_SCHEMA, PYTHON_MATH_SCHEMA, schema_error
+from .faithful_memory_injection import has_population_memory
+from .intern_instructions import objective_dependencies, response_instructions, step_review_scope
 from .intern_schemas import response_schema
-from .roles import definition
 
 
 class InternPortError(RuntimeError):
@@ -44,6 +45,8 @@ def _protocol_failure(category, record, text):
     error.usage = record.get("usage")
     error.finish_reason = record.get("finish_reason")
     error.response_excerpt = redact(str(text or ""))[:MAX_RESPONSE_EXCERPT_CHARS]
+    if "stream" not in record:
+        error.partial_text = str(text or "")
     return error
 
 
@@ -70,9 +73,11 @@ def _request_metadata(request, deadlines=None, activity_observer=None):
         "call_id": request.get("call_id"),
         "role": request["role"],
         "timeout_seconds": request.get("timeout_seconds"),
+        "retry_limit": request.get("retry_limit"),
         "phase_deadline_at": request.get("phase_deadline_at"),
         "batch_deadline_at": request.get("batch_deadline_at"),
         "strict_completion": request.get("strict_completion") is True,
+        "context_admission": request.get("_context_admission"),
     }
     for name, limit in (deadlines or {}).items():
         if limit is not None:
@@ -196,6 +201,13 @@ class InternModelPort:
         fingerprints = _audit_fingerprints(
             request, schema, messages, fallback_problem=self.original_problem
         )
+        cost_observer = request.get("_population_memory_cost_observer")
+        if callable(cost_observer) and has_population_memory(request):
+            from .faithful_memory_cost import measure_population_memory_cost
+
+            cost_observer(measure_population_memory_cost(
+                self, request, input_fingerprint=fingerprints["prompt_fingerprint"]
+            ), request)
         run_id = request.get("run_id")
         locked = self._run_transport_choices.get(run_id)
         activity_observer = request.get("activity_observer")
@@ -312,6 +324,9 @@ class InternModelPort:
             )
             error = InternPortError(exc.category)
             error.request_attempts = record["request_attempts"]
+            error.no_dispatch = getattr(exc, "no_dispatch", False) is True
+            if hasattr(exc, "context_pack"):
+                error.context_pack = exc.context_pack
             raise error from exc
         except InternPortError as exc:
             record["error_category"] = exc.category
@@ -385,6 +400,9 @@ class InternModelPort:
             metrics["status"] = exc.category
             error = InternPortError(exc.category)
             error.request_attempts = record["request_attempts"]
+            error.no_dispatch = getattr(exc, "no_dispatch", False) is True
+            if hasattr(exc, "context_pack"):
+                error.context_pack = exc.context_pack
             raise error from exc
         except InternPortError as exc:
             record["error_category"] = exc.category
@@ -398,37 +416,17 @@ class InternModelPort:
         original = _actual_problem(request, self.original_problem)
         if not isinstance(original, str) or not original.strip():
             raise InternPortError("missing_original_problem")
-        if self.original_problem is not None and original != self.original_problem:
+        specification = request.get("problem_spec")
+        revised_original = (
+            isinstance(specification, Mapping)
+            and specification.get("original_problem") == original
+            and request.get("problem_spec_version") == specification.get("specification_version")
+        )
+        if self.original_problem is not None and original != self.original_problem and not revised_original:
             raise InternPortError("problem_identity_mismatch")
         role = request["role"]
         layers = request.get("prompt_layers", [])
-        role_definition = definition(role)
-        instructions = (
-            f"You are the {role}. {role_definition} Return one JSON object only, no Markdown or commentary. "
-            "Obey this exact response schema: "
-            + json.dumps(schema, ensure_ascii=False)
-            + " Answer with a filled instance of this schema containing your actual values — "
-            "never echo the schema definition itself (a reply like "
-            '{"type": "object", "properties": ...} is a protocol failure). '
-            "Enum fields must take one of their listed values only; while a tool_request is "
-            "pending, still state your provisional enum verdict — the runtime withholds any "
-            "acceptance until the real receipt exists. "
-            "Use only runtime allowed_tools. A tool_request is a proposed local computation, not evidence. "
-            "Never fabricate tool receipts. Every pending tool_request MUST use label easy-verify, never verified. "
-            "Group candidate substitutions into one request when possible. Omit expected_output unless the exact registered output is known; a guessed shape will not match. "
-            "A successful polynomial candidate check proves substitution only, not completeness. "
-            "If a report already contains tool_receipts, review those actual inputs/outputs and continue the review; the runtime executed them, not you. "
-            "If a receipt reports tool_error or an error_category, inspect tool_argument_schemas and correct the arguments in a different request, or return a verdict retaining the unresolved objection. Never repeat an identical failed request. "
-            "polynomial_check accepts only numeric rational strings in coefficients and candidates, never symbolic parameters; use python_math for a permitted symbolic computation or review the symbolic argument without a tool. "
-            "A reviewer may propose at most one tool_request per reply while its verdict is still pending; judge only from recorded receipts, never from assumed outputs."
-        )
-        if request.get("checkpoint_protocol"):
-            role_label = role.replace("_", " ").title()
-            instructions += (
-                f" This {role_label} call uses the checkpoint protocol: return only the checkpoint wrapper; "
-                "YIELD must retain open gaps, FINAL must have no gaps, and a checkpoint is a partial "
-                "handoff rather than completion of the whole Step."
-            )
+        instructions = response_instructions(request, schema)
         system = [{"role": "system", "content": instructions}]
         system.extend(
             {"role": "system", "content": json.dumps(layer, ensure_ascii=False)} for layer in layers
@@ -441,11 +439,50 @@ class InternModelPort:
         context.pop("schema_fingerprint", None)
         context.pop("activity_observer", None)
         context.pop("transport_decision_observer", None)
+        context.pop("_context_admission", None)
+        context.pop("_population_memory_cost_observer", None)
+        context.pop("timeout_seconds", None)
+        context.pop("retry_limit", None)
+        context.pop("route_id", None)
+        context.pop("population_action_id", None)
+        context.pop("population_memory_advisory", None)
         context["original_problem"] = original
+        if role == "planner" and isinstance(specification, Mapping):
+            context["objective_dependencies"] = objective_dependencies(specification)
+        if role == "step_verifier" and (scope := step_review_scope(request)) is not None:
+            context["step_review_scope"] = scope
         context["tool_argument_schemas"] = {
             name: value for name, value in tools.items() if name in request.get("allowed_tools", [])
         }
         return system + [{"role": "user", "content": json.dumps(context, ensure_ascii=False)}]
+
+    def serialized_payload_size(self, request):
+        """Estimate the exact non-stream provider body without dispatching it."""
+        if self.adapter is None:
+            raise InternPortError("finalization_payload_estimate_unavailable", no_dispatch=True)
+        from ..adapters import _normalize_message
+
+        schema = response_schema(request)
+        messages = [_normalize_message(item) for item in self._messages(request, schema)]
+        client = self.adapter._get_client()
+        payload = {
+            "model": getattr(client, "model", None) or self.adapter.model_id,
+            "messages": messages,
+            "temperature": self.adapter.temperature,
+            "max_tokens": self.adapter.max_tokens,
+        }
+        tools = request.get("provider_tools", request.get("tools", ()))
+        if tools and hasattr(client, "chat"):
+            import inspect
+
+            if "tools" in inspect.signature(client.chat).parameters:
+                payload["tools"] = [dict(tool) for tool in tools]
+        mode = self.adapter.thinking_mode
+        if mode is None and hasattr(client, "_resolve_reasoning_mode"):
+            mode = client._resolve_reasoning_mode("inherit")
+        if mode is not None:
+            payload["thinking_mode"] = mode
+        return len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
 
     def _authorize_transport(self, request, decision, fingerprints):
         """Persist and freeze this Run's transport choice before any HTTP call."""

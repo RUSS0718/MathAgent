@@ -1,17 +1,26 @@
 """Initial persisted Solver Run shape."""
 
 import uuid
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 
 
-def initial_state(run_id: str, problem_hash: str, config_hash: str) -> dict[str, Any]:
+def initial_state(run_id: str, problem_hash: str, config_hash: str, *,
+                  context_policy: dict[str, Any] | None = None,
+                  problem_spec: dict[str, Any] | None = None,
+                  work_units: list[dict[str, Any]] | None = None,
+                  proof_graph: bool = False,
+                  serial_routes: bool = False,
+                  population_memory_advisory: dict[str, Any] | None = None) -> dict[str, Any]:
     now = datetime.now(UTC).isoformat()
-    return {
+    state = {
         "schema_version": "1.1",
         "run_id": run_id,
         "problem_hash": problem_hash,
         "config_hash": config_hash,
+        "context_policy": context_policy or {"enabled": False, "version": "context-pack-v1"},
+        "context_packs": [],
         "phase": "SETUP",
         "status": "running",
         "plan_version": 0,
@@ -42,4 +51,52 @@ def initial_state(run_id: str, problem_hash: str, config_hash: str) -> dict[str,
         "candidate_registry": None,
         "best_effort_decision": None,
         "finalization_reason": None,
+    }
+    if problem_spec is not None:
+        state.update(problem_spec_state(problem_spec, work_units))
+    if proof_graph:
+        from .proof_graph import initial_proof_graph
+
+        state["proof_graph_policy"] = {
+            "enabled": True, "version": "proof-graph-v1",
+            "schema_version": "proof-graph-v1",
+        }
+        state["proof_graph"] = initial_proof_graph()
+    if serial_routes:
+        state["route_policy"] = {
+            "enabled": True,
+            "version": "route-v1",
+            "policy_version": "serial-aprs-v1",
+        }
+        state["route_registry"] = []
+        state["route_lineage"] = []
+        state["route_evaluations"] = []
+        state["aprs_decisions"] = []
+        state["route_invalidations"] = []
+        state["active_route_id"] = None
+        state["route_budget"] = {"closing_reserve": {}, "unknown": []}
+    if population_memory_advisory is not None:
+        state["population_memory_advisory"] = deepcopy(population_memory_advisory)
+    return state
+
+
+def problem_spec_state(problem_spec, work_units=None):
+    """Initial specification fields, shared by supplied and audited intake paths."""
+    return {
+        "problem_spec_policy": {"enabled": True, "version": "problem-spec-v1"},
+        "problem_spec": problem_spec,
+        "specification_version": problem_spec["specification_version"],
+        "specification_history": [problem_spec],
+        "work_units": work_units or [],
+        "obligation_ledger": [
+            {
+                "obligation_id": item["obligation_id"],
+                "status": "open",
+                "evidence_refs": [],
+                "specification_version": problem_spec["specification_version"],
+            }
+            for item in problem_spec["root_obligations"]
+        ],
+        "obligation_evidence_ledger": [],
+        "skipped_work_units": [],
     }

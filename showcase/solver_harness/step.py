@@ -21,12 +21,40 @@ def run_step(
     max_runtime_seconds: int,
 ) -> dict[str, Any]:
     """Execute the first supplied step once, leaving the report pending review."""
+    from .progress import guard_action
+
+    run = guard_action(harness, run)
+    if run["state"]["phase"] not in {"SETUP", "PLAN", "STEP_EXECUTE"}:
+        return run
     state = run["state"]
     step = next(
         (item for item in plan["steps"] if item["step_id"] == state["current_step"]),
         plan["steps"][0],
     )
     step_id = step["step_id"]
+    if isinstance(state.get("problem_spec"), Mapping):
+        from .specification import prerequisites_satisfied
+
+        work_unit = next(
+            (item for item in state.get("work_units", [])
+             if item.get("step_id", item.get("work_unit_id")) == step_id),
+            None,
+        )
+        completed_work_units = {
+            item["step_id"] for item in plan["steps"]
+            if state.get("steps", {}).get(item["step_id"], {}).get("verification", {}).get("valid") is True
+            and state["steps"][item["step_id"]]["verification"].get("verdict") == "ACCEPT"
+        }
+        completed_obligations = {
+            obligation_id
+            for item in state.get("obligation_ledger", [])
+            if item.get("status") == "satisfied"
+            for obligation_id in [item.get("obligation_id")]
+        }
+        if work_unit is None or not prerequisites_satisfied(
+            work_unit, completed_work_units, completed_obligations
+        ):
+            return finish(harness, run, "partial_aborted", "work_unit_prerequisites_incomplete")
     from . import reasoner_checkpoint
 
     checkpoint_mode = reasoner_checkpoint.enabled(harness._config)

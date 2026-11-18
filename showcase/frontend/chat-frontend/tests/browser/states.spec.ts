@@ -1,26 +1,24 @@
 import { expect, test } from '@playwright/test'
 import { mockWorkspace, report } from './fixtures'
 
-test('mobile drawers contain focus, close with Escape, and restore focus', async ({ page }) => {
+test('mobile session drawer contains focus, closes with Escape, and restores focus', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 800 })
   await mockWorkspace(page)
   await page.goto('/dashboard-assets/session/session-demo')
   await expect(page.getByRole('textbox', { name: '数学问题' })).toBeVisible()
-  for (const name of ['打开会话栏', '显示运行观察']) {
-    const trigger = page.getByRole('button', { name, exact: true })
-    await trigger.click()
-    const modal = page.locator('dialog[open]')
-    await expect(modal).toBeVisible()
-    await expect(page).toHaveScreenshot(name === '打开会话栏' ? 'drawer-sessions-320.png' : 'drawer-observer-320.png', { maxDiffPixels: 0 })
-    for (let i = 0; i < 10; i++) {
-      await page.keyboard.press('Tab')
-      // Native dialogs allow browser-chrome focus (body), but never background controls.
-      expect(await modal.evaluate(element => document.activeElement === document.body || element.contains(document.activeElement))).toBe(true)
-    }
-    await page.keyboard.press('Escape')
-    await expect(modal).toHaveCount(0)
-    await expect(trigger).toBeFocused()
+  const trigger = page.getByRole('button', { name: '打开会话栏', exact: true })
+  await trigger.click()
+  const modal = page.locator('dialog[open]')
+  await expect(modal).toBeVisible()
+  await expect(page).toHaveScreenshot('drawer-sessions-320.png', { maxDiffPixels: 0 })
+  for (let i = 0; i < 10; i++) {
+    await page.keyboard.press('Tab')
+    // Native dialogs allow browser-chrome focus (body), but never background controls.
+    expect(await modal.evaluate(element => document.activeElement === document.body || element.contains(document.activeElement))).toBe(true)
   }
+  await page.keyboard.press('Escape')
+  await expect(modal).toHaveCount(0)
+  await expect(trigger).toBeFocused()
 })
 
 test('startup failure can retry without leaving a permanent loader', async ({ page }) => {
@@ -54,20 +52,21 @@ test('empty campaigns explain how to get started', async ({ page }) => {
   await expect(page.getByRole('button', { name: '下一页' })).toBeDisabled()
 })
 
-test('waiting input remains editable and resumes the existing run', async ({ page }) => {
+test('waiting input resumes the existing run without pretending to inject text', async ({ page }) => {
   await mockWorkspace(page, true)
   await page.route('**/api/agent/jobs/run-demo', route => route.fulfill({ json: { success: true, job_id: 'run-demo', session_id: 'session-demo', status: 'waiting_input' } }))
   await page.route('**/api/agent/jobs/run-demo/report', route => route.fulfill({ json: { ...report, status: 'waiting_input', report: { answer: '', public_summary: '请补充 x 的定义域后继续。', stage: 'planning', checks: { status: 'unknown' }, limitations: ['尚未形成最终答案。'], tool_summaries: [], request_attempts: [] } } }))
-  await page.route(/\/api\/agent\/jobs\/run-demo\/events/, route => route.fulfill({ contentType: 'text/event-stream', body: 'id: 1\nevent: interrupt\ndata: {"type":"interrupt","question_id":"q1","message":"请补充定义域"}\n\n' }))
+  await page.route(/\/api\/agent\/jobs\/run-demo\/events/, route => route.fulfill({ contentType: 'text/event-stream', body: 'id: 1\nevent: interrupt\ndata: {"type":"interrupt","job_id":"run-demo","status":"waiting_input"}\n\n' }))
   await page.goto('/dashboard-assets/session/session-demo')
-  await expect(page.getByRole('button', { name: '补充条件' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '恢复执行', exact: true })).toBeVisible()
+  await expect(page.getByText('运行已暂停。文本插话待接入；恢复执行不会追加新约束。')).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '数学问题' })).toHaveCount(0)
   await expect(page.locator('[aria-busy="true"]')).toHaveCount(0)
   await expect(page.getByText('events_stream_ended', { exact: true })).toHaveCount(0)
   await expect(page).toHaveScreenshot('waiting-input-1440.png', { maxDiffPixels: 0 })
-  await page.getByRole('textbox', { name: '数学问题' }).fill('x 为实数')
   const request = page.waitForRequest('**/api/agent/jobs/run-demo/resume')
-  await page.getByRole('button', { name: '补充条件' }).click()
-  expect((await request).postDataJSON()).toEqual({ answer: 'x 为实数' })
+  await page.getByRole('button', { name: '恢复执行', exact: true }).click()
+  expect((await request).postDataJSON()).toEqual({ answer: '' })
 })
 
 test('legacy failure is readable and retry sends exactly one request', async ({ page }) => {

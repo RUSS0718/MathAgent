@@ -48,6 +48,8 @@ def review_record(run, candidate, verdict, *, call_id, origin, versions=None, fa
             "plan_version": state["plan_version"], "attempt_index": state["attempt_index"],
             "state_revision": run["state_revision"], "origin": origin,
             "candidate_version": len(state.get("whole_solution_reviews", [])) + 1,
+            **({"specification_version": state["specification_version"]}
+               if "specification_version" in state else {}),
         },
         "versions": [
             {**deepcopy(version), "artifact": artifact_identity(version["text"])}
@@ -80,11 +82,15 @@ def review_binding(run, answer):
     source = latest.get("source", {})
     call = run["state"].get("calls", {}).get(source.get("call_id"), {})
     valid = (
-        latest.get("verdict") in {"ACCEPT", "REJECT"}
+        latest.get("invalidated") is not True
+        and latest.get("invalidated_by_specification_version") is None
+        and latest.get("verdict") in {"ACCEPT", "REJECT"}
         and source.get("run_id") == run["run_id"]
         and source.get("candidate_version") == len(records)
         and source.get("plan_version") == run["state"]["plan_version"]
         and source.get("attempt_index") == run["state"]["attempt_index"]
+        and ("specification_version" not in run["state"]
+             or source.get("specification_version") == run["state"].get("specification_version"))
         and call.get("status") == "completed"
         and call.get("role") == "whole_solution_verifier"
         and call.get("run_id") == run["run_id"]

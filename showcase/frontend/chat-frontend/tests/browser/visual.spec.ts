@@ -16,7 +16,11 @@ for (const width of [320, 768, 1024, 1440]) {
     test(`${name} at ${width}`, async ({ page }) => {
       const errors: string[] = []
       page.on('pageerror', error => errors.push(error.message))
-      page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+      page.on('console', message => {
+        if (message.type() !== 'error') return
+        if (/\/api\/(?:agent\/jobs|sessions)\/[^/]+\/(memory(?:\/[^?]*)?|population-memory|goal-cache|interventions)(?:\?|$)/.test(message.location().url) && message.text().includes('404')) return
+        errors.push(message.text())
+      })
       await page.setViewportSize({ width, height: 1000 })
       await mockWorkspace(page, populated)
       await page.goto(path)

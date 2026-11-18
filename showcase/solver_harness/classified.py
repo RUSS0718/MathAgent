@@ -201,6 +201,8 @@ def build_entries(state, reply, *, step_id, report, review_call_id, suffix,
             "plan_version": plan_version,
             "attempt_index": attempt_index,
         }
+        if state.get("proof_graph_policy", {}).get("enabled") is True:
+            entry["specification_version"] = state.get("specification_version", 0)
         entries.append(entry)
         known.add(result_id)
     return entries, rejections

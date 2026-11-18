@@ -7,9 +7,17 @@ import { useJobsStore } from '../stores/jobs.store'
 import { JobController } from '../runtime/jobs/job-controller'
 import { createIdempotencyKey } from '../runtime/jobs/idempotency'
 import StarRunReview from './StarRunReview.vue'
+import RoutePanel from './RoutePanel.vue'
 import ToolArtifactLinks from './ToolArtifactLinks.vue'
 import AgentTimeline from './AgentTimeline.vue'
 import ReportSection from './ReportSection.vue'
+import FormalVerificationSection from './FormalVerificationSection.vue'
+import FaithfulMemorySection from './FaithfulMemorySection.vue'
+import GoalCacheSection from './GoalCacheSection.vue'
+import FaithfulInterventionSection from './FaithfulInterventionSection.vue'
+import type { PopulationMemoryControlResponse, PopulationMemoryResponse, RunMemoryResponse } from '../api/memory.schemas'
+import PresentationSection from './PresentationSection.vue'
+import { isApiError } from '../api/errors'
 import PageFrame from './ui/PageFrame.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
@@ -19,6 +27,10 @@ const jobs = useJobsStore()
 const controller = new JobController(jobs)
 const job = computed(() => jobs.byId(props.jobId))
 const report = ref<JobReport | null>(null)
+type MemoryResult<T> = { status: 'loading' | 'unavailable' | 'error' } | { status: 'available'; data: T }
+const runMemory = ref<MemoryResult<RunMemoryResponse>>({ status: 'unavailable' })
+const populationMemory = ref<MemoryResult<PopulationMemoryResponse>>({ status: 'unavailable' })
+const populationMemoryControl = ref<MemoryResult<PopulationMemoryControlResponse & { sessionId?: string }>>({ status: 'unavailable' })
 const recovery = computed(() => report.value?.solver?.solver?.recovery)
 const notice = ref('')
 const connected = ref(false)
@@ -27,6 +39,7 @@ const busy = ref(false)
 const loading = ref(true)
 let reportTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
+let memoryGeneration = 0
 watch(() => job.value?.events.length, () => {
   if (reportTimer || disposed) return
   reportTimer = setTimeout(() => {
@@ -40,7 +53,41 @@ const fields = ['attempt_id', 'logical_call_id', 'attempt_index', 'started_at_ut
 const toolFields = ['name', 'tool_call_id', 'protocol', 'transport_mode', 'status', 'error_category', 'continuation_status', 'continuation_tool_call_id', 'continuation_response_received', 'candidate_status', 'coverage_status', 'result_summary', 'limitations', 'receipt']
 const budgetLabels: Record<string, string> = { http_attempts: 'HTTP 请求数', unknown_attempts: '未知请求数', reserved_tokens: '未决预留 Token', charged_tokens: '累计计入 Token', deadline_at: '原截止时间' }
 function display(value: unknown): string { return value === null || value === undefined ? 'unknown（未知）' : typeof value === 'object' ? JSON.stringify(value) : String(value) }
-async function refresh(): Promise<void> { loading.value = true; try { jobs.observe(await api.getJob(props.jobId)); report.value = await api.jobReport(props.jobId); notice.value = '' } catch (error) { notice.value = error instanceof Error ? error.message : '报告 unavailable（不可用）' } finally { loading.value = false } }
+async function refresh(): Promise<void> {
+  const generation = ++memoryGeneration
+  runMemory.value = { status: 'loading' }
+  populationMemory.value = { status: 'loading' }
+  populationMemoryControl.value = { status: 'loading' }
+  loading.value = true
+  try {
+    const currentJob = jobs.observe(await api.getJob(props.jobId))
+    if (generation !== memoryGeneration) return
+    const [loadedReport, loadedRunMemory, loadedPopulationMemory, loadedPopulationMemoryControl] = await Promise.allSettled([
+      api.jobReport(props.jobId),
+      api.runMemory(props.jobId),
+      api.populationMemory(currentJob.sessionId),
+      api.populationMemoryControl(currentJob.sessionId),
+    ])
+    if (generation !== memoryGeneration) return
+    runMemory.value = memoryResult(loadedRunMemory)
+    populationMemory.value = memoryResult(loadedPopulationMemory)
+    populationMemoryControl.value = memoryResult(loadedPopulationMemoryControl)
+    if (loadedReport.status === 'rejected') throw loadedReport.reason
+    report.value = loadedReport.value
+    notice.value = ''
+  } catch (error) {
+    if (generation !== memoryGeneration) return
+    if (runMemory.value.status === 'loading') runMemory.value = { status: 'error' }
+    if (populationMemory.value.status === 'loading') populationMemory.value = { status: 'error' }
+    if (populationMemoryControl.value.status === 'loading') populationMemoryControl.value = { status: 'error' }
+    notice.value = error instanceof Error ? error.message : '报告 unavailable（不可用）'
+  }
+  finally { if (generation === memoryGeneration) loading.value = false }
+}
+function memoryResult<T>(result: PromiseSettledResult<T>): MemoryResult<T> {
+  if (result.status === 'fulfilled') return { status: 'available', data: result.value }
+  return isApiError(result.reason) && result.reason.status === 404 ? { status: 'unavailable' } : { status: 'error' }
+}
 async function reconnect(): Promise<void> { await refresh(); connected.value = true; await controller.subscribe(props.jobId); connected.value = false; await refresh() }
 async function exportEvidence(): Promise<void> { try { const evidence = await api.evidence(props.jobId); downloadJson(props.jobId + '-evidence.json', evidence); notice.value = '已导出持久公开 Evidence JSON。' } catch (error) { notice.value = error instanceof Error ? error.message : 'Evidence 导出失败，请重试。' } }
 async function cancel(): Promise<void> { busy.value = true; try { await api.cancelJob(props.jobId, cancelKey); await refresh(); notice.value = '取消已记录；在途远端请求费用可能未知。' } catch (error) { notice.value = error instanceof Error ? error.message : '取消失败' } finally { busy.value = false } }
@@ -56,7 +103,7 @@ async function resume(callId?: string): Promise<void> {
   } finally { busy.value = false }
 }
 onMounted(() => { void reconnect() })
-onUnmounted(() => { disposed = true; clearTimeout(reportTimer); controller.stopAll() })
+onUnmounted(() => { disposed = true; memoryGeneration += 1; clearTimeout(reportTimer); controller.stopAll() })
 </script>
 <template>
   <PageFrame title="子 Run 审阅" description="查看公开答案、最终验证范围与脱敏执行记录。" active="run">
@@ -66,7 +113,9 @@ onUnmounted(() => { disposed = true; clearTimeout(reportTimer); controller.stopA
     <p class="notice notice--warning">fake / replay 只证明工程演示。planned 表示尚未实现；unavailable 表示当前不可用。</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p><p v-if="job?.error" class="notice notice--error" role="alert">运行类别：{{ job.error }}</p>
     <div class="action-row"><UiButton :busy="loading" @click="refresh"><UiIcon name="refresh" />刷新持久报告</UiButton><UiButton :disabled="connected || loading" @click="reconnect">重连事件（沿用游标）</UiButton><UiButton variant="danger" :disabled="busy || !job || ['succeeded', 'failed', 'canceled'].includes(job.status)" @click="cancel">取消 Run</UiButton></div>
-    <ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
+    <PresentationSection :source-version="report" v-if="report && job?.presentationMode" :job-id="props.jobId" :mode="job.presentationMode" :job-status="job.status" :fallback-answer="report.report.answer" />
+    <ReportSection v-else-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
+    <FormalVerificationSection v-if="report?.solver?.solver?.formal_verification" :verification="report.solver.solver.formal_verification" />
     <section v-if="recovery && job?.status === 'failed' && report?.solver?.solver?.phase !== 'TERMINAL'" class="evidence-section" aria-label="安全续算">
       <h2>{{ recovery.status === 'needs_review' ? '未知请求需要人工决定' : '从安全边界继续' }}</h2>
       <dl v-if="report?.report.budget" class="data-list"><template v-for="field in Object.keys(budgetLabels)" :key="field"><dt>{{ budgetLabels[field] }}</dt><dd>{{ field === 'deadline_at' && typeof report.report.budget[field] === 'number' ? new Date(Number(report.report.budget[field]) * 1000).toLocaleString() : display(report.report.budget[field]) }}</dd></template></dl>
@@ -81,8 +130,12 @@ onUnmounted(() => { disposed = true; clearTimeout(reportTimer); controller.stopA
     </section>
     <div v-if="loading && !report" class="loading-state" role="status" aria-busy="true">正在读取运行报告…<div v-for="n in 3" :key="n" class="skeleton"></div></div>
     <section v-else-if="!report" class="empty-state"><h2>报告当前不可用</h2><p>请刷新重试，尚不能判断运行成功。</p></section>
+    <FaithfulMemorySection :run-memory="runMemory" :population-memory="populationMemory" :population-memory-control="populationMemoryControl" />
+    <GoalCacheSection v-if="job?.sessionId" :session-id="job.sessionId" />
+    <FaithfulInterventionSection :job-id="jobId" :job-status="job?.status ?? 'unknown'" :refresh-token="job?.events.length ?? 0" />
     <template v-if="report">
       <StarRunReview :report="report" :job-id="jobId" />
+      <RoutePanel v-if="report.solver?.solver?.progress?.routes" :routes="report.solver.solver.progress.routes" />
       <section class="evidence-section"><h2>最终验证范围</h2><p>候选检查通过不等于完整解集证明。以下 status / acceptance 是兼容字段中的数学证据等级；unknown / needs_review 不表示网络请求未知。执行、传输、整题审查与当前文本绑定见数学报告。</p><dl class="data-list"><template v-for="field in ['status', 'scope', 'checker', 'checker_version', 'acceptance', 'binding', 'artifact', 'candidate_status', 'coverage_status', 'limitations', 'findings']" :key="field"><dt>{{ field }}</dt><dd>{{ display(report.report.checks[field]) }}</dd></template></dl></section>
       <section class="evidence-section"><h2>脱敏 Request Attempts</h2><p>reserved_dispatch_unconfirmed：本地预留已提交，远端是否接收或计费尚未确认；transport_observed 表示本地传输返回了观测。</p><p v-if="!report.report.request_attempts.length">无已记录 HTTP attempt；详见预算与计量。</p><details v-for="(attempt, index) in report.report.request_attempts" :key="index"><summary>Attempt {{ index + 1 }} · {{ display(attempt.status) }}</summary><dl class="data-list"><template v-for="field in fields" :key="field"><dt>{{ field }}</dt><dd>{{ display(attempt[field]) }}</dd></template></dl></details></section>
       <section class="evidence-section"><h2>工具闭环</h2><p v-if="!report.report.tool_summaries.length">无已记录工具结果。</p><article v-for="(tool, index) in report.report.tool_summaries" :key="index"><p v-if="tool.domain_status === 'out_of_domain'" class="notice notice--warning" role="status"><strong>域外：候选不满足定义域，最终结论仍为 unknown。</strong></p><dl class="data-list"><template v-for="field in toolFields" :key="field"><dt>{{ field }}</dt><dd>{{ display(tool[field]) }}</dd></template></dl><ToolArtifactLinks :job-id="jobId" :receipt="tool.receipt" /></article></section>

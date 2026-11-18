@@ -1,0 +1,24 @@
+{
+  "version": "faithful-service-v1",
+  "python_image_id": "sha256:fc913659cd06c9164aacf32cb498b1cf0a6f4b1b8aff66f55f4cd9ff31673a2d",
+  "context_capacity": {
+    "version": "context-capacity-v1",
+    "profile_version": "faithful-service-169-v1",
+    "provider": "intern",
+    "model": "intern-s2",
+    "endpoint": "https://chat.intern-ai.org.cn/api/v1/chat/completions",
+    "cap_source": "unknown",
+    "cap_source_date": null,
+    "input_cap_tokens": null,
+    "output_reserve_tokens": 32768,
+    "safety_margin_tokens": 0,
+    "token_estimator_version": "utf8-bytes-per-three-v1"
+  },
+  "budget": {
+    "max_model_calls": 48,
+    "max_http_attempts": 48,
+    "max_tool_calls": 8,
+    "max_tokens": 262144,
+    "max_runtime_seconds": 1100
+  }
+}

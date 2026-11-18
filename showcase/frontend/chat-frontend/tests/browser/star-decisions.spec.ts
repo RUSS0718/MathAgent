@@ -60,6 +60,8 @@ for (const width of [320, 768, 1024, 1440]) {
     const consoleProblems: string[] = []
     page.on('pageerror', (error) => consoleProblems.push(error.message))
     page.on('console', (message) => {
+      // Optional subsystems deliberately return 404 in this fixture.
+      if (message.text().includes('404') && /\/api\/.*\/(?:memory|population-memory|goal-cache|interventions)(?:\/|$)/.test(message.location().url)) return
       if (['error', 'warning'].includes(message.type())) consoleProblems.push(message.text())
     })
     await page.setViewportSize({ width, height: 1000 })

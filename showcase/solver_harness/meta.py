@@ -189,6 +189,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
     request["state_revision"] = run["state_revision"]
     request = harness.prepare_request(run, request)
     request.update(allowed_tools=[], tool_policy={"allow": []})
+    response = None
     try:
         from . import protocol_repair
         from .calls import CallInterrupted
@@ -235,6 +236,15 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
                 "status": "partial_aborted",
                 "result_reason": "invalid_challenge_meta_decision",
                 "final_response": "Meta returned an invalid challenge decision; no further action was taken.",
+            }
+        elif state["phase"] == "META_DECIDE" and response is not None:
+            # A completed but invalid decision cannot advance this owning stage.
+            # Leave transport interruptions to their existing recovery path.
+            updates = {
+                "phase": "TERMINAL",
+                "status": "partial_aborted",
+                "result_reason": "invalid_meta_decision",
+                "final_response": "Meta returned an invalid decision; no further action was taken.",
             }
         return harness.commit_event(
             run["run_id"],

@@ -1,5 +1,56 @@
 # MathAgent 文档索引
 
+- [Faithful 自主 Agent 完整本机服务实施规格](https://github.com/RUSS0718/MathAgent/issues/168)：已拆分 #169–#183，按 A–H 端到端切片推进。[首票 #169 验收记录](evals/faithful-service-169-20261113.md)包含普通输入、真实 2+3 整题检查与刷新证据。[#170 验收记录](evals/faithful-service-170-20261113.md)已完成简单题真实 Planner→三个串行工作块→Python→整题绑定与只读恢复；最终 gate-03 六阶段通过（2007 项、0 failure/error、49 skip、源码无漂移），达到本票工程退出，交付 SHA 见 #170 完成评论。完整服务仍未交付，后续票按真实依赖领取。验收以少量真实模型、工具和浏览器场景跑通为主，不新增准确率、性能或大样本门槛。
+- [Faithful 自主能力调度与前端闭环决策地图](https://github.com/RUSS0718/MathAgent/issues/160)：2026-11-12 七项决策完成，规划退出；实施要求已汇总到 #168，完整服务尚未交付。能力准入、普通输入、动态调度、形式化、记忆及前端合同见地图的已决事项。
+- [自主服务实施交接与验收决议](https://github.com/RUSS0718/MathAgent/issues/167#issuecomment-6828389803)：首次交付在当前机器完成；按端到端切片接通真实服务，减少无关或重复离线测试，保留关键故障检查、阶段门禁与真实模型、工具、浏览器验收。既有未提交草稿须按决议核对，不算已验收实现；官方路径与独立 F8 数学评测保持各自边界。
+
+- [对话式工作台集成合同](engineering/conversation-workbench-contract.md)：新主页替换旧聊天布局；共享事件投影、真实 Job/SSE、线程/星图/计划及来源边界。验收结果见 [工作台集成记录](evals/conversation-workbench-20261112.md)。
+
+- [S09/F3 受限形式化实施记录](evals/faithful-s09-20261109.md)：门禁源码 `4df0953`；最终门禁06 6/6通过（1683项、0 failure、0 error、2 skip），Reference 发布41项通过；真实 L2/L3、AC23 公共 Job/Report/Evidence 路线和桌面/移动 UI 验收完成，状态为 `engineering-preview`。2 skip 未计通过，真实 provider、自然题及独立数学效果未验证。[S09 合同映射](engineering/faithful-s09-contract.md)记录公共入口、持久断言和证据范围。
+
+- [#156 完整并发接管与验收](evals/faithful-population-20261109.md)：接续门禁06在源码 `5d80f90` 上6/6通过（1624项、42skip）；新增12项验收与102项聚焦通过，八组公共入口/持久证据逐项映射。42skip仍未执行，旧Docker专项独立记载；真实provider/容量/SLA/数学效果未验证，#156/#146保持开放。
+
+## Faithful 实施入口（截至2026-11-12）
+
+- [F8-R18 空答案辅助审查修复](evals/faithful-f8-empty-review-20261112.md)：#159 的真实空答案身份 pass/fail 已拒绝、unresolved 保留；本地 adapter 接入及 hash 见记录。41/29 与固定28槽不变，#157仍未完成。[Python 工具拒绝后的有界纠正](evals/showcase-tool-recovery-20261112.md)另见 #158；两项均只有离线修复证据。
+
+- [F8真实执行与故障处置](evals/faithful-f8-real-20261112.md)：2026-11-12用户交接#158/#159并授权恢复，接续准备增量见记录首节及[v1.4合同](engineering/faithful-f8-real-source-continuation-20261112.md)。41份首次仍为1 completed、39 failed、1 unknown，29槽未派发，unknown不重发；新源码完整门禁及正式接续身份待验收。R20源码`315ae9b`的6/6、1917项、42skip是历史证据，不能替代新源码门禁。F8实验及#157未完成。
+
+- F8 真实接续修复：[新源码接续条款 v1.3](engineering/faithful-f8-real-source-continuation-20261112.md)已双轴冻结；该条款中的7/63是R19时点历史截面，当前以[真实执行记录](evals/faithful-f8-real-20261112.md)的41/29及重启unknown处置为准。跨源码比较标not_comparable，原失败不覆盖；实验与报告尚未完成，#157保持开放。
+
+- F8 真实题集接续在 [#157](https://github.com/RUSS0718/MathAgent/issues/157)：[真实试点冻结合同](engineering/faithful-f8-real-protocol-20261111.md)为 `faithful-f8-real-v1`，双轴审查问题已解除。14题参考材料事前封存；初始A/B/C/G必需56槽，容量准入后D的14槽纳入当前70个必需主槽，F仍为真实条件任务。容量探测不等于D自然题验收；E原题目标域不支持且工具专项分开。官方重评分unavailable，usage缺失observe_only。冻结不是实验完成，旧工程试点及门禁证据保持原样。
+
+- F8/#154 已按 faithful-f8-v1.1.1-engineering 达到 `engineering-preview`：[冻结合同及评审记录](engineering/faithful-f8-protocol-20261111.md)、[分层验收记录](evals/faithful-f8-20261111.md)。2026-11-11 用户明确将真人替换为 R1/R2 子智能体隔离初审、R3 核对；14 题登记 98 槽全部 not_run，28 个抽查槽各角色均 unresolved，辅助链 complete 不代表数学通过。固定 L1 25 项、71 项 F8 聚焦及七组失败见证通过，双轴问题清零；门禁源码 `e40d240`，`faithful-f8-20261111-02` 6/6 通过（1915 项、0 failure/error、42 skip、source_changed=false），42 skip 与 F6/F7 的 ID／原因一致且不计通过。首轮真实 Lean timeout 与 SQLite 锁错误保留，有界诊断通过但间歇根因未确认。核心与阶段证据包均已封存；independent_math/provider-live/自然题求解/官方重评分继续 not_run，11 个 baseline 文件只确认字节一致。
+
+- F7/#153 已达到 `engineering-preview`：[任务合同](engineering/faithful-f7-contract.md)、[分层验收记录](evals/faithful-f7-20261111.md)。只读 Run/依赖图/F6 交付和等级、版本化段落深链与刷新/重开恢复完成；门禁源码 `1da9aee`，`faithful-f7-20261111-01` 6/6 通过（1844 项、0 failure/error、42 skip、`source_changed=false`）。37 项后端聚焦、52 项前端单测、5 项最终浏览器及真实 Lean L2/L3 专项通过，双轴问题已清零。500 节点 synthetic 三次渲染 P95 149 ms；最大真实样本仅 2 个命题，二者不混称。42 skip 与 F6 逐项一致，不计通过；11 个 baseline 文件字节一致，本轮未重新评分。F8/#154 后续已完成修订冻结，当前状态以上方 F8 入口为准。
+
+- F7/F8 范围与协议材料：[F7 只读系统视图与深链合同](engineering/faithful-f7-contract.md)、[F8 A–G 评测协议 v1](engineering/faithful-f8-protocol-20261111.md)、[F6 42 项 skip 原因与等级覆盖审计](evals/faithful-f6-skip-audit-20261111.md)。GitHub 正式入口为 [F7 #153](https://github.com/RUSS0718/MathAgent/issues/153) 与 [F8 #154](https://github.com/RUSS0718/MathAgent/issues/154)。
+
+- F6/#152 已达到 `engineering-preview`：[任务合同](engineering/faithful-f6-contract.md)、[分层验收记录](evals/faithful-f6-20261111.md)。逐段来源定位、独立输出身份、同源 Best-Effort 交付及旧 Run 策略边界完成；门禁源码 `c1d17bc`，`faithful-f6-20261111-02` 六阶段通过（1832 项、0 failure/error、42 skip、`source_changed=false`），25 项表达/API、5 项 Chromium 和双轴修复复查通过。首轮 readiness 迟到用量间歇失败保留，根因未确认，第二轮成功不证明已修复。独立受控 rubric 为 8/10，不外推自然题质量；真实 provider、自然题及数学效果 `not_run`。F7 工程退出见上方入口；F8/#154 先完成协议评审冻结。
+
+- S10/F4/F5 实施与阶段验收记录：[验收报告](evals/faithful-s10-20261111.md)及[合同映射](engineering/faithful-s10-contract.md)；`faithful-s10-20261111-02` 最终门禁 6/6 阶段通过（1821 项、0 failure、0 error、42 skip、`source_changed=false`），S10 达到 `engineering-preview` 并可进入下一阶段。135 项非 Docker S10 回归、前端 46 项单测/构建、9 项 F4/F5 Playwright 用例及快速检查通过。首轮门禁 01 的前端并行端口竞态失败保留在独立证据目录并已修复。42 项 skip 未计通过；固定 Lean、provider-live、容量/SLA、自然题与独立数学效果仍按独立证据层级记录。门禁源码 hash `421b9face1da7e8aa687a67ceecc4ff31fd0db495b24ebe707136ce1398e71c6`；#130 已追加 S10 路线进展并建议下一入口 #152，#146/#150/#151 未评论或关闭。S10 已提交为 `b02f8b4`；历史门禁与 artifacts 的证据身份保持不变。
+
+S01–S09（含 S06、串行 F2/S08、F3/S09）和 S10/F4/F5 均达到 `engineering-preview` 工程退出。S09 源码门禁 SHA 为 `4df095355d2eb5c39f94ba24cb7e367486973428`，随后纯文档交接 SHA 为 `f7d9c530978fbcbf453e06ba0a24500cb9593721`；门禁 6/6 通过，2 项显式 Docker readiness integration 测试 skip 未计通过。S10 门禁源码 hash 为 `421b9face1da7e8aa687a67ceecc4ff31fd0db495b24ebe707136ce1398e71c6`，最终门禁 02 6/6 通过（1821 项、0 failure/error、42 skip），source unchanged。真实 L2/L3 和公共 Prover Route Job/Report/Evidence 验收完成，#149 已关闭，F4/F5 的 F2/F3 工程前置已满足。S10 已实现 F4 原生 Solver/APRS checkpoint 双臂执行、双次 Verifier 调用与同臂账本/复核输入绑定、父 Run 恢复；F5 已实现 Run/Population Memory 只读与 advisory 链、会话注入同意和来源链、路线级成本估算接入 APRS，以及 Global Goal Cache 的当前 Lean 复核、漂移与用户控制。来源、unknown、预算及可见证据边界逐项见 [S10 合同映射](engineering/faithful-s10-contract.md)。路线最新进度见上方 F6 入口，下一阶段按 #146 的 F7–F8 合同推进；S10 源码已提交为 `b02f8b4`。2026-11-11 本轮只读核验 #130/#146 仍 open，#150/#151 已由既有交付关闭，本轮未修改这两个 Issue。provider-live、自然题、容量/SLA 和独立数学效果仍未验证；工程门禁和受控 fixture 不构成数学能力提升证据。阶段依赖见 [#144 决议](https://github.com/RUSS0718/MathAgent/issues/144#issuecomment-6703147321)、[S09 合同](engineering/faithful-s09-contract.md)和[工程门禁](engineering/development-gates.md)。
+
+- [S06 与 S08/F2 工程退出验收](evals/faithful-s06-s08-exit-20261108.md)：门禁源码 `2f11c65`，6/6通过，1543项含42skip；分别记录基础模板输出、串行路线/APRS、双轴修复及首轮门禁失败。
+- [S06基础输出合同](engineering/faithful-s06-contract.md)、[S08串行路线合同](engineering/faithful-s08-contract.md)、[重规划诊断与S09环境](evals/faithful-replan-s09-environment-20261108.md)：S09编译exit127、无L2/L3；#156可按实际前置推进，S10不可提前实施。
+
+- [S05 与 F1/S07 工程退出验收](evals/faithful-s05-s07-exit-20261108.md)：门禁源码 `932a234`，六阶段通过，1496 项回归含 42 skip；真实图浏览器 5 项通过、50/50 样本 P95 818 ms。分别记录两阶段结论、双轴修复、首轮门禁失败和未验证边界。
+- [S05 公开产物与 UI 合同](engineering/faithful-s05-contract.md)、[F1/S07 图与 GraphBootstrap 合同](engineering/faithful-s07-contract-exit-20261108.md)：真实进度、可恢复历史、脱敏图投影及 AND/OR、版本、来源与原子失效边界。
+
+- [S04 进展与停滞调度合同](engineering/faithful-s04-contract.md)：受控方法标识、证据信用、三回合停滞、重复动作局部阻断及恢复语义。
+- [S04 工程退出验收记录](evals/faithful-s04-exit-20261108.md)：源码 `13641c6`、24 项专属合同、71 项聚焦回归、六阶段门禁和浏览器回归；保留 42 项 Docker skip 及中止记录，解除 F1/S07 的 S04 工程前置。
+
+- [S02 上下文与容量治理退出合同](engineering/faithful-s02-exit-contract.md)：C01–C12 工程退出通过，状态为 `engineering-preview`；冻结源码 `d19aa56`，真实 provider、容量/SLA 与数学效果未验证。
+- [S02 工程退出验收记录](evals/faithful-s02-exit-20261108.md)：六阶段门禁、聚焦/浏览器回归、跳过项、审查修复及能力边界。S02 退出解除 S03 工程依赖。
+- [S03 规格与工作块交接合同](engineering/faithful-s03-handoff-contract.md)：S03 实现与接口合同；工程退出已通过，状态为 `engineering-preview`。
+- [S03 工程退出验收记录](evals/faithful-s03-exit-20261108.md)：C01–C12 证据、六阶段门禁、聚焦/浏览器回归、跳过项、双轴审查及能力边界。S03 退出解除 S04/S05 的 S03 工程依赖；F1/S07 当前前置状态见上述 S04 验收。
+
+- [S01 流式工程退出验收](evals/faithful-s01-exit-20261107.md)：按用户调整后的流式范围退出；六阶段冻结门禁与终审补丁分开留证，S02 的 S01 工程依赖解除。真实 provider 与数学效果未通过。
+- [S01 首纵切集成验收](evals/faithful-s01-first-slice-20261107.md)：流式策略、六阶段门禁与终审补丁证据；完整 S01 及后续阶段仍未验收。
+- [实施起点与 S01–S06 证据核验](engineering/faithful-implementation-entry-146.md)：实际 checkout、冻结基线同步、旧起点失败及聚焦复核；新阶段未因旧 SP 或 Intern 同名记录解除门槛。
+- [完整并发实施交接](engineering/faithful-concurrency-handoff-155.md)：承接 #155 的独立 [实施票 #156](https://github.com/RUSS0718/MathAgent/issues/156)，包含原生依赖、八组验收与交付/结算边界。串行 F2 不覆盖完整并发；文档和建票不代表产品已实现。
+
 ## 当前入口与归档状态（2026-11-06）
 
 - 本窗口所有Run的停因、根因边界和冻结身份统一见[逐Run错误索引](evals/provider-live-run-error-index-20261106.md)，不再另建重复错误流水账。原始实验数据按用户授权清理，证据恢复限制见索引末节。
@@ -211,6 +262,4 @@ v0.2 文档已归档为历史合同；v1.1 规格不覆盖这些 accepted ADR，
 
 最新 [readiness-05 执行观察器异常记录](evals/provider-live-natural-20261105-readiness-05.md) 区分 runner 写状态失败与服务端仍在运行的自然多步 Job；未获得 readiness PASS，#128 两臂仍 NOT_RUN。
 
-当前真实API批次为 [readiness-06](evals/provider-live-natural-20261105-readiness-06.md)，隔离服务与冻结源码已核对；简单题成功，多步运行中，尚未readiness PASS。
-
-readiness-06 已终态FAIL：有界Meta继续处理后仍未完成整题交付，详见 [06最终记录](evals/provider-live-natural-20261105-readiness-06.md)。后续零索引核验与重复历史读取修复不追溯升级旧Run。
+历史批次 [readiness-06](evals/provider-live-natural-20261105-readiness-06.md) 已终态 FAIL：有界 Meta 继续处理后仍未完成整题交付。后续零索引核验与重复历史读取修复不追溯升级旧 Run；当前实验状态见顶部归档入口。

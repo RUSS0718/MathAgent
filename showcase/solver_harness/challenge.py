@@ -23,6 +23,11 @@ def run_challenges(
     max_runtime_seconds,
 ):
     """Reply and recheck in verify:{run_id}:plan{version}:step{step_id}."""
+    from .progress import guard_action
+
+    run = guard_action(harness, run)
+    if run["state"]["phase"] != "CHALLENGE":
+        return run
     initial_state = run["state"]
     step_id = initial_state["current_step"]
     initial_history = initial_state["steps"].get(step_id, {}).get("challenge_history", [])
@@ -40,6 +45,10 @@ def run_challenges(
         state = run["state"]
         if state["phase"] != "CHALLENGE":
             return run
+        run = guard_action(harness, run)
+        if run["state"]["phase"] != "CHALLENGE":
+            return run
+        state = run["state"]
         attempt = state["attempt_index"]
         suffix = f"-attempt-{attempt}" if attempt else ""
         step_id = state["current_step"]
@@ -350,6 +359,7 @@ def run_plan(
     max_rounds,
     max_model_calls,
     max_runtime_seconds,
+    one_work_unit=False,
 ):
     """Execute at most the supplied plan, preserving the final review boundary."""
     while True:
@@ -382,6 +392,8 @@ def run_plan(
             max_runtime_seconds=max_runtime_seconds,
         )
         run = apply_traceback(harness, run)
+        if one_work_unit:
+            return run
         explore_guidance = run["state"].get("meta_guidance_decision")
         if (
             run["state"]["phase"] == "EXPLORE"

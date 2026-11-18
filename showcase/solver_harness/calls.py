@@ -7,7 +7,8 @@ from copy import deepcopy
 from datetime import UTC, datetime
 
 from ..redaction import redact
-from ..run_budget import public_solver_call_id
+from ..run_budget import current_budget, public_solver_call_id
+from .context_pack import ContextCapacityExceeded, finalize_context_pack
 from .intern_port import KNOWN_PROTOCOL_FAILURES
 
 
@@ -28,6 +29,8 @@ def pending_call(run):
     audit = {
         "call_audit", "call_activity", "session_recorded", "call_retry_authorized",
         "session_started", "transport_selected", "transport_rejected",
+        "context_pack_measured", "context_capacity_rejected",
+        "population_memory_cost_measured",
     }
     if any(event["state_revision"] > record["request_revision"]
            and event["type"] not in audit for event in run["events"]):
@@ -53,27 +56,39 @@ def retry_parent_id(record):
 
 def _save(harness, run, record, *, status=None, event_type="call_audit", event_fields=None,
           state_updates=None):
-    latest = harness.get_run(run["run_id"])
-    updates = {"calls": {**latest["state"].get("calls", {}), record["call_id"]: redact(record)}}
-    # Use the same snapshot/revision fence for the provider failure and its audit;
-    # a cancellation that committed first must keep its terminal math state.
-    if latest["state"]["phase"] != "TERMINAL" or record.get("status") != "provider_failed":
-        updates.update(state_updates or {})
-    if status is not None and latest["state"]["phase"] != "TERMINAL":
-        updates["status"] = status
-    updated = harness._commit_event(
-        run["run_id"],
-        expected_revision=latest["state_revision"],
-        current=latest,
-        event={
-            "event_id": f"call-{record['call_id']}-{record['status']}-{latest['state_revision']}",
-            "type": event_type,
-            "call_id": record["call_id"],
-            "outcome": record["status"],
-            **(event_fields or {}),
-        },
-        state_updates=updates,
-    )
+    from .storage import SolverRevisionConflictError
+
+    while True:
+        latest = harness.get_run(run["run_id"])
+        updates = {"calls": {**latest["state"].get("calls", {}), record["call_id"]: redact(record)}}
+        # Use the same snapshot/revision fence for the provider failure and its audit;
+        # a cancellation that committed first must keep its terminal math state.
+        if latest["state"]["phase"] != "TERMINAL" or record.get("status") != "provider_failed":
+            updates.update(state_updates or {})
+        if status is not None and latest["state"]["phase"] != "TERMINAL":
+            updates["status"] = status
+        try:
+            updated = harness._commit_event(
+                run["run_id"],
+                expected_revision=latest["state_revision"],
+                current=latest,
+                event={
+                    "event_id": f"call-{record['call_id']}-{record['status']}-{latest['state_revision']}",
+                    "type": event_type,
+                    "call_id": record["call_id"],
+                    "outcome": record["status"],
+                    **(event_fields or {}),
+                },
+                state_updates=updates,
+            )
+        except SolverRevisionConflictError:
+            if harness._config.get("features", {}).get("concurrent_routes") is not True:
+                raise
+            from ..run_control import check_control
+
+            check_control()
+            continue
+        break
     run.clear()
     run.update(updated)
 
@@ -134,6 +149,10 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "prompt_layers",
             "role_context",
             "session_history",
+            "session_history_summary",
+            "_context_pack",
+            "_context_policy",
+            "_context_admission",
             "state_revision",
             "session_history_authority",
             "prompt_fingerprint",
@@ -141,6 +160,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "schema_fingerprint",
             "input_fingerprint",
             "activity_observer",
+            "_population_memory_cost_observer",
         }
         safe_request = {
             key: deepcopy(value) for key, value in prepared.items() if key not in excluded
@@ -168,6 +188,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "run_id": run["run_id"],
             "plan_version": latest["state"].get("plan_version"),
             "attempt_index": latest["state"].get("attempt_index"),
+            "route_id": latest["state"].get("active_route_id"),
             "consumed_receipt_ids": [
                 receipt["receipt_id"]
                 for receipt in receipts
@@ -194,6 +215,10 @@ def dispatch(harness, run, operation, request, session_dispatch):
         if prepared.get("retry_of"):
             record["retry_of_internal"] = prepared["retry_of"]
         activity_enabled = harness._config.get("features", {}).get("stream_activity") is True
+        active_budget = current_budget()
+        timeout_warning_enabled = (
+            active_budget is not None and active_budget.stream_timeout_policy() is not None
+        )
         if activity_enabled:
             record["stream_metrics"] = {
                 "status": "dispatched",
@@ -212,6 +237,50 @@ def dispatch(harness, run, operation, request, session_dispatch):
             }
         _save(harness, run, record)
         prepared = harness.prepare_request(run, prepared)
+        context_policy = prepared.pop("_context_policy", None)
+        context_source = prepared.pop("_context_pack", None)
+        if isinstance(context_policy, Mapping) and context_policy.get("enabled") is True:
+            def admit_context(serialized_payload, endpoint, provider=None):
+                try:
+                    pack = finalize_context_pack(
+                        serialized_payload, context_policy, role=prepared["role"],
+                        run_id=run["run_id"],
+                        state_revision=(context_source or {}).get(
+                            "source_state_revision",
+                            (context_source or {}).get(
+                                "state_revision", prepared.get("state_revision", run["state_revision"])
+                            ),
+                        ),
+                        problem_hash=run["state"]["problem_hash"], endpoint=endpoint,
+                        provider=provider, source=context_source,
+                    )
+                except ContextCapacityExceeded as exc:
+                    record["context_pack"] = exc.pack
+                    record.update(status="policy_rejected", error_category=exc.category)
+                    raise
+                record["context_pack"] = pack
+                latest = harness.get_run(run["run_id"])
+                _save(
+                    harness, run, record, event_type="context_pack_measured",
+                    state_updates={"context_packs": [
+                        *latest["state"].get("context_packs", []), pack,
+                    ]},
+                )
+                return pack
+
+            prepared["_context_admission"] = admit_context
+
+        def observe_population_memory_cost(cost, _request):
+            if not isinstance(cost, Mapping):
+                return
+            record["population_memory_cost"] = dict(cost)
+            _save(
+                harness, run, record, event_type="population_memory_cost_measured",
+                event_fields={"cost_status": cost.get("status"),
+                              "estimator_version": cost.get("estimator_version")},
+            )
+
+        prepared["_population_memory_cost_observer"] = observe_population_memory_cost
 
         def observe_transport(decision, _request):
             latest = harness.get_run(run["run_id"])
@@ -258,12 +327,29 @@ def dispatch(harness, run, operation, request, session_dispatch):
             return not mismatch
 
         prepared["transport_decision_observer"] = observe_transport
-        if activity_enabled:
+        if activity_enabled or timeout_warning_enabled:
             def observe_activity(activity):
                 if not isinstance(activity, Mapping):
                     return
-                metrics = dict(record["stream_metrics"])
                 kind = activity.get("kind")
+                if not activity_enabled:
+                    if kind != "soft_timeout_warning":
+                        return
+                    warning = {
+                        "elapsed_seconds": activity.get("elapsed_seconds")
+                        if type(activity.get("elapsed_seconds")) is int else None,
+                        "policy_version": activity.get("policy_version")
+                        if isinstance(activity.get("policy_version"), str) else None,
+                    }
+                    _save(
+                        harness,
+                        run,
+                        record,
+                        event_type="call_activity",
+                        event_fields={"activity_kind": kind, "stream_timeout_warning": warning},
+                    )
+                    return
+                metrics = dict(record["stream_metrics"])
                 at = activity.get("at")
                 if not isinstance(at, str) or not at.strip():
                     at = datetime.now(UTC).isoformat()
@@ -313,6 +399,27 @@ def dispatch(harness, run, operation, request, session_dispatch):
         try:
             response = _consume(operation(deepcopy(prepared)), partial, checkpoint)
         except Exception as exc:
+            if (getattr(exc, "no_dispatch", False) is True
+                    and not getattr(exc, "transport_decision", None)):
+                category = getattr(exc, "category", "context_policy_rejected")
+                record.update(
+                    status="policy_rejected", error_category=category,
+                    context_pack=getattr(exc, "context_pack", record.get("context_pack")),
+                )
+                latest = harness.get_run(run["run_id"])
+                state_updates = {}
+                context_pack = record.get("context_pack")
+                if isinstance(context_pack, Mapping):
+                    state_updates["context_packs"] = [
+                        *latest["state"].get("context_packs", []), context_pack,
+                    ]
+                _save(
+                    harness, run, record,
+                    event_type="context_capacity_rejected",
+                    event_fields={"error_category": category},
+                    state_updates=state_updates,
+                )
+                raise CallInterrupted(run["run_id"], record["call_id"]) from None
             if getattr(exc, "no_dispatch", False) is True:
                 decision = getattr(exc, "transport_decision", None) or {}
                 record.update(
@@ -361,13 +468,27 @@ def dispatch(harness, run, operation, request, session_dispatch):
             # provider finish reason, known usage and a safe response reference.
             known_protocol = category in KNOWN_PROTOCOL_FAILURES
             known_provider = category == "provider_generation_error"
+            completed_attempt = next((item for item in reversed(
+                getattr(exc, "request_attempts", ())
+            ) if item.get("status") == "success"), {})
+            local_processing = (
+                category == "local_processing_timeout" and bool(completed_attempt)
+            )
+            failure_usage = getattr(exc, "usage", None)
+            failure_finish_reason = getattr(exc, "finish_reason", None)
+            if local_processing:
+                failure_usage = failure_usage or completed_attempt.get("usage")
+                failure_finish_reason = failure_finish_reason or completed_attempt.get(
+                    "finish_reason"
+                )
             record.update(
                 status="tool_error" if getattr(exc, "tool_error", False)
                 else "provider_failed" if known_provider
+                else "local_processing_failed" if local_processing
                 else "protocol_failed" if known_protocol else "unknown_outcome",
                 partial_text="".join(partial),
-                usage=getattr(exc, "usage", None),
-                finish_reason=getattr(exc, "finish_reason", None),
+                usage=failure_usage,
+                finish_reason=failure_finish_reason,
                 response_excerpt=getattr(exc, "response_excerpt", None),
                 error_type=type(exc).__name__,
                 error_category=category,

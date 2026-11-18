@@ -72,6 +72,17 @@ uv run python showcase_cli.py probe "求解 x^2-1=0，并检查候选根。"
 
 官方评分入口位于根目录 `user_agent.py`，其演示页和 `/solve` 用法见 [Demo 使用说明](docs/demo.md)。
 
+### Faithful 普通输入服务
+
+本机 live 服务可使用 [配置示例](examples/faithful-service.json)。先在本地副本中核对 Python 镜像 ID、预算和模型上下文策略，并配置未跟踪 `.env` 中的 Intern 凭证；上下文容量未知保持 `null`，示例不承诺提供方硬上限。先启动 Docker，再执行：
+
+```powershell
+uv run python showcase_server.py --mode live --faithful-config examples/faithful-service.json --check-runtime
+uv run python showcase_server.py --mode live --faithful-config examples/faithful-service.json --data-dir artifacts/faithful-local
+```
+
+前端构建后访问 `http://127.0.0.1:8090/dashboard`，普通输入会进入自动规格和求解，无需手填技术模式。开发前端仍可使用上方 Vite 命令。用 Ctrl+C 停止服务，再使用相同数据目录启动可读取持久任务。就绪检查不调用模型，不代表真实求解验收；可选能力限制与实验性状态会显示在入口。并发、自主干预、形式化和记忆完整闭环按 [#168 实施规格](https://github.com/RUSS0718/MathAgent/issues/168) 的后续子票验收。
+
 ## 工程状态与验收边界
 
 官方客观评测入口是根目录 `user_agent.py` 的 `ReasoningAgent`，评分实现位于 `implementations/`。Showcase 作为独立展示路径；未经独立验收的改动不得接入官方默认路径或改变其请求预算。官方文件和基线哈希见 [BASELINE.json](BASELINE.json)。

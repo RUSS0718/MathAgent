@@ -1,6 +1,7 @@
 import type { DecodedSseEvent } from '../../api/events.schemas'
 
 const starEventTitles: Record<string, string> = {
+  step_reported: '步骤报告',
   explore_assessed: 'Explore 路由',
   solution_review_assessed: '整题审查路由',
   partial_exploration_routed: 'Meta 探索决策',
