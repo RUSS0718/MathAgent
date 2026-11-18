@@ -54,6 +54,10 @@ def prepare_hint(harness, run, problem, metadata):
 
 def explore(harness, run, problem):
     config = harness._config
+    if config.get("features", {}).get("adaptive_solving") is True:
+        from .adaptive_solving import explore_direct
+
+        return explore_direct(harness, run, problem)
     limit = min(2, config.get("max_explore_rounds", 2))
     for number in range(1, limit + 1):
         recovering_review = (getattr(harness, "_product_recovery", False)

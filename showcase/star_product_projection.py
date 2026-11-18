@@ -4,7 +4,7 @@ import json
 
 
 def persisted_solver(connection, run_id, *, projection_only=False):
-    """Read persisted Solver data; projections retain only tool events used by recovery."""
+    """Read Solver data; projections retain tool recovery and review qualification events."""
     from .solver_harness.population_settlement import reconcile_settlement
 
     reconcile_settlement(connection, run_id)
@@ -17,7 +17,7 @@ def persisted_solver(connection, run_id, *, projection_only=False):
     answer = snapshot.get("final_response")
     event_query = (
         "SELECT event_json FROM solver_events WHERE run_id=? AND "
-        "json_extract(event_json, '$.type') IN ('tool_dispatched', 'tool_receipt') "
+        "json_extract(event_json, '$.type') IN ('tool_dispatched', 'tool_receipt', 'solution_review_qualification') "
         "ORDER BY sequence"
         if projection_only
         else "SELECT event_json FROM solver_events WHERE run_id=? ORDER BY sequence"

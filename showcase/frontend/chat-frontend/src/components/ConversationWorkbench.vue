@@ -1,48 +1,62 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, shallowRef, watch } from 'vue'
 import type { DecodedSseEvent } from '../api/events.schemas'
 import type { Collaboration } from '../api/workbench.schemas'
+import { roleLabels, statusLabels, typeOf } from '../runtime/jobs/causal-progress'
 import { projectWorkbench, roles } from '../runtime/jobs/workbench'
 import AgentConstellation from './AgentConstellation.vue'
+import AutonomousRouteStatus from './AutonomousRouteStatus.vue'
+import SerialInterventionStatus from './SerialInterventionStatus.vue'
 
-const props = defineProps<{ events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null }>()
+const props = defineProps<{ events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null; animateLive?: boolean }>()
 const view = ref('conversation')
 const role = ref('')
 const step = ref('')
+const expanded = ref(false)
+const technical = ref(false)
+const page = ref(1)
 const replayCount = ref<number | null>(null)
 const playing = ref(false)
 let timer: ReturnType<typeof setInterval> | undefined
-const all = computed(() => projectWorkbench(props.events, props.result, Boolean(props.replay)))
-const state = computed(() => replayCount.value === null ? all.value : projectWorkbench(all.value.events.slice(0, replayCount.value), null, true))
-const shown = computed(() => state.value.entries.filter(entry => (!role.value || entry.role === role.value
-  || entry.message?.from_role === role.value || entry.message?.to_role === role.value) && (!step.value || entry.step === step.value)))
-const threads = computed(() => {
-  const groups: Array<{ id: string; key: string; entries: typeof shown.value }> = []
-  for (const entry of shown.value) {
-    const id = entry.message?.thread_id ?? `event-${entry.event.id}`
-    const previous = groups.at(-1)
-    if (previous?.id === id) previous.entries.push(entry)
-    else groups.push({ id, key: `${id}:${entry.event.id}`, entries: [entry] })
-  }
-  return groups
+// Batch display updates only; the store and durable cursor retain every event.
+const displayEvents = shallowRef(props.events.slice())
+let displayTimer: ReturnType<typeof setTimeout> | undefined
+watch(() => props.events.length, () => {
+  if (displayTimer !== undefined) return
+  displayTimer = setTimeout(() => { displayTimer = undefined; displayEvents.value = props.events.slice() }, 100)
 })
-const activeRoles = computed(() => [...new Set(state.value.entries.map(entry => entry.role))])
-const message = ref<Collaboration | null>(null)
-const displayedMessage = computed(() => replayCount.value === null ? message.value : state.value.entries.at(-1)?.message ?? null)
+const all = computed(() => projectWorkbench(displayEvents.value, props.result, Boolean(props.replay), props.status))
+const state = computed(() => replayCount.value === null ? all.value : projectWorkbench(all.value.events.slice(0, replayCount.value), null, true))
+const now = ref(Date.now())
+const phaseClock = setInterval(() => { now.value = Date.now() }, 1000)
+const elapsed = computed(() => state.value.phaseStartedAt === null ? '阶段耗时未知'
+  : props.replay || replayCount.value !== null || props.status !== 'running' ? '历史阶段时间见技术记录'
+    : `本阶段 ${Math.max(0, Math.floor((now.value - state.value.phaseStartedAt) / 1000))} 秒`)
+const filtered = computed(() => state.value.keyEntries.filter(entry => (!role.value || entry.role === role.value
+  || entry.message?.from_role === role.value || entry.message?.to_role === role.value) && (!step.value || entry.step === step.value)))
+const shown = computed(() => expanded.value ? filtered.value : filtered.value.slice(-6))
+const technicalEntries = computed(() => state.value.entries.slice((page.value - 1) * 100, page.value * 100))
+const messages = ref<Collaboration[]>([])
+const displayedMessages = computed(() => replayCount.value === null ? messages.value : state.value.keyEntries.flatMap(entry => entry.message ? [entry.message] : []).slice(-1))
+let flightTimer: ReturnType<typeof setTimeout> | undefined
 const dark = ref(globalThis.document?.documentElement.dataset.theme === 'dark')
 function toggleTheme() {
   dark.value = !dark.value
   document.documentElement.dataset.theme = dark.value ? 'dark' : 'light'
   try { localStorage.setItem('mathagent-theme', dark.value ? 'dark' : 'light') } catch { /* Optional persistence. */ }
 }
-const animated = new Set<string>()
-watch(() => props.events.length, () => {
+const animated = new Set(all.value.entries.flatMap(entry => entry.message ? [entry.message.message_id] : []))
+watch(displayEvents, () => {
+  const batch: Collaboration[] = []
   for (const entry of all.value.entries) {
     if (entry.message && !animated.has(entry.message.message_id)) {
       animated.add(entry.message.message_id)
-      if (!props.replay && replayCount.value === null) message.value = entry.message
+      if (props.animateLive && !props.replay && props.status === 'running' && replayCount.value === null) batch.push(entry.message)
     }
   }
+  messages.value = batch.slice(-8)
+  clearTimeout(flightTimer)
+  flightTimer = setTimeout(() => { messages.value = [] }, 1400)
 })
 function selectRole(value: string) { role.value = role.value === value ? '' : value }
 function pause() { clearInterval(timer); playing.value = false }
@@ -55,20 +69,22 @@ function play() {
     if (replayCount.value >= all.value.events.length) pause()
   }, 900)
 }
-onUnmounted(pause)
+onUnmounted(() => { pause(); clearTimeout(flightTimer); clearTimeout(displayTimer); clearInterval(phaseClock) })
 </script>
 
 <template>
   <section class="workbench" aria-label="对话式执行工作台">
     <header class="workbench-toolbar">
       <strong>{{ replayCount === null ? all.source : 'REPLAY · 本地事件回放' }}</strong>
-      <span role="status">{{ status }}<span v-if="error"> · {{ error }}</span></span>
+      <span role="status" aria-atomic="true">当前阶段：{{ state.phase }}<span v-if="error"> · 请查看任务状态与运行详情</span></span>
+      <small>{{ elapsed }}</small>
       <div class="view-controls" aria-label="执行视图">
         <button type="button" :aria-pressed="dark" @click="toggleTheme">{{ dark ? '浅色主题' : '深色主题' }}</button>
-        <button type="button" :aria-pressed="view === 'conversation'" @click="view = 'conversation'">对话事件</button>
+        <button type="button" :aria-pressed="view === 'conversation'" @click="view = 'conversation'">关键进展</button>
         <button type="button" :aria-pressed="view === 'constellation'" @click="view = 'constellation'">完整星图</button>
       </div>
     </header>
+    <p v-if="['waiting_input', 'failed', 'canceled', 'unknown', 'needs_review'].includes(status)" class="attention">{{ statusLabels[status] }}。请查看任务状态及当前允许的操作；结果未知时先核对原提交，不要自动重发。</p>
     <div class="workbench-columns">
       <div class="workbench-main">
         <div class="event-filters">
@@ -76,52 +92,64 @@ onUnmounted(pause)
           <label>步骤 <select v-model="step"><option value="">全部步骤</option><option v-for="item in state.steps" :key="item.label">{{ item.label }}</option></select></label>
           <button type="button" @click="role = ''; step = ''">清除筛选</button>
         </div>
-        <AgentConstellation v-show="view === 'constellation'" :selected="role" :active-roles="activeRoles" :message="displayedMessage" @select="selectRole" />
-        <p v-if="role" class="role-detail">{{ roles.find(item => item[0] === role)?.[1] }} · {{ shown.length }} 条关联公开事件；节点亮起仅代表持久事件已到达。</p>
-        <ol v-show="view === 'conversation'" class="conversation-events" aria-live="polite">
-          <li v-for="thread in threads" :key="thread.key" :data-thread-id="thread.id">
-            <article v-for="entry in thread.entries" :key="entry.event.id!" :data-workbench-event="entry.event.id">
-            <small>#{{ entry.event.id }} · {{ entry.role }} <span v-if="entry.step">· {{ entry.step }}</span></small>
-            <h3>{{ entry.title }}</h3><p>{{ entry.summary }}</p>
-            <template v-if="entry.message">
-              <small>{{ entry.message.from_role }} → {{ entry.message.to_role }} · {{ entry.message.thread_status }}</small>
-              <details><summary>关联线程与公开边界</summary><p>{{ entry.message.thread_id }}</p><p>计划 v{{ entry.message.plan_version }} · 尝试 {{ entry.message.attempt_index }}；详细正文及裁决依据尚未公开。</p></details>
-              <p v-if="entry.message.chosen">裁决：{{ entry.message.chosen }}</p>
-              <ul v-if="entry.message.changes"><li v-for="(change, i) in entry.message.changes" :key="i">{{ change.op }} · {{ change.step_label }} · {{ change.summary }}</li></ul>
-            </template>
-            <ul v-if="entry.evidence.length" aria-label="通过门控的证据步骤"><li v-for="evidence in entry.evidence" :key="evidence.step_label">{{ evidence.step_label }} · ACCEPT · 已允许推进（不等于形式化证明）</li></ul>
+        <AgentConstellation v-show="view === 'constellation'" :selected="role" :role-states="state.roleStates" :messages="displayedMessages" @select="selectRole" />
+        <ol v-show="view === 'conversation'" class="conversation-events">
+          <li v-for="entry in shown" :key="entry.event.id!" :data-thread-id="entry.message?.thread_id">
+            <article :data-workbench-event="entry.event.id">
+              <small>{{ roleLabels[entry.role] }} <span v-if="entry.step">· {{ entry.step }}</span></small>
+              <h3>{{ entry.title }}</h3><p v-if="entry.summary !== entry.title">{{ entry.summary }}</p>
+              <p v-if="entry.message">{{ roleLabels[entry.message.from_role] ?? '角色待确认' }} → {{ roleLabels[entry.message.to_role] ?? '角色待确认' }}</p>
+              <p v-if="entry.evidence.length">步骤检查允许推进，不等于整题正确或形式化证明。</p>
             </article>
           </li>
         </ol>
-        <p v-if="!shown.length">等待公开执行事件；当前没有匹配的事件。</p>
+        <p v-if="!shown.length">等待关键进展；内部状态可在技术详情查看。</p>
+        <button v-if="filtered.length > 6" type="button" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起完整过程' : `展开完整过程（${filtered.length} 项）` }}</button>
+        <details @toggle="technical = ($event.target as HTMLDetailsElement).open">
+          <summary>技术详情（{{ state.events.length }} 条公开记录）</summary>
+          <template v-if="technical">
+            <p>仅显示公开事件身份、类型和分类，不展开模型正文。事件数不等于模型调用数。</p>
+            <ol class="technical-records"><li v-for="entry in technicalEntries" :key="entry.event.id!">#{{ entry.event.id }} · {{ typeOf(entry.event) }} · {{ roleLabels[entry.role] }} · {{ entry.event.data.created_at ?? '时间未知' }} · {{ state.keyEntries.some(e => e.event.id === entry.event.id) ? '关键进展' : '内部记录' }}</li></ol>
+            <button type="button" :disabled="page <= 1" @click="page--">上一页</button><span>第 {{ page }} 页</span>
+            <button type="button" :disabled="page * 100 >= state.events.length" @click="page++">下一页</button>
+          </template>
+        </details>
       </div>
-      <aside class="workbench-plan" aria-label="Planner 计划">
-        <h3>Planner <small>v{{ state.progress.plan_version ?? '—' }} · 尝试 {{ state.progress.attempt_index ?? '—' }}</small></h3>
+      <aside class="workbench-plan" aria-label="求解计划">
+        <details><summary>求解计划与调度详情</summary>
+        <AutonomousRouteStatus :execution-switch="state.progress.execution_switch" :selection="state.progress.execution_selection" :population="state.progress.population" />
+        <SerialInterventionStatus :value="state.progress.serial_intervention" />
+        <h3>求解计划</h3>
         <p v-if="!state.steps.length">计划尚未生成</p>
         <p v-else class="interjection-note">目标来自已保存的计划；执行状态来自实际核验事件。</p>
-        <ol><li v-for="item in state.steps" :key="item.label" :data-step-status="item.status"><strong>{{ item.label }}</strong><p v-if="item.goal">{{ item.goal }}</p><span>{{ item.status }}</span></li></ol>
+        <ol><li v-for="item in state.steps" :key="item.label" :data-step-status="item.status"><strong>{{ item.label }}</strong><p v-if="item.goal">{{ item.goal }}</p><span>{{ statusLabels[item.status] ?? '状态待确认' }}</span></li></ol>
         <details v-if="status === 'failed' && state.partial.unresolved.length">
           <summary>已保存成果与未解决项</summary>
           <p>已核验：{{ state.partial.accepted.join('、') || '暂无' }}</p>
           <p>未解决：{{ state.partial.unresolved.map(item => item === 'whole_solution_review' ? '独立整题审查' : item).join('、') }}</p>
           <article v-for="(candidate, i) in state.partial.candidates" :key="i"><small>候选 {{ i + 1 }} · {{ candidate.review }} · {{ candidate.eligible ? '已通过审查' : '未获通过' }}</small><p>{{ candidate.text }}</p></article>
         </details>
-        <AgentConstellation mini :selected="role" :active-roles="activeRoles" :message="displayedMessage" @select="selectRole" />
-        <p class="interjection-note">文本插话待接入，当前不能向求解器追加约束。暂停与恢复不代表采纳新文本。</p>
+        </details>
+        <AgentConstellation mini :selected="role" :role-states="state.roleStates" :messages="displayedMessages" @select="selectRole" />
+        <p class="interjection-note">节点依据公开生命周期更新；历史在途状态不冒充实时执行。</p>
       </aside>
     </div>
-    <footer class="replay-controls">
+    <details class="replay-controls"><summary>查看历史回放</summary>
       <button type="button" :disabled="!all.events.length" @click="playing ? pause() : play()">{{ playing ? '暂停回放' : '回放已收事件' }}</button>
-      <label>事件进度 <input type="range" min="0" :max="all.events.length" :value="replayCount ?? all.events.length" @input="pause(); replayCount = Number(($event.target as HTMLInputElement).value)" /></label>
-      <button v-if="replayCount !== null" type="button" @click="pause(); replayCount = null; message = null">返回任务状态</button>
-    </footer>
+      <label>回放位置（不是求解进度） <input type="range" min="0" :max="all.events.length" :value="replayCount ?? all.events.length" @input="pause(); replayCount = Number(($event.target as HTMLInputElement).value)" /></label>
+      <button v-if="replayCount !== null" type="button" @click="pause(); replayCount = null; messages = []">返回任务状态</button>
+    </details>
   </section>
 </template>
 
 <style scoped>
-.workbench { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); overflow: clip; color: var(--text); }
+.workbench { margin: 16px 0; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); color: var(--text); }
 .workbench-toolbar, .event-filters, .replay-controls, .view-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .workbench-toolbar, .replay-controls { padding: 12px; background: var(--surface-muted); }
+.workbench-toolbar { position: sticky; top: 0; z-index: 2; }
+.technical-records { font-size: 12px; overflow-wrap: anywhere; }
+.attention { padding: 12px; }
+summary { cursor: pointer; padding: 8px 0; }
 .workbench-toolbar > strong { color: var(--accent); font: 12px var(--font-mono); }
 .view-controls { margin-left: auto; }
 button, select { background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 6px 8px; font: inherit; min-height: 36px; cursor: pointer; }

@@ -52,6 +52,11 @@ export const progressSchema = z.object({
 
 export const populationProjectionSchema = z.object({
   version: z.string(),
+  routes: z.array(z.object({
+    ordinal: z.number().int().positive(), parent_ordinal: z.number().int().positive().nullable(),
+    status: z.string(), step_count: z.number().int().nonnegative(),
+    completed_steps: z.number().int().nonnegative(), result: z.string(),
+  })).optional(),
   scheduler: z.object({
     round: z.number().int().nonnegative(),
     member_count: z.number().int().nonnegative(),
@@ -89,6 +94,13 @@ export const formalAttemptSchema = z.object({
 
 export const formalVerificationSchema = z.object({
   schema_version: z.literal('formal-verification-v1'),
+  assessment: z.object({
+    status: z.enum(['default', 'met', 'unmet']),
+    reason: z.string(),
+    scope: z.enum(['original_problem', 'formal_target']),
+    required_grade: z.enum(['L2', 'L3']),
+    covered_obligation_ids: z.array(z.string()),
+  }).optional(),
   policy: z.record(z.string(), z.unknown()),
   policy_hash: z.string(),
   status: z.enum(['disabled', 'dispatched', 'unsupported', 'unavailable', 'not_verified', 'partial', 'timeout', 'error', 'failed', 'unknown', 'solved']),

@@ -1,6 +1,7 @@
 """Public Planner checkpoint handoff contracts for CP-03."""
 
 import unittest
+from copy import deepcopy
 
 from showcase.solver_harness import ScriptedModelPort, SolverHarness
 from showcase.solver_harness.intern_schemas import response_schema
@@ -28,6 +29,40 @@ def checkpoint(status="YIELD", *, marker="draft-a", version=1):
 
 
 class PlannerCheckpointTest(unittest.TestCase):
+    def test_forward_binding_feedback_separates_optional_complete_routes(self):
+        from tests.test_faithful_s03_job import SPEC
+
+        spec = deepcopy(SPEC)
+        spec["root_obligations"].append({"obligation_id": "output", "obligation_type": "format",
+            "statement": "Report the result", "prerequisite_ids": ["root:value"]})
+        bad = {"version": 1, "steps": [
+            {"step_id": "A", "title": "Compute", "objective": "Compute the result",
+             "obligation_ids": ["root:value"]},
+            {"step_id": "B", "title": "Report", "objective": "Report the result",
+             "obligation_ids": ["output"], "depends_on": ["A"]},
+            {"step_id": "C", "title": "Independent computation", "objective": "Compute another way",
+             "obligation_ids": ["root:value"]}]}
+        corrected = deepcopy(bad)
+        corrected["steps"].pop()
+        port = ScriptedModelPort([
+            {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []},
+            {"checkpoint": checkpoint("FINAL"), "plan": bad},
+            {"checkpoint": checkpoint("FINAL", marker="repair"), "plan": corrected}])
+        with SolverHarness(config={"features": {**FEATURES, "problem_spec": True,
+                "final_solution_review": True}, "max_model_calls": 3}, model_port=port) as harness:
+            result = harness.solve(spec["original_problem"], {"problem_spec": spec})
+        planners = [request for request in port.requests if request["role"] == "planner"]
+        feedback = planners[1]["feedback"]
+        self.assertEqual(bad, feedback["invalid_plan"])
+        self.assertEqual([{"step_id": "B", "objective_id": "output", "prerequisite_id": "root:value",
+                           "owner_step_id": "C", "kind": "forward_dependency"}], feedback["binding_errors"])
+        self.assertIn("Move optional whole-problem routes to alternative_plans", feedback["instruction"])
+        self.assertIn("one owner per root within each route", planners[0]["instruction"])
+        self.assertEqual(corrected["steps"], [
+            {key: value for key, value in step.items() if key != "auxiliary_goal_ids"}
+            for step in result["state"]["plan"]["steps"]])
+        self.assertEqual(2, len(planners))
+
     def test_yield_feedback_then_final_plan_uses_new_identity(self):
         plan = {
             "version": 1,

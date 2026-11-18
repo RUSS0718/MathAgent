@@ -108,6 +108,29 @@ def _established_ids(state):
     return ids
 
 
+def graph_step_result(state, step_id):
+    """Resolve only a unique live result already accepted by the current graph."""
+    snapshots = state.get("proof_graph", {}).get("snapshots", [])
+    snapshot = snapshots[-1] if snapshots else {}
+    propositions = snapshot.get("propositions", {})
+    accepted = {
+        item.get("result_id")
+        for item in snapshot.get("derivations", {}).values()
+        if item.get("status") == "accepted"
+        and snapshot.get("attempts", {}).get(item.get("attempt_id"), {}).get("status") == "accepted"
+        and propositions.get(item.get("conclusion"), {}).get("status") == "supported"
+        and not propositions.get(item.get("conclusion"), {}).get("conflict")
+        and propositions.get(item.get("conclusion"), {}).get("problem_version") == state.get("specification_version", 0)
+    }
+    candidates = {
+        row["result_id"] for row in state.get("verified_results_ledger", [])
+        if row.get("source") == step_id and row.get("result_id") in accepted
+        and row.get("valid") is True and not row.get("invalidated")
+        and row.get("specification_version", 0) == state.get("specification_version", 0)
+    }
+    return next(iter(candidates)) if len(candidates) == 1 else None
+
+
 def build_entries(state, reply, *, step_id, report, review_call_id, suffix,
                   plan_version, attempt_index):
     """Verify declared classifications and build authoritative ledger entries.
@@ -167,11 +190,19 @@ def build_entries(state, reply, *, step_id, report, review_call_id, suffix,
         ):
             reason = "unknown_dependency"
         if reason is None:
-            for value in dependencies:
+            dependencies = list(dependencies)
+            for dependency_index, value in enumerate(dependencies):
                 if value == result_id:
                     reason = "cyclic_dependency"
                 elif value not in known:
                     reason = "unknown_dependency"
+                elif (state.get("proof_graph_policy", {}).get("enabled") is True
+                      and value in state.get("steps", {})):
+                    resolved = graph_step_result(state, value)
+                    if resolved is None:
+                        reason = "unsupported_graph_step_dependency"
+                    else:
+                        dependencies[dependency_index] = resolved
                 if reason:
                     break
         if reason is not None:

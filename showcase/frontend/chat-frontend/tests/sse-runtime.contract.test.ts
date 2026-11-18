@@ -40,6 +40,21 @@ test('interrupt ends observation without reporting a dropped stream or retrying'
   assert.equal(events.at(-1)?.event, 'interrupt')
 })
 
+test('terminal history drains an old interrupt and its resumed completion without solving again', async () => {
+  let requests = 0
+  const events = await readJobEvents('saved-completed-job', 0, {
+    terminalSeen: true, maxRetries: 0,
+    fetchImpl: async () => {
+      requests++
+      return new Response('id: 1\nevent: interrupt\ndata: {"type":"interrupt","job_id":"saved-completed-job","status":"waiting_input"}\n\n'
+        + 'id: 2\nevent: resumed\ndata: {"type":"resumed"}\n\n'
+        + 'id: 3\nevent: final_result\ndata: {"type":"final_result","data":{}}\n\n')
+    },
+  })
+  assert.deepEqual(events.map(event => event.id), [1, 2, 3])
+  assert.equal(requests, 1)
+})
+
 test('SSE parser joins UTF-8 data split across chunks and accepts heartbeat', () => {
   const parser = new SseParser()
   const bytes = new TextEncoder().encode(

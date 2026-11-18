@@ -18,7 +18,26 @@ def task_identity(pipeline, mode):
     }}
 
 
-def attach_task_state(payload, *, allowed_actions=None):
+def _public_question(question, *, include_answer=True):
+    from .redaction import redact
+
+    fields = ("request_id", "task_id", "input_version", "question", "reason", "status")
+    if include_answer:
+        fields += ("answer",)
+    return redact({key: question[key] for key in fields if key in question})
+
+
+def public_run_result(result):
+    """Do not copy internal clarification persistence into a Run snapshot."""
+    public = dict(result)
+    identity = public.get("faithful")
+    if isinstance(identity, dict) and (reply := identity.get("clarification_reply")):
+        public["faithful"] = {key: value for key, value in identity.items() if key != "clarification_reply"}
+        public["faithful"]["clarification"] = _public_question(reply, include_answer=False)
+    return public
+
+
+def attach_task_state(payload, *, allowed_actions=None, question=None, control_phase=None):
     """Project committed Job/Solver state without creating another controller."""
     result = payload.get("result") or {}
     identity = result.get("faithful")
@@ -33,13 +52,20 @@ def attach_task_state(payload, *, allowed_actions=None):
     elif status == "canceled":
         phase = "canceled"
     elif status == "waiting_input":
-        phase = "waiting_input"
+        phase = control_phase or "waiting_input"
     elif status == "failed":
         phase = ("unknown" if recovery.get("unknown_calls") or recovery.get("unknown_tools")
                  else "budget_exhausted" if solver.get("status") == "partial_budget_exhausted"
-                 else "protocol_error" if "protocol" in str(reason) else "failed")
+                 else "protocol_error" if "protocol" in str(reason)
+                 else "incomplete" if solver.get("status", "").startswith(("partial_", "completed_"))
+                 else "failed")
     else:
-        phase = "intake" if solver.get("intake_status") == "pending" else solver.get("phase", status).lower()
+        switch = solver.get("execution_switch") or {}
+        phase = (control_phase or
+                 ("unknown" if switch.get("status") == "needs_review" else
+                  "converging" if switch.get("status") == "converging" else
+                  "intake" if solver.get("intake_status") == "pending" else
+                  solver.get("phase", status).lower()))
     result["faithful"] = {
         **identity, "specification_version": solver.get("specification_version"),
         "state_revision": solver.get("state_revision", 0),
@@ -47,5 +73,14 @@ def attach_task_state(payload, *, allowed_actions=None):
         "allowed_actions": (allowed_actions if allowed_actions is not None else
                             ["cancel"] if status in {"queued", "running", "waiting_input"} else []),
     }
+    if identity.get("revision_to"):
+        result["faithful"]["revision_to"] = {"task_id": identity["revision_to"]["task_id"]}
+        result["faithful"]["allowed_actions"] = []
+    result["faithful"]["revision_allowed"] = not bool(identity.get("revision_to"))
+    question = identity.get("clarification_reply") or question
+    if question:
+        result["faithful"].pop("clarification_reply", None)
+        result["faithful"]["clarification"] = _public_question(question)
+        result["faithful"]["input_version"] = question["input_version"] + int(question["status"] == "answered")
     payload["result"] = result
     return payload

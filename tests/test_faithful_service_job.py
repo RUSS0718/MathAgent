@@ -161,7 +161,11 @@ class FaithfulServiceJobTest(StarJobFixture, unittest.TestCase):
         # synthetic profiles do not cover every ContextPack message shape.
         with patch("tests.controlled_stream_profiles.configure_controlled_streaming",
                    return_value=VERIFIED_STREAM_PROFILES):
-            self.open_star([SPEC, SOLVED, POLISH, ACCEPT], **config)
+            intake = {**SPEC, "formalization": {
+                "status": "not_selected", "reason": "No formal target needed for this arithmetic fixture.",
+                "require_formal": False, "obligation_ids": [], "target": None,
+            }}
+            self.open_star([intake, SOLVED, POLISH, ACCEPT], **config)
         pipeline = self.app.extensions["showcase_workspace_service"].star_pipeline
         with patch.object(pipeline, "full_gaps", return_value=[]):
             created = self.client.post("/api/agent/jobs", headers=self.headers(),

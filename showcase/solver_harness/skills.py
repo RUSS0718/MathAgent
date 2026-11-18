@@ -32,9 +32,9 @@ PROTOCOLS = {
     "meta-intervention-protocol": {
         "trigger": "meta role",
         "input": "cross-attempt progress, failures, budget",
-        "output": "CONTINUE, TRACE_BACK, APPROVE_REPLAN or ABORT with reason",
+        "output": "One strategy decision conforming to the active response schema, with an explanation in its permitted fields",
         "permissions": ["read_state", "read_ledger"],
-        "instructions": "Choose one strategy decision without taking over the proof. Give a legal target for TRACE_BACK. APPROVE_REPLAN states failure causes, forbidden directions and reusable results. ABORT when no justified continuation remains within budget. Never execute code or mutate authoritative state.",
+        "instructions": "Choose one strategy decision without taking over the proof. Use only fields and values permitted by the active response schema, following this request's instruction within that schema. Only when the schema offers TRACE_BACK, give a legal target; only when it offers APPROVE_REPLAN, state failure causes, forbidden directions and reusable results. Choose ABORT only when offered and no justified continuation remains within budget. Never execute code or mutate authoritative state.",
     },
     "math-solving-strategies": {
         "trigger": "meta selects mathematical method",

@@ -13,6 +13,24 @@ from tests.test_faithful_s03_job import CAPACITY_POLICY
 
 
 class FaithfulServiceConfigTest(unittest.TestCase):
+    def test_unavailable_population_preserves_ordinary_config_identity(self):
+        from showcase.run_budget import RunBudgetLimits
+        from showcase.star_product_config import full_config
+        from showcase.star_product_pipeline import StarProductPipeline
+        from tests.test_star_population_runtime import CAPACITY
+
+        features = {"auto_problem_spec": True}
+        budget = RunBudgetLimits(max_model_calls=40)
+        expected = {**full_config(budget, features), "hint_mode": "none"}
+        for enabled, capacity in ((False, None), (False, CAPACITY),
+                                  (True, None), (True, {**CAPACITY, "worker_slots": 0})):
+            with self.subTest(enabled=enabled, capacity=capacity):
+                pipeline = StarProductPipeline(
+                    self.temp.name, full_budget=budget, full_features=features,
+                    population_enabled=enabled, population_capacity=capacity,
+                )
+                self.assertEqual(expected, pipeline.full_config)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -32,6 +50,14 @@ class FaithfulServiceConfigTest(unittest.TestCase):
         self.path.write_text(json.dumps(self.value), encoding="utf-8")
         return load_faithful_config(self.path)
 
+    def test_adaptive_solving_is_explicit_and_strictly_boolean(self):
+        self.assertNotIn("adaptive_solving", self.load()["SHOWCASE_STAR_FULL_FEATURES"])
+        self.value["adaptive_solving"] = True
+        self.assertIs(True, self.load()["SHOWCASE_STAR_FULL_FEATURES"]["adaptive_solving"])
+        self.value["adaptive_solving"] = 1
+        with self.assertRaisesRegex(ValueError, "faithful_adaptive_solving_invalid"):
+            self.load()
+
     def test_serial_features_are_added_to_core(self):
         from showcase.star_product_config import CORE_FEATURES
 
@@ -45,6 +71,64 @@ class FaithfulServiceConfigTest(unittest.TestCase):
         self.assertTrue(config["SHOWCASE_F7_SYSTEM_VIEW_ENABLED"])
         self.assertNotIn("SHOWCASE_FORMAL_BACKEND", config)
         self.assertFalse(config["SHOWCASE_POPULATION_MEMORY_ENABLED"])
+        self.assertNotIn("SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION", config)
+        self.value["stream_timeout_policy_version"] = None
+        self.assertNotIn("SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION", self.load())
+
+    def test_explicit_stream_timeout_policy_reaches_cli_config(self):
+        from showcase.server_cli import parse_server_args
+
+        self.value["stream_timeout_policy_version"] = "faithful-stream-v1"
+        self.load()
+        _, config = parse_server_args(["--mode", "live", "--faithful-config", str(self.path)])
+        self.assertEqual("faithful-stream-v1", config["SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION"])
+        self.assertEqual(180, config["SHOWCASE_STAR_ADAPTER"].client_timeout)
+        self.assertEqual(1100, config["SHOWCASE_STAR_FULL_BUDGET"].max_runtime_seconds)
+
+    def test_invalid_stream_timeout_policy_is_rejected(self):
+        for invalid in ("future", "", False, 1, {}, []):
+            self.value["stream_timeout_policy_version"] = invalid
+            with self.subTest(version=invalid), self.assertRaisesRegex(
+                    ValueError, "stream_timeout_policy_unsupported"):
+                self.load()
+
+    def test_explicit_request_wait_preserves_root_limits_and_adapter_settings(self):
+        from showcase.server_cli import parse_server_args
+
+        before = self.load()["SHOWCASE_STAR_ADAPTER"]
+        self.assertEqual(180, before.client_timeout)
+        self.value["budget"].update(max_tokens=2097152, max_runtime_seconds=2400)
+        self.value["request_timeout_seconds"] = 360
+        self.load()
+        _, config = parse_server_args(["--mode", "live", "--faithful-config", str(self.path)])
+        adapter = config["SHOWCASE_STAR_ADAPTER"]
+        self.assertEqual(360, adapter.client_timeout)
+        self.assertEqual((before.model_id, before.thinking_mode, before.max_tokens, before.client_retry),
+                         (adapter.model_id, adapter.thinking_mode, adapter.max_tokens, adapter.client_retry))
+        budget = config["SHOWCASE_STAR_FULL_BUDGET"]
+        self.assertEqual((48, 48, 8, 2097152, 2400), (budget.max_model_calls,
+            budget.max_http_attempts, budget.max_tool_calls, budget.max_tokens, budget.max_runtime_seconds))
+
+    def test_request_wait_and_population_wait_respect_explicit_bounds(self):
+        self.value["request_timeout_seconds"] = 360
+        self.value["population"] = {"capacity": {
+            "service_id": "intern", "max_inflight": 2, "worker_slots": 2,
+            "evidence_ref": "existing-two-slot-observation", "status": "verified"},
+            "budget": self.value["budget"]}
+        self.assertEqual(360, self.load()["SHOWCASE_STAR_POPULATION_REQUEST_TIMEOUT_SECONDS"])
+        self.value["population"]["request_timeout_seconds"] = 30
+        config = self.load()
+        self.assertEqual(30, config["SHOWCASE_STAR_POPULATION_REQUEST_TIMEOUT_SECONDS"])
+        self.assertEqual(360, config["SHOWCASE_STAR_ADAPTER"].client_timeout)
+        self.value["population"]["request_timeout_seconds"] = 361
+        with self.assertRaisesRegex(ValueError, "population_request_timeout_invalid"):
+            self.load()
+        self.value["population"]["request_timeout_seconds"] = 30
+        for invalid in (0, -1, True, "360", 1101, float("inf"), float("nan")):
+            self.value["request_timeout_seconds"] = invalid
+            with self.subTest(timeout=invalid), self.assertRaisesRegex(
+                    ValueError, "faithful_request_timeout_invalid"):
+                self.load()
 
     def test_missing_or_invalid_prerequisites_are_rejected(self):
         for field in ("budget", "python_image_id", "context_capacity"):
@@ -73,6 +157,20 @@ class FaithfulServiceConfigTest(unittest.TestCase):
         self.value["version"] = "future"
         with self.assertRaises(ValueError):
             self.load()
+
+    def test_population_timeout_is_explicit_and_preserves_root_limits(self):
+        self.value["population"] = {"capacity": {
+            "service_id": "intern", "max_inflight": 2, "worker_slots": 2,
+            "evidence_ref": "existing-two-slot-observation", "status": "verified"},
+            "budget": self.value["budget"], "request_timeout_seconds": 30}
+        config = self.load()
+        self.assertEqual(30, config["SHOWCASE_STAR_POPULATION_REQUEST_TIMEOUT_SECONDS"])
+        self.assertEqual(1100, config["SHOWCASE_STAR_FULL_BUDGET"].max_runtime_seconds)
+        self.assertEqual(180, config["SHOWCASE_STAR_ADAPTER"].client_timeout)
+        for invalid in (0, True, 181, float("inf")):
+            self.value["population"]["request_timeout_seconds"] = invalid
+            with self.subTest(timeout=invalid), self.assertRaises(ValueError):
+                self.load()
 
     def test_cli_defaults_preserved_and_fake_config_rejected(self):
         from showcase.server_cli import parse_server_args

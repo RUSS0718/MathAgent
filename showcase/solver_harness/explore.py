@@ -135,6 +135,17 @@ def run_exploration(
             "state_revision": current["state_revision"],
         }
         guidance_task = current["state"].get("pending_guidance_task")
+        if current["state"].get("adaptive_solving"):
+            request["instruction"] = (
+                "Construct a complete self-contained solution when possible, preserving all "
+                "requirements and proof obligations. Return SOLVED only with complete reasoning; "
+                "otherwise return NEED_PLAN with concrete unresolved obligations. When given "
+                "review_feedback, correct the identified step and all affected conclusions; "
+                "preserve independently valid reasoning. Do not treat feedback as proven facts.")
+            if current["state"].get("candidate_review_feedback"):
+                request["review_feedback"] = current["state"]["candidate_review_feedback"]
+                request["previous_candidate"] = current["state"]["exploration_findings"][-1].get(
+                    "solution_candidate", "")
         if isinstance(guidance_task, str) and guidance_task.strip():
             request["specific_task"] = guidance_task
         from . import protocol_repair

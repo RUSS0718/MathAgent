@@ -1,5 +1,75 @@
 # MathAgent 文档索引
 
+2026-11-16 当前：#187 自主求解入口工程退出完成。默认显示「自主求解（推荐）」，
+高级设置按自主调度、资源与候选交付、调试与兼容分组，保留原模式值及一键恢复。
+冻结45bd678的门禁6/6通过（后端2215项、0失败/错误、42跳过；发布27项、前端77项），
+源码无漂移；14项浏览器及本机入口、320px布局核验通过。后端策略和预算未改，
+不声明数学效果或难度分类能力提升。见[合同](engineering/autonomous-entry-187-contract.md)、
+[验收记录](evals/autonomous-entry-187-20261116.md)。下列较早状态按记录时间理解。
+
+2026-11-16 当前：#186 因果推理智能体首轮体验工程退出完成。统一中文入口，
+当前阶段原位更新，默认最近6条关键进展与生命周期星图，技术记录按需分页。
+完成后优先展示答案和实际检查，历史等待后的事件完整读取。冻结1405a71的
+门禁6/6通过（2215项、0失败/错误、42跳过；发布27项、前端77项），源码无
+漂移。32项浏览器及本机两份旧答案完整历史、刷新和重启只读复核通过。
+未定位的后台事件暴增风险仍保留，不声明数学能力或性能提升。见
+[#186合同](engineering/causal-ux-186-contract.md)、
+[验收记录](evals/causal-ux-186-20261116.md)。下列较早状态按各记录时间理解。
+
+2026-11-16 当前：用户允许受控路由并要求尽早结束，#183按工程接线验收，
+不再追加provider试跑。Lean限额、Intake阶段诊断、图依赖身份修复及双轴复查
+完成；8103从停止状态启动，两份持久答案/UI/刷新只读核验通过。gate-06原
+2214项有2失败/1错误；冻结da02f92的gate-07定点复验及补跑14/14通过，源码
+无漂移（受影响8项、发布27项、前端70项及审计通过）。按组合证据完成#183
+工程接线退出，原失败保留，不宣称单次全仓通过；并发冻结等待及SQLite锁
+仍为未定位的间歇风险。自然触发稳定性与数学
+正确率/F8未验证，#168保持开放。以[当前合同](engineering/faithful-service-183-contract.md)、
+[阶段记录](evals/faithful-service-183-20261115.md)及[交付入口](engineering/faithful-service-183-delivery.md)首节为准；
+下列旧计划和状态均为历史快照。
+
+2026-11-16 历史停止：live32首题答案交付、真实UI及只读刷新通过；Lean触发
+CPU时间限制、无可信缓存来源，条件性第二题未提交。按用户“再失败就终止”
+要求停止后续修复、重跑、门禁和自动接续。#183/#168仍开放，详见下列最新
+阶段记录及交接首节。历史启动计划不构成当前继续授权。
+
+2026-11-16 最新：#183 改按完整流程、格式传递及持久答案稳定读取验收，
+不独立核对数学内容。live31 在本机09:48重启时中断，恢复为failed/needs_review，
+最后Planner未知且未重发；不属于已证实的预算耗尽或模型超时。准备以短恒等式
+补交付/缓存/恢复证据，其他未触发能力仍未完成。以[当前合同](engineering/faithful-service-183-contract.md)、
+[阶段记录](evals/faithful-service-183-20261115.md)和[最新交接](engineering/unattended-ticket-handoff.md)首节为准。
+
+2026-11-16 接续状态：#185 已按用户确认关闭，交付 `0d9f86d` 已推送至
+`faithful-autonomous-population`。其增量验收不替代仍开放的 #183/#168；
+下列旧状态描述按各记录的源码与日期理解。
+
+- [#185 按需求解阶段验收](evals/adaptive-solving-185-20261115.md)：本票增量工程退出完成；[策略合同](engineering/adaptive-solving-185-contract.md)。轻量交付、一次数学修正、反馈调度、Meta 防循环与协议接缝修复均有证据；真实先单题再16题扩展，17个新 Job 独立核对正确（源码 `dfe8018`）。最终检查源码 `7b9962c` 的后端离线3/3通过（2196项、0 failure/error、42skip；发布27项；无源码漂移），baseline 11文件字节一致。完整深度交付、历史SQLite/并发间歇故障及数学误判仍有限制；不替代#183/#157，GitHub状态未自动变更。
+
+- [#183 本机服务阶段验收](evals/faithful-service-183-20261115.md)：首节按S01–S05/F1–F7区分受控接线、真实模型/工具及未验证自然能力；保留live33缓存未命中、live34协议失败及live35图提交异常。最终门禁与本机持久交付见当前记录，不将历史失败升级。见[当前交接](engineering/unattended-ticket-handoff.md)。
+
+- [#182 状态与控制组合验收](evals/faithful-service-182-20261115.md)：[G2合同](engineering/faithful-service-182-contract.md)。冻结e62d145的gate-01六阶段通过（2105项、0failure/error、42skip、source_changed=false），双轴复查解除；真实旧Run刷新/重启保持原预算、4次Attempt和输出身份。仅整合已有能力，#168完整服务仍未完成，按[交接](engineering/unattended-ticket-handoff.md)继续#183。
+
+- [#181 答案表达与只读恢复验收](evals/faithful-service-181-20261115.md)：G1工程退出通过；[合同](engineering/faithful-service-181-contract.md)。复用#169真实答案5，显式模板表达、同版本深链和只读恢复通过，原4次模型调用及预算不变。冻结36c0c36的gate-02六阶段通过（2096项、0failure/error、42skip、源码无漂移），原gate-01夹具失败和最小修复保留。表达不代表新增验证或教学质量提升。按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)继续#182；#168完整服务仍未完成。
+
+- [#180 证明缓存当前核验验收](evals/faithful-service-180-20261115.md)：达到授权调整后的开发接线退出条件；[合同](engineering/faithful-service-180-contract.md)。冻结35eaa43的gate-01六阶段通过（2095项、0failure/error、42skip、源码无漂移）。固定真实Lean当前重验与同根计账、当前回执身份UI完成；三轮自然来源失败保留，自然命中及真实当前回执UI/跨进程恢复留#183。#168未完成；按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)继续#181。
+
+- [#179 授权经验与撤销验收](evals/faithful-service-179-20261114.md)：达到用户授权调整后的开发接线退出条件；[合同](engineering/faithful-service-179-contract.md)。冻结 a82b345 的 gate-01 六阶段通过（2095项、0 failure/error、49 skip、源码无漂移）。真实关联新 Job 正确交付7，自动捕获及同域来源注入可追踪，但决策为 not_reported；新 Job 公共投影仅事后离线导出，观察器原失败保留。自然 adopt/reject、真实关闭/清理/跨会话导入、重启后的真实撤销及完整真实 UI 闭环留 #183，#168未完成。按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)继续 #180。
+
+- [#178 自然题形式目标与范围验收](evals/faithful-service-178-20261114.md)：普通输入取得真实 Lean L2、正确恒等式答案及只读恢复；对应未审查不冒认整题L3。[合同](engineering/faithful-service-178-contract.md)取消额外自然L3门槛，原失败保留。冻结f008420的gate-02六阶段通过（2087项、0 failure/error、49 skip、源码无漂移）；一般L3及自然明确机器要求正向仍未实证，留#183。#168未完成。
+
+- [#177 并发收敛后自主干预验收](evals/faithful-service-177-20261114.md)：达到授权调整后的开发接线退出条件；[合同](engineering/faithful-service-177-contract.md)。冻结源码 `0225fd9c` 以gate-02及gate-03受影响复验组合完成门禁，覆盖2080项、49 skip；原异常退出和Docker错误保持失败，非单次全仓通过。发布27项、前端65项及审计通过，源码无漂移。自然并发干预、完整正确答案、真实干预UI终态和进程退出续跑未实证，留#183；#168未完成。按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)继续。
+
+- [#176 串行自主干预与成果采用验收](evals/faithful-service-176-20261114.md)：达到授权调整后的开发接线退出条件；[合同](engineering/faithful-service-176-contract.md)。冻结源码 `b958807` 的 gate-03 六阶段通过（2070项、0 failure/error、49 skip、源码无漂移）；原门禁中止/观察超时、修复红绿及双轴复审保留。自然干预、完整正确交付、真实干预UI正向闭环及进程退出续跑未实证，继续留#183；#168未完成。按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)推进下一就绪票。
+
+- [#175 同任务安全串并行切换验收](evals/faithful-service-175-20261114.md)：达到用户授权调整后的开发接线退出条件；[合同](engineering/faithful-service-175-contract.md)。冻结源码 `588b40e` 的 gate-03 六阶段通过（2063 项、0 failure/error、49 skip、源码无漂移），前两轮失败、竞态红绿与双轴复审保留。自然真实热切换、完整正确交付与真实路线UI正向闭环仍留#183，#168未完成；按[接续合同](engineering/unattended-ticket-loop.md)及[当前交接](engineering/unattended-ticket-handoff.md)继续#176。
+
+- [#174 自主并发开发接线验收](evals/faithful-service-174-20261113.md)：达到用户授权调整后的开发退出条件。冻结源码 `b8c4ec8` 的 gate-02 六阶段通过（2048 项、0 failure/error、49 skip、源码无漂移）；原 gate-01 的 4 项测试 profile 失败及最小修复保留。真实自然并发完整交付、实际路线 UI 与刷新正向闭环留待 #183，#168 完整服务仍未完成。#175后续进展见上方入口；unknown 不重发。
+
+- [#173 关联改题验收](evals/faithful-service-173-20261113.md)：B3 改题停止旧派发并创建关联新任务；真实新题独立交付 5，旧迟到结算隔离、刷新零新增调用，最终源码只读恢复通过。双轴修复复查无剩余问题；冻结 `9978157` 门禁 6/6 通过（2020 项、49 skip、源码无漂移）。仅交付本票，#168 完整服务仍未完成。
+
+- [#172 必要条件澄清验收](evals/faithful-service-172-20261113.md)：B2 同任务提问、回答适用性复判和规格 v2 已取得真实三角形面积 12 的证据，刷新 0 POST、同 Attempt；双轴复查无阻塞。冻结源码 `1c37325` 门禁 6/6 通过（2016 项、49 skip、源码无漂移），达到本票工程退出；#168 完整服务仍未交付。
+
+- [#171 提交响应丢失恢复验收](evals/faithful-service-171-20261113.md)：B1 已完成持久身份、只读找回、多标签防重和明确再次求解；双轴复查清零，冻结源码 `c87c33f` 门禁 6/6 通过（2008 项、49 skip、源码无漂移）。真实旧 Run 刷新及第二标签 0 POST、Attempt 不变；#168 完整服务仍未交付。
+
 - [Faithful 自主 Agent 完整本机服务实施规格](https://github.com/RUSS0718/MathAgent/issues/168)：已拆分 #169–#183，按 A–H 端到端切片推进。[首票 #169 验收记录](evals/faithful-service-169-20261113.md)包含普通输入、真实 2+3 整题检查与刷新证据。[#170 验收记录](evals/faithful-service-170-20261113.md)已完成简单题真实 Planner→三个串行工作块→Python→整题绑定与只读恢复；最终 gate-03 六阶段通过（2007 项、0 failure/error、49 skip、源码无漂移），达到本票工程退出，交付 SHA 见 #170 完成评论。完整服务仍未交付，后续票按真实依赖领取。验收以少量真实模型、工具和浏览器场景跑通为主，不新增准确率、性能或大样本门槛。
 - [Faithful 自主能力调度与前端闭环决策地图](https://github.com/RUSS0718/MathAgent/issues/160)：2026-11-12 七项决策完成，规划退出；实施要求已汇总到 #168，完整服务尚未交付。能力准入、普通输入、动态调度、形式化、记忆及前端合同见地图的已决事项。
 - [自主服务实施交接与验收决议](https://github.com/RUSS0718/MathAgent/issues/167#issuecomment-6828389803)：首次交付在当前机器完成；按端到端切片接通真实服务，减少无关或重复离线测试，保留关键故障检查、阶段门禁与真实模型、工具、浏览器验收。既有未提交草稿须按决议核对，不算已验收实现；官方路径与独立 F8 数学评测保持各自边界。

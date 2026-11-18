@@ -17,15 +17,71 @@ const injectionEnabled = ref(false)
 const injectionPending = ref(false)
 const injectionUnavailable = ref(false)
 const injectionError = ref('')
+const observations = ref<PopulationMemoryControlResponse['observations']>([])
+const sourceSessionId = ref('')
+const loadedSourceId = ref('')
+const sourceObservations = ref<PopulationMemoryControlResponse['observations']>([])
+const selectedRecordId = ref('')
+const managementMessage = ref('')
+
+watch(sourceSessionId, () => {
+  loadedSourceId.value = ''
+  sourceObservations.value = []
+  selectedRecordId.value = ''
+})
 
 watch(() => props.populationMemoryControl, (memory) => {
   injectionUnavailable.value = false
   injectionError.value = ''
-  if (memory.status === 'available') injectionEnabled.value = memory.data.injection_enabled
+  sourceSessionId.value = ''
+  managementMessage.value = ''
+  if (memory.status === 'available') {
+    injectionEnabled.value = memory.data.injection_enabled
+    observations.value = memory.data.observations
+  }
 }, { immediate: true })
 
+async function manageMemory(action: 'load' | 'import' | 'clear'): Promise<void> {
+  const control = props.populationMemoryControl
+  if (control.status !== 'available' || !control.data.sessionId || injectionPending.value) return
+  const sessionId = control.data.sessionId
+  const sourceId = sourceSessionId.value.trim()
+  if (action === 'load' && !sourceId) return
+  if (action === 'import' && (!selectedRecordId.value || loadedSourceId.value !== sourceId)) return
+  injectionPending.value = true
+  injectionError.value = ''
+  managementMessage.value = ''
+  try {
+    if (action === 'load') {
+      sourceObservations.value = []
+      selectedRecordId.value = ''
+      loadedSourceId.value = ''
+      const result = await api.populationMemoryControl(sourceId)
+      sourceObservations.value = result.observations
+      loadedSourceId.value = sourceId
+      managementMessage.value = result.observations.length ? '来源已读取；请选择观察并显式导入。' : '来源会话没有可导入的观察。'
+    } else {
+      if (action === 'import') {
+        await api.importPopulationMemory(sessionId, loadedSourceId.value, selectedRecordId.value)
+        managementMessage.value = '已导入所选观察；仅作经验参考。'
+      } else {
+        await api.clearPopulationMemory(sessionId)
+        observations.value = []
+        managementMessage.value = '已清理此会话记忆；保留历史审计与有效数学账本。'
+      }
+      const result = await api.populationMemoryControl(sessionId)
+      observations.value = result.observations
+      injectionEnabled.value = result.injection_enabled
+    }
+  } catch (error) {
+    injectionError.value = error instanceof Error ? `记忆管理失败：${error.message}` : '记忆管理失败；服务端状态无法确认。'
+  } finally {
+    injectionPending.value = false
+  }
+}
+
 async function updateInjection(enabled: boolean): Promise<void> {
-  if (props.populationMemoryControl.status !== 'available' || !props.populationMemoryControl.data.sessionId) return
+  if (props.populationMemoryControl.status !== 'available' || !props.populationMemoryControl.data.sessionId || injectionPending.value) return
   injectionPending.value = true
   injectionError.value = ''
   try {
@@ -105,6 +161,25 @@ function evidenceKey(evidence: Record<string, unknown>, index: number): string {
           {{ evidenceLabel(evidence, index) }} · 等级：{{ display(evidence.evidence_level ?? evidence.grade) }} · 类别：{{ display(evidence.category) }}
         </li>
       </ul>
+      <section aria-label="经验记忆使用与决策">
+        <h3>经验记忆使用与决策</h3>
+        <p>检索或注入不表示采用；经验仅供参考，不构成数学证明。</p>
+        <p v-if="!props.runMemory.data.run_memory.memory_usage.length" class="muted" role="status">没有可显示的记忆使用报告；不能据此推断采用或拒绝。</p>
+        <article v-for="usage in props.runMemory.data.run_memory.memory_usage" :key="usage.call_id">
+          <dl class="data-list">
+            <dt>调用</dt><dd>{{ usage.call_id }}</dd>
+            <dt>检索/注入记录</dt><dd>{{ usage.record_ids.length ? usage.record_ids.join('、') : '无记录' }}</dd>
+          </dl>
+          <p v-if="usage.decision_status === 'not_reported'">未报告采用或拒绝（not_reported）</p>
+          <template v-else>
+            <p>已报告决策（reported）</p>
+            <p v-if="!usage.decisions.length" class="muted">没有明确的采用或拒绝条目。</p>
+            <ul v-else aria-label="明确记忆决策">
+              <li v-for="(decision, index) in usage.decisions" :key="`${decision.record_id}:${index}`">{{ decision.record_id }} · {{ decision.decision === 'adopt' ? '明确采用（adopt）' : '明确拒绝（reject）' }} · 原因：{{ decision.reason || '未提供' }}</li>
+            </ul>
+          </template>
+        </article>
+      </section>
     </template>
 
     <p v-else-if="props.runMemory.status === 'loading'" role="status" aria-busy="true">正在读取本次运行记忆…</p>
@@ -143,14 +218,29 @@ function evidenceKey(evidence: Record<string, unknown>, index: number): string {
           >
           启用此会话的 Population Memory 注入
         </label>
-        <p id="population-memory-injection-help" class="muted">服务端启用 Population Memory 功能时，此开关允许本会话的新 STAR Run 读取并注入历史观察，也允许记录终态 Run 的观察。关闭后，新 Run 不再读取观察，完成时关闭的 Run 不会记录观察；已开始的 Run 可能继续使用先前载入的观察。已有记录仍可显示、清理和审计。</p>
-        <p v-if="injectionPending" role="status" aria-busy="true">正在提交注入设置请求…</p>
+        <p id="population-memory-injection-help" class="muted">服务端启用 Population Memory 功能时，此开关允许本会话读取并注入历史观察，也允许记录终态 Run 的观察。关闭后不再记录或注入；关闭、清理或来源撤销后，后续模型请求（包括继续及重启恢复）都会重新核验当前授权和来源，不再使用失效经验。已发出的请求无法撤回；历史审计与有效数学账本保留。</p>
+        <form @submit.prevent="manageMemory('load')">
+          <label for="memory-source-session">来源会话 ID</label>
+          <input id="memory-source-session" v-model="sourceSessionId" :disabled="injectionPending" required>
+          <button type="submit" :disabled="injectionPending || !sourceSessionId.trim()">读取来源观察</button>
+        </form>
+        <p class="muted">仅允许同所有者会话显式导入；读取来源不会自动导入或启用注入，服务端会复核所有祖先来源。</p>
+        <label for="memory-source-observation">来源观察</label>
+        <select id="memory-source-observation" v-model="selectedRecordId" :disabled="injectionPending || !sourceObservations.length">
+          <option value="">请选择来源观察</option>
+          <option v-for="item in sourceObservations" :key="item.record_id" :value="item.record_id">{{ item.record_id }}</option>
+        </select>
+        <p v-for="item in sourceObservations" :key="item.record_id">来源 {{ item.record_id }}：{{ display(item.provenance) }}</p>
+        <button type="button" :disabled="injectionPending || !selectedRecordId || loadedSourceId !== sourceSessionId.trim()" @click="manageMemory('import')">显式导入所选观察</button>
+        <button type="button" :disabled="injectionPending" @click="manageMemory('clear')">清理此会话记忆</button>
+        <p v-if="managementMessage" role="status" aria-live="polite">{{ managementMessage }}</p>
+        <p v-if="injectionPending" role="status" aria-busy="true">正在处理记忆管理请求…</p>
         <p v-else role="status" aria-live="polite">服务端报告的注入状态：{{ injectionEnabled ? '启用' : '停用' }}</p>
         <p v-if="injectionError" class="notice notice--warning" role="alert">{{ injectionError }}</p>
       </div>
       <p v-else class="notice notice--warning" role="status">此会话的记忆注入控制不可用。</p>
-      <p v-if="!props.populationMemoryControl.data.observations.length" class="muted" role="status">没有可显示的记忆观察。</p>
-      <article v-for="observation in props.populationMemoryControl.data.observations" :key="observation.record_id">
+      <p v-if="!observations.length" class="muted" role="status">没有可显示的记忆观察。</p>
+      <article v-for="observation in observations" :key="observation.record_id">
         <dl class="data-list">
           <dt>结果观察</dt><dd>{{ display(observation.observation.outcome) }}</dd>
           <dt>适用范围</dt><dd>{{ display(observation.observation.applicability) }}</dd>
@@ -165,3 +255,7 @@ function evidenceKey(evidence: Record<string, unknown>, index: number): string {
     <p v-else-if="props.populationMemoryControl.status === 'unavailable'" class="muted" role="status">会话记忆注入控制不可用。</p>
   </section>
 </template>
+
+<style scoped>
+input:not([type="checkbox"]), select { max-width: 100%; min-width: 0; }
+</style>

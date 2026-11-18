@@ -365,7 +365,13 @@ class GlobalGoalCache:
                 "UPDATE faithful_goal_cache_entries SET updated_at=? WHERE cache_id=?",
                 (_utc_now(), row[0]),
             )
-            self._audit(row[0], "receipt_rechecked", actor_id, {"grade_ceiling": "L2"})
+            self._audit(row[0], "receipt_rechecked", actor_id, {
+                "grade_ceiling": "L2",
+                "current_run_id": request["run_id"],
+                "current_attempt_id": request["attempt_id"],
+                "current_status": safe_result["status"],
+                "current_grade": "L2",
+            })
         return {"cache_id": row[0], "status": "rechecked", "grade": "L2", "result": safe_result}
 
     def invalidate(self, identity: GoalCacheIdentity, *, actor_id: str, reason: str) -> None:

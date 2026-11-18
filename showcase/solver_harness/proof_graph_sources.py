@@ -7,7 +7,7 @@ import re
 import unicodedata
 from collections.abc import Mapping
 
-from .classified import PROVEN_CATEGORIES, _complete_receipt_ids
+from .classified import PROVEN_CATEGORIES, _complete_receipt_ids, graph_step_result
 from .counterexample import consumed_result
 
 
@@ -22,7 +22,8 @@ def recorded_call(state: Mapping, call_id: object, role: str) -> Mapping | None:
     if not isinstance(call_id, str) or not isinstance(calls, Mapping):
         return None
     call = calls.get(call_id)
-    if (not isinstance(call, Mapping) or call.get("role") != role
+    allowed_roles = {"reasoner", "reason_noncoding"} if role == "reasoner" else {role}
+    if (not isinstance(call, Mapping) or call.get("role") not in allowed_roles
             or call.get("run_id") != state.get("run_id")
             or call.get("problem_hash") != state.get("problem_hash")
             or call.get("config_hash") != state.get("config_hash")):
@@ -30,7 +31,7 @@ def recorded_call(state: Mapping, call_id: object, role: str) -> Mapping | None:
     return call
 
 
-def reasoner_report_call(state: Mapping, step_id: str, report: Mapping,
+def local_reasoner_report_call(state: Mapping, step_id: str, report: Mapping,
                          plan_version: int, attempt_index: int,
                          before_revision: int | None = None) -> str | None:
     """Find the completed reasoner call matching the saved report and attempt."""
@@ -46,7 +47,7 @@ def reasoner_report_call(state: Mapping, step_id: str, report: Mapping,
         response_claims = [item.get("statement") for item in response.get("claims", [])
                            if isinstance(item, Mapping) and isinstance(item.get("statement"), str)] \
             if isinstance(response, Mapping) and isinstance(response.get("claims"), list) else None
-        if (isinstance(call, Mapping) and call.get("role") == "reasoner"
+        if (isinstance(call, Mapping) and call.get("role") in {"reasoner", "reason_noncoding"}
                 and call.get("status") in {"completed", "recovered_pending_validation"}
                 and call.get("run_id") == state.get("run_id")
                 and call.get("problem_hash") == state.get("problem_hash")
@@ -59,6 +60,17 @@ def reasoner_report_call(state: Mapping, step_id: str, report: Mapping,
                 and response_claims == claims):
             candidates.append((call.get("request_revision", -1), call_id))
     return max(candidates, default=(None, None))[1]
+
+
+def reasoner_report_call(state, step_id, report, plan_version, attempt_index, before_revision=None):
+    """返回本地回执或显式原生来源身份，禁止伪造父 reasoner 调用。"""
+    from .report_sources import resolve_report_source
+
+    review = next((call for call in state.get('calls', {}).values()
+                   if call.get('role') == 'step_verifier' and call.get('request_revision') == before_revision
+                   and call.get('request', {}).get('step', {}).get('step_id') == step_id), None)
+    source = resolve_report_source(state, step_id, report, plan_version, attempt_index, review=review)
+    return source['source_id'] if source else None
 
 
 def _verify_record(state: Mapping, record: Mapping) -> tuple[dict | None, str | None]:
@@ -117,7 +129,8 @@ def _verify_record(state: Mapping, record: Mapping) -> tuple[dict | None, str | 
         and item.get("scope") == scope
         and item.get("claim_indexes", []) == record.get("claim_indexes", [])
         and item.get("receipt_ids", []) == record.get("receipt_ids", [])
-        and item.get("dependencies", []) == record.get("dependencies", [])
+        and [graph_step_result(state, dep) if dep in state.get("steps", {}) else dep
+             for dep in item.get("dependencies", [])] == record.get("dependencies", [])
         for item in response.get("classified_outcomes", [])
     ):
         return None, "review_did_not_accept_record"

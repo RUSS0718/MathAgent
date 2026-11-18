@@ -55,6 +55,14 @@ const starEvents = [
   'id: 11\nevent: final_result\ndata: {"type":"final_result","data":{},"status":"failed"}\n\n',
 ].join('')
 
+test('repeated checkpoints show stagnation instead of a false round-limit claim', async ({ page }) => {
+  await mockWorkspace(page, true, starEvents.replaceAll('round_limit_reached', 'checkpoint_no_progress'))
+  await page.goto('/dashboard-assets/run/run-demo')
+  await expect(page.getByText('质询草稿重复 · 升级原因：检查点无进展 · 已升级 Meta')).toBeVisible()
+  await expect(page.getByText(/Meta 裁定 ABORT · 升级原因：检查点无进展/)).toBeVisible()
+  await expect(page.getByText(/达到质询轮数上限/)).toHaveCount(0)
+})
+
 for (const width of [320, 768, 1024, 1440]) {
   test(`STAR route and Gate decisions render safely at ${width}px`, async ({ page }, testInfo) => {
     const consoleProblems: string[] = []

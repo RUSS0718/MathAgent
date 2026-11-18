@@ -24,6 +24,16 @@ test('goal-cache schema validates metadata and preserves only supplied optional 
   assert.throws(() => goalCacheResponseSchema.parse({ ...response, entries: [{ ...response.entries[0], state: 'tombstone' }] }))
 })
 
+test('goal-cache accepts null reasons and session audit events from the public API', () => {
+  const parsed = goalCacheResponseSchema.parse({
+    ...response,
+    entries: [{ ...response.entries[0], state: 'active', reason: null }],
+    events: [{ cache_id: null, event: 'cache_enabled', details: { tombstone: false }, created_at: '2026-11-15T01:00:00Z' }],
+  })
+  assert.equal(parsed.entries[0]?.reason, null)
+  assert.equal(parsed.events[0]?.cache_id, null)
+})
+
 test('goal-cache API uses encoded session paths and CSRF for both mutation methods', async () => {
   const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' })
   const originalFetch = globalThis.fetch

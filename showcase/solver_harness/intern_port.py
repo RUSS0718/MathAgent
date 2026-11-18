@@ -16,6 +16,7 @@ from ..tool_schemas import POLYNOMIAL_CHECK_SCHEMA, PYTHON_MATH_SCHEMA, schema_e
 from .faithful_memory_injection import has_population_memory
 from .intern_instructions import objective_dependencies, response_instructions, step_review_scope
 from .intern_schemas import response_schema
+from .problem_intake_schema import invalid_intake_phase_reply
 
 
 class InternPortError(RuntimeError):
@@ -313,7 +314,8 @@ class InternModelPort:
                 raise _protocol_failure("invalid_json", record, response.text) from exc
             if _invalid_meta_action_enum(parsed, schema, request["role"]):
                 raise _protocol_failure("invalid_role_enum", record, response.text)
-            if not isinstance(parsed, Mapping) or schema_error(parsed, schema):
+            if (not isinstance(parsed, Mapping) or schema_error(parsed, schema)
+                    or invalid_intake_phase_reply(parsed, request)):
                 raise _protocol_failure("invalid_role_schema", record, response.text)
             record["status"] = "success"
             return dict(parsed)
@@ -387,7 +389,8 @@ class InternModelPort:
                 raise _protocol_failure("invalid_json", record, text) from exc
             if _invalid_meta_action_enum(parsed, schema, request["role"]):
                 raise _protocol_failure("invalid_role_enum", record, text)
-            if not isinstance(parsed, Mapping) or schema_error(parsed, schema):
+            if (not isinstance(parsed, Mapping) or schema_error(parsed, schema)
+                    or invalid_intake_phase_reply(parsed, request)):
                 raise _protocol_failure("invalid_role_schema", record, text)
             record["status"] = "success"
             metrics["status"] = "completed"
@@ -425,15 +428,29 @@ class InternModelPort:
         if self.original_problem is not None and original != self.original_problem and not revised_original:
             raise InternPortError("problem_identity_mismatch")
         role = request["role"]
-        layers = request.get("prompt_layers", [])
+        context = deepcopy(dict(request))
+        layers = context.pop("prompt_layers", [])
+        memory = context.get("population_memory_advisory")
+        if (isinstance(memory, Mapping) and memory.get("authority") == "advisory_only"
+                and isinstance(memory.get("observations"), list) and memory["observations"]):
+            # The refreshed current envelope stays untrusted user data, once.
+            for layer in layers:
+                state = layer.get("state") if isinstance(layer, Mapping) else None
+                if isinstance(state, dict):
+                    state.pop("population_memory_advisory", None)
+            role_context = context.get("role_context")
+            state = role_context.get("state") if isinstance(role_context, Mapping) else None
+            if isinstance(state, dict):
+                state.pop("population_memory_advisory", None)
+        else:
+            # Legacy nested-only inputs retain their original serialized body.
+            context.pop("population_memory_advisory", None)
         instructions = response_instructions(request, schema)
         system = [{"role": "system", "content": instructions}]
         system.extend(
             {"role": "system", "content": json.dumps(layer, ensure_ascii=False)} for layer in layers
         )
         tools = {"polynomial_check": POLYNOMIAL_CHECK_SCHEMA, "python_math": PYTHON_MATH_SCHEMA}
-        context = deepcopy(dict(request))
-        context.pop("prompt_layers", None)
         context.pop("prompt_layers_fingerprint", None)
         context.pop("input_fingerprint", None)
         context.pop("schema_fingerprint", None)
@@ -445,7 +462,6 @@ class InternModelPort:
         context.pop("retry_limit", None)
         context.pop("route_id", None)
         context.pop("population_action_id", None)
-        context.pop("population_memory_advisory", None)
         context["original_problem"] = original
         if role == "planner" and isinstance(specification, Mapping):
             context["objective_dependencies"] = objective_dependencies(specification)

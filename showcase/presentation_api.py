@@ -21,7 +21,9 @@ def register_presentation_api(app, *, workspace_service, job_loader: Callable, r
     blueprint = Blueprint("s06_presentation", __name__)
 
     @blueprint.post("/api/agent/jobs/<job_id>/<mode>")
+    @blueprint.get("/api/agent/jobs/<job_id>/outputs/<mode>")
     def present_job(job_id: str, mode: str):
+        """Generate only on explicit POST; GET restores an existing current output."""
         if mode not in MODES:
             return _error("presentation_mode_invalid", 400)
         user_id = getattr(g.auth_session, "user_id", None)
@@ -31,17 +33,21 @@ def register_presentation_api(app, *, workspace_service, job_loader: Callable, r
             job = job_loader(job_id, user_id)
         except WorkspaceError as exc:
             return _error(exc.code, exc.status)
-        if "presentation_mode" not in (job.get("result") or {}):
+        result = job.get("result") or {}
+        ordinary = (result.get("faithful") or {}).get("version") == "faithful-task-v1"
+        if "presentation_mode" not in result and not ordinary:
             return _error("presentation_run_not_frozen", 409)
         frozen = (job.get("result") or {}).get("presentation_mode")
-        if frozen != mode:
+        if frozen is not None and frozen != mode:
             return _error("presentation_mode_mismatch", 409)
+        if job.get("status") not in {"succeeded", "failed", "canceled"}:
+            return _error("presentation_job_not_terminal", 409)
         try:
             public = report_loader(job_id, user_id)
         except WorkspaceError as exc:
             return _error(exc.code, exc.status)
         snapshot = presentation_snapshot(job, public)
-        body = request.get_json(silent=True)
+        body = request.get_json(silent=True) if request.method == "POST" else {}
         if body is None:
             body = {}
         if not isinstance(body, Mapping):
@@ -54,6 +60,8 @@ def register_presentation_api(app, *, workspace_service, job_loader: Callable, r
                 source_fingerprint=snapshot["fingerprint"],
             )
             if artifact is None:
+                if request.method == "GET":
+                    return _error("presentation_unavailable", 404)
                 try:
                     artifact = build_presentation(snapshot, mode)
                 except (TimeoutError, ConnectionError, ValueError):
@@ -66,12 +74,14 @@ def register_presentation_api(app, *, workspace_service, job_loader: Callable, r
         for old in workspace_service.list_presentations(user_id=user_id, job_id=job_id, mode=mode):
             if old.get("source_fingerprint") != snapshot["fingerprint"]:
                 history.append(revalidate(old, snapshot))
-        return jsonify({
+        response = jsonify({
             "version": artifact["schema_version"], "evidence_id": job_id,
             "status": job.get("status"), "mode": mode,
             "answer": public["report"]["answer"], "presentation": artifact,
             "presentation_history": history, "report": public["report"],
         })
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     app.register_blueprint(blueprint)
 

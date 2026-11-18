@@ -109,9 +109,22 @@ def prepare_candidates(run, event, updates):
             targets = targets[-1:]
         else:
             review = event
-            reviewed_text = state["exploration_findings"][-1].get("solution_candidate", "")
+            finding = state["exploration_findings"][-1]
+            reviewed_text = finding.get("solution_candidate", "")
             reviewed_hash = hashlib.sha256(redact(reviewed_text).encode("utf-8")).hexdigest()
-            targets = [record for record in targets if record["answer_hash"] == reviewed_hash][-1:]
+            reviewed_hashes = {reviewed_hash}
+            qualification = review.get("runtime_qualification") or {}
+            if (qualification.get("verdict") == "REJECT"
+                    and qualification.get("reason") == "scalar_candidate_cannot_discharge_proof_obligations"):
+                from .review import _is_plain_scalar
+
+                # The same finding's scalar original also lacks a proof; retain derivations.
+                original = finding.get("original_solution_candidate") or ""
+                if _is_plain_scalar(original):
+                    reviewed_hashes.add(hashlib.sha256(redact(original).encode("utf-8")).hexdigest())
+            targets = [record for record in targets if record["answer_hash"] in reviewed_hashes]
+            if not review.get("runtime_qualification"):
+                targets = targets[-1:]
         for record in targets:
             _review(registry, actions, record, event, review, source == "STEP_EXECUTE")
     elif kind in {"trace_back_applied", "plan_archived", "problem_spec_revised"}:
@@ -128,7 +141,7 @@ def prepare_candidates(run, event, updates):
         if kind == "problem_spec_revised":
             invalid.update(
                 record["candidate_id"] for record in latest_records(registry)
-                if record.get("source_phase") == "FINAL_GENERATE"
+                if event.get("clarification_request_id") or record.get("source_phase") == "FINAL_GENERATE"
             )
         plan_steps = state.get("plan", {}).get("steps", [])
         changed = True
@@ -149,7 +162,7 @@ def prepare_candidates(run, event, updates):
                     invalid.add(record["candidate_id"])
                     changed = True
         for record in latest:
-            if record["candidate_id"] in invalid:
+            if record["candidate_id"] in invalid and record["review_state"] != "invalidated":
                 _version(
                     registry,
                     actions,
@@ -235,7 +248,8 @@ def _review(registry, actions, record, event, review, local):
             event,
             "candidate_refuted" if refuted else "candidate_reviewed",
             review_state="refuted" if refuted else record["review_state"],
-            selection_eligible=False if refuted else record["selection_eligible"],
+            selection_eligible=False if refuted or review.get("runtime_qualification", {}).get("verdict") == "REJECT"
+                               else record["selection_eligible"],
             known_objections=[*record["known_objections"], objection],
             evidence_refs=[*record["evidence_refs"], event["event_id"]],
         )

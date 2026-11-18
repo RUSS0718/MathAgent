@@ -103,6 +103,9 @@ onUnmounted(() => { generation += 1 })
           <span v-if="event.details?.category"> · {{ event.details.category }}</span>
           <span v-if="event.details?.reason"> · {{ event.details.reason }}</span>
           <span v-if="event.details?.source_run_id"> · 来源 Run {{ event.details.source_run_id }}</span>
+          <span v-if="event.details?.current_run_id"> · 当前 Run {{ event.details.current_run_id }}</span>
+          <span v-if="event.details?.current_attempt_id"> · 当前 Attempt {{ event.details.current_attempt_id }}</span>
+          <span v-if="event.details?.current_status"> · 当前核验 {{ event.details.current_status }}<template v-if="event.details?.current_grade"> · {{ event.details.current_grade }}</template></span>
           · <time :datetime="event.created_at">{{ event.created_at }}</time>
         </li>
       </ul>

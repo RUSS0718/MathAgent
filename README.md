@@ -83,6 +83,8 @@ uv run python showcase_server.py --mode live --faithful-config examples/faithful
 
 前端构建后访问 `http://127.0.0.1:8090/dashboard`，普通输入会进入自动规格和求解，无需手填技术模式。开发前端仍可使用上方 Vite 命令。用 Ctrl+C 停止服务，再使用相同数据目录启动可读取持久任务。就绪检查不调用模型，不代表真实求解验收；可选能力限制与实验性状态会显示在入口。并发、自主干预、形式化和记忆完整闭环按 [#168 实施规格](https://github.com/RUSS0718/MathAgent/issues/168) 的后续子票验收。
 
+按需求解可在新的本地配置中显式加入 `"adaptive_solving": true`：完整候选直接送独立整题检查，具体数学异议最多触发一次局部修正，再进入已有规划。省略时保持原策略。高预算候选示例见 [faithful-service-high-budget.json](examples/faithful-service-high-budget.json)：根上限 96 模型调用、96 HTTP、24 工具、4194304 本地计账 token、7200 秒；这些是授权上限，不是实际用量或成功承诺。该配置只作用于使用它启动的新 Run，不自动启用并发或 Lean；实际并发仍需显式容量配置与准入。策略与未验收边界见 [#185 合同](docs/engineering/adaptive-solving-185-contract.md)。
+
 ## 工程状态与验收边界
 
 官方客观评测入口是根目录 `user_agent.py` 的 `ReasoningAgent`，评分实现位于 `implementations/`。Showcase 作为独立展示路径；未经独立验收的改动不得接入官方默认路径或改变其请求预算。官方文件和基线哈希见 [BASELINE.json](BASELINE.json)。

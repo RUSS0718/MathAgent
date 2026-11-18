@@ -140,10 +140,11 @@ def resume_guard(connection, job_id, *, read_only=False):
     return True
 
 
-def authorize_explicit_resume(connection, job_id):
+def authorize_explicit_resume(connection, job_id, *, read_only=False):
     """Authorize the dedicated intervention resume route after pair resolution."""
-    ensure_control_schema(connection)
-    owns_transaction = not connection.in_transaction
+    if not read_only:
+        ensure_control_schema(connection)
+    owns_transaction = not read_only and not connection.in_transaction
     if owns_transaction:
         connection.execute("BEGIN IMMEDIATE")
     try:
@@ -165,7 +166,10 @@ def authorize_explicit_resume(connection, job_id):
             if json.loads(report_json).get("status") in {"reserved", "running"}:
                 if _owner_alive(pair_id, owner_pid, execution_status):
                     raise WorkspaceError("intervention_pair_execution_active", status=409)
-                _interrupt_pair(connection, pair_id, job_id)
+                if not read_only:
+                    _interrupt_pair(connection, pair_id, job_id)
+        if read_only:
+            return True
         connection.execute(
             "UPDATE faithful_intervention_control SET status='resuming',resume_authorized=1,updated_at=? "
             "WHERE job_id=? AND status='paused'",

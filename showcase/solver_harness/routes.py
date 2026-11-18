@@ -22,7 +22,7 @@ _ROUTE_REQUIRED_FIELDS = set(_ROUTE_IMMUTABLE_FIELDS) | {
     "status", "stop_reason", "elimination_reason", "verified_gain",
     "unknown_observations",
 }
-_ROUTE_OPTIONAL_FIELDS = {"needs_reevaluation"}
+_ROUTE_OPTIONAL_FIELDS = {"needs_reevaluation", "specification_version"}
 
 
 def _canonical(value: Any) -> str:
@@ -46,7 +46,7 @@ def validate_route_frontier(state: dict[str, Any], plan: Any) -> str | None:
     method_error = route_plan_error(plan)
     if method_error is not None:
         return method_error
-    frontier = plan_frontier(plan, state.get("problem_spec"))
+    frontier = search_frontier(state, plan)
     if not frontier:
         return "empty_route_frontier"
     digest = frontier_digest(frontier)
@@ -124,7 +124,10 @@ def _validate_route_registry(previous: dict[str, Any], new_routes: Any) -> None:
     if new_ids[:len(old_ids)] != old_ids or len(new_ids) > len(old_ids) + 1:
         raise ValueError("route_history_rewrite")
     for old, new in zip(old_routes, new_routes):
-        if any(new.get(field) != old.get(field) for field in _ROUTE_IMMUTABLE_FIELDS):
+        if (any(new.get(field) != old.get(field) for field in _ROUTE_IMMUTABLE_FIELDS)
+                or ("specification_version" in old) != ("specification_version" in new)
+                or type(new.get("specification_version")) is not type(old.get("specification_version"))
+                or new.get("specification_version") != old.get("specification_version")):
             raise ValueError("route_identity_rewrite")
         if set(new) - _ROUTE_REQUIRED_FIELDS - _ROUTE_OPTIONAL_FIELDS:
             raise ValueError("route_fields_invalid")
@@ -132,6 +135,13 @@ def _validate_route_registry(previous: dict[str, Any], new_routes: Any) -> None:
             raise ValueError("route_status_invalid")
     if len(new_routes) == len(old_routes) + 1:
         added = new_routes[-1]
+        version = (previous.get("problem_spec") or {}).get("specification_version")
+        if type(version) is int and version > 0:
+            if (type(added.get("specification_version")) is not int
+                    or added.get("specification_version") != version):
+                raise ValueError("route_specification_version_invalid")
+        elif "specification_version" in added:
+            raise ValueError("route_specification_version_invalid")
         if (set(added) - _ROUTE_REQUIRED_FIELDS - _ROUTE_OPTIONAL_FIELDS
                 or not _ROUTE_REQUIRED_FIELDS.issubset(added)):
             raise ValueError("route_creation_shape_invalid")
@@ -222,6 +232,17 @@ def plan_frontier(plan: Any, specification: Any = None) -> list[dict[str, Any]]:
     return [json.loads(item) for item in sorted(targets)]
 
 
+def search_frontier(state, plan):
+    """Bind new adaptive serial frontiers to full scope and feedback identity."""
+    frontier = plan_frontier(plan, state.get("problem_spec"))
+    if state.get("adaptive_solving"):
+        from .adaptive_solving import search_context
+
+        context = search_context(state)
+        return [{**item, "search_context": context} for item in frontier]
+    return frontier
+
+
 def _route_id(routes: list[dict[str, Any]], parent: str | None, digest: str) -> str:
     seed = f"{parent or 'root'}:{digest}:{len(routes)}"
     return "route_" + hashlib.sha256(seed.encode()).hexdigest()[:20]
@@ -281,6 +302,9 @@ def register_route(
     }
     from .aprs import verified_gain
 
+    version = (state.get("problem_spec") or {}).get("specification_version")
+    if type(version) is int and version > 0:
+        route["specification_version"] = version
     route["credit_at_start"] = verified_gain(state)
     lineage = deepcopy(state.get("route_lineage") or [])
     lineage.append({"event": "route_created", "route_id": route_id,
@@ -331,13 +355,16 @@ def sync_plan_route(harness, run: dict[str, Any]) -> dict[str, Any]:
     plan = state.get("plan")
     if not isinstance(plan, dict):
         return run
-    frontier = plan_frontier(plan, state.get("problem_spec"))
+    frontier = search_frontier(state, plan)
     digest = frontier_digest(frontier)
     routes = state.get("route_registry") or []
+    # CONTINUE and trace-back create new action attempts within the same plan,
+    # not new search routes. Keep the route's original accounting and lineage.
     if any(
-        item.get("frontier_digest") == digest
+        (item.get("frontier_digest") == digest or (
+            state.get("adaptive_solving")
+            and item.get("specification_version") == state.get("specification_version")))
         and item.get("plan_version") == state.get("plan_version")
-        and item.get("attempt_index") == state.get("attempt_index")
         for item in routes
     ):
         return run

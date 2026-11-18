@@ -357,6 +357,31 @@ class VerifyContractTest(unittest.TestCase):
 
 class DockerSupervisionContractTest(unittest.TestCase):
     def test_docker_launcher_uses_stdin_and_fail_closed_cleanup(self):
+        self._check_limits(2, 1, "--ulimit=cpu=1:1")
+
+    def test_cpu_budget_follows_effective_tool_timeout(self):
+        for maximum, requested, expected in (
+            (90, 90, "--ulimit=cpu=90:90"),
+            (30, 90, "--ulimit=cpu=30:30"),
+            (90, 7.8, "--ulimit=cpu=7:7"),
+        ):
+            with self.subTest(maximum=maximum, requested=requested):
+                self._check_limits(maximum, requested, expected)
+
+    def test_subsecond_budget_does_not_launch_container(self):
+        from showcase.formal_docker import LeanDockerExecutor
+
+        executor = LeanDockerExecutor(manifest=_manifest(), timeout_seconds=90)
+        with patch.object(executor, "_command") as command:
+            result = executor.execute("example : True := by trivial",
+                                      run_id="run", call_id="attempt", timeout_seconds=0.8)
+        command.assert_not_called()
+        self.assertEqual("unavailable", result["status"])
+        self.assertFalse(result["executed"])
+        self.assertEqual("lean_cpu_budget_too_small", result["error"])
+        self.assertTrue(executor.verify_receipt(result))
+
+    def _check_limits(self, maximum, requested, expected_cpu):
         from showcase.formal_docker import LeanDockerExecutor
 
         manifest = _manifest()
@@ -390,9 +415,9 @@ class DockerSupervisionContractTest(unittest.TestCase):
             "stdout": b"accepted", "stderr": b"", "observed_output_bytes": 8,
             "reason": None}) as supervised, patch.object(
                 LeanDockerExecutor, "_command", side_effect=command) as docker_command:
-            executor = LeanDockerExecutor(manifest=manifest, timeout_seconds=2, max_output_bytes=64)
+            executor = LeanDockerExecutor(manifest=manifest, timeout_seconds=maximum, max_output_bytes=64)
             result = executor.execute("theorem polynomial_identity : True := by trivial",
-                                      run_id="run", call_id="attempt", timeout_seconds=1,
+                                      run_id="run", call_id="attempt", timeout_seconds=requested,
                                       max_output_bytes=32,
                                       resource_limits={"memory_mb": 512, "cpu_count": 0.5})
         self.assertTrue(result["executed"], result)
@@ -400,9 +425,10 @@ class DockerSupervisionContractTest(unittest.TestCase):
         self.assertEqual("accepted", result["stdout"])
         supervised.assert_called_once()
         self.assertEqual(32, supervised.call_args.kwargs["limit"])
-        self.assertEqual(1, supervised.call_args.kwargs["timeout"])
+        self.assertEqual(min(maximum, requested), supervised.call_args.kwargs["timeout"])
         created = next(call.args[0] for call in docker_command.call_args_list
                        if call.args[0][0] == "create")
+        self.assertIn(expected_cpu, created)
         self.assertIn("--memory=512m", created)
         self.assertIn("--cpus=0.5", created)
         self.assertTrue(executor.verify_receipt(result))

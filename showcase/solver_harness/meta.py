@@ -109,6 +109,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
             ),
             None,
         )
+    upgrade_reason = upgrade.get("upgrade_reason", "round_limit_reached") if upgrade else "round_limit_reached"
     if trigger is None and upgrade is not None:
         trigger = upgrade.get("meta_trigger", "challenge_round_limit")
     if guidance is None and trigger is None and state["phase"] != "META_DECIDE":
@@ -162,6 +163,16 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         **({"pending_replan_request": redact(deepcopy(pending_replan))}
            if pending_replan is not None else {}),
     }
+    from .progress import scheduler_context
+
+    guard_context = scheduler_context(state) if guidance is None else None
+    if guard_context is not None:
+        request["scheduler_context"] = guard_context
+        request["instruction"] = (
+            "Respect scheduler_context.continue_allowed. CONTINUE does not change the plan "
+            "or bypass a blocked action; choosing it while false ends this route. Use a legal "
+            "TRACE_BACK, APPROVE_REPLAN for a substantively different executable plan, or ABORT. "
+            "Unreviewed self-corrections and NOT_FOUND are not verified proof.")
     if harness._config.get("features", {}).get("reasoner_checkpoints") is True:
         from .reasoner_checkpoint import current_checkpoints
 
@@ -179,7 +190,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
             "event_id": f"meta-dispatched-{revision}",
             "type": "meta_dispatched",
             "role": "meta",
-            **({"upgrade_reason": "round_limit_reached"} if upgrade is not None else {}),
+            **({"upgrade_reason": upgrade_reason} if upgrade is not None else {}),
         },
         state_updates={
             "counters": {**state["counters"], "model_calls": state["counters"]["model_calls"] + 1}
@@ -209,7 +220,11 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
                 dispatch_event={"event_id": f"meta-dispatched-{revision}-repair-1",
                                 "type": "meta_dispatched", "role": "meta"},
             )
-            request = protocol_repair.repair_request(request)
+            from .intern_instructions import META_TRACE_INSTRUCTION
+
+            request = protocol_repair.repair_request(
+                request, instruction=protocol_repair.REPAIR_INSTRUCTION + " " + META_TRACE_INSTRUCTION,
+                failed_call=failed)
             response = dict(harness.dispatch(run, meta_port.complete, request))
         call = harness.get_run(run["run_id"])["state"].get("calls", {}).get(request["call_id"])
         transport = call.get("transport_decision") if isinstance(call, dict) else None
@@ -254,7 +269,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
                 "type": "meta_invalid",
                 "reason": "invalid_or_failed_response",
                 "role": "meta",
-                **({"upgrade_reason": "round_limit_reached"} if upgrade is not None else {}),
+                **({"upgrade_reason": upgrade_reason} if upgrade is not None else {}),
             },
             state_updates=updates,
         )
@@ -307,6 +322,8 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
         "decided_at_revision": run["state_revision"] + 1,
         "consumed": None,
     }
+    if guard_context is not None:
+        identity["scheduler_context"] = guard_context
     updates = {
         "phase": phase,
         "meta_history": history,
@@ -321,7 +338,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
                 **({
                     "trigger": trigger,
                     "meta_trigger": trigger,
-                    "upgrade_reason": "round_limit_reached",
+                    "upgrade_reason": upgrade_reason,
                 } if upgrade is not None else {}),
                 **decision,
             },
@@ -371,7 +388,7 @@ def run_meta(harness, run, *, meta_port, metadata, max_model_calls, max_runtime_
                 "use_pure_reasoning": decision["use_pure_reasoning"],
             } if guidance_event else {"decision": decision}),
             **({"attempt_index": updates["attempt_index"]} if new_action else {}),
-            **({"trigger": trigger, "upgrade_reason": "round_limit_reached", "role": "meta"} if upgrade is not None else {}),
+            **({"trigger": trigger, "upgrade_reason": upgrade_reason, "role": "meta"} if upgrade is not None else {}),
             **({"role": "meta"} if guidance_event else {}),
         },
         state_updates=updates,

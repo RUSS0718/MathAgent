@@ -75,6 +75,9 @@ def verify_step(
         return stop(harness, run, reason)
     state = run["state"]
     suffix = f"-challenge-{round_number}" if round_number else ""
+    adoption_review = (state.get("serial_intervention") or {}).get("review_id")
+    if adoption_review:
+        suffix += f"-adoption-{adoption_review}"
     attempt = state["attempt_index"]
     suffix += f"-attempt-{attempt}" if attempt else ""
     step_id = state["current_step"]
@@ -121,7 +124,11 @@ def verify_step(
     from .counterexample import pending_review
 
     pending = pending_review(run) if getattr(harness, "_product_recovery", False) else None
-    reserved = run if pending else harness.commit_event(
+    call_id = getattr(harness, "namespace_call_id", lambda value: value)(
+        f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
+    )
+    adoption_receipt = adoption_review and call_id in state.get("calls", {})
+    reserved = run if pending or adoption_receipt else harness.commit_event(
         run["run_id"],
         expected_revision=run["state_revision"],
         event={
@@ -132,9 +139,6 @@ def verify_step(
         state_updates={"counters": counters},
     )
     report = state["steps"][step_id]["report"]
-    call_id = getattr(harness, "namespace_call_id", lambda value: value)(
-        f"{run['run_id']}:step-verifier:{plan['version']}:{step_id}{suffix}"
-    )
     request = {
         "run_id": run["run_id"],
         "call_id": call_id,
@@ -153,9 +157,20 @@ def verify_step(
         "state_revision": reserved["state_revision"],
     }
 
+    if state.get('serial_intervention'):
+        from .serial_intervention import applicable_results
+        request['intervention_results'] = applicable_results(harness, run)
+
+    repair_used = any(
+        item.get("role") == "step_verifier"
+        and (identity == call_id or identity.startswith(call_id + ":"))
+        and item.get("request", {}).get("repair_instruction")
+        for identity, item in state.get("calls", {}).items()
+    )
+
     def reserve_and_dispatch(current, seq, continuation_call_id, continuation_request,
                              *, purpose="compute"):
-        nonlocal call_id
+        nonlocal call_id, repair_used
         # Claim-target repairs may continue an already answered computation.
         # Its call identity must own a distinct reservation event.
         identity = hashlib.sha256(continuation_call_id.encode()).hexdigest()[:16]
@@ -176,7 +191,35 @@ def verify_step(
                 },
             },
         )
-        reply = harness.dispatch(reserved, verifier_port.verify, continuation_request)
+        from . import protocol_repair
+
+        if continuation_request.get("repair_instruction"):
+            repair_used = True
+        try:
+            reply = harness.dispatch(reserved, verifier_port.verify, continuation_request)
+        except CallInterrupted as exc:
+            if repair_used:
+                raise
+            reserved = protocol_repair.reserve_repair(
+                harness, current["run_id"], exc,
+                failure_event=lambda latest, failed: {
+                    "event_id": f"step-review-parse-{step_id}{suffix}-{event_suffix}",
+                    "type": "step_review_parse_failed", "step_id": step_id,
+                    "role": "step_verifier",
+                    "summary": "Verifier continuation failed protocol; one bounded repair follows",
+                },
+                dispatch_event={
+                    "event_id": f"step-review-dispatched-{step_id}{suffix}-{event_suffix}-repair-1",
+                    "type": "step_review_dispatched", "step_id": step_id,
+                    "role": "step_verifier",
+                },
+            )
+            repair_used = True
+            continuation_request = protocol_repair.repair_request(
+                continuation_request,
+                failed_call=protocol_repair.interrupted_call(harness, current["run_id"], exc))
+            continuation_call_id = continuation_request["call_id"]
+            reply = harness.dispatch(reserved, verifier_port.verify, continuation_request)
         latest = harness.get_run(current["run_id"])
         call_id = latest_retry_id(latest["state"].get("calls", {}), continuation_call_id)
         return latest, reply
@@ -190,6 +233,8 @@ def verify_step(
             try:
                 reply = harness.dispatch(reserved, verifier_port.verify, request)
             except CallInterrupted as exc:
+                if repair_used:
+                    raise
                 reserved = protocol_repair.reserve_repair(
                     harness, run["run_id"], exc,
                     failure_event=lambda latest, failed: {
@@ -204,6 +249,7 @@ def verify_step(
                         "role": "step_verifier",
                     },
                 )
+                repair_used = True
                 request = protocol_repair.repair_request(
                     request, failed_call=protocol_repair.interrupted_call(harness, run["run_id"], exc))
                 call_id = request["call_id"]
@@ -275,7 +321,7 @@ def verify_step(
                     and not 0 <= claim_index < len(claims)):
                 from . import protocol_repair
 
-                if protocol_repair.repair_enabled(harness._config):
+                if protocol_repair.repair_enabled(harness._config) and not repair_used:
                     target_request = protocol_repair.repair_request(
                         request,
                         instruction=(
@@ -383,6 +429,11 @@ def verify_step(
             state, reply, step_id=step_id, report=report, review_call_id=call_id,
             suffix=suffix, plan_version=plan["version"], attempt_index=attempt,
         )
+    if any(item["reason"] == "unsupported_graph_step_dependency" for item in rejections):
+        # The completed review is known, but cannot be admitted to this graph.
+        # Fail before promoting any part of this ruling or its obligations.
+        verification.update(valid=False, reason="unsupported_graph_step_dependency")
+        outcomes = []
     obligation_evidence, obligation_rejections = [], []
     if (verification["valid"] and verification["verdict"] == "ACCEPT"
             and (not checkpoint_mode or checkpoint_status == "FINAL")
@@ -517,8 +568,10 @@ def verify_step(
             )
     if not verification["valid"] and not checkpoint_accepted:
         state_updates["status"] = "partial_aborted"
-        if verification.get("reason") == "invalid_verifier_verdict":
-            state_updates["result_reason"] = "invalid_verifier_verdict"
+        if verification.get("reason") in {
+            "invalid_verifier_verdict", "unsupported_graph_step_dependency",
+        }:
+            state_updates["result_reason"] = verification["reason"]
     event = {
         "event_id": f"step-reviewed-{step_id}{suffix}",
         "type": "step_reviewed",

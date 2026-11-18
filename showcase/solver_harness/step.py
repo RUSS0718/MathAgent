@@ -126,6 +126,9 @@ def run_step(
         "state_revision": reserved["state_revision"],
         "tool_policy": {"allow": []},
     }
+    if state.get('serial_intervention'):
+        from .serial_intervention import applicable_results
+        base_request['intervention_results'] = applicable_results(harness, run)
     request = base_request
     if checkpoint_mode:
         valid_sources = [

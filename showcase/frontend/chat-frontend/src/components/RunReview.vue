@@ -22,10 +22,17 @@ import PageFrame from './ui/PageFrame.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
 import StatusBadge from './ui/StatusBadge.vue'
+import TaskRevisionPanel from './TaskRevisionPanel.vue'
+import { faithfulTaskStateSchema, taskRevisionStateSchema } from '../api/jobs.schemas'
 const props = defineProps<{ jobId: string }>()
 const jobs = useJobsStore()
 const controller = new JobController(jobs)
 const job = computed(() => jobs.byId(props.jobId))
+const faithful = computed(() => job.value?.result?.faithful != null)
+const allowedActions = computed(() => faithfulTaskStateSchema.safeParse(job.value?.result?.faithful).data?.allowed_actions ?? [])
+const canRetryUnknown = computed(() => !faithful.value || allowedActions.value.includes('retry_unknown_call'))
+const canResume = computed(() => !faithful.value || allowedActions.value.includes('resume'))
+const revision = computed(() => taskRevisionStateSchema.safeParse(job.value?.result?.faithful).data)
 const report = ref<JobReport | null>(null)
 type MemoryResult<T> = { status: 'loading' | 'unavailable' | 'error' } | { status: 'available'; data: T }
 const runMemory = ref<MemoryResult<RunMemoryResponse>>({ status: 'unavailable' })
@@ -92,6 +99,7 @@ async function reconnect(): Promise<void> { await refresh(); connected.value = t
 async function exportEvidence(): Promise<void> { try { const evidence = await api.evidence(props.jobId); downloadJson(props.jobId + '-evidence.json', evidence); notice.value = '已导出持久公开 Evidence JSON。' } catch (error) { notice.value = error instanceof Error ? error.message : 'Evidence 导出失败，请重试。' } }
 async function cancel(): Promise<void> { busy.value = true; try { await api.cancelJob(props.jobId, cancelKey); await refresh(); notice.value = '取消已记录；在途远端请求费用可能未知。' } catch (error) { notice.value = error instanceof Error ? error.message : '取消失败' } finally { busy.value = false } }
 async function resume(callId?: string): Promise<void> {
+  if (busy.value || (callId ? !canRetryUnknown.value : !canResume.value)) return
   busy.value = true
   try {
     if (callId) await api.retryUnknownCall(props.jobId, callId, crypto.randomUUID(), createIdempotencyKey())
@@ -109,14 +117,15 @@ onUnmounted(() => { disposed = true; memoryGeneration += 1; clearTimeout(reportT
   <PageFrame title="子 Run 审阅" description="查看公开答案、最终验证范围与脱敏执行记录。" active="run">
     <template #actions><UiButton @click="exportEvidence"><UiIcon name="download" />导出公开 Evidence JSON</UiButton></template>
     <p class="record-id">{{ jobId }}</p>
+    <TaskRevisionPanel v-if="job" :job-id="jobId" :session-id="job.sessionId" owner="" mode="" :state="job.result?.faithful" :disabled="true" readonly />
     <div class="review-meta"><StatusBadge :value="report?.mode ?? 'unavailable'" /><StatusBadge :value="job?.status ?? 'unknown'" /><span class="muted">事件流：{{ connected ? '已连接 / 读取中' : '已结束或断开，可重连' }}</span></div>
     <p class="notice notice--warning">fake / replay 只证明工程演示。planned 表示尚未实现；unavailable 表示当前不可用。</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p><p v-if="job?.error" class="notice notice--error" role="alert">运行类别：{{ job.error }}</p>
     <div class="action-row"><UiButton :busy="loading" @click="refresh"><UiIcon name="refresh" />刷新持久报告</UiButton><UiButton :disabled="connected || loading" @click="reconnect">重连事件（沿用游标）</UiButton><UiButton variant="danger" :disabled="busy || !job || ['succeeded', 'failed', 'canceled'].includes(job.status)" @click="cancel">取消 Run</UiButton></div>
-    <PresentationSection :source-version="report" v-if="report && job?.presentationMode" :job-id="props.jobId" :mode="job.presentationMode" :job-status="job.status" :fallback-answer="report.report.answer" />
-    <ReportSection v-else-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
+    <PresentationSection :source-version="report" v-if="report && job && (job.presentationMode || (job.status === 'succeeded' && job.result?.faithful && (job.result.faithful as { version?: string }).version === 'faithful-task-v1'))" :job-id="props.jobId" :mode="job.presentationMode ?? undefined" :answer-report="report.report" :job-status="job.status" :fallback-answer="report.report.answer" />
+    <ReportSection v-if="report" :mode="report.mode" :status="report.status" :report="report.report" />
     <FormalVerificationSection v-if="report?.solver?.solver?.formal_verification" :verification="report.solver.solver.formal_verification" />
-    <section v-if="recovery && job?.status === 'failed' && report?.solver?.solver?.phase !== 'TERMINAL'" class="evidence-section" aria-label="安全续算">
+    <section v-if="recovery && job?.status === 'failed' && !revision?.revision_to && report?.solver?.solver?.phase !== 'TERMINAL'" class="evidence-section" aria-label="安全续算">
       <h2>{{ recovery.status === 'needs_review' ? '未知请求需要人工决定' : '从安全边界继续' }}</h2>
       <dl v-if="report?.report.budget" class="data-list"><template v-for="field in Object.keys(budgetLabels)" :key="field"><dt>{{ budgetLabels[field] }}</dt><dd>{{ field === 'deadline_at' && typeof report.report.budget[field] === 'number' ? new Date(Number(report.report.budget[field]) * 1000).toLocaleString() : display(report.report.budget[field]) }}</dd></template></dl>
       <p v-if="recovery.status === 'needs_review'">以下请求结果与消耗未知。选择重试会产生新的调用身份，保留旧请求预留，继续使用原预算和截止时间。</p>
@@ -124,15 +133,15 @@ onUnmounted(() => { disposed = true; memoryGeneration += 1; clearTimeout(reportT
       <p v-else>沿用同一任务、已接受步骤和累计预算继续运行。</p>
       <div v-for="call in recovery.unknown_calls" :key="call.call_id" class="action-row">
         <span>{{ call.role }} · {{ call.call_id }}</span>
-        <UiButton :busy="busy" :disabled="busy" @click="resume(call.call_id)">明确选择：用新身份重试</UiButton>
+        <UiButton v-if="canRetryUnknown" :busy="busy" :disabled="busy" @click="resume(call.call_id)">明确选择：用新身份重试</UiButton>
       </div>
-      <UiButton v-if="recovery.status === 'safe'" :busy="busy" :disabled="busy" @click="resume()">继续同一任务</UiButton>
+      <UiButton v-if="recovery.status === 'safe' && canResume" :busy="busy" :disabled="busy" @click="resume()">继续同一任务</UiButton>
     </section>
     <div v-if="loading && !report" class="loading-state" role="status" aria-busy="true">正在读取运行报告…<div v-for="n in 3" :key="n" class="skeleton"></div></div>
     <section v-else-if="!report" class="empty-state"><h2>报告当前不可用</h2><p>请刷新重试，尚不能判断运行成功。</p></section>
     <FaithfulMemorySection :run-memory="runMemory" :population-memory="populationMemory" :population-memory-control="populationMemoryControl" />
     <GoalCacheSection v-if="job?.sessionId" :session-id="job.sessionId" />
-    <FaithfulInterventionSection :job-id="jobId" :job-status="job?.status ?? 'unknown'" :refresh-token="job?.events.length ?? 0" />
+    <FaithfulInterventionSection :job-id="jobId" :allowed-actions="allowedActions" :refresh-token="job?.events.length ?? 0" />
     <template v-if="report">
       <StarRunReview :report="report" :job-id="jobId" />
       <RoutePanel v-if="report.solver?.solver?.progress?.routes" :routes="report.solver.solver.progress.routes" />

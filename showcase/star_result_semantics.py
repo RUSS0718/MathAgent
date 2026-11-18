@@ -49,11 +49,12 @@ def result_semantics(run, answer, *, verification_mode="auto", execution_status=
     if not isinstance(formal_policy, Mapping) and isinstance(formal, Mapping):
         formal_policy = formal.get("policy")
     if isinstance(formal_policy, Mapping):
-        formal_met = (isinstance(formal, Mapping) and formal.get("status") == "solved"
-                      and formal.get("grade") in {"L2", "L3"})
-        result["formal_requirement"] = (
-            ("met" if formal_met else "unmet")
-            if formal_policy.get("require_formal") is True else "default")
+        from .formal_requirements import assess_formal_requirement
+
+        assessment = assess_formal_requirement(formal_policy, formal, state.get("problem_spec"))
+        result["formal_requirement"] = assessment["status"]
+        if assessment["status"] == "unmet" and result["execution"] == "completed":
+            result["execution"] = "needs_review"
     if state.get("context_policy", {}).get("enabled") is True:
         context_packs = state.get("context_packs") or [
             call["context_pack"] for call in calls

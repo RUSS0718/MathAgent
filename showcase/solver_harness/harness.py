@@ -70,6 +70,7 @@ class SolverHarness:
         meta_port: MetaPort | None = None,
         tool_port=None,
         event_observer=None,
+        intervention_enabled=False,
     ) -> None:
         if store is not None and database_path is not None:
             raise SolverValidationError("provide either store or database_path")
@@ -77,6 +78,7 @@ class SolverHarness:
         self._product_recovery = False
         self._population_owner = None
         self._population_futures = {}
+        self._intervention_enabled = intervention_enabled is True
         self._event_observer = event_observer
         self._config = _normalize_config(config)
         if self._config.get("features", {}).get("auto_problem_spec") is True and any(
@@ -271,10 +273,30 @@ class SolverHarness:
                                   if isinstance(effective_metadata, Mapping) else None
                               ))
         pending_intake = auto_spec and supplied_spec is None
+        if self._config.get("features", {}).get("adaptive_solving") is True:
+            from .adaptive_resources import VERSION
+            from .progress import ADAPTIVE_SEARCH_VERSION
+
+            state["adaptive_resource_policy"] = VERSION
+            state["adaptive_search_policy"] = ADAPTIVE_SEARCH_VERSION
+            if (effective_metadata or {}).get("plan") is not None:
+                from .adaptive_solving import VERSION as solving_version
+
+                state["adaptive_solving"] = {"version": solving_version, "corrections": 0,
+                                             "reason": "supplied_plan"}
         if pending_intake:
+            from .autonomous_routes import initial_permission
             from .problem_intake import POLICY
 
             state["problem_intake"] = dict(POLICY)
+            if (effective_metadata or {}).get("formal_generation_required") is True:
+                state["problem_intake"]["formal_generation_required"] = True
+            if self._intervention_enabled:
+                state["serial_intervention_permission"] = {
+                    "enabled": True, "version": "serial-intervention-v1"
+                }
+            state["autonomous_routes"] = initial_permission(
+                self._config, (effective_metadata or {}).get("population_unavailable_reason"))
         if serial_routes and supplied_spec is None and not pending_intake:
             raise SolverValidationError("serial_routes_requires_problem_spec")
         if self._config.get("features", {}).get("progress_scheduling") is True:
@@ -567,6 +589,12 @@ class SolverHarness:
         from .tool_precheck import allowed_tool_ids
 
         latest = run if use_snapshot else self.get_run(run["run_id"])
+        from .faithful_memory_injection import refresh_memory_request
+
+        latest, request = refresh_memory_request(
+            self._state_store._connection, latest, request,
+            enabled=getattr(self, "_population_memory_enabled", False),
+        )
         from . import handoff
 
         if handoff.enabled(self._config):
@@ -578,7 +606,10 @@ class SolverHarness:
         population_policy = latest["state"].get("population_policy")
         if population_policy and population_policy.get("enabled") is True:
             request = {**request,
-                       "timeout_seconds": population_policy.get("request_timeout_seconds"),
+                       "timeout_seconds": population_policy.get(
+                           "finalization_timeout_seconds", population_policy.get("request_timeout_seconds"))
+                       if request.get("role") in {"final_generator", "whole_solution_verifier"}
+                       else population_policy.get("request_timeout_seconds"),
                        "retry_limit": population_policy.get("retry_limit", 1)}
         specification = latest["state"].get("problem_spec")
         if isinstance(specification, Mapping):

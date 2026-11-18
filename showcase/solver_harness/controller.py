@@ -51,6 +51,7 @@ def run_supplied_plan_or_explore(
         plan=plan,
         model_port=harness._model_port,
         verifier_port=harness._verifier_port,
+        one_work_unit=bool(run["state"].get("autonomous_routes")),
         max_rounds=min(5, _positive_config_int(harness._config, "max_challenge_rounds", 5)),
         max_model_calls=_non_negative_config_int(harness._config, "max_model_calls", 2),
         max_runtime_seconds=_non_negative_config_int(
@@ -96,6 +97,33 @@ def run_exploration_phase(harness, run: dict[str, Any], problem: str) -> dict[st
 
 
 def advance(harness, run, metadata, problem):
+    if (run["state"]["phase"] == "PLAN" and run["state"].get("adaptive_solving")
+            and len(run["state"].get("whole_solution_reviews", [])) >
+            run["state"]["adaptive_solving"].get("processed_reviews", 0)):
+        from .adaptive_solving import explore_direct
+
+        run = explore_direct(harness, run, problem)
+    from .autonomous_routes import advance_switch
+    from .serial_intervention import advance as advance_intervention
+
+    if (run['state'].get('population_intervention') or {}).get('status') == 'executing':
+        from .population_intervention import advance as advance_composition
+
+        run = advance_composition(harness, run, problem)
+        if run['state']['population_intervention']['status'] != 'completed':
+            return run
+    run = advance_intervention(harness, run, problem)
+    if (run['state'].get('serial_intervention') or {}).get('status') == 'needs_review':
+        return run
+    run = advance_switch(harness, run, problem)
+    if (run["state"].get("execution_switch") or {}).get("status") in {"converging", "needs_review"}:
+        return run
+    if run["state"].get("population_intervention"):
+        from .population_intervention import advance as advance_composition
+
+        run = advance_composition(harness, run, problem)
+        if (run["state"].get("serial_intervention") or {}).get("status") == "needs_review":
+            return run
     if run["state"].get("population_policy", {}).get("enabled") is True:
         from .population_lifecycle import advance_population
 
@@ -133,6 +161,13 @@ def advance(harness, run, metadata, problem):
         config=harness._config,
         metadata=metadata or {},
     )
+    from .autonomous_routes import select_initial_execution
+
+    run = select_initial_execution(harness, run, problem)
+    if run["state"].get("population_policy", {}).get("enabled") is True:
+        from .population_lifecycle import advance_population
+
+        return advance_population(harness, run, problem, {})
     if harness._config.get("features", {}).get("serial_routes") is True:
         from .routes import sync_plan_route
 
@@ -228,8 +263,13 @@ def protocol_failure_exit(harness, run, exc):
 def advance_product(harness, run, problem):
     """Continue the existing phases under S3; never replay an interrupted action."""
     from ..run_control import check_control
+    from .clarification import waiting_for_clarification
+    from .problem_intake import intake_pending
 
-    for _ in range(64):
+    transitions = 0
+    while transitions < 64:
+        if waiting_for_clarification(run["state"]) or intake_pending(run):
+            return run
         if run["state"]["phase"] == "TERMINAL" or run["state"]["status"] in {
             "interrupted", "recovered_pending_validation"
         }:
@@ -245,6 +285,13 @@ def advance_product(harness, run, problem):
             latest = harness.get_run(run["run_id"])
             terminated = protocol_failure_exit(harness, latest, exc)
             return latest if terminated is None else terminated
+        # Population ticks wait for a bounded interval, not a complete action.
+        # Do not enter product finalization while those workers still own work.
+        if (harness._population_futures and (
+                run["state"]["phase"] == "POPULATION"
+                or (run["state"].get("execution_switch") or {}).get("status") == "converging")):
+            continue
+        transitions += 1
         if run["state_revision"] == revision:
             return run
     return run  # Explicitly incomplete; bridge never calls this a reviewed success.

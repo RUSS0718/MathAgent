@@ -164,7 +164,8 @@ def _commit_session(harness, run_id, record, call_id, kind):
                 }},
             )
         except SolverRevisionConflictError:
-            if harness._config.get("features", {}).get("concurrent_routes") is not True:
+            if (harness._config.get("features", {}).get("concurrent_routes") is not True
+                    and latest["state"].get("population_policy", {}).get("enabled") is not True):
                 raise
             from ..run_control import check_control
 

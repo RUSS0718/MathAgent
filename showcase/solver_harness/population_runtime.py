@@ -1,6 +1,7 @@
 """WorkUnit scheduling transitions inside the existing product controller."""
 
 import time
+from collections.abc import Mapping
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextvars import copy_context
 from copy import deepcopy
@@ -9,10 +10,22 @@ from .population_schedule import round_schedule
 from .population_store import command
 
 
-def register_plans(harness, run, plan):
-    """Register distinct, validated route snapshots before any WorkUnit dispatch."""
+def prepare_population_plan(proposal, specification):
+    """Validate and bind a proposal before computing its independent frontier."""
     from .plan import validate_plan
     from .routes import frontier_digest, plan_frontier, route_plan_error
+    from .specification import bind_plan_work_units
+
+    validate_plan(proposal)
+    error = route_plan_error(proposal)
+    if error:
+        raise ValueError(error)
+    bound, _ = bind_plan_work_units(proposal, specification)
+    return bound, frontier_digest(plan_frontier(bound, specification))
+
+
+def register_plans(harness, run, plan):
+    """Register distinct, validated route snapshots before any WorkUnit dispatch."""
     from .specification import bind_plan_work_units
 
     existing_routes = run["state"]["population"]["routes"]
@@ -20,11 +33,7 @@ def register_plans(harness, run, plan):
     primary = next(iter(existing_routes), None)
     for index, proposal in enumerate(proposals, len(existing_routes) + 1):
         try:
-            validate_plan(proposal)
-            error = route_plan_error(proposal)
-            if error:
-                raise ValueError(error)
-            bound, _ = bind_plan_work_units(proposal, run["state"]["problem_spec"])
+            bound, digest = prepare_population_plan(proposal, run["state"]["problem_spec"])
         except (TypeError, ValueError) as exc:
             if index == 1:
                 from .finalize import finish
@@ -36,7 +45,6 @@ def register_plans(harness, run, plan):
                        "type": "population_plan_rejected", "reason": str(exc)},
             )
             continue
-        digest = frontier_digest(plan_frontier(bound, run["state"]["problem_spec"]))
         if any(item["frontier_digest"] == digest
                for item in run["state"]["population"]["routes"].values()):
             continue
@@ -75,6 +83,12 @@ def _estimates(harness, run, route, problem):
     local = {"run_id": run["run_id"], "state": route["snapshot"], "state_revision": route.get("revision", 0)}
     state = local["state"]
     step = next(s for s in state["plan"]["steps"] if s["step_id"] == state["current_step"])
+    from . import reasoner_checkpoint
+
+    checkpoint_mode = reasoner_checkpoint.enabled(harness._config)
+    checkpoints = reasoner_checkpoint.current_checkpoints(state) if checkpoint_mode else []
+    parent_checkpoint = checkpoints[-1] if checkpoints else None
+    previous = state.get("steps", {}).get(step["step_id"], {})
     cap = port.adapter.max_tokens
     report_bound = {"argument": "x" * (cap * 4), "claims": [], "blocked": False}
     policy = run["state"]["population_policy"]
@@ -82,7 +96,7 @@ def _estimates(harness, run, route, problem):
     if type(retry_limit) is not int or retry_limit < 1:
         raise ValueError("population_retry_policy_unavailable")
     retry_slots = max(1, retry_limit)
-    challenges = harness._config.get("max_challenge_rounds", 1)
+    challenges = policy.get("max_challenge_rounds", harness._config.get("max_challenge_rounds", 1))
     roles = ["reasoner", "step_verifier"] * (1 + challenges)
     # A protocol repair can consume one more logical request for either role.
     roles.extend(("reasoner", "step_verifier"))
@@ -92,7 +106,37 @@ def _estimates(harness, run, route, problem):
                    if role == "reasoner" else
                    {"role": role, "step": step, "problem": problem,
                     "report": report_bound, "original_problem": problem,
-                    "challenge_history": [{"objection": "x" * 2048}] * challenges})
+                    "challenge_history": [*previous.get("challenge_history", []),
+                                          *[{"objection": "x" * 2048}] * challenges]})
+        # Checkpoint fields select a different wire schema and carry variable context.
+        if role == "reasoner" and checkpoint_mode:
+            request = reasoner_checkpoint.request(
+                request, call_id=f"population-estimate:{role}:{step['step_id']}",
+                round_number=len(checkpoints) + 1, parent=parent_checkpoint,
+                objection=previous.get("verification", {}).get("objection"),
+                guidance=state.get("meta_guidance_decision"),
+            )
+            request.update(
+                current_goal=step["objective"],
+                valid_sources=[item for item in [*state.get("accepted_results", []),
+                                                *state.get("verified_results_ledger", [])]
+                               if isinstance(item, Mapping) and item.get("invalidated") is not True
+                               and item.get("status") not in {"INVALIDATED", "invalidated"}],
+                open_obligations=list(parent_checkpoint.get("gaps", [])) if parent_checkpoint else [],
+            )
+        if role == "reasoner":
+            task = state.get("pending_guidance_task")
+            if isinstance(task, str) and task.strip():
+                request["specific_task"] = task
+            if previous.get("challenge_history"):
+                request.update(challenge_history=previous["challenge_history"],
+                               objection=previous.get("verification", {}).get("objection", ""))
+            if state.get("phase") == "CHALLENGE":
+                request.update(report=previous.get("report", {}),
+                               objection=previous.get("verification", {}).get("objection", ""),
+                               suspected_false_claim=harness._config.get("features", {}).get("skills") is True)
+        elif parent_checkpoint is not None:
+            request.update(step_goal=step["objective"], checkpoint=parent_checkpoint)
         from .sessions import prepare_session
 
         _, request = prepare_session(local, {
@@ -131,13 +175,15 @@ def _work(parent, database_path, run_id, rid, aid, problem):
                        meta_port=parent._meta_port, tool_port=parent._tool_port,
                        event_observer=parent._event_observer) as worker:
         worker._population_owner = deepcopy(parent._population_owner)
+        worker._population_memory_enabled = getattr(parent, "_population_memory_enabled", False)
         local = RouteHarness(worker, run_id, rid, aid)
         result = local.get_run(run_id)
         status = "completed"
         try:
             result = run_plan(local, result, problem=problem, plan=result["state"]["plan"],
                               model_port=worker._model_port, verifier_port=worker._verifier_port,
-                              max_rounds=worker._config.get("max_challenge_rounds", 3),
+                              max_rounds=worker._config.get("population_policy", {}).get(
+                                  "max_challenge_rounds", worker._config.get("max_challenge_rounds", 3)),
                               max_model_calls=worker._config["max_model_calls"],
                               max_runtime_seconds=worker._config["max_total_duration_seconds"],
                               one_work_unit=True)
@@ -208,7 +254,15 @@ def tick(harness, run, problem):
                    "type": "population_paused"},
             state_updates={"status": "interrupted"},
         )
-    schedule = round_schedule(pop)
+    recovery_routes = {rid: r for rid, r in pop["routes"].items() if r.get("snapshot", {}).get("authorized_retry")}
+    if (run["state"].get("execution_switch") or {}).get("status") in {"converging", "needs_review"}:
+        pop = {**pop, "routes": recovery_routes, "round_members": [], "opportunities": []}
+    serial_route = run["state"].get("execution_serial_route")
+    scheduling = ({**pop, "routes": {serial_route: pop["routes"][serial_route]},
+                   "round_members": [rid for rid in pop.get("round_members", []) if rid == serial_route],
+                   "opportunities": [rid for rid in pop.get("opportunities", []) if rid == serial_route]}
+                  if serial_route else pop)
+    schedule = round_schedule(scheduling)
     run = command(harness, run["run_id"], "patch", updates=schedule)
     for rid in schedule["order"]:
         route = run["state"]["population"]["routes"][rid]

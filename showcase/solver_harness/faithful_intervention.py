@@ -154,6 +154,11 @@ class FaithfulInterventionEngine:
             raise FaithfulInterventionError("checkpoint_revision_conflict")
         if state.get("phase") == "TERMINAL":
             raise FaithfulInterventionError("parent_run_terminal")
+        parent_state = state
+        if state.get("serial_checkpoint"):
+            from .autonomous_routes import serial_checkpoint_view
+
+            state = serial_checkpoint_view(state, expected_revision=expected_revision)
         checkpoint = {
             "run_id": run_id,
             "state_revision": expected_revision,
@@ -234,7 +239,7 @@ class FaithfulInterventionEngine:
                     "FROM solver_states WHERE run_id=?", (run_id,),
                 ).fetchone()
                 if (current is None or current[3] != expected_revision
-                        or current[0] != _encode(state)
+                        or current[0] != _encode(parent_state)
                         or current[1] != state["problem_hash"]
                         or current[2] != state["config_hash"]):
                     raise FaithfulInterventionError("checkpoint_revision_conflict")

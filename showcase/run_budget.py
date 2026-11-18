@@ -84,6 +84,7 @@ class RunBudgetLedger:
         self._closed = False
         self.database_path = self.connection.execute("PRAGMA database_list").fetchone()[2]
         self.late_usage_evidence_dir = None
+        self.on_settled = None
         with self.lock, self.connection_lock:
             self.connection.execute(
                 "CREATE TABLE IF NOT EXISTS run_budgets (run_id TEXT PRIMARY KEY, ledger_json TEXT NOT NULL)"
@@ -196,6 +197,11 @@ class RunBudgetLedger:
             closing_call = role in {"final_generator", "whole_solution_verifier"}
             floor = (population.get("closing_reserve", {})
                      if population is not None and not closing_call else {})
+            from .solver_harness.adaptive_resources import current_floor
+
+            adaptive_floor = current_floor(run_id)
+            floor = {key: max(floor.get(key, 0), adaptive_floor.get(key, 0))
+                     for key in set(floor) | set(adaptive_floor)}
             if time.time() >= state["deadline_at"]:
                 raise BudgetExhausted("run_deadline_exhausted")
             if kind == "http":
@@ -208,6 +214,11 @@ class RunBudgetLedger:
                 if reserved is not None:
                     if population_action_id is not None:
                         self._assert_population_owner(run_id, population_action_id, population_scope[1])
+                        if input_estimate > reserved["input_estimate"] and output_cap <= reserved["output_cap"]:
+                            from .solver_harness.population_budget import resize_input_hold
+
+                            resize_input_hold(reserved, input_estimate, summary, limits, floor,
+                                              state["deadline_at"] - time.time())
                     if input_estimate > reserved["input_estimate"] or output_cap > reserved["output_cap"]:
                         raise BudgetExhausted("finalization_reservation_too_small")
                     action_id = attempt_id or uuid4().hex
@@ -246,12 +257,12 @@ class RunBudgetLedger:
             if kind == "logical" and population_action_id is not None:
                 raise BudgetExhausted("population_model_reservation_exhausted")
             if kind == "logical":
-                held = floor.get("model_calls", 0) if population is not None else 0
+                held = floor.get("model_calls", 0)
                 if summary["logical_calls"] + 1 + held > limits["max_model_calls"]:
                     raise BudgetExhausted("run_model_budget_exhausted")
             elif kind == "http":
-                held_http = floor.get("http_attempts", 0) if population is not None else 0
-                held_tokens = floor.get("tokens", 0) if population is not None else 0
+                held_http = floor.get("http_attempts", 0)
+                held_tokens = floor.get("tokens", 0)
                 if (
                     summary["http_attempts"] + 1 + held_http > limits["max_http_attempts"]
                     or summary["charged_tokens"] + input_estimate + output_cap + held_tokens
@@ -466,6 +477,8 @@ class RunBudgetLedger:
             settled = self._settle_open(run_id, action_id, event)
         if settled:
             self._settle_population_resource(run_id, action_id)
+            if self.on_settled is not None:
+                self.on_settled()
         return settled
 
     def _settle_population_resource(self, run_id, attempt_id):
@@ -678,6 +691,25 @@ class ModelCallBudget(RunBudget):
         return super().before_attempt(event, input_estimate)
 
 
+def http_outcome_unknown(action):
+    """Classify unresolved remote outcomes independently of missing usage."""
+    attempt = action.get("public_attempt") or {}
+    return (action["status"] == "unknown" or (action["status"] == "error"
+            and (attempt.get("error_category") in {
+                "timeout", "connectivity", "missing_finish_reason", "missing_stream_terminal"}
+                or (attempt.get("error_category") == "http_status"
+                    and 500 <= (attempt.get("http_status") or 0) < 600))))
+
+
+def tool_outcome_unknown(action):
+    """Retain tool occupancy until its outcome and cleanup are confirmed."""
+    evidence = action.get("execution_evidence") or {}
+    return (action["status"] in {"reserved", "unknown"}
+            or evidence.get("unknown_outcome") is True
+            or (action["status"] == "timeout" and not (
+                evidence.get("unknown_outcome") is False and evidence.get("cleanup_verified") is True)))
+
+
 def _summary(state):
     # Known counters sum only fields actually returned by the provider. Missing
     # fields retain their reservation even when a total-only usage is available.
@@ -692,11 +724,7 @@ def _summary(state):
         held = (action["input_estimate"] if usage["prompt_tokens"] is None else 0) + (
             action["output_cap"] if usage["completion_tokens"] is None else 0
         )
-        attempt = action.get("public_attempt") or {}
-        if (action["status"] == "unknown" or (action["status"] == "error"
-                and (attempt.get("error_category") in {"timeout", "connectivity", "missing_finish_reason", "missing_stream_terminal"}
-                     or (attempt.get("error_category") == "http_status"
-                         and 500 <= (attempt.get("http_status") or 0) < 600)))):
+        if http_outcome_unknown(action):
             held = action["input_estimate"] + action["output_cap"]
             # The known counts are already inside the full original reservation.
             accounted = max(action["input_estimate"], usage["prompt_tokens"] or 0) + max(
@@ -733,18 +761,7 @@ def _summary(state):
             a.get("duration_seconds") or 0 for a in state["actions"] if a["kind"] == "tool"
         ),
         "unknown_tool_calls": sum(
-            a["kind"] == "tool"
-            and (
-                a["status"] in {"reserved", "unknown"}
-                or (a.get("execution_evidence") or {}).get("unknown_outcome") is True
-                or (
-                    a["status"] == "timeout"
-                    and not (
-                        (a.get("execution_evidence") or {}).get("unknown_outcome") is False
-                        and (a.get("execution_evidence") or {}).get("cleanup_verified") is True
-                    )
-                )
-            )
+            a["kind"] == "tool" and tool_outcome_unknown(a)
             for a in state["actions"]
         ),
         "started_at": state["started_at"],

@@ -13,7 +13,7 @@ from tests.test_faithful_s03_job import ENDPOINT, PROBLEM, REPLIES, SPEC
 
 
 class PopulationMemoryPipelineTest(StarJobFixture, unittest.TestCase):
-    def test_explicit_same_domain_memory_is_advisory_context_and_reaches_current_review(self):
+    def test_rational_domain_alias_memory_is_advisory_and_reaches_current_review(self):
         self.enterContext(patch.dict(os.environ, {"INTERN_API_BASE": ENDPOINT}))
         features = {
             "problem_spec": True,
@@ -40,7 +40,7 @@ class PopulationMemoryPipelineTest(StarJobFixture, unittest.TestCase):
         source_created = self.client.post(
             "/api/agent/jobs",
             json={"message": PROBLEM, "session_id": self.session,
-                  "solver_mode": "star_limited", "problem_spec": SPEC},
+                  "solver_mode": "star_limited", "problem_spec": {**SPEC, "domain": "rationals"}},
             headers=self.headers(),
         )
         self.assertEqual(202, source_created.status_code, source_created.get_json())
@@ -57,13 +57,16 @@ class PopulationMemoryPipelineTest(StarJobFixture, unittest.TestCase):
         created = self.client.post(
             "/api/agent/jobs",
             json={"message": PROBLEM, "session_id": self.session,
-                  "solver_mode": "star_limited", "problem_spec": SPEC},
+                  "solver_mode": "star_limited", "problem_spec": {**SPEC, "domain": "rational numbers"}},
             headers=self.headers(),
         )
         self.assertEqual(202, created.status_code, created.get_json())
         job_id = created.get_json()["job_id"]
         terminal = self.terminal(job_id)
         self.assertEqual("succeeded", terminal["status"], terminal)
+
+        usage = self.client.get(f"/api/agent/jobs/{job_id}/memory").get_json()["run_memory"]["memory_usage"]
+        self.assertTrue(any(source_observation["record_id"] in item["record_ids"] for item in usage))
 
         state_connection = sqlite3.connect(self.app.config["SHOWCASE_DATABASE_PATH"])
         try:
@@ -121,7 +124,7 @@ class PopulationMemoryPipelineTest(StarJobFixture, unittest.TestCase):
             if item["provenance"].get("source_run_id") == job_id
         )
         self.assertIn("logical_calls", current_observation["observation"]["cost"])
-        self.assertEqual(SPEC["domain"], current_observation["observation"]["applicability"]["domain"])
+        self.assertEqual("rational numbers", current_observation["observation"]["applicability"]["domain"])
 
     def test_cross_session_import_is_rechecked_and_cannot_supply_an_accepted_claim(self):
         self.enterContext(patch.dict(os.environ, {"INTERN_API_BASE": ENDPOINT}))

@@ -102,6 +102,8 @@ def prepare_adoption(parent, route_snapshot):
         "verified_results_ledger": selected,
         "steps": snapshot_steps,
         "calls": snapshot_calls,
+        "native_report_sources": {**route_snapshot.get('native_report_sources', {}),
+                                  **parent.get('native_report_sources', {})},
     }
     if dependencies:
         patch["proof_graph"] = deepcopy(parent.get("proof_graph"))
@@ -191,8 +193,14 @@ def merge_route_evidence(current_state, route, action, branch_snapshot):
         if item.get("evidence_id") not in existing_obligations
         and item.get("source") in event_steps
         and _valid_obligation_evidence(branch, item)
+        and obligation_claims_eligible(branch, item, current_state)
     ]
     if not accepted and not obligation_additions:
+        from .population_checkpoint import continuation_audit
+
+        continuation = continuation_audit(branch, branch_snapshot.get("events", []), route, action)
+        if continuation is not None:
+            return empty, continuation
         return empty, _audit(False, "no_verified_incremental_evidence")
     for item in obligation_additions:
         review_id = item.get("review_call_id")
@@ -311,7 +319,8 @@ def _valid_result(state, result, current, route=None, action=None):
     ):
         return False
     report_id = _report_call_for(state, result)
-    report = state.get("calls", {}).get(report_id, {})
+    source = _report_source_for(state, result)
+    report = source['call'] if source else {}
     if (
         report.get("role") != "reasoner"
         or report.get("status") != "completed"
@@ -355,6 +364,50 @@ def _valid_result(state, result, current, route=None, action=None):
     )
 
 
+def obligation_claims_eligible(state, evidence, graph_state=None):
+    """Exclude obligation source claims contradicted by the current proof graph."""
+    from .proof_graph import proposition_id
+
+    claims = state.get("steps", {}).get(evidence.get("source"), {}).get("report", {}).get("claims", [])
+    indexes = evidence.get("claim_indexes", [])
+    if not indexes or any(type(index) is not int or not 0 <= index < len(claims)
+                          for index in indexes):
+        return False
+    current = _current_propositions(state if graph_state is None else graph_state)
+    identity = {key: evidence.get(key) for key in (
+        "source", "review_call_id", "plan_version", "attempt_index")}
+    report_id = _report_call_for(state, identity)
+    source_props = {}
+    if report_id is not None:
+        for source in (state, graph_state or state):
+            graph = source.get("proof_graph") or {}
+            for snapshot in graph.get("snapshots", []):
+                if snapshot.get("graph_version") != graph.get("current_version"):
+                    continue
+                for attempt in snapshot.get("attempts", {}).values():
+                    prop_id = attempt.get("conclusion")
+                    if f"report:{report_id}" in attempt.get("source_refs", []):
+                        prop = snapshot.get("propositions", {}).get(prop_id)
+                        if prop is not None:
+                            source_props[prop_id] = prop
+    for index in indexes:
+        claim = claims[index]
+        ids = {_proposition_for_result(state, item)
+               for item in state.get("verified_results_ledger", [])
+               if all(item.get(key) == value for key, value in identity.items())
+               and index in item.get("claim_indexes", [])
+               and item.get("statement") == claim.get("statement")}
+        ids.update(prop_id for prop_id, prop in source_props.items()
+                   if isinstance(prop.get("scope"), str)
+                   and proposition_id(state, claim["statement"], prop["scope"]) == prop_id)
+        if not ids:
+            ids.add(_proposition_for_result(state, claim))
+        if any(current.get(prop_id, {}).get("conflict") is True
+               or current.get(prop_id, {}).get("status") == "refuted" for prop_id in ids):
+            return False
+    return True
+
+
 def _valid_obligation_evidence(state, evidence):
     import hashlib
     import json
@@ -364,22 +417,17 @@ def _valid_obligation_evidence(state, evidence):
         or evidence.get("invalidated") is True
         or evidence.get("run_id") != state.get("run_id")
         or evidence.get("specification_version") != state.get("specification_version")
+        or not obligation_claims_eligible(state, evidence)
     ):
         return False
     step_id = evidence.get("source")
     step = state.get("steps", {}).get(step_id, {})
     review = state.get("calls", {}).get(evidence.get("review_call_id"), {})
     report = step.get("report", {})
-    report_call_id = _report_call_for(
-        state,
-        {
-            "source": step_id,
-            "review_call_id": evidence.get("review_call_id"),
-            "plan_version": evidence.get("plan_version"),
-            "attempt_index": evidence.get("attempt_index"),
-        },
-    )
-    report_call = state.get("calls", {}).get(report_call_id, {})
+    source = _report_source_for(state, {
+        'source': step_id, 'review_call_id': evidence.get('review_call_id'),
+        'plan_version': evidence.get('plan_version'), 'attempt_index': evidence.get('attempt_index')})
+    report_call = source['call'] if source else {}
     report_digest = hashlib.sha256(
         json.dumps(report, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -401,27 +449,18 @@ def _valid_obligation_evidence(state, evidence):
     )
 
 
+def _report_source_for(state, result):
+    from .report_sources import resolve_report_source
+
+    step_id = result.get('source')
+    return resolve_report_source(state, step_id, state.get('steps', {}).get(step_id, {}).get('report', {}),
+                                 result.get('plan_version'), result.get('attempt_index'),
+                                 review=state.get('calls', {}).get(result.get('review_call_id')))
+
+
 def _report_call_for(state, result):
-    review = state.get("calls", {}).get(result.get("review_call_id"), {})
-    candidates = []
-    for call_id, record in state.get("calls", {}).items():
-        request = record.get("request", {})
-        step = request.get("step", {})
-        step_id = step.get("step_id", request.get("step_id"))
-        if (record.get("role") != "reasoner" or record.get("status") != "completed"
-                or step_id != result.get("source")
-                or record.get("plan_version") != result.get("plan_version")
-                or record.get("attempt_index") != result.get("attempt_index")):
-            continue
-        if review and (any(record.get(key) != review.get(key) for key in ("route_id", "action_id"))
-                       or record.get("request_revision", 0) > review.get("request_revision", 0)):
-            continue
-        claims = record.get("response", {}).get("claims", [])
-        if all(type(index) is int and 0 <= index < len(claims)
-               and claims[index].get("statement") == result.get("statement")
-               for index in result.get("claim_indexes", [])):
-            candidates.append((record.get("request_revision", 0), call_id))
-    return max(candidates)[1] if candidates else None
+    source = _report_source_for(state, result)
+    return source['source_id'] if source else None
 
 
 def _proposition_for_result(state, result):

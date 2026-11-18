@@ -8,6 +8,7 @@ from .adapters import InternStreamAdapter
 from .run_budget import RunBudgetLimits
 from .solver_harness.context_pack import frozen_policy
 from .star_product_config import CORE_FEATURES, population_config
+from .stream_timeout_policy import policy_for_version
 
 
 def _unique_object(pairs):
@@ -37,7 +38,8 @@ def load_faithful_config(path):
     path = Path(path)
     value = json.loads(path.read_text(encoding="utf-8-sig"), object_pairs_hook=_unique_object)
     _object(value, {"version", "python_image_id", "context_capacity", "budget"},
-            {"population", "formal", "population_memory"})
+            {"population", "formal", "population_memory", "request_timeout_seconds",
+             "stream_timeout_policy_version", "adaptive_solving"})
     if value["version"] != "faithful-service-v1":
         raise ValueError("faithful_config_version_invalid")
     image = value["python_image_id"]
@@ -49,37 +51,60 @@ def load_faithful_config(path):
         "auto_problem_spec",
     }, True)
     frozen_policy({"features": features, "context_capacity": value["context_capacity"]})
+    if type(value.get("adaptive_solving", False)) is not bool:
+        raise ValueError("faithful_adaptive_solving_invalid")
+    if value.get("adaptive_solving") is True:
+        features["adaptive_solving"] = True
     memory = value.get("population_memory", False)
     if type(memory) is not bool:
         raise ValueError("faithful_population_memory_invalid")
+    root_budget = _budget(value["budget"])
+    stream_policy = policy_for_version(value.get("stream_timeout_policy_version"))
+    request_timeout = value.get("request_timeout_seconds", 180)
+    if "request_timeout_seconds" in value and (
+        type(request_timeout) not in {int, float}
+        or not 0 < request_timeout <= root_budget.max_runtime_seconds
+    ):
+        raise ValueError("faithful_request_timeout_invalid")
     config = {
         "SHOWCASE_FAITHFUL_AUTONOMOUS": True,
+        "SHOWCASE_FORMAL_GENERATION_REQUIRED": True,
         "SHOWCASE_STAR_FULL_ENABLED": True,
         "SHOWCASE_STAR_PYTHON_IMAGE_ID": image,
         "SHOWCASE_STAR_FULL_FEATURES": features,
-        "SHOWCASE_STAR_FULL_BUDGET": _budget(value["budget"]),
+        "SHOWCASE_STAR_FULL_BUDGET": root_budget,
         "SHOWCASE_STAR_CONTEXT_CAPACITY": value["context_capacity"],
         "SHOWCASE_STAR_TRANSPORT_POLICY": "stream_first",
         "SHOWCASE_STAR_ADAPTER": InternStreamAdapter(max_tokens=32768, thinking_mode=False,
-                                                    client_timeout=180, client_retry=3),
+                                                    client_timeout=request_timeout, client_retry=3),
         "SHOWCASE_PRESENTATION_ENABLED": True,
         "SHOWCASE_FAITHFUL_MEMORY_ENABLED": True,
         "SHOWCASE_POPULATION_MEMORY_ENABLED": memory,
         "SHOWCASE_FAITHFUL_INTERVENTION_ENABLED": True,
         "SHOWCASE_F7_SYSTEM_VIEW_ENABLED": True,
     }
+    if stream_policy is not None:
+        config["SHOWCASE_STREAM_TIMEOUT_POLICY_VERSION"] = stream_policy["policy_version"]
     if "population" in value:
-        population = _object(value["population"], {"capacity", "budget"})
+        population = _object(value["population"], {"capacity", "budget"},
+                             {"request_timeout_seconds"})
         budget = _budget(population["budget"])
-        # Validate with the current production adapter's default timeout; the
+        # Validate with the configured adapter's timeout; the
         # runtime repeats admission against the actual configured adapter.
+        timeout = population.get("request_timeout_seconds", request_timeout)
+        if type(timeout) not in {int, float} or not 0 < timeout <= request_timeout:
+            raise ValueError("population_request_timeout_invalid")
         population_config(budget, population["capacity"], evidence_kind="live",
-                          request_timeout_seconds=180)
+                          request_timeout_seconds=timeout)
         config.update(SHOWCASE_STAR_POPULATION_ENABLED=True,
                       SHOWCASE_STAR_POPULATION_CAPACITY=population["capacity"],
-                      SHOWCASE_STAR_POPULATION_BUDGET=budget)
+                      SHOWCASE_STAR_POPULATION_BUDGET=budget,
+                      SHOWCASE_STAR_POPULATION_REQUEST_TIMEOUT_SECONDS=timeout)
     if "formal" in value:
-        from .formal import LeanTacticProver
+        import secrets
+
+        from .formal import LeanTacticProver, ReviewAuthority
+        from .formal_correspondence import CHECKER_VERSION
         from .formal_docker import LeanDockerExecutor
 
         formal = _object(value["formal"], {"manifest", "policy"})
@@ -93,6 +118,9 @@ def load_faithful_config(path):
                                       timeout_seconds=policy["timeout_seconds"],
                                       max_output_bytes=policy["max_output_bytes"])
         config.update(SHOWCASE_FORMAL_BACKEND=LeanTacticProver(
-            executor, timeout_seconds=policy["timeout_seconds"]),
+            executor, timeout_seconds=policy["timeout_seconds"],
+            review_authority=ReviewAuthority(
+                {CHECKER_VERSION: secrets.token_hex(32)},
+                {CHECKER_VERSION: "independent_service"})),
             SHOWCASE_FORMAL_VERIFICATION_CONFIG=policy)
     return config

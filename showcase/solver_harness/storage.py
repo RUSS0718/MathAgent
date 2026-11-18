@@ -280,7 +280,18 @@ class SolverStateStore:
                     from .proof_graph import evolve_proof_graph
 
                     receipt_rows = connection.execute(
-                        "SELECT event_json FROM solver_events WHERE run_id = ? ORDER BY sequence",
+                        """
+                        SELECT event_json FROM solver_events
+                        WHERE run_id = ? AND CASE
+                            WHEN json_valid(event_json) = 0 THEN 1
+                            WHEN json_type(event_json) <> 'object' THEN 1
+                            ELSE EXISTS (
+                                SELECT 1 FROM json_each(event_json)
+                                WHERE key = 'type' AND value = 'tool_receipt'
+                            )
+                        END
+                        ORDER BY sequence
+                        """,
                         (run_id,),
                     ).fetchall()
                     persisted_receipts = {}

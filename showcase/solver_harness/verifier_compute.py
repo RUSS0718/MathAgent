@@ -141,10 +141,10 @@ def continue_review(harness, run, *, role, step_id, round_number, attempt_index,
     continuation = {**deepcopy(dict(base_request)), "call_id": call_id, "report": report}
     try:
         run, reply = reserve_and_dispatch(run, matching["request_index"], call_id, continuation)
-    except CallInterrupted:
+    except CallInterrupted as exc:
         latest = harness.get_run(run["run_id"])
         calls = latest["state"].get("calls", {})
-        call = calls.get(latest_retry_id(calls, call_id), {})
+        call = calls.get(latest_retry_id(calls, getattr(exc, "call_id", call_id)), {})
         if call.get("error_category") not in KNOWN_RESPONSE_FAILURES:
             raise
         return latest, None, False

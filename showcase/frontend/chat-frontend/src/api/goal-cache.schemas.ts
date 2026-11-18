@@ -3,7 +3,7 @@ import { z } from 'zod'
 const goalCacheEntrySchema = z.object({
   cache_id: z.string(),
   state: z.enum(['active', 'stale', 'invalidated']),
-  reason: z.string().optional(),
+  reason: z.string().nullish(),
   created_at: z.string(),
   updated_at: z.string(),
   source_run_id: z.string().optional(),
@@ -13,7 +13,7 @@ const goalCacheEntrySchema = z.object({
 }).passthrough()
 
 const goalCacheEventSchema = z.object({
-  cache_id: z.string().optional(),
+  cache_id: z.string().nullish(),
   event: z.string(),
   created_at: z.string(),
   details: z.record(z.string(), z.unknown()).optional(),

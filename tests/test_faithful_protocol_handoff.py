@@ -28,6 +28,36 @@ from tests.test_solver_harness_reasoner_checkpoint import checkpoint as reasoner
 
 
 class PlannerHandoffMessagesTest(unittest.TestCase):
+    def test_explore_requests_require_instances_including_nested_tool_requests(self):
+        from showcase.solver_harness.protocol_repair import REPAIR_INSTRUCTION
+
+        tool = {"tool": "python_math", "arguments": {"code": "print(1 + 1)"},
+                "scope": "finite_computation"}
+        reply = {"assessment": "NEED_PLAN", "worked": [], "failed": [],
+                 "candidates": [], "solution_candidate": None, "tool_request": tool}
+        for repair in (False, True):
+            with self.subTest(repair=repair):
+                request = {"role": "explore", "problem": "Compute 1+1",
+                           "allowed_tools": ["python_math"]}
+                if repair:
+                    request["repair_instruction"] = REPAIR_INSTRUCTION
+                schema = response_schema(request)
+                messages = InternModelPort()._messages(request, schema)
+                system = messages[0]["content"]
+                self.assertIn("at every nesting level", system)
+                self.assertIn("tool_request must directly contain", system)
+                self.assertIn("actual argument values", system)
+                self.assertIn("type, properties, required, or additionalProperties", system)
+                self.assertIsNone(schema_error(reply, schema))
+                wrapped = {"type": "object", "properties": reply,
+                           "required": list(reply), "additionalProperties": False}
+                self.assertIsNotNone(schema_error(wrapped, schema))
+                nested = {**reply, "tool_request": {
+                    "type": "object", "properties": tool,
+                    "required": ["tool", "arguments", "scope"], "additionalProperties": False,
+                }}
+                self.assertIsNotNone(schema_error(nested, schema))
+
     def test_runtime_usage_is_separate_from_the_strict_provider_checkpoint(self):
         from showcase.solver_harness.reasoner_checkpoint import parse
 
@@ -100,7 +130,12 @@ class PlannerHandoffMessagesTest(unittest.TestCase):
     def test_planner_and_reviewer_distinguish_preparation_from_proof(self):
         request = self.request()
         system = InternModelPort()._messages(request, response_schema(request))[0]["content"]
-        self.assertIn("Pure preparation", system)
+        self.assertIn("A root obligation's owner step must establish its proof, "
+                      "not merely prepare or choose a method", system)
+        self.assertIn("Auxiliary goals outside the frozen root prerequisite closure are optional; "
+                      "keep required auxiliary owners", system)
+        self.assertIn("Use auxiliary_goal_ids for needed non-root preparation, "
+                      "leaving obligation_ids empty and respecting those dependencies", system)
         request = {"role": "step_verifier", "problem": "1+1", "problem_spec": SPEC,
                    "step_goal": "Choose a method before deriving the proof"}
         system = InternModelPort()._messages(request, response_schema(request))[0]["content"]
@@ -250,22 +285,61 @@ class FaithfulProtocolHandoffTest(StarJobFixture, unittest.TestCase):
 
     def test_binding_feedback_identifies_objective_and_its_self_owned_prerequisite(self):
         spec = deepcopy(SPEC)
+        spec["root_obligations"].append({"obligation_id": "root:explain", "obligation_type": "universal",
+            "statement": "Explain the derived value", "prerequisite_ids": ["duplicate", "root:value"]})
         spec["auxiliary_goals"] = [{"goal_id": "duplicate", "description": "Use the established value",
                                     "dependencies": ["root:value"]}]
         bad = {"version": 1, "steps": [{"step_id": "S1", "title": "Add", "objective": "Compute 1+1",
-                "obligation_ids": ["root:value"], "auxiliary_goal_ids": ["duplicate"], "method_id": "direct"}]}
+                "obligation_ids": ["root:value"], "auxiliary_goal_ids": ["duplicate"], "method_id": "direct"},
+            {"step_id": "S3", "title": "Explain", "objective": "Explain the value", "depends_on": ["S1"],
+             "obligation_ids": ["root:value", "root:explain"], "auxiliary_goal_ids": [], "method_id": "direct"}]}
         corrected = deepcopy(bad)
         corrected["steps"][0]["auxiliary_goal_ids"] = []
+        corrected["steps"][1]["obligation_ids"] = ["root:explain"]
+        corrected["steps"][1]["depends_on"] = ["S2"]
+        corrected["steps"].insert(1, {"step_id": "S2", "title": "Use", "objective": "Use the established value",
+            "depends_on": ["S1"], "obligation_ids": [], "auxiliary_goal_ids": ["duplicate"], "method_id": "direct"})
         self.open_faithful([spec, {"assessment": "NEED_PLAN", "worked": [], "failed": [], "candidates": []},
             {"checkpoint": {**planner_checkpoint("FINAL"), "gaps": []}, "plan": bad},
-            {"checkpoint": {**planner_checkpoint("FINAL"), "gaps": []}, "plan": corrected}], calls=4)
-        self.terminal(self.submit())
+            {"checkpoint": {**planner_checkpoint("FINAL"), "gaps": []}, "plan": corrected},
+            {"checkpoint": {**reasoner_checkpoint("FINAL"), "objective": "Compute 1+1"}}], calls=5)
+        final = self.terminal(self.submit())
         planners = [request for request in self.outbound if request["role"] == "planner"]
         self.assertEqual(2, len(planners))
         feedback = planners[1]["feedback"]
+        self.assertNotIn("root-only repair", feedback["instruction"])
+        self.assertNotIn("auxiliary_goal_ids=[]", feedback["instruction"])
+        self.assertIn("after every owner of prerequisite_id", feedback["instruction"])
+        for hint in (
+            "prefer one actual proof owner per root",
+            "Do not claim the same root in both preparation and completion steps",
+            "Fold preparation into the actual proof owner or omit an unneeded preparation step",
+            "retain needed legally mapped auxiliary goals and preserve required auxiliary owners",
+            "Do not leave a WorkUnit with both mapping lists empty",
+            "The dependent root and its prerequisite must have different owners",
+            "place the dependent after all prerequisite owners",
+            "Apply these same binding rules independently to every proposed complete plan, including alternative_plans",
+            "do not mix owners between plans",
+        ):
+            self.assertIn(hint, feedback["instruction"])
         self.assertEqual(bad, feedback["invalid_plan"])
         self.assertEqual([{"step_id": "S1", "objective_id": "duplicate", "prerequisite_id": "root:value",
-                           "owner_step_id": "S1", "kind": "self_dependency"}], feedback.get("binding_errors"))
+                           "owner_step_id": "S1", "kind": "self_dependency"},
+                          {"step_id": "S1", "objective_id": "duplicate", "prerequisite_id": "root:value",
+                           "owner_step_id": "S3", "kind": "forward_dependency"},
+                          {"step_id": "S3", "objective_id": "root:explain", "prerequisite_id": "root:value",
+                           "owner_step_id": "S3", "kind": "self_dependency"}], feedback.get("binding_errors"))
+        planner_systems = [messages[0]["content"] for request, messages in
+                           zip(self.outbound, self.outbound_messages) if request["role"] == "planner"]
+        for system in planner_systems:
+            self.assertIn("Auxiliary goals outside the frozen root prerequisite closure are optional; "
+                          "keep required auxiliary owners", system)
+        reasoners = [request for request in self.outbound if request["role"] == "reasoner"]
+        self.assertEqual(1, len(reasoners))
+        self.assertEqual("S1", reasoners[0]["step"]["step_id"])
+        self.assertNotEqual("invalid_problem_spec_work_units", final["result"]["solver"]["result_reason"])
+        self.assertEqual(5, final["result"]["budget"]["logical_calls"])
+        self.assertEqual(5, len(self.outbound))
 
     def test_reasoner_empty_yield_is_repaired_before_serial_execution_continues(self):
         spec = deepcopy(SPEC)
@@ -290,7 +364,8 @@ class FaithfulProtocolHandoffTest(StarJobFixture, unittest.TestCase):
         second_review = deepcopy(review)
         second_review["obligation_evidence"][0]["obligation_id"] = "root:explain"
         stream_requests = [
-            {"role": "planner", "checkpoint_protocol": True, "problem_spec": spec, "progress_policy": {"enabled": True}},
+            {"role": "planner", "checkpoint_protocol": True, "problem_spec": spec, "plan_version": 1,
+             "progress_policy": {"enabled": True}, "autonomous_routes": {"enabled": True}},
             *({"role": "step_verifier", "problem_spec": spec, "step": step} for step in plan["steps"]),
             *({"role": "reasoner", "checkpoint_protocol": True, "current_goal": step["objective"]}
               for step in plan["steps"]),
@@ -299,7 +374,8 @@ class FaithfulProtocolHandoffTest(StarJobFixture, unittest.TestCase):
             {"checkpoint": {**planner_checkpoint("FINAL"), "gaps": []}, "plan": plan},
             bad, first, review, second, second_review, {"final_response": "1+1=2"}, ACCEPT],
             calls=12, stream=True, stream_requests=stream_requests)
-        final = self.terminal(self.submit())
+        # Ten audited calls including a repair can exceed the fixture's 8s observation window.
+        final = self.terminal(self.submit(), timeout=30)
         self.assertEqual("succeeded", final["status"])
         reasoners = [r for r in self.outbound if r["role"] == "reasoner"]
         self.assertEqual(3, len(reasoners))
@@ -362,7 +438,8 @@ class FaithfulProtocolHandoffTest(StarJobFixture, unittest.TestCase):
                 "tool_request": {"tool": "polynomial_check", "arguments": {"coefficients": [1]},
                                  "scope": "finite_computation"}}, reviewed_with_receipt]
         stream_requests = [
-            {"role": "planner", "checkpoint_protocol": True, "problem_spec": spec, "progress_policy": {"enabled": True}},
+            {"role": "planner", "checkpoint_protocol": True, "problem_spec": spec, "plan_version": 1,
+             "progress_policy": {"enabled": True}, "autonomous_routes": {"enabled": True}},
             *({"role": "step_verifier", "problem_spec": spec, "step": step} for step in plan["steps"]),
             *({"role": "reasoner", "checkpoint_protocol": True, "current_goal": step["objective"]}
               for step in plan["steps"]),

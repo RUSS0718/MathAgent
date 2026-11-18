@@ -23,7 +23,7 @@ for (const width of [320, 768, 1024, 1440]) {
     const id = await create(page, 'plan')
     await terminal(page, id)
     await page.goto(`/dashboard-assets/run/${id}`)
-    await expect(page.getByRole('heading', { name: 'STAR 持久进展' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '求解持久进展' })).toBeVisible()
     await expect(page.getByRole('heading', { name: '报告当前不可用' })).toHaveCount(0)
     await expect(page.getByText('fault_injection', { exact: true })).toBeVisible()
     await expect(page.getByText('步骤 1', { exact: false }).first()).toBeVisible()
@@ -202,10 +202,10 @@ test('ProblemSpec progress survives browser refresh and SSE reconnect without ne
   expect(JSON.stringify(report)).not.toContain(privateStatement)
 
   await page.goto(`${origin}/dashboard/run/${id}`)
-  await expect(page.getByRole('heading', { name: 'STAR 持久进展' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '求解持久进展' })).toBeVisible()
   await expect(page.getByLabel('结果语义').first()).toContainText('LLM 整题审查通过')
   await page.reload()
-  await expect(page.getByRole('heading', { name: 'STAR 持久进展' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '求解持久进展' })).toBeVisible()
   const requestCountBeforeReconnect = eventRequests.length
   const persistedCursor = (await (await page.request.get(`${origin}/api/agent/jobs/${id}`)).json()).last_event_id
   expect(persistedCursor).toBeGreaterThan(0)

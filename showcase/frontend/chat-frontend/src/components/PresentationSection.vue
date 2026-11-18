@@ -1,5 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { isApiError } from '../api/errors'
+import type { JobReport } from '../api/reports.schemas'
+import { describeResultSemantics } from '../runtime/reports/result-semantics'
+import { buildSystemDeepLink } from '../runtime/navigation/system-deeplink'
 import { api } from '../api/client'
 import { renderSafeMarkdown } from '../renderers/markdown-adapter'
 import type { PresentationMode, PresentationResponse } from '../api/presentation.schemas'
@@ -8,19 +12,27 @@ import UiButton from './ui/UiButton.vue'
 
 const props = defineProps<{
   jobId: string
-  mode: PresentationMode
+  mode?: PresentationMode
   jobStatus: string
   problem?: string
   fallbackAnswer?: string
   sourceVersion?: unknown
+  answerReport?: JobReport['report']
 }>()
 
+const selectedMode = ref<PresentationMode>(props.mode ?? 'teach')
+watch(() => [props.jobId, props.mode], () => { selectedMode.value = props.mode ?? 'teach' })
+const systemViewEnabled = import.meta.env.VITE_F7_SYSTEM_VIEW_ENABLED === 'true'
 const view = ref<'answer' | 'presentation'>('answer')
 const response = ref<PresentationResponse | null>(null)
 const loading = ref(false)
 const loadError = ref('')
 let requestGeneration = 0
 const modeLabels: Record<string, string> = { solve: '求解', teach: '教学', report: '报告' }
+const providerKnown = computed(() => {
+  const value = props.answerReport?.budget?.provider_known
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {}
+})
 const artifact = computed(() => response.value?.presentation)
 const sourceStatus = computed(() => artifact.value?.status === 'needs_review' ? 'needs_review' : artifact.value?.sources.length ? 'current' : 'unknown')
 const renderedAnswer = computed(() => renderSafeMarkdown(response.value?.answer ?? props.fallbackAnswer ?? ''))
@@ -34,39 +46,77 @@ function evidenceId(reference: string): string {
   return `presentation-${props.jobId}-${reference}`
 }
 
-watch(() => [props.jobId, props.mode, props.jobStatus, props.sourceVersion] as const, async ([jobId, mode, status], previous) => {
+function systemHref(paragraphId?: string): string | undefined {
+  const current = artifact.value
+  if (!systemViewEnabled || !current?.output_request) return undefined
+  try {
+    return buildSystemDeepLink({ runId: props.jobId, mode: current.mode,
+      outputId: current.output_request.id, artifactId: current.artifact.id, paragraphId })
+  } catch { return undefined }
+}
+
+async function load(generate = false): Promise<void> {
   const generation = ++requestGeneration
-  response.value = null
+  const jobId = props.jobId
+  const mode = selectedMode.value
   loadError.value = ''
-  if (jobId !== previous?.[0] || mode !== previous?.[1]) view.value = 'answer'
-  if (!['succeeded', 'failed', 'canceled'].includes(status)) return
+  loading.value = false
+  if (!['succeeded', 'failed', 'canceled'].includes(props.jobStatus)) return
   loading.value = true
   try {
-    const loaded = await api.presentation(jobId, mode)
-    if (generation === requestGeneration) response.value = loaded
+    const loaded = await (generate ? api.presentation(jobId, mode) : api.readPresentation(jobId, mode))
+    if (generation === requestGeneration) {
+      response.value = loaded
+      if (generate) view.value = 'presentation'
+    }
   } catch (error) {
     if (generation === requestGeneration) {
-      loadError.value = error instanceof Error ? error.message : '表达产物暂时不可用。'
+      loadError.value = isApiError(error) && error.status === 404 && error.code === 'presentation_unavailable'
+        ? '尚未保存此模式的表达，可显式生成模板。'
+        : error instanceof Error ? error.message : '表达产物暂时不可用。'
     }
   } finally {
     if (generation === requestGeneration) loading.value = false
   }
+}
+watch(() => [props.jobId, selectedMode.value, props.jobStatus, props.sourceVersion], () => {
+  response.value = null
+  view.value = 'answer'
+  void load()
 }, { immediate: true })
 </script>
 
 <template>
-  <section class="presentation-section" aria-label="S06 输出模式" :data-presentation-mode="mode" :data-artifact-id="artifact?.artifact.id" :data-source-job-id="artifact?.job_id">
+  <section class="presentation-section" aria-label="S06 输出模式" :data-presentation-mode="selectedMode" :data-artifact-id="artifact?.artifact.id" :data-source-job-id="artifact?.job_id">
     <div class="presentation-heading">
       <div>
-        <h2>独立输出 · {{ modeLabels[mode] ?? mode }}</h2>
+        <h2>独立输出 · {{ modeLabels[selectedMode] ?? selectedMode }}</h2>
         <p v-if="problem" class="presentation-problem">题目：{{ problem }}</p>
       </div>
       <div class="review-meta">
-        <StatusBadge :value="mode" />
+        <StatusBadge :value="selectedMode" />
         <StatusBadge v-if="artifact" :value="artifact.status" />
         <StatusBadge v-if="artifact" :value="artifact.completion" />
       </div>
     </div>
+    <div class="presentation-tabs" role="group" aria-label="按需表达">
+      <label v-if="!props.mode">表达模式
+        <select v-model="selectedMode" :disabled="loading" aria-label="表达模式">
+          <option value="teach">教学</option><option value="report">报告</option>
+        </select>
+      </label>
+      <UiButton :disabled="loading || !['succeeded', 'failed', 'canceled'].includes(jobStatus)" @click="load(true)">生成模板{{ modeLabels[selectedMode] }}</UiButton>
+      <a v-if="systemHref()" :href="systemHref()">查看版本化输出证据</a>
+    </div>
+    <p class="presentation-note">实验性模板整理：复用已有答案与证据，不是模型新讲解，不升级证明等级。</p>
+    <dl class="data-list" aria-label="答案验证边界">
+      <dt>验证方式</dt><dd>{{ answerReport?.checks?.checker ?? '未知 / 未记录' }}</dd>
+      <dt>验证范围</dt><dd>{{ answerReport?.checks?.scope ?? '未知 / 未记录' }}</dd>
+      <dt>要求满足</dt><dd>{{ answerReport?.semantics ? describeResultSemantics(answerReport.semantics) : '未知 / 未记录；任务完成不等于验证要求满足' }}</dd>
+      <template v-for="field in ['prompt_tokens', 'completion_tokens', 'total_tokens']" :key="field">
+        <dt>Provider {{ field }}</dt><dd>{{ providerKnown[field] ?? '未知 / 未记录' }}</dd>
+      </template>
+    </dl>
     <div class="presentation-tabs" role="group" aria-label="输出内容">
       <UiButton :variant="view === 'answer' ? 'primary' : 'secondary'" :aria-pressed="view === 'answer'" @click="view = 'answer'">原答案</UiButton>
       <UiButton :variant="view === 'presentation' ? 'primary' : 'secondary'" :aria-pressed="view === 'presentation'" @click="view = 'presentation'">表达内容</UiButton>
@@ -80,6 +130,7 @@ watch(() => [props.jobId, props.mode, props.jobStatus, props.sourceVersion] as c
     <article v-else-if="artifact" class="presentation-content" aria-label="表达内容">
       <section v-for="paragraph in artifact.paragraphs" :key="paragraph.id" class="presentation-paragraph">
         <div class="report-content" v-html="renderSafeMarkdown(paragraph.text)"></div>
+        <a v-if="systemHref(paragraph.id)" :href="systemHref(paragraph.id)">段落版本与证据</a>
         <details v-if="paragraph.kind === 'mathematical' || paragraph.claim_refs.length" class="presentation-claims" open>
           <summary>段落依据 · {{ paragraph.status }} · {{ paragraph.grade }}</summary>
           <ul v-if="paragraph.claim_refs.length">
@@ -92,7 +143,7 @@ watch(() => [props.jobId, props.mode, props.jobStatus, props.sourceVersion] as c
       </section>
     </article>
     <article v-else-if="view === 'presentation'" class="presentation-content" aria-label="表达内容">
-      <p>表达产物暂不可用，请稍后重试；原答案保留在“原答案”视图。</p>
+      <p>尚未保存或表达产物不可用，可显式生成模板；原答案保留在“原答案”视图。</p>
     </article>
     <div v-if="artifact" class="presentation-evidence" aria-label="证据状态">
       <h3>证据状态</h3>

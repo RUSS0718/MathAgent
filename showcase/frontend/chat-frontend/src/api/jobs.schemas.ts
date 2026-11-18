@@ -8,3 +8,25 @@ export const activeJobsResponseSchema = z.object({ success: z.boolean(), jobs: z
 export type JobActionResponse = z.infer<typeof jobActionResponseSchema>
 export type ActiveJobsResponse = z.infer<typeof activeJobsResponseSchema>
 export type ActiveJobResponse = z.infer<typeof activeJobSchema>
+
+export const taskRevisionStateSchema = z.object({
+  input_version: z.number().int(), revision_allowed: z.boolean(),
+  revision_source: z.object({ task_id: z.string() }).optional(),
+  revision_to: z.object({ task_id: z.string() }).optional(),
+})
+
+export const clarificationStateSchema = z.object({
+  allowed_actions: z.array(z.string()),
+  clarification: z.object({
+    request_id: z.string(), task_id: z.string(), input_version: z.number().int().positive(),
+    question: z.string(), reason: z.string(), status: z.enum(['waiting', 'evaluating', 'answered', 'expired']),
+    answer: z.string().optional(),
+  }),
+})
+export type ClarificationState = z.infer<typeof clarificationStateSchema>
+
+export const faithfulTaskStateSchema = z.object({
+  phase: z.string(), allowed_actions: z.array(z.string()).default([]),
+  reason: z.string().nullable().optional(),
+})
+export type FaithfulTaskState = z.infer<typeof faithfulTaskStateSchema>

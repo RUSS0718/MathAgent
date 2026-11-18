@@ -67,11 +67,25 @@ def recovery_projection(run):
     return projection
 
 
+def resume_budget(connection, job_id):
+    """Read the original root deadline without renewing or releasing holds."""
+    from .workspace import WorkspaceError
+
+    budget = connection.execute(
+        "SELECT ledger_json FROM run_budgets WHERE run_id=?", (job_id,)
+    ).fetchone()
+    if budget is None or time.time() >= json.loads(budget[0])["deadline_at"]:
+        raise WorkspaceError("run_deadline_exhausted", status=409)
+    return json.loads(budget[0])
+
+
 def authorize_resume(connection, row, decision, *, read_only=False):
     """Validate before Job CAS; no network or math writes occur here."""
     from .workspace import WorkspaceError
 
     identity = json.loads(row["result_json"] or "{}")
+    if identity.get("faithful", {}).get("revision_to"):
+        raise WorkspaceError("task_revised", status=409)
     if identity.get("solver_mode") not in STAR_MODES:
         return False
     if row["status"] != "failed" or row["error_code"] not in {
@@ -96,16 +110,12 @@ def authorize_resume(connection, row, decision, *, read_only=False):
     # The resumed task must be the problem this Solver Run was initialized with.
     if hashlib.sha256(str(row["problem"]).encode("utf-8")).hexdigest() != state["problem_hash"]:
         raise WorkspaceError("star_recovery_task_mismatch", status=409)
-    budget = connection.execute(
-        "SELECT ledger_json FROM run_budgets WHERE run_id=?", (row["job_id"],)
-    ).fetchone()
-    if budget is None or time.time() >= json.loads(budget[0])["deadline_at"]:
-        raise WorkspaceError("run_deadline_exhausted", status=409)
+    budget = resume_budget(connection, row["job_id"])
     receipts = {event[0] for event in connection.execute(
         "SELECT event_id FROM solver_events WHERE run_id=? "
         "AND json_extract(event_json,'$.type')='tool_receipt'", (row["job_id"],)
     )}
-    orphan_tools = [action for action in json.loads(budget[0])["actions"]
+    orphan_tools = [action for action in budget["actions"]
                     if action["kind"] == "tool" and action.get("tool_call_id") not in receipts]
     if orphan_tools:
         raise WorkspaceError("star_tool_recovery_needs_review", status=409)
@@ -141,15 +151,49 @@ def authorize_resume(connection, row, decision, *, read_only=False):
     return True
 
 
-def allowed_job_actions(connection, row):
+def intervention_phase(connection, row):
+    """Read the existing pause owner; terminal Job status takes precedence."""
+    if row["status"] not in {"running", "waiting_input"}:
+        return None
+    if not connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='faithful_intervention_control'"
+    ).fetchone():
+        return None
+    control = connection.execute(
+        "SELECT status FROM faithful_intervention_control WHERE job_id=?", (row["job_id"],)
+    ).fetchone()
+    return control[0] if control and control[0] in {"pause_requested", "paused"} else None
+
+
+def allowed_job_actions(connection, row, *, pipeline=None):
     """Preview the existing control admission without persisting a retry decision."""
     from .workspace import WorkspaceError
 
     actions = ["cancel"] if row["status"] in {"queued", "running", "waiting_input"} else []
     if not isinstance(json.loads(row["result_json"] or "{}").get("faithful"), dict):
         return actions
+    from .faithful_intervention_api import pause_admission, resume_intervention_admission
+
+    try:
+        pause_admission(row, pipeline)
+        if intervention_phase(connection, row) is None:
+            actions.append("pause")
+    except WorkspaceError:
+        pass
+    from .clarification_api import clarification_actions
+
+    clarification = clarification_actions(connection, row)
+    if clarification is not None:
+        return clarification
     if row["status"] not in {"waiting_input", "failed"}:
         return actions
+    if (pipeline is not None and pipeline.intervention_enabled is True
+            and intervention_phase(connection, row) == "paused"):
+        try:
+            resume_intervention_admission(connection, row)
+            actions.append("resume_intervention")
+        except WorkspaceError:
+            pass
     try:
         if connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='faithful_intervention_control'"
@@ -229,6 +273,10 @@ def resume_solver(harness, problem, run_id, retry):
             harness, run, problem, {"plan": run["state"]["plan"]}
         )
     if run["state"]["phase"] in {"SETUP", "EXPLORE", "EXPLORE_REVIEW"}:
+        if run["state"].get("adaptive_solving"):
+            from .solver_harness.adaptive_solving import explore_direct
+
+            return explore_direct(harness, run, problem)
         from .solver_harness.calls import pending_call
         from .solver_harness.review import review_solution
 

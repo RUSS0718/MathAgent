@@ -35,8 +35,9 @@ class StarProductPipeline:
                  context_capacity=None, population_capacity=None, population_budget=None,
                  limited_enabled=True,
                  population_enabled=None, population_memory_enabled=False,
+                 population_request_timeout_seconds=None,
                  intervention_enabled=False, formal_backend=None,
-                 formal_registry=None, formal_server_policy=None):
+                 formal_registry=None, formal_server_policy=None, formal_generation_required=False):
         from .star_experiment_policy import ExperimentRunPolicy
 
         if experiment_policy is not None and not isinstance(experiment_policy, ExperimentRunPolicy):
@@ -73,10 +74,18 @@ class StarProductPipeline:
             try:
                 timeout = (self.adapter.applied_config().get("request_timeout_seconds")
                            or self.adapter.client_timeout)
+                finalization_timeout = timeout
+                if population_request_timeout_seconds is not None:
+                    if (type(population_request_timeout_seconds) not in {int, float}
+                            or not 0 < population_request_timeout_seconds <= timeout):
+                        raise ValueError("population_request_timeout_invalid")
+                    timeout = population_request_timeout_seconds
                 self.population_config = population_config(
                     self.population_budget, population_capacity, evidence_kind=evidence_kind,
                     request_timeout_seconds=timeout,
                 )
+                if population_request_timeout_seconds is not None:
+                    self.population_config["population_policy"]["finalization_timeout_seconds"] = finalization_timeout
                 self.population_config["transport_identity"] = {
                     "transport_policy": self.transport_policy,
                     "stream_profiles_fingerprint": profile_set_fingerprint(self.stream_profiles),
@@ -91,6 +100,7 @@ class StarProductPipeline:
         self.config["hint_mode"] = hint_mode
         self.registry = registry
         self.formal_backend = formal_backend
+        self.formal_generation_required = formal_generation_required is True
         self.formal_registry = formal_registry
         if self.formal_backend is not None and self.formal_registry is None:
             from .formal import BackendRegistry, register_formal_backend
@@ -106,6 +116,9 @@ class StarProductPipeline:
             raise ValueError("star_budget_invalid")
         self.full_config = full_config(self.full_budget, full_features,
                                        context_capacity=context_capacity)
+        from .solver_harness.autonomous_routes import freeze_permission
+
+        freeze_permission(self.full_config, self.population_config, self.population_capacity_gap)
         if acceptance_mode == "handoff" and self.full_config["features"].get("problem_spec") is True:
             raise ValueError("problem_spec_requires_strict_acceptance")
         if acceptance_mode == "handoff":
@@ -283,7 +296,8 @@ class StarProductPipeline:
                       "solver": projection(run, verification_mode=verification_mode,
                                            include_prover_routes=False),
                       **decision_fields(event, run["state"], port.invocations)})
-                if self.intervention_enabled and solver_mode != "star_population":
+                if (self.intervention_enabled and solver_mode != "star_population"
+                        and run["state"].get("population_policy", {}).get("enabled") is not True):
                     harness = harness_ref["harness"]
                     maybe_pause(
                         harness._state_store._connection, run, event, config, problem,
@@ -293,11 +307,13 @@ class StarProductPipeline:
 
         def solve():
             with SolverHarness(database_path=self.database_path, config=config,
+                               intervention_enabled=self.intervention_enabled,
                                model_port=port, verifier_port=port,
                                meta_port=port,
                                tool_port=RegistryToolPort(self.registry) if self.registry else None,
                                event_observer=observe) as harness:
                 harness_ref["harness"] = harness
+                harness._population_memory_enabled = self.population_memory_enabled
                 existing = harness._state_store.get_run(run_id)
                 harness._product_recovery = existing is not None
                 if existing is not None:
@@ -306,12 +322,17 @@ class StarProductPipeline:
                     )
                 from .solver_harness.budget import HardBudgetStop
                 from .solver_harness.calls import CallInterrupted
+                from .solver_harness.clarification import waiting_for_clarification
 
                 try:
                     if existing:
                         run = resume_solver(harness, problem, run_id, retry_call)
                     else:
                         metadata = {"run_id": run_id, "user_hint": solver_hint}
+                        if self.formal_generation_required:
+                            metadata["formal_generation_required"] = True
+                        if self.population_enabled and self.population_config is None:
+                            metadata["population_unavailable_reason"] = self.population_capacity_gap
                         if problem_spec is not None:
                             metadata["problem_spec"] = problem_spec
                         if self.population_memory_enabled and problem_spec is not None:
@@ -338,6 +359,8 @@ class StarProductPipeline:
                     if solver_mode not in BEST_EFFORT_MODES or exc.category != "run_deadline_exhausted":
                         raise
                     run = harness.get_run(run_id)
+                if waiting_for_clarification(run["state"]):
+                    return {"status": "WAITING_INPUT"}
                 try:
                     if solver_mode == "star_population":
                         from .solver_harness.population_lifecycle import (
@@ -374,6 +397,25 @@ class StarProductPipeline:
                 formal_identity = json.loads(identity_row[0]) if identity_row and identity_row[0] else {}
                 formal_policy = formal_identity.get("formal_policy")
                 formal_verification = None
+                selection = math.get("formalization")
+                generation_error = None
+                if formal_policy is None and selection is not None:
+                    from .solver_harness.formal_generation import (
+                        freeze_generated_policy,
+                        generated_policy,
+                    )
+                    from .solver_harness.formal_policy import FormalPolicyError
+
+                    try:
+                        formal_policy = generated_policy(
+                            selection, math.get("problem_spec", {}), self.formal_server_policy,
+                            self.formal_backend is not None,
+                        )
+                    except FormalPolicyError as exc:
+                        generation_error = exc.category
+                    if formal_policy is not None:
+                        run = freeze_generated_policy(harness, run, formal_identity, formal_policy)
+                        math = run["state"]
                 if formal_policy is not None:
                     from .solver_harness.formal_integration import (
                         FormalIntegrationState,
@@ -433,7 +475,45 @@ class StarProductPipeline:
                         )
                         math = run["state"]
                     else:
-                        formal_verification = reserved
+                        from .formal_requirements import assess_formal_requirement
+
+                        formal_verification = dict(reserved)
+                        formal_verification["assessment"] = assess_formal_requirement(
+                            formal_policy, reserved, current_state["state"].get("problem_spec"),
+                        )
+                        if formal_verification != reserved:
+                            run = harness.commit_event(
+                                run_id, expected_revision=current_state["state_revision"],
+                                event={"event_id": "formal-assessment-" + str(current_state["state_revision"]),
+                                       "type": "formal_requirement_assessed"},
+                                state_updates={"formal_verification": formal_verification},
+                            )
+                            math = run["state"]
+                if formal_policy is None and selection is not None:
+                    from .solver_harness.formal_integration import _initial
+
+                    fallback_policy = {"enabled": False, "require_formal": selection["require_formal"]}
+                    formal_verification = {
+                        **_initial(fallback_policy),
+                        "status": ("unsupported" if selection["status"] == "unsupported" else
+                                   "disabled" if selection["status"] == "not_selected" else "unavailable"),
+                        "grade": None, "reason": generation_error or selection["reason"],
+                        "source": selection["source"],
+                    }
+                    from .formal_requirements import assess_formal_requirement
+
+                    formal_verification["assessment"] = assess_formal_requirement(
+                        fallback_policy, formal_verification,
+                        math.get("problem_spec"),
+                    )
+                    if math.get("formal_verification") != formal_verification:
+                        run = harness.commit_event(
+                            run_id, expected_revision=run["state_revision"],
+                            event={"event_id": "formal-generation-" + str(run["state_revision"]),
+                                   "type": "formal_generation_unavailable"},
+                            state_updates={"formal_verification": formal_verification},
+                        )
+                    math = run["state"]
                 attempts = []
                 for call in port.invocations:
                     for attempt in call["request_attempts"]:
@@ -474,6 +554,14 @@ class StarProductPipeline:
                     from .solver_harness.handoff import delivery_check
 
                     result["engineering_delivery"] = delivery_check(run, answer)
+                if formal_verification is not None:
+                    result["formal_verification"] = formal_verification
+                    if formal_verification.get("assessment", {}).get("status") == "unmet":
+                        result["status"] = "NEEDS_REVIEW"
+                        result["error"] = {"category": "formal_requirement_unmet"}
+                if formal_policy is not None:
+                    result["formal_policy"] = formal_policy
+                    result["formal_policy_hash"] = formal_identity.get("formal_policy_hash")
                 check_control(allow_expired_selection=math.get("best_effort_decision") is not None)
                 if self.population_memory_enabled:
                     from .solver_harness.faithful_memory_capture import (
@@ -496,6 +584,8 @@ class StarProductPipeline:
         graph = builder.compile(checkpointer=self.checkpointer)
         graph_config = {"configurable": {"thread_id": run_id}}
         result = solve()
+        if result["status"] == "WAITING_INPUT":
+            return result
         result = graph.invoke(result, graph_config, durability="sync")
         sink({"type": "final_result" if result["status"] == "COMPLETED" else "needs_review",
               "job_id": run_id, "node_name": "terminal", "step_id": "terminal",
@@ -535,6 +625,24 @@ def projection(run, *, answer=None, verification_mode="auto", include_prover_rou
             **candidate_projection(run),
             **({'formal_verification': state['formal_verification']}
                if isinstance(state.get('formal_verification'), Mapping) else {})}
+    if state.get('serial_intervention'):
+        from .solver_harness.serial_intervention import public_projection
+        result['serial_intervention'] = public_projection(state['serial_intervention'])
+    if state.get("execution_selection"):
+        result["execution_selection"] = state["execution_selection"]
+    if state.get("adaptive_solving"):
+        result["adaptive_solving"] = {
+            key: state["adaptive_solving"][key] for key in ("version", "reason", "corrections")
+        }
+        if state.get("adaptive_resource_policy"):
+            result["adaptive_solving"]["resource_policy"] = state["adaptive_resource_policy"]
+        if state.get("adaptive_search_policy"):
+            result["adaptive_solving"]["search_policy"] = state["adaptive_search_policy"]
+    if state.get("execution_switch"):
+        result["execution_switch"] = state["execution_switch"]
+        result["execution_switch_history"] = state.get("execution_switch_history", [])
+    if state.get("serial_checkpoint"):
+        result["serial_checkpoint"] = state["serial_checkpoint"]
     if include_prover_routes:
         from .prover_routes import prover_route_projection
 

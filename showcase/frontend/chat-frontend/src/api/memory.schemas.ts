@@ -19,6 +19,16 @@ const runMemorySchema = z.object({
   budget: z.unknown(),
   valid_evidence: z.array(runEvidenceSchema),
   invalidated_count: z.number().int().nonnegative(),
+  memory_usage: z.array(z.object({
+    call_id: z.string(),
+    record_ids: z.array(z.string()),
+    decision_status: z.enum(['reported', 'not_reported']),
+    decisions: z.array(z.object({
+      record_id: z.string(),
+      decision: z.enum(['adopt', 'reject']),
+      reason: z.string().max(500),
+    })),
+  })).default([]),
 }).passthrough()
 
 export const runMemoryResponseSchema = z.object({

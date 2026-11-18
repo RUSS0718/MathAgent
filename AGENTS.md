@@ -52,6 +52,8 @@ Single-context: read the root `GLOSSARY.md` and relevant records in `docs/adr/` 
 
 ## Development workflow
 
+执行用户授权的 #168 无人值守 ticket 接续循环时，先读 [接续合同](docs/engineering/unattended-ticket-loop.md)，完成当前票后把同一合同传给新 session。
+
 产品实现前先确保 PRD、技术设计、任务合同与验收案例可审阅。对会影响设计、验收或交接的阶段，保留可审阅产物和退出条件；纯文档、诊断及小范围维护按任务范围处理，不为流程本身创建材料。
 
 每个代码切片先运行并留存能稳定失败的测试或可执行验收案例，再实施最小改动，运行聚焦检查与相关回归，审阅 diff。跨模块并行前先确认共享 schema/API 和文件所有权；依赖方在生产者的最小接口检查通过后再启动集成测试。双轴审查集中在可独立验收的纵切或阶段退出时，修复后复查受影响部分；验收编号不等于独立审查或提交单位。每次提交保持一个逻辑变更，阶段最终检查按工程门禁执行。

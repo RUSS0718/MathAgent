@@ -243,8 +243,65 @@ SCHEMAS["planner_checkpoint"] = obj(
 
 
 def response_schema(request):
+    schema = _response_schema(request)
+    memory = request.get("population_memory_advisory", {})
+    ids = [item["record_id"] for item in memory.get("observations", [])
+           if isinstance(item, dict) and isinstance(item.get("record_id"), str)]
+    if ids and memory.get("authority") == "advisory_only":
+        schema = deepcopy(schema)
+        schema["properties"]["memory_decisions"] = {
+            "type": "array", "maxItems": 25,
+            "items": obj({"record_id": {"type": "string", "enum": ids},
+                          "decision": {"type": "string", "enum": ["adopt", "reject"]},
+                          "reason": {"type": "string", "minLength": 1, "maxLength": 500,
+                                     "pattern": r"[\s\S]{1,500}"}}),
+        }
+    # Build complete branches after optional extensions; the boundary validator
+    # checks oneOf branches independently, including their strict field sets.
+    if request["role"] == "step_verifier" and isinstance(request.get("problem_spec"), dict):
+        schema = deepcopy(schema)
+        pending = deepcopy(schema)
+        pending["properties"].update(verdict={"enum": ["ACCEPT"]}, tool_request=TOOL)
+        pending["required"].append("tool_request")
+        terminal = deepcopy(schema)
+        proved = deepcopy(schema["properties"]["answer_claim"])
+        proved["properties"]["both_directions_proved"] = {"type": "boolean", "enum": [True]}
+        numerical = deepcopy(schema["properties"]["answer_claim"])
+        numerical["properties"].update(both_directions_proved={"type": "boolean", "enum": [False]},
+                                      claim_type={"enum": ["numerical_evaluation"]})
+        numerical["required"].append("claim_type")
+        terminal["properties"].update(
+            verdict={"enum": ["ACCEPT"]}, goal_gate={"enum": ["YES"]},
+            logic_gate={"enum": ["PASS"]}, tool_request={"enum": [None]},
+            answer_claim={"oneOf": [proved, numerical]})
+        other = deepcopy(schema)
+        other["properties"]["verdict"] = {"enum": ["CHALLENGE", "TRACE_BACK", "PROPOSE_REPLAN"]}
+        schema["oneOf"] = [other, pending, terminal]
+    if request["role"] in {"meta", "meta_strategist"} and "trace_back_to" in schema["properties"]:
+        schema = deepcopy(schema)
+        action, trace = ("action_type", "trace_back") if request.get("guidance_request") else (
+            "decision", "TRACE_BACK")
+        actions = schema["properties"][action]["enum"]
+        schema["oneOf"] = [
+            obj({**schema["properties"], action: {"enum": choices}, "trace_back_to": target},
+                schema["required"])
+            for choices, target in (
+                ([trace], {"type": "integer", "exclusiveMinimum": 0}),
+                ([choice for choice in actions if choice != trace], {"enum": [None]}),
+            )
+        ]
+    return schema
+
+
+def _response_schema(request):
+    if request.get('serial_intervention_decision') is True and request.get('role') == 'meta':
+        from .progress import METHOD_IDS
+        return obj({'decision': {'enum': ['keep', 'intervene']}, 'reason': TEXT,
+                    'hypothesis': TEXT, 'method_id': {'enum': sorted(METHOD_IDS)}})
+    if request.get("execution_mode_decision") is True and request.get("role") == "meta":
+        return obj({"mode": {"enum": ["serial", "population", "keep", "intervene"]}, "reason": TEXT})
     role = request["role"]
-    if role == "reasoner" and request.get("checkpoint_protocol"):
+    if role in {"reasoner", "reason_noncoding"} and request.get("checkpoint_protocol"):
         schema = deepcopy(SCHEMAS["reasoner_checkpoint"])
         if isinstance(request.get("current_goal"), str):
             for branch in schema["properties"]["checkpoint"]["oneOf"]:
@@ -281,6 +338,9 @@ def response_schema(request):
     if role not in SCHEMAS:
         raise ValueError("unsupported_intern_role")
     schema = SCHEMAS[role]
+    if role == "problem_intake" and request.get("formal_generation_required") is True:
+        schema = deepcopy(schema)
+        schema["required"].append("formalization")
     if not isinstance(request.get("problem_spec"), dict):
         return schema
     schema = deepcopy(schema)
@@ -325,6 +385,15 @@ def response_schema(request):
                 + "; unknown denotes an unresolved method and cannot start a serial route.",
             }
             step["required"].append("method_id")
+        if request.get("autonomous_routes"):
+            planner["properties"]["alternative_plans"] = {
+                "type": "array", "maxItems": 3, "items": deepcopy(planner),
+            }
+            planner["properties"]["execution_selection"] = obj({
+                "mode": {"enum": ["serial", "population"]}, "reason": TEXT,
+            })
+            if request["autonomous_routes"].get("capacity"):
+                planner["required"].append("execution_selection")
         if role == "planner":
             schema = planner
             if request.get("population_policy", {}).get("version") == "concurrent-aprs-v1":
@@ -337,4 +406,6 @@ def response_schema(request):
                 nested_plan = branch["properties"].get("plan")
                 if nested_plan:
                     nested_plan["oneOf"][0] = planner
+        if type(request.get("plan_version")) is int:
+            planner["properties"]["version"] = {"type": "integer", "const": request["plan_version"]}
     return schema

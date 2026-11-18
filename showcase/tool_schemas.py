@@ -110,6 +110,9 @@ def schema_error(value: Any, schema: Mapping[str, Any]) -> str | None:
         pattern = schema.get("pattern")
         if isinstance(pattern, str) and re.fullmatch(pattern, value) is None:
             return "tool_schema_invalid"
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
+            return "tool_schema_invalid"
     return None
 
 

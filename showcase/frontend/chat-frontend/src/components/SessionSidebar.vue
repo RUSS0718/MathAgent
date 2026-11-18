@@ -23,7 +23,7 @@ const emit = defineEmits<{
   <aside class="session-sidebar" aria-label="会话导航">
     <div class="brand-block">
       <div class="brand-mark"><UiIcon name="sigma" /></div>
-      <div><strong>MathAgent</strong><small>数学推理工作区</small></div>
+      <div><strong>因果推理智能体</strong><small>数学推理工作区</small></div>
       <UiButton icon-only variant="ghost" class="mobile-only" aria-label="关闭会话栏" @click="emit('close')"><UiIcon name="close" /></UiButton>
     </div>
     <nav class="sidebar-nav" aria-label="主导航"><UiButton variant="primary" @click="emit('new')"><UiIcon name="plus" />新建会话</UiButton><a class="ui-button ui-button--ghost" href="/dashboard/campaigns"><UiIcon name="experiments" />配对实验</a></nav>

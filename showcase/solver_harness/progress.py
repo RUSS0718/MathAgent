@@ -1,6 +1,8 @@
 """S04 policy primitives; method names are a closed controller vocabulary."""
 
 METHOD_IDS = frozenset({"direct", "contradiction", "induction", "construction", "computation", "unknown"})
+ADAPTIVE_SEARCH_VERSION = "adaptive-search-v2"
+_ADAPTIVE_SEARCH_VERSIONS = {"adaptive-search-v1", ADAPTIVE_SEARCH_VERSION}
 
 
 def normalize_method(value):
@@ -12,7 +14,12 @@ def action_keys(state, step_id):
                  if item.get("step_id") == step_id), {})
     method = normalize_method(step.get("method_id"))
     roots = step.get("obligation_ids", []) or step.get("auxiliary_goal_ids", []) or ["unknown_target"]
-    return [f"{root}:{method}" for root in sorted(roots)]
+    suffix = ""
+    if state.get("adaptive_solving"):
+        from .adaptive_solving import search_context
+
+        suffix = ":" + search_context(state)
+    return [f"{root}:{method}{suffix}" for root in sorted(roots)]
 
 
 def review_progress(state, event, updates):
@@ -37,7 +44,8 @@ def review_progress(state, event, updates):
     fresh = satisfied - seen
     counts = dict(previous.get("action_failures", {}))
     blocked = set(previous.get("blocked_actions", []))
-    keys = action_keys(state, event.get("step_id"))
+    adaptive_search = state.get("adaptive_search_policy") in _ADAPTIVE_SEARCH_VERSIONS
+    keys = action_keys({**state, **updates} if adaptive_search else state, event.get("step_id"))
     changed_targets = fresh | new_goals | {
         root for root, goals in prerequisite_goals(state).items() if goals & new_goals
     }
@@ -54,7 +62,18 @@ def review_progress(state, event, updates):
             if counts[key] >= 2:
                 blocked.add(key)
     rounds = 0 if fresh or new_goals else previous.get("no_evidence_rounds", 0) + 1
-    trigger = "stagnation" if rounds >= 3 else "local_action_blocked" if blocked.intersection(keys) else None
+    search = {}
+    feedback_changed = False
+    search_rounds = rounds
+    if adaptive_search:
+        from .adaptive_solving import search_context
+
+        context = search_context({**state, **updates})
+        feedback_changed = context != previous.get("search_context", search_context(state))
+        search_rounds = (0 if fresh or new_goals or feedback_changed else
+                         previous.get("no_feedback_rounds", previous.get("no_evidence_rounds", 0)) + 1)
+        search = {"search_context": context, "no_feedback_rounds": search_rounds}
+    trigger = "stagnation" if search_rounds >= 3 else "local_action_blocked" if blocked.intersection(keys) else None
     progress = {
         "rounds": previous.get("rounds", 0) + 1,
         "no_evidence_rounds": rounds,
@@ -63,6 +82,7 @@ def review_progress(state, event, updates):
         "action_failures": counts,
         "blocked_actions": sorted(blocked),
         "trigger": trigger,
+        **search,
     }
     if state.get("route_policy", {}).get("enabled") is True:
         route_id = state.get("active_route_id")
@@ -81,6 +101,10 @@ def review_progress(state, event, updates):
             "action_failures": failures,
         }
         local_rounds = progress["route_progress"]["no_evidence_rounds"]
+        if adaptive_search:
+            local_rounds = (0 if fresh or new_goals or feedback_changed else
+                            local.get("no_feedback_rounds", local.get("no_evidence_rounds", 0)) + 1)
+            progress["route_progress"]["no_feedback_rounds"] = local_rounds
         local_blocked = any(failures.get(key, 0) >= 2 for key in keys)
         trigger = "stagnation" if local_rounds >= 3 else "local_action_blocked" if local_blocked else None
         progress["trigger"] = trigger
@@ -100,6 +124,11 @@ def review_progress(state, event, updates):
 
 def guard_action(harness, run):
     """A Meta continuation cannot dispatch an already blocked action."""
+    # A reserved symmetric experiment intentionally measures the blocked action
+    # once per arm. Native admission and its parent ledger still fence every call.
+    from .faithful_intervention_native import CheckpointHarness
+    if isinstance(harness, CheckpointHarness):
+        return run
     state = run["state"]
     if (state.get("phase") not in {"PLAN", "STEP_EXECUTE", "CHALLENGE"}
             or state.get("progress_policy", {}).get("enabled") is not True):
@@ -121,8 +150,10 @@ def guard_action(harness, run):
             from .finalize import finish
 
             return finish(harness, run, "partial_aborted", "route_requires_reevaluation")
+        if _new_search_feedback(state, progress):
+            return run
         local = progress.get("route_progress", {})
-        rounds = local.get("no_evidence_rounds", 0) if local.get("route_id") == active["route_id"] else 0
+        rounds = local.get("no_feedback_rounds", local.get("no_evidence_rounds", 0)) if local.get("route_id") == active["route_id"] else 0
         failures = local.get("action_failures", {}) if local.get("route_id") == active["route_id"] else {}
         blocked = any(failures.get(key, 0) >= 2 for key in action_keys(state, state.get("current_step")))
         reason = (
@@ -132,6 +163,16 @@ def guard_action(harness, run):
         if reason is None:
             return run
         if active.get("kind") == "primary":
+            from .traceback import transition_decision
+
+            decision = state.get("meta_decision") or {}
+            context = scheduler_context(state)
+            if (context is not None and decision.get("decision") == "CONTINUE"
+                    and transition_decision(run, state, decision)
+                    and decision.get("scheduler_context") == context):
+                from .finalize import finish
+
+                return finish(harness, run, "partial_aborted", reason)
             return harness.commit_event(
                 run["run_id"], expected_revision=run["state_revision"],
                 event={"event_id": f"route-stagnation-guard-{run['state_revision']}",
@@ -155,7 +196,9 @@ def guard_action(harness, run):
             authorization=ROUTE_COMMIT_TOKEN,
         )
     reason = None
-    if progress.get("no_evidence_rounds", 0) >= 3:
+    if _new_search_feedback(state, progress):
+        return run
+    if progress.get("no_feedback_rounds", progress.get("no_evidence_rounds", 0)) >= 3:
         reason = "progress_stagnation_stop"
     elif set(action_keys(state, state.get("current_step"))).intersection(
             progress.get("blocked_actions", [])):
@@ -165,6 +208,49 @@ def guard_action(harness, run):
     from .finalize import finish
 
     return finish(harness, run, "partial_aborted", reason)
+
+
+def _new_search_feedback(state, progress):
+    """New actual feedback permits an attempt, without granting proof credit."""
+    if (state.get("adaptive_search_policy") not in _ADAPTIVE_SEARCH_VERSIONS
+            or "search_context" not in progress):
+        return False
+    from .adaptive_solving import search_context
+
+    return progress["search_context"] != search_context(state)
+
+
+def scheduler_context(state):
+    """Bind one Meta ruling to its actual guard state, excluding Meta activity."""
+    if (state.get("adaptive_search_policy") != ADAPTIVE_SEARCH_VERSION
+            or state.get("route_policy", {}).get("enabled") is not True):
+        return None
+    route = next((item for item in state.get("route_registry", [])
+                  if item.get("route_id") == state.get("active_route_id")), None)
+    if route is None or route.get("status") != "active":
+        return None
+    from .adaptive_solving import search_context
+
+    progress = state.get("progress", {})
+    local = progress.get("route_progress", {})
+    if local.get("route_id") != route["route_id"]:
+        local = {}
+    keys = action_keys(state, state.get("current_step"))
+    rounds = local.get("no_feedback_rounds", local.get("no_evidence_rounds", 0))
+    blocked = any(local.get("action_failures", {}).get(key, 0) >= 2 for key in keys)
+    reason = ("progress_stagnation_stop" if rounds >= 3 else
+              "progress_action_blocked" if blocked else None)
+    if _new_search_feedback(state, progress):
+        reason = None
+    return {
+        "route_id": route["route_id"], "plan_version": state.get("plan_version"),
+        "specification_version": state.get("specification_version"),
+        "step_id": state.get("current_step"), "action_keys": keys,
+        "search_context": search_context(state), "review_rounds": progress.get("rounds", 0),
+        "work_calls": sorted([call_id, call.get("status")] for call_id, call in
+                             state.get("calls", {}).items() if call.get("role") not in {"meta", "meta_strategist"}),
+        "continue_allowed": reason is None, "reason": reason,
+    }
 
 
 def accepted_prerequisite_goals(state, event, updates):

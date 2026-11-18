@@ -40,7 +40,11 @@ def command(harness, run_id, operation, **args):
             if row is None:
                 raise PopulationConflict("population_run_missing")
             state = json.loads(row["state_json"])
-            population = deepcopy(state.get("population"))
+            population = state.get("population")
+            # route_commit owns this freshly decoded candidate and never needs
+            # the old population after mutation; other transitions still do.
+            if operation != "route_commit":
+                population = deepcopy(population)
             if not isinstance(population, dict) or state.get("population_policy", {}).get("enabled") is not True:
                 raise PopulationConflict("population_policy_missing")
             event, updates = _transition(
@@ -78,7 +82,7 @@ def command(harness, run_id, operation, **args):
             state.update(updates)
             state.update(state_revision=next_revision, updated_at=now)
             stored = dict(event or {})
-            if operation == "patch":
+            if operation in {"patch", "execution_intent", "execution_checkpoint"}:
                 stored["event_id"] = f"{stored['event_id']}-{next_revision}"
             elif operation == "route_commit":
                 stored["event_id"] = f"population-{stored['action_id']}-{stored['event_id']}"
@@ -204,6 +208,128 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             "population": population,
         }
 
+    if operation == "intervention_complete":
+        if owner is None or owner_token != owner:
+            raise PopulationConflict("population_owner_epoch_mismatch")
+        if state['state_revision'] != args['expected_revision']:
+            raise PopulationConflict('population_intervention_revision_changed')
+        from .autonomous_routes import serial_checkpoint_view
+        from .faithful_intervention import FaithfulInterventionEngine
+        from .population_intervention import completion_updates
+        from .report_sources import native_material
+
+        allowed = {'population', 'serial_checkpoint', 'serial_checkpoint_snapshot', 'phase',
+                   'execution_serial_sources', 'population_intervention', 'serial_intervention'}
+        updates = args.get('updates')
+        if not isinstance(updates, dict) or set(updates) != allowed:
+            raise PopulationConflict('population_intervention_patch_forbidden')
+        intent = state.get('population_intervention') or {}
+        projection = state.get('serial_intervention') or {}
+        if (intent.get('status') != 'executing' or state.get('phase') == 'TERMINAL'
+                or projection.get('status') not in {'completed', 'incomplete', 'skipped'}
+                or projection.get('continuation') != 'main_task_continues'
+                or any(c.get('status') in {'dispatched', 'streaming', 'unknown_outcome'}
+                       for c in state.get('calls', {}).values())):
+            raise PopulationConflict('population_intervention_not_complete')
+        source = intent.get('source') or {}
+        if (source != state.get('serial_checkpoint')
+                or source.get('route_id') != state.get('execution_serial_route')
+                or projection.get('route_id') != source.get('route_id')
+                or projection.get('source_version') != source.get('snapshot_hash')):
+            raise PopulationConflict('population_intervention_source_changed')
+        serial_checkpoint_view(state, expected_revision=state['state_revision'])
+        engine = FaithfulInterventionEngine(connection)
+        if projection.get('pair_id'):
+            report = engine.get_pair(projection['pair_id'])
+            frozen = json.loads(connection.execute(
+                'SELECT checkpoint_json FROM faithful_intervention_pairs WHERE pair_id=?',
+                (projection['pair_id'],)).fetchone()[0])
+            if frozen['state'].get('serial_checkpoint_source') != source:
+                raise PopulationConflict('population_intervention_pair_source_changed')
+            if (report['run_id'] != run_id or report['job_id'] != run_id
+                    or report.get('status') != projection['status'] or report.get('unknown_pairs')
+                    or report.get('config_hash') != state.get('config_hash')):
+                raise PopulationConflict('population_intervention_pair_changed')
+        for material in state.get('native_report_sources', {}).values():
+            if native_material(engine, material['reference']) != material:
+                raise PopulationConflict('population_intervention_report_changed')
+        expected = completion_updates(state)
+        if updates != expected:
+            raise PopulationConflict('population_intervention_patch_changed')
+        return _event('population_intervention_completed'), expected
+
+    if operation == "execution_intent":
+        if owner is None or owner_token != owner:
+            raise PopulationConflict("population_owner_epoch_mismatch")
+        return _event("execution_switch_intent", **args["projection"]), {
+            "execution_switch": deepcopy(args["projection"]),
+            "execution_mode_progress": deepcopy(args["mode_progress"]), "execution_mode_pending": None}
+
+    if operation == "execution_checkpoint":
+        if owner is None or owner_token != owner:
+            raise PopulationConflict("population_owner_epoch_mismatch")
+        if state["state_revision"] != args["expected_revision"]:
+            return None, {}
+        switch = deepcopy(state["execution_switch"])
+        if switch["status"] == "switched":
+            return None, {}
+        actions = list(population["actions"].values())
+        calls = list(state.get("calls", {}).values())
+        from .calls import latest_retry_id
+
+        calls_by_id = state.get("calls", {})
+        resolved_actions = {c.get("action_id") for c in calls
+                            if c.get("status") == "unknown_outcome" and c.get("action_id") is not None
+                            and latest_retry_id(calls_by_id, c["call_id"]) != c["call_id"]
+                            and calls_by_id[latest_retry_id(calls_by_id, c["call_id"])].get("status") == "completed"}
+        unresolved = {c["call_id"] for c in calls if c.get("status") == "unknown_outcome"
+                      and latest_retry_id(calls_by_id, c["call_id"]) == c["call_id"]}
+        unknown = (any(a.get("status") == "unknown" and a["action_id"] not in resolved_actions
+                       for a in actions) or bool(unresolved))
+        pending = (any(a.get("status") == "inflight"
+                       or (a.get("settlement_status") == "pending" and a["action_id"] not in resolved_actions)
+                       or (a.get("status") == "completed" and not a.get("accepted")) for a in actions)
+                   or any(c.get("status") in {"dispatched", "streaming"} for c in calls))
+        if unknown or pending:
+            switch["status"] = "needs_review" if unknown else "converging"
+            if switch == state["execution_switch"]:
+                return None, {}
+            return _event("execution_switch_blocked"), {"execution_switch": switch,
+                **({"status": "interrupted"} if unknown else {})}
+        from .population_evidence import validate_dependencies
+
+        candidates = [r for r in population["routes"].values()
+                      if r.get("status") in {"eligible", "active"}
+                      and r.get("snapshot", {}).get("phase") == "STEP_EXECUTE"
+                      and r["snapshot"].get("current_step")
+                      and r["snapshot"].get("specification_version") == state.get("specification_version")
+                      and validate_dependencies(state, r.get("dependencies", []))[0]]
+        if not candidates:
+            switch["status"] = "rejected"
+            switch["reason"] = "no_current_serial_checkpoint"
+            return _event("execution_switch_rejected"), {"execution_switch": switch}
+        from .population_schedule import round_schedule
+
+        ranking = round_schedule({**population, "round_members": [], "opportunities": []})["order"]
+        selected = next((rid for rid in ranking if rid in {r["route_id"] for r in candidates}),
+                        candidates[0]["route_id"])
+        switch.update(status="switched", current_mode=switch["target"],
+                      checkpoint_revision=state["state_revision"] + 1)
+        history = [*state.get("execution_switch_history", []), deepcopy(switch)]
+        checkpoint = {"revision": switch["checkpoint_revision"], "route_id": selected,
+                      "route_revision": population["routes"][selected]["revision"],
+                      "specification_version": state.get("specification_version"),
+                      "config_hash": state.get("config_hash"),
+                      "source_revision": state["state_revision"],
+                      "snapshot_hash": hashlib.sha256(_canonical(population["routes"][selected]["snapshot"]).encode()).hexdigest()}
+        return _event("execution_switched", **switch), {
+            "execution_switch": switch, "execution_switch_history": history,
+            "serial_checkpoint": checkpoint if switch["target"] == "serial" else None,
+            "serial_checkpoint_snapshot": deepcopy(population["routes"][selected]["snapshot"])
+                if switch["target"] == "serial" else None,
+            "execution_serial_route": selected if switch["target"] == "serial" else None,
+            "phase": "POPULATION", "status": "running"}
+
     if operation == "patch":
         if owner is None or owner_token != owner:
             raise PopulationConflict("population_owner_epoch_mismatch")
@@ -271,6 +397,11 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             raise PopulationConflict("population_owner_epoch_mismatch")
         if population.get("freeze") is not None or state.get("phase") == "TERMINAL":
             raise PopulationConflict("population_exploration_frozen")
+        recovering = bool(population["routes"].get(args["route_id"], {}).get("snapshot", {}).get("authorized_retry"))
+        if (state.get("execution_switch") or {}).get("status") in {"converging", "needs_review"} and not recovering:
+            raise PopulationConflict("execution_switch_converging")
+        if state.get("execution_serial_route") not in {None, args["route_id"]}:
+            raise PopulationConflict("execution_serial_route_required")
         route_id, action_id = args["route_id"], args["action_id"]
         existing_action = population["actions"].get(action_id)
         if existing_action is not None:
@@ -374,7 +505,8 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             raise PopulationConflict("population_action_route_mismatch")
         event = deepcopy(args["event"])
         updates = deepcopy(args.get("updates", {}))
-        audit_only = (event.get("type") in {"call_audit", "call_activity"}
+        audit_events = {"call_audit", "call_activity", "transport_selected", "transport_rejected"}
+        audit_only = (event.get("type") in audit_events
                       and set(updates) <= {"calls", "status"})
         current_epoch_action = (owner is not None and owner_token == owner
                                 and action.get("owner") == owner
@@ -400,7 +532,7 @@ def _transition(connection, state, population, operation, args, *, owner_token):
             raise PopulationConflict("population_route_patch_forbidden")
         local_state = deepcopy(route["snapshot"])
         if state.get("phase") == "TERMINAL":
-            if event.get("type") not in {"call_audit", "call_activity"} or set(updates) - {"calls"}:
+            if event.get("type") not in audit_events or set(updates) - {"calls"}:
                 raise PopulationConflict("population_terminal_frozen")
         if not audit_only:
             from ..run_control import RunStopped
@@ -518,11 +650,26 @@ def _transition(connection, state, population, operation, args, *, owner_token):
         population["actions"][action["action_id"]] = action
         population["routes"][route["route_id"]] = route
         updates["population"] = population
+        switch = state.get("execution_switch") or {}
+        if (switch.get("status") == "switched" and switch.get("current_mode") == "serial"
+                and state.get("execution_serial_route") == route["route_id"]
+                and route["snapshot"].get("phase") == "STEP_EXECUTE"
+                and route["snapshot"].get("specification_version") == state.get("specification_version")):
+            from .population_evidence import validate_dependencies
+
+            if validate_dependencies({**state, **updates}, route.get("dependencies", []))[0]:
+                updates["serial_checkpoint"] = {
+                    "revision": state["state_revision"] + 1, "route_id": route["route_id"],
+                    "route_revision": route["revision"], "source_revision": state["state_revision"],
+                    "specification_version": state.get("specification_version"),
+                    "config_hash": state.get("config_hash"),
+                    "snapshot_hash": hashlib.sha256(_canonical(route["snapshot"]).encode()).hexdigest()}
+                updates["serial_checkpoint_snapshot"] = deepcopy(route["snapshot"])
         source_event = next((item for item in reversed(route["events"])
                              if item.get("event_id") in audit["source_event_ids"]), {})
         event = {**deepcopy(source_event),
                  "event_id": f"population-evidence-accepted-{action['action_id']}",
-                 "type": "step_reviewed", "route_id": route["route_id"],
+                 "type": audit.get("type", "step_reviewed"), "route_id": route["route_id"],
                  "action_id": action["action_id"],
                  "source_event_ids": audit["source_event_ids"],
                  "report_call_ids": audit["report_call_ids"],

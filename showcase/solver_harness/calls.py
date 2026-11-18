@@ -82,7 +82,8 @@ def _save(harness, run, record, *, status=None, event_type="call_audit", event_f
                 state_updates=updates,
             )
         except SolverRevisionConflictError:
-            if harness._config.get("features", {}).get("concurrent_routes") is not True:
+            if (harness._config.get("features", {}).get("concurrent_routes") is not True
+                    and latest["state"].get("population_policy", {}).get("enabled") is not True):
                 raise
             from ..run_control import check_control
 
@@ -180,6 +181,14 @@ def dispatch(harness, run, operation, request, session_dispatch):
             raise CallInterrupted(run["run_id"])
         if latest["state"]["phase"] == "TERMINAL":
             raise CallInterrupted(run["run_id"])
+        from .adaptive_resources import allocate, bind_allocation
+
+        allocation, allocation_error = allocate(harness, latest, prepared)
+        if allocation_error:
+            from .budget import HardBudgetStop, stop
+
+            stop(harness, latest, allocation_error)
+            raise HardBudgetStop(run["run_id"])
         report = prepared.get("report")
         receipts = report.get("tool_receipts", []) if isinstance(report, Mapping) else []
         record = {
@@ -212,6 +221,8 @@ def dispatch(harness, run, operation, request, session_dispatch):
             "partial_text": "",
             "usage": None,
         }
+        if allocation:
+            record["resource_allocation"] = allocation
         if prepared.get("retry_of"):
             record["retry_of_internal"] = prepared["retry_of"]
         activity_enabled = harness._config.get("features", {}).get("stream_activity") is True
@@ -237,6 +248,11 @@ def dispatch(harness, run, operation, request, session_dispatch):
             }
         _save(harness, run, record)
         prepared = harness.prepare_request(run, prepared)
+        memory = prepared.get("population_memory_advisory", {})
+        record["population_memory_record_ids"] = [
+            item["record_id"] for item in memory.get("observations", [])
+            if isinstance(item, Mapping) and isinstance(item.get("record_id"), str)
+        ]
         context_policy = prepared.pop("_context_policy", None)
         context_source = prepared.pop("_context_pack", None)
         if isinstance(context_policy, Mapping) and context_policy.get("enabled") is True:
@@ -397,7 +413,12 @@ def dispatch(harness, run, operation, request, session_dispatch):
             _save(harness, run, record)
 
         try:
-            response = _consume(operation(deepcopy(prepared)), partial, checkpoint)
+            if allocation:
+                deadline = prepared.get("phase_deadline_at")
+                prepared["phase_deadline_at"] = min(
+                    deadline, allocation["work_deadline_at"]) if deadline is not None else allocation["work_deadline_at"]
+            with bind_allocation(run["run_id"], allocation):
+                response = _consume(operation(deepcopy(prepared)), partial, checkpoint)
         except Exception as exc:
             if (getattr(exc, "no_dispatch", False) is True
                     and not getattr(exc, "transport_decision", None)):
@@ -519,6 +540,18 @@ def dispatch(harness, run, operation, request, session_dispatch):
             partial_text="".join(partial),
             usage=response.get("usage"),
         )
+        if record["population_memory_record_ids"]:
+            record["memory_decisions"] = [
+                {key: item[key] for key in ("record_id", "decision", "reason")}
+                for item in response.get("memory_decisions", [])
+                if isinstance(item, Mapping)
+                and item.get("record_id") in record["population_memory_record_ids"]
+                and item.get("decision") in {"adopt", "reject"}
+                and isinstance(item.get("reason"), str) and 0 < len(item["reason"]) <= 500
+            ][:25]
+            record["memory_decision_status"] = (
+                "reported" if record["memory_decisions"] else "not_reported"
+            )
         _save(harness, run, record)
         return response
 

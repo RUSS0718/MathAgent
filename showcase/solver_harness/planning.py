@@ -62,6 +62,22 @@ def generate_initial_plan(harness, run, *, problem, model_port, config, metadata
                 "only for non-root work. Every root obligation must be mapped; WorkUnit count does not "
                 "change the root-obligation progress denominator."
             )
+    from .autonomous_routes import planner_request
+
+    if state.get("adaptive_solving"):
+        request["review_feedback"] = state.get("candidate_review_feedback", {})
+        request["unresolved_obligations"] = [
+            item for item in state.get("obligation_ledger", [])
+            if item.get("status") != "satisfied"]
+        request["instruction"] = request.get("instruction", "") + (
+            " Review decomposition before returning it: each subgoal must help an unresolved "
+            "root, simplify rather than rename the parent, avoid stronger assumptions, have "
+            "a plausible solution method, and together suffice for every parent requirement. "
+            "Preserve valid findings; repair actual reviewer gaps. Distinct method labels alone "
+            "do not establish independent directions. Time spent, heartbeats, text volume, "
+            "NOT_FOUND and tool success alone are not mathematical progress.")
+
+    request = planner_request(harness, run, request)
     if config.get("features", {}).get("planner_checkpoints") is True:
         from .planner_checkpoint import generate_checkpoint_plan
 
