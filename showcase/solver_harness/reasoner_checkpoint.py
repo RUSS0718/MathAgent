@@ -152,14 +152,18 @@ def checkpoint_tool_receipts(checkpoint, run, step):
             receipt = receipts.get(ref, {})
             if (not receipt or committed.get(ref) != receipt
                     or receipt.get("status") != "success" or receipt.get("executed") is not True
+                    or type(receipt.get("exit_code")) is not int or receipt["exit_code"] != 0
+                    or receipt.get("comparison_status") == "mismatched"
                     or receipt.get("unknown_outcome") or not has_computation_output(receipt)
                     or receipt.get("step_id") not in allowed_steps
+                    or (receipt.get("step_id") != step["step_id"] and ref not in
+                        state["steps"][receipt["step_id"]].get("report", {}).get("tool_evidence_refs", []))
                     or any(receipt.get(k) != state.get(k)
                            for k in ("run_id", "plan_version", "attempt_index"))):
                 raise ValueError("invalid_checkpoint_tool_evidence")
             # Bind the target and input to the original request, never to a label.
             source_found = False
-            for source in state.get("reasoner_checkpoints", []):
+            for source in current_checkpoints({**state, "current_step": receipt["step_id"]}):
                 call = state.get("calls", {}).get(source.get("call_id"), {})
                 index = receipt.get("claim_index")
                 claims = source.get("claims", [])
@@ -175,6 +179,7 @@ def checkpoint_tool_receipts(checkpoint, run, step):
                 original = claims[index]
                 request = original.get("tool_request") or {}
                 if (original["statement"] == claim["statement"]
+                        and request.get("scope") == "finite_computation"
                         and request.get("tool") == receipt.get("tool")
                         and request.get("arguments") == receipt.get("input")
                         and (not claim.get("tool_request") or claim["tool_request"] == request)):

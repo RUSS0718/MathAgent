@@ -197,6 +197,10 @@ def run_step(
     if checkpoint_mode:
         try:
             checkpoint = reasoner_checkpoint.parse(reply)
+            failed_checkpoint_call = harness.get_run(run["run_id"])["state"].get("calls", {}).get(
+                request["call_id"], {})
+            if protocol_repair.known_protocol_failure(failed_checkpoint_call):
+                protocol_repair.validate_checkpoint_repair(checkpoint, failed_checkpoint_call)
         except ValueError as exc:
             return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", str(exc))
         if checkpoint["objective"] != step["objective"]:
@@ -222,6 +226,9 @@ def run_step(
         report = reasoner_checkpoint.to_report(checkpoint, step)
         report["tool_receipts"] = cited_receipts
         report["tool_evidence_refs"] = [r["receipt_id"] for r in cited_receipts]
+        for claim in report["claims"]:
+            if claim["tool_evidence_refs"]:
+                claim["verification_scope"] = "finite_computation"
         if completion_receipts is not None:
             for claim, original in zip(report["claims"], checkpoint["claims"]):
                 claim["tool_evidence_refs"] = list(original.get("tool_evidence_refs", []))

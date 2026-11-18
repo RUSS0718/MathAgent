@@ -33,7 +33,7 @@ def precheck_report(harness, run, *, config, tool_port):
         return run
     receipts = list(state.get("tool_receipts", []))
     for index, claim in enumerate(report.get("claims", [])):
-        if claim.get("label") != "easy-verify":
+        if claim.get("label") != "easy-verify" or claim.get("tool_evidence_refs"):
             continue
         request = claim.pop("tool_request", None)
         retries = config.get("max_tool_retries", 0)
@@ -55,7 +55,8 @@ def precheck_report(harness, run, *, config, tool_port):
     report["tool_evidence_refs"] = [
         ref for claim in report.get("claims", []) for ref in claim.get("tool_evidence_refs", [])
     ]
-    report["tool_receipts"] = [r for r in receipts if r["step_id"] == step_id]
+    report["tool_receipts"] = [r for r in receipts if r["step_id"] == step_id
+                               or r["receipt_id"] in report["tool_evidence_refs"]]
     latest = run["state"]
     return harness.commit_event(
         run["run_id"],

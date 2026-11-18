@@ -53,6 +53,39 @@ def repair_call_id(call_id):
     return f"{call_id}:repair-1"
 
 
+def validate_checkpoint_repair(checkpoint, failed_call):
+    """Serialization repair cannot acquire execution or change supplied semantics."""
+    from .intern_port import _loads_known_escape_rescue
+
+    try:
+        original = _loads_known_escape_rescue(failed_call.get("partial_text", ""))
+    except (TypeError, ValueError):
+        raise ValueError("checkpoint_repair_semantics_unavailable") from None
+    original = original.get("checkpoint") if isinstance(original, dict) else None
+    if not isinstance(original, dict):
+        raise ValueError("checkpoint_repair_semantics_unavailable")
+    # A single misplaced action can be relocated without guessing its target.
+    claims = original.get("claims", [])
+    if not isinstance(claims, list) or any(not isinstance(c, dict) for c in claims):
+        raise ValueError("checkpoint_repair_semantics_unavailable")
+    misplaced = original.pop("tool_request", None)
+    if misplaced:
+        if len(claims) != 1 or not isinstance(claims[0], dict):
+            raise ValueError("checkpoint_repair_semantics_unavailable")
+        claims[0].update(tool_request=misplaced, label="easy-verify")
+    if original.pop("tool_evidence_refs", None):
+        raise ValueError("checkpoint_repair_semantics_unavailable")
+    if any(key in checkpoint and checkpoint[key] != value
+           for key, value in original.items() if key != "claims"):
+        raise ValueError("checkpoint_repair_changed_semantics")
+    if (not isinstance(claims, list) or len(claims) != len(checkpoint["claims"])
+            or any(not isinstance(old, dict) or any(old.get(key) != new.get(key)
+                   for key in {"statement", "label", "tool_request"})
+                   or old.get("tool_evidence_refs", []) != new.get("tool_evidence_refs", [])
+                   for old, new in zip(claims, checkpoint["claims"]))):
+        raise ValueError("checkpoint_repair_changed_semantics")
+
+
 def completed_call_id(calls, call_id):
     """Follow only this review's retry, repair and computation lineage.
 
