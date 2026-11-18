@@ -3,7 +3,12 @@ import re
 from collections.abc import Mapping
 from copy import deepcopy
 
-from ..formal_specification import canonical_identity, normalize_target, public_target
+from ..formal_specification import (
+    canonical_identity,
+    normalize_target,
+    public_target,
+    spec_target_representation_matches,
+)
 
 AUTHORITY_QUESTION = {
     "question": "Do you require a machine-checked proof of the entire conclusion? Reply yes or no.",
@@ -83,9 +88,7 @@ def select_formalization(value, spec, call_id, *, clarification=None, explicit_p
                 raise ValueError("formal_obligations_invalid")
             result["target"] = public_target(normalize_target(value.get("target")))
             target = result["target"]
-            if (spec["domain"].strip().lower() not in {"rationals", "rational", "rational numbers"}
-                    or spec["quantifiers"] != target["quantifiers"]
-                    or spec["assumptions"] or spec["directions"] != ["equality"]):
+            if not spec_target_representation_matches(spec, target):
                 raise ValueError("spec_target_mismatch")
         except (TypeError, ValueError) as exc:
             result.update(status="unsupported", reason=str(exc))
