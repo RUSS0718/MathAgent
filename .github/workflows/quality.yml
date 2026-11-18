@@ -56,8 +56,18 @@ jobs:
           cache: npm
           cache-dependency-path: showcase/frontend/chat-frontend/package-lock.json
       - name: Install locked frontend dependencies
+        id: install
         run: npm ci --no-audit --no-fund
-      - name: Audit frontend dependencies
-        run: npm audit --audit-level=high
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: Audit all frontend dependencies
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          report="$RUNNER_TEMP/frontend-npm-audit.json"
+          status=0
+          npm audit --audit-level=high --json > "$report" || status=$?
+          cat "$report"
+          node scripts/check-npm-audit.mjs "$report" "$status"
       - name: Check frontend
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run check
