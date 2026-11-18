@@ -366,13 +366,13 @@ class SolverHarness:
             problem,
         )
 
-    def get_run(self, run_id: str, *, problem: str | None = None) -> dict[str, Any]:
+    def get_run(self, run_id: str, *, problem: str | None = None, _history=None) -> dict[str, Any]:
         """Recover a run and optionally verify the expected problem identity."""
 
         if not isinstance(run_id, str) or not run_id.strip():
             raise SolverValidationError("run_id must be a non-empty string")
         normalized_run_id = run_id.strip()
-        result = self._state_store.get_run(normalized_run_id)
+        result = self._state_store.get_run(normalized_run_id, _history=_history)
         if result is None:
             raise SolverRunNotFoundError(normalized_run_id)
         if problem is not None and (not isinstance(problem, str) or not problem.strip()):
@@ -567,7 +567,14 @@ class SolverHarness:
             population_owner=self._population_owner,
         )
         if self._event_observer is not None:
-            self._event_observer(result, next(item for item in result["events"] if item["event_id"] == normalized_event["event_id"]))
+            last = result["events"][-1]
+            observed = last if last["event_id"] == normalized_event["event_id"] else next(
+                item for item in result["events"] if item["event_id"] == normalized_event["event_id"]
+            )
+            # The internal shared prefix is not part of the observer's JSON contract.
+            observer_run = (result if isinstance(result["events"], list)
+                            else {**result, "events": list(result["events"])})
+            self._event_observer(observer_run, observed)
         for audit in candidate_events:
             result = self.commit_event(
                 normalized_run_id, expected_revision=result["state_revision"], event=audit
