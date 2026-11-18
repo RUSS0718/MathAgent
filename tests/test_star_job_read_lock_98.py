@@ -15,6 +15,23 @@ from tests.star_product_support import StarJobFixture
 
 
 class JobReadLockTest(StarJobFixture, unittest.TestCase):
+    def test_exclusive_database_lock_returns_retryable_job_snapshot_error(self):
+        self.open_star([], SHOWCASE_WORKER_ENABLED=False)
+        job_id = self.create_job()
+        service = self.app.extensions["showcase_workspace_service"]
+        read = service.get_job
+
+        def read_during_commit(*args):
+            with contextlib.closing(sqlite3.connect(service.store.database_path)) as writer:
+                writer.execute("BEGIN EXCLUSIVE")
+                return read(*args)
+
+        with patch.object(service, "get_job", side_effect=read_during_commit):
+            response = self.client.get(f"/api/agent/jobs/{job_id}")
+        self.assertEqual(503, response.status_code)
+        self.assertEqual("job_snapshot_busy", response.get_json()["code"])
+        self.assertEqual(job_id, self.job(job_id)["job_id"])
+
     def test_job_read_at_deadline_does_not_wait_for_blocked_workspace_writer(self):
         deadline = time.time() + 2
         self.open_star([], SHOWCASE_STAR_EXPERIMENT_POLICY=ExperimentRunPolicy(
