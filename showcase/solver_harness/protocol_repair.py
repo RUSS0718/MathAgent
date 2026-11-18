@@ -72,6 +72,9 @@ def validate_checkpoint_repair(checkpoint, failed_call):
     if misplaced:
         if len(claims) != 1 or not isinstance(claims[0], dict):
             raise ValueError("checkpoint_repair_semantics_unavailable")
+        existing = claims[0].get("tool_request")
+        if existing is not None and json.dumps(existing, sort_keys=True) != json.dumps(misplaced, sort_keys=True):
+            raise ValueError("checkpoint_repair_changed_semantics")
         claims[0].update(tool_request=misplaced, label="easy-verify")
     if original.pop("tool_evidence_refs", None):
         raise ValueError("checkpoint_repair_semantics_unavailable")

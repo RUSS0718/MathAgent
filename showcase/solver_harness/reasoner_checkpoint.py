@@ -191,6 +191,18 @@ def checkpoint_tool_receipts(checkpoint, run, step):
     return list(used.values())
 
 
+def validated_report(checkpoint, run, step):
+    """Resolve citations before either checkpoint handoff persists its report."""
+    receipts = checkpoint_tool_receipts(checkpoint, run, step)
+    report = to_report(checkpoint, step)
+    report["tool_receipts"] = receipts
+    report["tool_evidence_refs"] = [r["receipt_id"] for r in receipts]
+    for claim in report["claims"]:
+        if claim["tool_evidence_refs"]:
+            claim["verification_scope"] = "finite_computation"
+    return report
+
+
 def feedback(checkpoint, *, objection=None):
     result = {
         "accepted": ["checkpoint_schema_and_semantics"],

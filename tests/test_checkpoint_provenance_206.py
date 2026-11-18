@@ -13,11 +13,145 @@ from showcase.solver_harness import (
     SolverHarness,
 )
 from showcase.solver_harness.intern_port import InternPortError
-from tests.test_solver_harness_reasoner_checkpoint import ACCEPT, PLAN, checkpoint
+from tests.test_solver_harness_reasoner_checkpoint import ACCEPT, CHALLENGE, PLAN, checkpoint
 
 
 class CheckpointProvenanceTest(unittest.TestCase):
-    def citation_case(self, *, label="verified", tool_result=None, mutate=None, dependent=True, fault=None):
+    def test_conflicting_misplaced_action_repair_is_rejected(self):
+        original = checkpoint("FINAL", tool_request={"tool": "python_math",
+            "arguments": {"code": "print(3)"}, "scope": "finite_computation"})
+        misplaced = {"tool": "polynomial_check", "arguments": {"coefficients": [1]},
+                     "scope": "finite_computation"}
+        original["checkpoint"]["tool_request"] = misplaced
+        repaired = deepcopy(original)
+        repaired["checkpoint"].pop("tool_request")
+        repaired["checkpoint"]["claims"][0]["tool_request"] = misplaced
+        result, verifier, model = self.repair_case(json.dumps(original), repaired)
+        self.assertEqual("checkpoint_repair_changed_semantics", result["state"].get("result_reason"))
+        self.assertEqual([], result["state"].get("reasoner_checkpoints", []))
+        self.assertEqual([], verifier.requests)
+        self.assertEqual(2, len(model.requests))
+        self.assertEqual(0, result["state"]["counters"]["tool_calls"])
+
+    def challenge_case(self, reply, *, original=None):
+        class ChallengePort(ScriptedModelPort):
+            def complete(self, request):
+                if original is not None and len(self.requests) == 1:
+                    self.requests.append(deepcopy(request))
+                    def stream():
+                        yield json.dumps(original)
+                        raise InternPortError("invalid_role_schema")
+                    return stream()
+                return super().complete(request)
+
+        model = ChallengePort([checkpoint(marker="cp-1"), reply])
+        verifier = ScriptedVerifierPort([CHALLENGE, ACCEPT])
+        with tempfile.TemporaryDirectory() as directory, SolverHarness(
+            database_path=Path(directory) / "state.sqlite",
+            config={"features": {"reasoner_checkpoints": True, "stream_recovery": True,
+                                 "star_routing": True, "local_code_tool": True},
+                    "allowed_tools": ["polynomial_check"], "max_model_calls": 7},
+            model_port=model, verifier_port=verifier, tool_port=ScriptedToolPort([]),
+        ) as harness:
+            result = harness.solve("synthetic proof", {"plan": PLAN})
+        return result, verifier, model
+
+    def test_misplaced_action_with_boolean_numeric_conflict_is_rejected(self):
+        original = checkpoint("FINAL", tool_request={"tool": "polynomial_check",
+            "arguments": {"coefficients": [1]}, "scope": "finite_computation",
+            "expected_output": {"value": True}})
+        misplaced = deepcopy(original["checkpoint"]["claims"][0]["tool_request"])
+        misplaced["expected_output"] = {"value": 1}
+        original["checkpoint"]["tool_request"] = misplaced
+        repaired = deepcopy(original)
+        repaired["checkpoint"].pop("tool_request")
+        repaired["checkpoint"]["claims"][0]["tool_request"] = misplaced
+        result, verifier, model = self.repair_case(json.dumps(original), repaired)
+        self.assertEqual("checkpoint_repair_changed_semantics", result["state"].get("result_reason"))
+        self.assertEqual([], verifier.requests)
+        self.assertEqual(2, len(model.requests))
+        self.assertEqual(0, result["state"]["counters"]["tool_calls"])
+
+    def test_repeated_identity_keeps_no_progress_exit_before_receipt_validation(self):
+        reply = checkpoint("FINAL", marker="cp-1")
+        reply["checkpoint"]["claims"][0]["tool_evidence_refs"] = ["absent"]
+        result, verifier, model = self.challenge_case(reply)
+        self.assertEqual("checkpoint_no_progress", result["state"]["meta_interventions"][-1]["upgrade_reason"])
+        self.assertEqual(1, len(verifier.requests))
+        self.assertEqual(2, len(model.requests))
+        self.assertEqual(0, result["state"]["counters"]["tool_calls"])
+        model = ScriptedModelPort([checkpoint(), reply])
+        verifier = ScriptedVerifierPort([ACCEPT])
+        with SolverHarness(config={"features": {"reasoner_checkpoints": True}, "max_model_calls": 5},
+                           model_port=model, verifier_port=verifier) as harness:
+            result = harness.solve("synthetic proof", {"plan": PLAN})
+        self.assertEqual("reasoner_checkpoint_no_progress", result["state"]["result_reason"])
+        self.assertEqual(1, len(verifier.requests))
+        self.assertEqual(2, len(model.requests))
+        self.assertEqual(0, result["state"]["counters"]["tool_calls"])
+
+    def test_challenge_checkpoint_cannot_cite_absent_receipts(self):
+        for label in ("easy-verify", "verified", "hard-verify"):
+            with self.subTest(label=label):
+                reply = checkpoint("FINAL", marker="cp-2", tool_request={
+                    "tool": "polynomial_check", "arguments": {"coefficients": [1]},
+                    "scope": "finite_computation"})
+                reply["checkpoint"]["claims"][0].update(
+                    label=label, tool_evidence_refs=["tool:absent:1047:0"])
+                result, verifier, model = self.challenge_case(reply)
+                self.assertEqual("invalid_checkpoint_tool_evidence", result["state"].get("result_reason"))
+                self.assertEqual(["cp-1"], [c["checkpoint_id"] for c in result["state"]["reasoner_checkpoints"]])
+                self.assertEqual(1, len(verifier.requests))
+                self.assertEqual(2, len(model.requests))
+                self.assertEqual(0, result["state"]["counters"]["tool_calls"])
+
+    def test_challenge_repair_cannot_drop_pending_action(self):
+        original = checkpoint(marker="cp-2", tool_request={"tool": "polynomial_check",
+            "arguments": {"coefficients": [1]}, "scope": "finite_computation"})
+        reply = checkpoint("FINAL", marker="cp-2")
+        reply["checkpoint"]["claims"][0]["label"] = "verified"
+        result, verifier, model = self.challenge_case(reply, original=original)
+        self.assertEqual("checkpoint_repair_changed_semantics", result["state"].get("result_reason"))
+        self.assertEqual(["cp-1"], [c["checkpoint_id"] for c in result["state"]["reasoner_checkpoints"]])
+        self.assertEqual(1, len(verifier.requests))
+        self.assertEqual(3, len(model.requests))
+        self.assertEqual(0, result["state"]["counters"]["tool_calls"])
+
+    def test_unambiguous_misplaced_action_repair_preserves_request(self):
+        original = checkpoint("FINAL")
+        tool = {"tool": "polynomial_check", "arguments": {"coefficients": [1]},
+                "scope": "finite_computation"}
+        original["checkpoint"]["tool_request"] = tool
+        repaired = deepcopy(original)
+        repaired["checkpoint"].pop("tool_request")
+        repaired["checkpoint"]["claims"][0].update(label="easy-verify", tool_request=tool)
+        result, verifier, model = self.repair_case(json.dumps(original), repaired)
+        self.assertEqual("FINAL_GENERATE", result["state"]["phase"])
+        self.assertEqual(tool, result["state"]["reasoner_checkpoints"][0]["claims"][0]["tool_request"])
+        self.assertEqual(1, len(verifier.requests))
+        self.assertEqual(2, len(model.requests))
+
+    def test_challenge_pure_math_format_repair_remains_legal(self):
+        reply = checkpoint("FINAL", marker="cp-2")
+        original = deepcopy(reply)
+        original["checkpoint"]["verdict"] = "not_a_checkpoint_field"
+        result, verifier, model = self.challenge_case(reply, original=original)
+        self.assertEqual("FINAL_GENERATE", result["state"]["phase"])
+        self.assertEqual(2, len(verifier.requests))
+        self.assertEqual(3, len(model.requests))
+        self.assertEqual(0, result["state"]["counters"]["tool_calls"])
+
+    def test_challenge_can_cite_accepted_predecessor_without_dispatching_again(self):
+        result, verifier = self.citation_case(challenge=True)
+        self.assertEqual("FINAL_GENERATE", result["state"]["phase"])
+        self.assertEqual(3, len(verifier.requests))
+        report = verifier.requests[-1]["report"]
+        self.assertEqual(1, len(report["tool_receipts"]))
+        self.assertEqual("finite_computation", report["claims"][0]["verification_scope"])
+        self.assertEqual(1, result["state"]["counters"]["tool_calls"])
+
+    def citation_case(self, *, label="verified", tool_result=None, mutate=None, dependent=True,
+                      fault=None, challenge=False):
         initial = checkpoint("FINAL", marker="finite-result", tool_request={
             "tool": "polynomial_check", "arguments": {"coefficients": [1]},
             "scope": "finite_computation", "expected_output": {"value": 3}})
@@ -31,7 +165,8 @@ class CheckpointProvenanceTest(unittest.TestCase):
                 if not self.requests:
                     return super().complete(request)
                 self.requests.append(deepcopy(request))
-                reply = checkpoint("FINAL", marker="use-result")
+                reply = checkpoint("FINAL", marker="use-result-challenge"
+                                   if request.get("round") else "use-result")
                 run = harness.get_run(request["run_id"])
                 receipt = run["state"]["tool_receipts"][0]
                 if fault:
@@ -56,7 +191,7 @@ class CheckpointProvenanceTest(unittest.TestCase):
                 return reply
 
         model = CitationPort([initial])
-        verifier = ScriptedVerifierPort([ACCEPT, ACCEPT])
+        verifier = ScriptedVerifierPort([ACCEPT, CHALLENGE, ACCEPT] if challenge else [ACCEPT, ACCEPT])
         with tempfile.TemporaryDirectory() as directory, SolverHarness(
             database_path=Path(directory) / "state.sqlite",
             config={"features": {"reasoner_checkpoints": True, "stream_recovery": True,

@@ -134,6 +134,9 @@ class CheckpointIdentityHarness206Test(unittest.TestCase):
                     cp["dependencies"] = ["S1"]
                 elif mutation == "objection":
                     cp["argument"] = "Dividing 2*x=6 by nonzero 2 forces x=3; the implication is necessary."
+                    cp["claims"].append({"statement": "2*x=6 implies x=3 by division by 2",
+                                         "label": "hard-verify"})
+                elif mutation == "changed_computational_target":
                     cp["claims"][0]["statement"] = "2*x=6 implies x=3 by division by 2"
                 elif mutation == "r05":
                     cp["claims"].append({"statement": "The real solution is unique",
@@ -182,7 +185,21 @@ class CheckpointIdentityHarness206Test(unittest.TestCase):
                 self.assertEqual("S1-completed", verifier.requests[1]["checkpoint"]["checkpoint_id"])
                 self.assertNotEqual(verifier.requests[0]["call_id"], verifier.requests[1]["call_id"])
                 self.assertEqual(verdict == ACCEPT, state["phase"] == "FINAL_GENERATE")
+                claims = verifier.requests[1]["report"]["claims"]
+                self.assertEqual("2 * 3 = 6", claims[0]["statement"])
+                self.assertEqual([state["tool_receipts"][0]["receipt_id"]], claims[0]["tool_evidence_refs"])
+                self.assertEqual("2*x=6 implies x=3 by division by 2", claims[1]["statement"])
+                self.assertEqual([], claims[1]["tool_evidence_refs"])
                 self.assertIn("Challenge replies must use a fresh checkpoint_id", client.requests[1][0][0]["content"])
+
+    def test_challenge_cannot_rebind_finite_receipt_to_new_claim(self):
+        state, client, verifier = self.run_case(
+            first_verdict=CHALLENGE, fresh=True, mutation="changed_computational_target")
+        self.assertEqual("invalid_checkpoint_tool_evidence", state["result_reason"])
+        self.assertEqual(2, len(client.requests))
+        self.assertEqual(1, len(verifier.requests))
+        self.assertEqual(1, state["counters"]["tool_calls"])
+        self.assertEqual(["S1"], [c["checkpoint_id"] for c in state["reasoner_checkpoints"]])
 
     def test_same_id_mutation_is_rejected_before_another_review(self):
         for mutation in ("claim", "evidence", "dependencies", "r05"):

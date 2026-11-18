@@ -186,6 +186,10 @@ def run_challenges(
         if checkpoint_mode:
             try:
                 checkpoint = reasoner_checkpoint.parse(reply)
+                failed_checkpoint_call = harness.get_run(run["run_id"])["state"].get("calls", {}).get(
+                    request["call_id"], {})
+                if protocol_repair.known_protocol_failure(failed_checkpoint_call):
+                    protocol_repair.validate_checkpoint_repair(checkpoint, failed_checkpoint_call)
             except ValueError as exc:
                 return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", str(exc))
             if checkpoint["objective"] != step["objective"]:
@@ -200,7 +204,11 @@ def run_challenges(
             ):
                 upgrade_reason = "checkpoint_no_progress"
                 break
-            report = reasoner_checkpoint.to_report(checkpoint, step)
+            try:
+                report = reasoner_checkpoint.validated_report(
+                    checkpoint, harness.get_run(run["run_id"]), step)
+            except ValueError as exc:
+                return finish(harness, harness.get_run(run["run_id"]), "partial_aborted", str(exc))
             if checkpoint["status"] in {"BLOCKED", "FAILED"}:
                 report["blocked"] = True
         else:
