@@ -17,6 +17,60 @@ from tests.test_solver_harness_reasoner_checkpoint import ACCEPT, CHALLENGE, PLA
 
 
 class CheckpointProvenanceTest(unittest.TestCase):
+    def test_challenge_repair_preserves_nested_tool_request_json_types(self):
+        for change_expected in (False, True):
+            with self.subTest(change_expected=change_expected):
+                original = checkpoint("FINAL", marker="cp-2", tool_request={
+                    "tool": "polynomial_check", "arguments": {"coefficients": [1]},
+                    "scope": "finite_computation", "expected_output": {"value": True}})
+                original["checkpoint"]["verdict"] = "invalid_checkpoint_field"
+                repaired = deepcopy(original)
+                repaired["checkpoint"].pop("verdict")
+                if change_expected:
+                    repaired["checkpoint"]["claims"][0]["tool_request"]["expected_output"]["value"] = 1
+
+                class ChallengePort(ScriptedModelPort):
+                    def complete(self, request):
+                        if len(self.requests) == 1:
+                            self.requests.append(deepcopy(request))
+                            def stream():
+                                yield json.dumps(original)
+                                raise InternPortError("invalid_role_schema")
+                            return stream()
+                        return super().complete(request)
+
+                model = ChallengePort([checkpoint(marker="cp-1"), repaired])
+                verifier = ScriptedVerifierPort([CHALLENGE, ACCEPT])
+                tool = ScriptedToolPort([{
+                    "status": "success", "exit_code": 0, "output": {"value": 1}}])
+                with SolverHarness(config={
+                    "features": {"reasoner_checkpoints": True, "stream_recovery": True,
+                                 "star_routing": True, "local_code_tool": True},
+                    "allowed_tools": ["polynomial_check"], "max_model_calls": 7},
+                    model_port=model, verifier_port=verifier, tool_port=tool,
+                ) as harness:
+                    result = harness.solve("synthetic finite computation", {"plan": PLAN})
+                state = result["state"]
+                self.assertEqual(3, len(model.requests))
+                if change_expected:
+                    self.assertEqual("checkpoint_repair_changed_semantics", state.get("result_reason"))
+                    self.assertEqual(["cp-1"], [c["checkpoint_id"] for c in state["reasoner_checkpoints"]])
+                    self.assertEqual(1, len(verifier.requests))
+                    self.assertEqual(0, state["counters"]["tool_calls"])
+                    self.assertEqual([], state["tool_receipts"])
+                else:
+                    self.assertEqual("FINAL_GENERATE", state["phase"])
+                    self.assertEqual("ACCEPTED", state["steps"]["s1"]["status"])
+                    self.assertEqual(2, len(verifier.requests))
+                    self.assertEqual(1, state["counters"]["tool_calls"])
+                    request = state["reasoner_checkpoints"][-1]["claims"][0]["tool_request"]
+                    self.assertIs(True, request["expected_output"]["value"])
+                    self.assertEqual("mismatched", state["tool_receipts"][0]["comparison_status"])
+                    self.assertIs(False, state["tool_receipts"][0]["assertion_matched"])
+                    claim = verifier.requests[-1]["report"]["claims"][0]
+                    self.assertEqual("easy-verify", claim["label"])
+                    self.assertIsNone(claim.get("verification_scope"))
+
     def test_conflicting_misplaced_action_repair_is_rejected(self):
         original = checkpoint("FINAL", tool_request={"tool": "python_math",
             "arguments": {"code": "print(3)"}, "scope": "finite_computation"})

@@ -83,7 +83,9 @@ def validate_checkpoint_repair(checkpoint, failed_call):
         raise ValueError("checkpoint_repair_changed_semantics")
     if (not isinstance(claims, list) or len(claims) != len(checkpoint["claims"])
             or any(not isinstance(old, dict) or any(old.get(key) != new.get(key)
-                   for key in {"statement", "label", "tool_request"})
+                   for key in {"statement", "label"})
+                   or json.dumps(old.get("tool_request"), sort_keys=True)
+                   != json.dumps(new.get("tool_request"), sort_keys=True)
                    or old.get("tool_evidence_refs", []) != new.get("tool_evidence_refs", [])
                    for old, new in zip(claims, checkpoint["claims"]))):
         raise ValueError("checkpoint_repair_changed_semantics")
