@@ -111,9 +111,10 @@ class JobProjectionReadLockTest(StarJobFixture, unittest.TestCase):
         from showcase.star_product_pipeline import projection
 
         def slow_projection(*args, **kwargs):
-            entered.set()
-            if not release.wait(3):
-                raise AssertionError("projection was not released")
+            if threading.current_thread() is reader:
+                entered.set()
+                if not release.wait(3):
+                    raise AssertionError("projection was not released")
             return projection(*args, **kwargs)
 
         def read():

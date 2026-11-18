@@ -178,7 +178,7 @@ def dispatch(harness, run, operation, request, session_dispatch):
                 raise ValueError("call identity conflict")
             if existing["status"] == "completed":
                 return deepcopy(existing["response"])
-            raise CallInterrupted(run["run_id"])
+            raise CallInterrupted(run["run_id"], existing["call_id"])
         if latest["state"]["phase"] == "TERMINAL":
             raise CallInterrupted(run["run_id"])
         from .adaptive_resources import allocate, bind_allocation

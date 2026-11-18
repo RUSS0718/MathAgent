@@ -1,5 +1,7 @@
 # MathAgent 文档索引
 
+2026-11-17 #189补充真实验收未全通过：最终UI真实启动/跨重启恢复通过；新自然S2正确，D因unsupported_graph_step_dependency失败、U未运行。#189重新打开，PR198退回draft，详见[补验记录](evals/dependency-routing-189-20261117.md)。
+
 2026-11-17 #188 用户答疑工程退出完成：冻结8db1006门禁6/6通过，后端2241项、0失败/错误、42跳过，源码无漂移；原失败保留。受控表达与fake回退不代表教学质量或数学效果提升。
 见 [实施设计](engineering/user-solving-188-design.md)、
 [验收映射与证据](evals/user-solving-188-20261116.md)和 [审阅授权入口](engineering/reviewer-access-195.md)。

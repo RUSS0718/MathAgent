@@ -143,9 +143,20 @@ def get_final_answer(workspace_service, user_id, job_id, public_report=None):
     if answer:
         scope = snapshot['scope']
         completion = artifact.get('completion') if artifact else (snapshot.get('selection') or {}).get('completeness')
-        if completion in {'partial', 'incomplete'} or scope['unresolved'] or scope['covered'] < scope['total']:
+        selection = snapshot.get('selection')
+        reviewed = (job['status'] == 'succeeded' and answer == snapshot['answer']
+            and snapshot['whole_review'] == 'accepted' and snapshot['answer_binding'] == 'same_artifact'
+            and any(source.get('scope') == 'whole_solution_llm_review'
+                    and source.get('artifact') == snapshot['answer_artifact']
+                    and source.get('status') == 'current' for source in snapshot['sources'])
+            and (not selection or (selection.get('eligible')
+                 and selection.get('completeness') == 'complete'
+                 and selection.get('selected_answer_artifact') == snapshot['answer_artifact'])))
+        if reviewed:
+            notice += ' 当前原答案已完成并经整题模型审查；不代表步骤级或形式化证明。'
+        elif completion in {'partial', 'incomplete'} or scope['unresolved'] or scope['covered'] < scope['total']:
             notice += f" 当前仅为部分结果，仍有未完成目标；已覆盖 {scope['covered']}/{scope['total']} 项目标。"
-        if snapshot['whole_review'] != 'accepted' or (artifact and artifact.get('delivery', {}).get('grade') == 'not_verified'):
+        if not reviewed:
             notice += ' 当前答复未验证，不代表整题证明。'
     return {'job_id': job_id, 'status': job['status'], 'mode': mode, 'answer': answer,
             'presentation_status': status, 'notice': notice}

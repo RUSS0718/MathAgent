@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .challenge import run_plan
+from .dependency_routing import unknown_pending
 from .explore import run_exploration
 from .finalize import run_finalization
 from .harness_config import _non_negative_config_int, _positive_config_int
@@ -20,6 +21,8 @@ def run_supplied_plan_or_explore(
     problem: str,
     metadata: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    if unknown_pending(run, allow_authorized_retry=True):
+        return run
     if run["state"].get("population_policy", {}).get("enabled") is True:
         plan = None if metadata is None else metadata.get("plan")
         if plan is not None:
@@ -97,6 +100,8 @@ def run_exploration_phase(harness, run: dict[str, Any], problem: str) -> dict[st
 
 
 def advance(harness, run, metadata, problem):
+    if unknown_pending(run, allow_authorized_retry=True):
+        return run
     if (run["state"]["phase"] == "PLAN" and run["state"].get("adaptive_solving")
             and len(run["state"].get("whole_solution_reviews", [])) >
             run["state"]["adaptive_solving"].get("processed_reviews", 0)):

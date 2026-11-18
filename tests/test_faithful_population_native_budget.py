@@ -69,18 +69,23 @@ class NativePopulationBudgetTest(StarJobFixture, unittest.TestCase):
 
         frozen = threading.Event()
         held = []
+        settled = []
         held_lock = threading.Lock()
         def save(harness, run, record, **kwargs):
             should_hold = False
             with held_lock:
-                if (kwargs.get("event_type") == "transport_selected" and not held
+                if (kwargs.get("event_type", "call_audit") == "call_audit"
+                        and record.get("status") == "completed" and not held
                         and record["role"] == "step_verifier"
                         and record["request"].get("checkpoint", {}).get("status") == "FINAL"):
                     held.append(record["call_id"])
                     should_hold = True
             if should_hold:
                 self.assertTrue(frozen.wait(10), "independent route did not reach finalization")
-            return _save(harness, run, record, **kwargs)
+            result = _save(harness, run, record, **kwargs)
+            if should_hold:
+                settled.append(harness.get_run(run["run_id"])["state"]["calls"][record["call_id"]]["status"])
+            return result
 
         def freeze(*args, **kwargs):
             run = command(*args, **kwargs)
@@ -92,8 +97,11 @@ class NativePopulationBudgetTest(StarJobFixture, unittest.TestCase):
             with patch("showcase.solver_harness.calls._save", save), patch(
                     "showcase.solver_harness.population_runtime.command", freeze), patch.object(
                     InternModelPort, "complete", complete):
-                self.run_checkpoint_routes(continuation=True)
+                # Hold settlement after HTTP, so freezing never requires a new
+                # dispatch from the held route. Both verifiers reach HTTP first.
+                self.run_checkpoint_routes()
             self.assertEqual(1, len(held))
+            self.assertEqual(["completed"], settled)
         except AssertionError as exc:
             exc.add_note(
                 "InternModelPort.complete failure snapshot; inflight calls may not have raised "

@@ -147,7 +147,9 @@ def generate_terminal(service, job_id):
                 raise ValueError('output_protocol_invalid')
             text = response.text
         artifact = build_presentation(snapshot, mode, paragraphs=[
-            {'text': text, 'kind': 'mathematical', 'claim_refs': []}])
+            {'text': text, 'kind': 'mathematical', 'claim_refs': [source['id']
+                for source in snapshot['sources'] if mode == 'solve'
+                and source.get('artifact') == snapshot['answer_artifact']]}])
     except Exception as exc:
         if hasattr(exc, 'request_attempts'):
             cost['request_attempts'] = list(exc.request_attempts)

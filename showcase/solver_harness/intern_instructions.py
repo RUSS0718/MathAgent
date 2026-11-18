@@ -181,6 +181,13 @@ def response_instructions(request, schema):
             "when explicitly required. "
             "A computation used to establish a root cannot depend on that root already being complete. "
             "Dependencies denote logical prerequisites, not merely related topics. "
+            "When a requested conclusion uses the result of another objective, assign explicit IDs "
+            "and record that prerequisite in the dependent root's prerequisite_ids or dependent "
+            "auxiliary goal's dependencies. Use only declared objective IDs. Keep requested "
+            "conclusions as roots and separate necessary non-root preparation as auxiliary goals. "
+            "Record only genuine logical prerequisites; leave dependencies empty when absent. "
+            "Do not infer dependencies from difficulty, length, or the requirement to explain or "
+            "list all solutions. "
             "Use extremum_bound/extremum_attainment only when the original problem asks for a "
             "minimum or maximum, not ordinary counting or numerical evaluation."
         )

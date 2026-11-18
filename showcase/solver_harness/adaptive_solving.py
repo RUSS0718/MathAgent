@@ -42,12 +42,24 @@ def search_context(state):
 def explore_direct(harness, run, problem):
     """Try a complete candidate and at most one feedback-directed correction."""
     config = harness._config
+    from .dependency_routing import planning_requirement, require_plan, unknown_pending
+
+    if unknown_pending(run, allow_authorized_retry=True):
+        return run
+    run = require_plan(harness, run)
+    if run["state"]["phase"] == "PLAN" and planning_requirement(run["state"]):
+        return run
     policy = run["state"].get("adaptive_solving")
     if policy is None:
         run = commit(harness, run, "adaptive_solving_started", {
             "adaptive_solving": {"version": VERSION, "corrections": 0,
                                  "reason": "candidate_first"}}, reason="candidate_first")
     while True:
+        if unknown_pending(run, allow_authorized_retry=True):
+            return run
+        run = require_plan(harness, run)
+        if run["state"]["phase"] == "PLAN" and planning_requirement(run["state"]):
+            return run
         if (run["state"]["phase"] == "PLAN" and
                 len(run["state"].get("whole_solution_reviews", [])) >
                 run["state"]["adaptive_solving"].get("processed_reviews", 0)):
@@ -63,7 +75,12 @@ def explore_direct(harness, run, problem):
         if run["state"]["phase"] == "TERMINAL":
             return run
         if run["state"]["phase"] != "EXPLORE_REVIEW":
-            return _route(harness, run, "complete_candidate_unavailable")
+            reason = "complete_candidate_unavailable"
+            finding = run["state"].get("exploration_findings", [])[-1]
+            if finding.get("initial_explore"):
+                reason = ("initial_explore_output_limit" if finding.get("end_reason") == "truncated_response"
+                          else "initial_explore_incomplete")
+            return _route(harness, run, reason)
         run = review_solution(
             harness, run, problem=problem, verifier_port=harness._verifier_port,
             max_model_calls=config.get("max_model_calls", 2),

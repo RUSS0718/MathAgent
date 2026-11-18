@@ -71,6 +71,8 @@ def create_star_product_pipeline(database_path, *, storage_root, config):
         registry=registry,
         full_enabled=full_enabled,
         full_features=config.get("SHOWCASE_STAR_FULL_FEATURES"),
+        routing_policy_version=config.get("SHOWCASE_STAR_ROUTING_POLICY_VERSION"),
+        initial_explore_policy_version=config.get("SHOWCASE_STAR_INITIAL_EXPLORE_POLICY_VERSION"),
         full_budget=config.get("SHOWCASE_STAR_FULL_BUDGET"),
         experiment_policy=config.get("SHOWCASE_STAR_EXPERIMENT_POLICY"),
         transport_policy=config.get("SHOWCASE_STAR_TRANSPORT_POLICY", "legacy"),

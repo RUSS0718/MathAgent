@@ -1,10 +1,68 @@
-# 无人值守交接：#188交付收尾，随后按依赖接续
+# 无人值守交接：189/193 工程验收通过，发布后停止
 
-## 2026-11-17 当前授权与所有权
+2026-11-17 补充真实验收（受验源码60a5882976e758558b5bc3dd6620daa579135047）：真实8120启动及跨进程重启浏览器恢复通过，重启后101个真实GET、0console/pageerror，资产及S2/D/U既有答案/终态一致，业务身份audit不变。新隔离自然live05中S2成功且x=3独立核对正确（4HTTP/1工具）；D failed，第三步依赖S1/S2无可接受证明图成果，unsupported_graph_step_dependency，未交付完整答案（12HTTP/4工具、非预算耗尽/协议失败/远端unknown）；U依停止门控未提交。此轮真实自然求解未全通过，重新打开#189、PR198退回draft；#193历史恢复验收保留。旧通过/失败按各自源码保留，下文完成状态为补验前快照。新证据artifacts/issue189/live05-final60a5882/{assessment.md,assessment-summary.json}、artifacts/issue193-browser/final60a5882-live/after-restart/report.md和artifacts/issue193-ui/attempts/final60a5882restart/controller-audit.json。自有8119/8120已停止，临时检查已移除；8103保留。本次补验不追加修复或重复求解，不领取其他票。
 
-用户授权完成当前ticket后推送并关闭，再领取剩余ticket；实现尽量交给子智能体，主控分派、等待及整合，不催促。#188及子票#194/#195/#196已工程验收退出，当前先由主控完成文档提交、PR #197交付推送及关票，随后按 `#190 → {#191, #192} → #193` 接续#189。#190尚未领取实施；较早父票及未实证能力不随本次界面交付自动关闭。
+## 当前状态与所有权（2026-11-17）
 
-集成root为 `D:/project/工程化MathAgent/Challenge-Cup-2026`，分支 `user-solving-188`，冻结源码/HEAD `8db100636a117c7219d10dfeb7c974f505819e2b`。最终文档交付SHA待主控提交后提供。PR #197仍draft，远端尚未推送最新；这些是主控提供状态，本次文档工作不操作GitHub，不预写推送、关票或main合并完成。
+主控root D:/project/工程化MathAgent/Challenge-Cup-2026，分支dependency-routing-189。最终gate02受验源码为ada7c20444bde0a6351947c736b63fe4595e92e1/tree445fce256c5446f25915914924c7445552a994b2，source_changed=false，门禁完成后冻结已解除。最终纯文档交付提交尚未产生，交付SHA由提交后的HEAD、PR及最终关票评论记录，与受验源码分记。用户原有改动保持；docs/README.md由主控partial stage处理。两份用户未跟踪合同及tests/test.md不读、不hash、不改、不提交。
+
+本轮工程退出条件已通过；#190/#191/#192已关闭，发布前#189/#193仍open、PR198 draft、base user-solving-188，不合main。主控独占最终提交、推送、PR ready、关票及重读复核事务。#168保持开放，#183已closed，不重开或接收新增缺口。完整证据与各源码范围见[#189验收](../evals/dependency-routing-189-20261117.md)及[#193验收](../evals/routing-ui-193-20261117.md)，远端最终交付状态以发布后的PR和关票评论及重读复核记录为准。
+
+3797e7f及后续f94a492历史默认终态修复均已集成，后者merger为a59450a；新完整Vue DOM受控fixture独立4/4及独立双轴0已齐，原a0真实after与3797e7f受控failed不改判。四组gate修复来源4e272e3，已合并至ea81b6b、tree一致；原8方法8/8（restart含3subtests）、最新合并相关25/25，受影响两fresh复查0确认问题/0阻断。精确来源及证据指针见上述eval，各自绑定适用源码，不与最终门禁重复累加。自然S2/D成功、U failed、natural AC2 not_triggered保持原判。
+
+唯一最终run dependency-routing-189-02已passed 6/6、current_stage=completed、source_changed=false，elapsed2501.094秒；2311 testsRun、0failure/0error/42skip，发布27/27，前端87/87、typecheck/build通过，audit0漏洞，六阶段日志均EXIT_CODE 0。精确时间、命令及报告见189验收与artifacts/final-gates/dependency-routing-189-02/。gate01仍failed，不因本轮通过改判；skip仍未执行，不计通过覆盖。
+
+临时task MathAgent-189-dependency-routing-189-02于北京时间2026-11-17 10:52写scheduled-terminal.json后自动删除，主控10:55复核不存在；PID40112及测试子进程41976/43680/34888/11632/44264/43308/44248均已退出。清理证据入口为该run目录controller-cleanup.json。无活跃长测或检查所有权需要转移，不再启动测试。
+
+依[#193合同](routing-ui-193-contract.md)及[接续合同第3条](unattended-ticket-loop.md)，已正式撤销本地附加“最终修复后同自然S2/D/U真实服务重启再浏览器验收”门槛：用户充分批准后安全Start三次工具拒绝，原四AC不要求新增该轮重启且产品不改启动/恢复。替代组合为原a0真实after+audit、新完整Vue DOM/刷新、公共进程恢复及最终门禁，四组均已有适用范围内通过证据，本轮工程退出条件已满足。身份/权限/预算/unknown与公共恢复要求不减。
+
+8119/8120均停止；真实post-fix服务重启为NOT_RUN / blocked_by_tool_approval，作为#168限制保留，不转给已关闭#183。用户批准充分，不再求同一批准或换执行器/工具/代理绕过。8119精确清理记录为artifacts/issue189/live04/final-service-cleanup-20261117.json。用户8103服务保留，不碰；受控DOM及最终门禁不证明自然重启、数学能力或效率提升。
+
+原mathagent-193已安全清理且28来源证据保留；merged clean mathagent-193-terminal-plan与mathagent-193-history-terminal也已由主控核对4/72来源证据后，仅删各精确junction再git worktree remove。root共享node_modules仍在、浏览器已完成不再使用来源dist，证据保留root；记录artifacts/issue193-history-terminal/controller-cleanup.json。192与189-gate-fixes来源树误建ignored .venv的清理被自动审批拒绝，继续保留，不force或换方式绕过。
+
+用户最新停止范围：剩余仅主控最终文档提交推送、PR198设为ready、关闭并重读复核#189/#193；不预写已推送、ready或closed。#189完成推送关票后停止，不领取#156或其他票，不创建新session或接班会话，不追加服务、模型调用或测试。等待、不催促；下文历史“继续其他ready ticket/领取下一票/创建接班”指令仅作历史保留，不再生效。#168保持开放、#183保持closed。
+
+继续当前选择的同一模型，不指定/覆盖型号；具体型号及跨session继承无法独立确认。下文历史原样保留，不构成当前启动授权。
+
+## 历史：2026-11-17 授权、准备与逐轮进展
+
+以下至 #183 历史段均为 live04 终态前快照；旧“当前/下一步/未提交/NOT_RUN”按当时理解，不代表继续启动或当前退出状态。原失败、修复、提交及所有权历史保留。
+
+用户授权完成当前ticket后推送并关闭，再领取剩余ticket；实现尽量交给子智能体，主控分派、等待及整合，不催促。#188及子票#194/#195/#196已工程验收退出、推送并经GitHub复核关闭，交付 `1307aab40b8788cc408ef65fc94dfc7f2b1dc1f8`，PR #197已ready，未合入main。#190独立纵切已推送 `975560a9bd9c546d7e7b1ae7e8133071c3a41cf4` 并复核关闭；当前#191/#192代码及审查修复已集成，准备自然验收，按 `#190 → {#191, #192} → #193` 接续#189。#189整体仍未退出，较早父票及未实证能力保持各自边界。
+
+集成root为 `D:/project/工程化MathAgent/Challenge-Cup-2026`，分支 `dependency-routing-189`，起点为上述#188交付，PR #198堆叠于 `user-solving-188` 且保持draft。#190聚焦45项和集成快速5项通过，独立两轴0阻断，见[本票记录](dependency-routing-190-handoff.md)。#191代码切片由fresh merger集成至 `147f8eacb87ece8e77d7512dff61a1161ed9e517`，随后 `adc01500a6bdfae8c76bdcd8ed6f0871663de6b0` 仅清理新增测试末尾空行；生产Intake指令增加7行，35个不同聚焦方法通过、零跳过，见[受控记录](../evals/natural-intake-191-20261117.md)。20个ignored证据文件已复制至root `artifacts/issue191/` 并校验哈希一致，干净且已合并的191工作树和相关代理已清理。#191仍open，不能把受控HTTP当作自然模型成功。
+
+#192已集成5582e86，原实现源码b2b1a50；21项最终聚焦及历史回归共95个不同选择器，1项Docker Reference未执行，不能累加为103。Hume已完成关闭，68份ignored证据复制root且哈希一致。工作树 `D:/project/mathagent-192` 因自动审批拒绝删除自建ignored `.venv`（blocked by policy）保留，不能绕过拒绝force清理。2048仍为工程假设，不宣称实测token分位数。#193的Copernicus（01a1e648-36e6-7f83-8b80-36f3071b6c70）仅完成只读设计，待自然191/192实际退出后再正式实施。原四项用户dirt仍保留。
+
+唯一fresh修复者Socrates完成补证，生产/测试源码1037ec9、来源da87637，fresh merger集成0b92236。显式非流指纹补tools；首次工具续接已知协议失败的公开恢复不再额外repair。51个不同测试、零失败/错误/跳过，40份ignored证据复制并哈希一致。两位fresh审阅者复查5582e86…0b92236，两轴均0阻断，原两项受控证据限制解除；报告及边界见[阶段记录](../evals/dependency-routing-189-20261117.md)和[补证记录](../evals/dependency-routing-review-20261117.md)。0b92236主控fast5/5、3.097秒通过。实现、合并及复查代理均已结束，193准备代理保留等待正式任务；不催促。
+
+下一步先提交这些文档并推送，填写live01内部冻结记录，再由主控冻结唯一自然S/D/U。冻结期间不改tracked bytes、HEAD、dist或配置；当前尚无本轮进程/定时检查，运行所有权归主控。自然终态后再推进193，真实Job只读复用，不为UI重复模型请求。继续同一模型选择，不指定子智能体型号覆盖，具体型号及继承无法独立确认。
+
+上述准备已于9ca4212冻结并启动live01，但S提交返回400，未创建Job；主控只读核对Job/Run/预算/solver state/event均为0，无provider调用。根因为运行器幂等键非UUIDv4、离线smoke未复用实际提交代码；原响应体丢失如实记录。原失败、guard及reconciliation保留，数学验收仍not_run，D/U未提交。主控按精确PID/创建时间清理服务与临时检查，8119无监听。fresh Nash（01a1e685-77b7-7d50-af61-433b30c87c08）独占ignored live02及仓库外交接，修正运行器并做公共离线红绿，不改产品或启动provider；主控等待，不催促。live02就绪后再记录新冻结与唯一启动，不能覆盖/重放live01原提交。另有Einstein（01a1e684-77ca-7fd3-a8d1-e462a3f7e8a7）只读准备#156后续工程缺口报告，无领取/实施/实验授权。
+
+Nash已完成关闭，live02红400/idempotency_key_invalid、绿202/default star_reference；observe与smoke共用提交代码，错误留存及单次请求断言通过，0真实provider。主控已审阅窄差异，下一步冻结新文档HEAD并唯一启动live02，继续原S/D/U题目与预算，保留live01全部失败。新的监控入口 `artifacts/issue189/live02/check.ps1`、任务 `MathAgent-Issue189-live02`，端口8119；尚未启动时无进程/任务所有权可交接。详见[阶段记录](../evals/dependency-routing-189-20261117.md)。Einstein亦完成关闭，报告 `C:/Users/CQX/.codex/tmp/156-next-slice-audit-20261117.md`；#156未领取，两个活跃公共owner接管为具体工程证据缺口，机器压力信号合同未定，provider/数学未实证不作为新增实验授权。
+
+live02实际启动在df546df发生原生PowerShell中文路径解码错误，误入新虚拟环境，dotenv导入失败。无observer、submission guard、sqlite、Job/provider；主控清理精确owner、临时检查及误建环境，原失败与cleanup证据保留。Nash已恢复接续，唯一写新ignored live03及仓库外交接，修运行时路径解析、原生后台health和启动失败落盘检查；主控等待，不催促，不改依赖掩盖问题。当前无本轮活跃进程/临时检查，193仍未正式实施，自然验收仍not_run。
+
+live03窄修已完成并审阅，Nash已关闭。原生PS5.1环境、真实worker-off后台boot/health、启动失败落盘及finally自动清理临时task均通过；0Job/provider、测试进程已精确清理。提交代码与live02字节相同，不重跑准入；实际证据范围及失败保留见[阶段记录](../evals/dependency-routing-189-20261117.md)。下一步在本次文档提交后冻结live03，唯一入口 `artifacts/issue189/live03/start.ps1`、监控 `check.ps1`、临时task `MathAgent-Issue189-live03`、端口8119，原S/D/U与预算不变。运行所有权归主控，不自动重复旧提交。
+
+live03已冻结316eaba8c681bb928f2d49ea14581db9f7617363并实际启动，S Job `run_bd94bd70b28a651ec30ebc2f66d97c52` 194.885秒后failed/partial_aborted/route_requires_reevaluation，未交付答案；8HTTP全部已返回，Intake1、Planner1、Reasoner3、StepVerifier3，工具3、未决0、原预算未耗尽。无Explore，S不能算简单直解通过；D/U因首题失败未提交。provider usage缺失不等于远端结果未知。主控已按精确PID/创建时间释放服务和临时检查，原失败与cleanup证据保留，当前无本轮运行所有权待移交。
+
+fresh Plato（01a1e69c-cd87-7781-bed0-0d58a721b74d）只读诊断实际Intake依赖及Verifier/Reasoner失败因果，唯一仓库外报告 `C:/Users/CQX/.codex/tmp/189-live03-S-diagnosis-20261117.md` 和同名目录离线回放；允许有限0provider最小诊断，不改源码/库、不重试原Job。主控不重做其诊断，不催促。#191/#192/#189保持open，193正式实施继续等待实际退出。
+
+Plato已完成关闭，定位确认challenge repair成功后checkpoint仍引用原失败调用，形成review_record_mismatch并阻断路线刷新；真实绑定接缝回放两次稳定红，仅内存更正成功来源即绿，尚非公共全链。S实际解释依赖来自Intake违反已有指令；两次工具参数错误非原方程反例，不把schema/来源守卫当错误删除。fresh Arendt（01a1e6a5-5cc5-7173-b5c3-694c2e98d583）独占 `D:/project/mathagent-189-checkpoint-fix` / `fix/checkpoint-repair-source-189`，基于c4493ba，负责成功repair来源的最小生产修复、公共Job先红后绿和相关身份/恢复回归；不做Intake/工具/schema/容量扩改，不重试旧Job，不跑provider/整仓。
+
+主控登记natural-cases-v2.json的S2单数学目标，D/hash原样、U原登记未提交；旧S失败保留。Nash（01a1e685-77b7-7d50-af61-433b30c87c08）已恢复，只准备新ignored live04静态运行器与S2停止门控见证，未启动/冻结。待Arendt完成后fresh merger、受影响双轴复查，再由主控唯一自然运行；当前无本轮模型/长测试/临时task。Copernicus仅完成193准备和指南检索，正式实施仍等待191/192实际退出。
+
+Nash的live04准备已完成审阅并关闭，静态差异、配置/提交字节相同及原生S2未终态停止拒绝证据齐备，状态仍not_run0/3、无freeze/guard/进程/task。Arendt首轮提交0319893修challenge来源、2公共回归及9项聚焦通过；生产2轮上限下该旧链路仍以reasoner_checkpoint_round_limit终止，测试内3轮续算仅为来源机制见证，生产上限未改，不能冒称旧S自然成功。主控已要求同一owner窄补普通step.py同caller来源风险及registry回执覆盖，完成前不合并、不启动live04；主控不重复实施、不催促。
+
+Arendt补充完成9cf830d，普通step同来源bug已公共红绿确认并最小修复，新增生产两轮内续算/交付和真实registry一次工具回执；累计去重10项通过，最终补充4项不重复累加。fresh merger Ptolemy集成08eeecded8fbebd73bf91e228017072215c9c87e、tree一致；主控fast5/5、3.307秒通过。24份证据复制root并hash一致，clean且已合并的修复工作树已安全移除，实现/合并代理均关闭。独立Laplace（01a1e6b3-0580-7c23-997a-6bf9791b1cd2）规范轴、Descartes（01a1e6b3-046a-70d2-ad7b-1a954b52f9f7）规格轴复查c4493ba…08eeecd，仓库外报告189-checkpoint-review-{standards,spec}-20261117.md；主控等待不催促。复查通过后更新记录、推送、冻结live04唯一自然运行；当前无自然/长测试/临时task。
+
+上述两位fresh审阅者均完成：确认问题0、阻断0；已关闭。报告复制到root `artifacts/checkpoint-189/independent-review/`。主控将提交本次诊断/修复/复查及S2登记时序记录后推送，再填写live04内部冻结记录、唯一启动S2/D/U；期间源码/HEAD/dist/config冻结，所有权仍归主控，193正式实施待自然AC实际退出。
+
+自然S/D题干已预登记于忽略目录 `artifacts/issue189/preregistration/natural-cases-v1.json`，新增单目标题U登记于同目录 `natural-U-v1.json`，均为 `registered_not_run`；题干SHA在相应文件。U的人审参考另存仓库外，主控独立有理数枚举核对21组；答案不得进入运行器或模型。D未产生实际依赖，或U自然产生依赖/首次完整完成，均按相应路径记not_triggered，不注入Spec/计划或诱导重跑。先在191/192代码集成及独立审阅通过后冻结同一源码/配置，由主控唯一启动S/D/U每题一次；实际退出后才实施193，复用保存结果做只读UI/刷新验收，分别记录自然运行与UI源码SHA，不为UI重新派发模型。Boyle已完成运行器及公共Flask/Job受控离线smoke，真实provider为0，核心HTTP读取/分页通过；自然验收仍NOT_RUN。Dalton（01a1e659-e22f-7940-9b17-6d08464af0ea）仅在ignored `artifacts/issue189/live01/` 修简有效配置审计与冻结时序：独立服务配置快照，不修改受验公共Run响应。独立端口8119和data，不触碰用户8103；未启动provider、服务或定时检查。当前无本轮live/长测试进程。#188门禁源码为 `8db100636a117c7219d10dfeb7c974f505819e2b`，与文档交付SHA区别记录。
+
+独立只读审阅另确认#130按开发前决策地图范围完成交接，已由主控于2026-11-17关闭并重读确认；结案评论 `6930388527`。原五类待明确事项由146/156/157/168等执行票承接，不视为产品或实验完成；审阅报告 `C:/Users/CQX/.codex/tmp/130-closure-audit-20261117.md`。Boole（01a1e656-6341-7143-8c05-53c5b9fdcdd5）仅只读核对157旧批次证据，不启动或重试实验。
 
 最终门禁 `artifacts/final-gates/user-solving-188-final-02/status.json`：北京时间2026-11-17 04:08:05启动，2123.609秒、passed 6/6、source_changed=false。完整测试2241项、0 failure/0 error/42 skip、1963.492秒；发布27项通过；前端精确日志79项全部通过、typecheck/build通过、audit 0漏洞，既有chunk warning非失败。fast包含baseline_snapshot及官方import/JSON合同；manifest前后指纹相同但不记录Git SHA，源码SHA与最终文档SHA分别登记。阶段、baseline验证流程及证据见[验收记录](../evals/user-solving-188-20261116.md)。不重复启动门禁或因纯文档修改重跑产品检查。
 
@@ -12,7 +70,7 @@ PID34832已退出，临时检查 `MathAgent-188-user-solving-188-final-02`已由
 
 主控已确认安全移除本轮四个实现工作树 `D:/project/mathagent-188-{output,auth,ui,fix}`：分别核对绝对路径、clean、tip已合并并保留证据；Tesla（01a1e4c2-3136-7fa0-9e7e-d688c0c5f256）已关闭，无待修任务。其他工作树未触碰。本次文档工作不重复清理或启动旧实现者。
 
-后续只读准备指针（不是已领取或已实施）：
+后续准备指针（#190已领取实施，其余尚未领取）：
 
 - `C:/Users/CQX/.codex/tmp/190-routing-design-candidate-20261117.md`
 - `C:/Users/CQX/.codex/tmp/192-explore-cap-evidence-20261117.md`

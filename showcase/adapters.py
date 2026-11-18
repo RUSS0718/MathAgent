@@ -169,6 +169,7 @@ class InternModelAdapter:
         *,
         tools: Sequence[Mapping[str, Any]] = (),
         metadata: Mapping[str, Any] | None = None,
+        max_output_tokens: int | None = None,
     ) -> ModelResponse:
         """Call the injected/current Intern client and parse safe tool markers."""
 
@@ -176,7 +177,7 @@ class InternModelAdapter:
         normalized = [_normalize_message(message) for message in messages]
         kwargs: dict[str, Any] = {
             "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            "max_tokens": self.max_tokens if max_output_tokens is None else max_output_tokens,
         }
         # The repository client intentionally has no tools kwarg.  Injected
         # clients may opt in; old clients continue to receive the official text shape.
@@ -298,7 +299,7 @@ class InternStreamAdapter(InternModelAdapter):
     run budget ledger as the non-streaming client path.
     """
 
-    def stream_complete(self, messages, *, metadata=None):
+    def stream_complete(self, messages, *, metadata=None, max_output_tokens=None):
         """Yield provider fragments, then exactly one complete result envelope."""
         from .stream_activity import notify
 
@@ -310,7 +311,7 @@ class InternStreamAdapter(InternModelAdapter):
         thinking_mode = self.thinking_mode if self.thinking_mode is not None else getattr(client, "thinking_mode", None)
         payload = {
             "model": model_id, "messages": normalized, "stream": True,
-            "temperature": self.temperature, "max_tokens": self.max_tokens,
+            "temperature": self.temperature, "max_tokens": self.max_tokens if max_output_tokens is None else max_output_tokens,
         }
         if thinking_mode is not None:
             payload["thinking_mode"] = thinking_mode
@@ -328,7 +329,7 @@ class InternStreamAdapter(InternModelAdapter):
             "role": role,
             "solver_call_id": (metadata or {}).get("call_id"),
             "started_at_utc": datetime.now(UTC).isoformat(),
-            "max_tokens": self.max_tokens,
+            "max_tokens": self.max_tokens if max_output_tokens is None else max_output_tokens,
             "temperature": self.temperature,
             "thinking_mode": thinking_mode,
             "request_purpose": (metadata or {}).get("purpose") or role or "model_response",
