@@ -11,6 +11,10 @@ from tests.test_faithful_s03_job import CAPACITY_POLICY, ENDPOINT, SPEC
 
 
 class FaithfulOutputsTest(StarJobFixture, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        from tests.test_s06_presentation import seed_legacy_jobs
+        seed_legacy_jobs(self, unselected=True)
     def test_plain_answer_explicit_outputs_restore_without_generation(self):
         self.enterContext(patch.dict(os.environ, {"INTERN_API_BASE": ENDPOINT}))
         self.open_star([SPEC, SOLVED, POLISH, ACCEPT],

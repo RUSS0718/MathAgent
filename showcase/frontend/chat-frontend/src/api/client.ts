@@ -1,5 +1,6 @@
 import { campaignSchema, campaignsSchema } from './campaigns.schemas'
 import { z } from 'zod'
+import { finalAnswerSchema } from './answer.schemas'
 import { ApiError } from './errors'
 import { checkAuthResponseSchema, logoutResponseSchema } from './auth.schemas'
 import { activeJobsResponseSchema, jobActionResponseSchema, jobResponseSchema } from './jobs.schemas'
@@ -46,6 +47,8 @@ const json = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'Cont
 export const api = {
   campaigns: (offset = 0) => requestJson('/api/experiments/campaigns?offset=' + offset + '&limit=20', {}, campaignsSchema),
   campaign: (id: string) => requestJson('/api/experiments/campaigns/' + encodeURIComponent(id), {}, campaignSchema),
+  finalAnswer: (id: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(id)}/answer`, {}, finalAnswerSchema),
+  grantReviewer: (secret: string) => requestJson('/api/reviewer/grant', json({ secret }), z.object({ success: z.boolean(), reviewer: z.boolean() })),
   checkAuth: () => requestJson('/api/check_auth', {}, checkAuthResponseSchema),
   logout: () => requestJson('/api/logout', json({}), logoutResponseSchema),
   listSessions: () => requestJson('/api/sessions', {}, sessionsResponseSchema),
@@ -56,7 +59,7 @@ export const api = {
   listFiles: () => requestJson('/api/files', {}, filesResponseSchema),
   uploadFile: (file: File) => { const body = new FormData(); body.append('file', file); return requestJson('/api/upload_file', { method: 'POST', body }, uploadResponseSchema) },
   deleteFile: (fileId: string) => requestJson('/api/delete_file', json({ file_id: fileId }), z.object({ success: z.boolean(), file_id: z.string() })),
-  createJob: (message: string, sessionId: string, key: string, fileId?: string, solverMode = 'legacy', presentationMode?: PresentationMode) => requestJson('/api/agent/jobs', { ...json({ message, session_id: sessionId, web_search_enabled: false, input_user_file_id: fileId, solver_mode: solverMode, ...(presentationMode ? { presentation_mode: presentationMode } : {}) }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
+  createJob: (message: string, sessionId: string, key: string, fileId?: string, solverMode = 'legacy', presentationMode?: PresentationMode) => requestJson('/api/agent/jobs', { ...json({ message, session_id: sessionId, web_search_enabled: false, input_user_file_id: fileId, ...(solverMode ? { solver_mode: solverMode } : {}), ...(presentationMode ? { presentation_mode: presentationMode } : {}) }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   resumeJob: (jobId: string, answer: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/resume`, { ...json({ answer }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   reviseJob: (jobId: string, message: string, inputVersion: number, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/revisions`, { ...json({ message, input_version: inputVersion }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),
   answerClarification: (jobId: string, requestId: string, inputVersion: number, answer: string, key: string) => requestJson(`/api/agent/jobs/${encodeURIComponent(jobId)}/clarifications/${encodeURIComponent(requestId)}`, { ...json({ task_id: jobId, input_version: inputVersion, answer }), headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key } }, jobActionResponseSchema),

@@ -195,7 +195,8 @@ class ExperimentPairWorkerPlumbingTest(unittest.TestCase):
                 self.addCleanup(app.extensions["showcase_workspace_service"].close)
                 self.addCleanup(app.extensions["showcase_run_service"].close)
                 self.addCleanup(app.extensions["loopback_store"].close)
-                client = app.test_client()
+                from tests.reviewer_support import reviewer_client
+                client, _ = reviewer_client(app)
                 csrf = client.get("/api/check_auth").get_json()["csrf_token"]
                 jobs = {}
                 for arm in ("baseline", "variant"):

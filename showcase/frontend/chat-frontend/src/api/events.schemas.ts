@@ -56,7 +56,7 @@ function parseEventId(raw: RawSseBlock): number | null {
   return id
 }
 
-export function decodeSseBlock(raw: RawSseBlock): DecodedSseEvent {
+export function decodeSseBlock(raw: RawSseBlock, ordinary = false): DecodedSseEvent {
   const event = raw.event.trim()
   if (!event) throw new SseProtocolError('SSE 事件名称不能为空', raw)
   if (!raw.data) throw new SseProtocolError('SSE 事件缺少 data 字段', raw)
@@ -71,6 +71,7 @@ export function decodeSseBlock(raw: RawSseBlock): DecodedSseEvent {
     throw new SseProtocolError('SSE data 必须是对象', raw)
   }
   const data = parsed as Record<string, unknown>
+  if (ordinary && data.type === undefined) data.type = event
   if (typeof data.type !== 'string' || !data.type) {
     throw new SseProtocolError('SSE data 必须是带 type 的对象', raw)
   }
@@ -82,7 +83,7 @@ export function decodeSseBlock(raw: RawSseBlock): DecodedSseEvent {
   } else if (id === null) {
     throw new SseProtocolError('业务 SSE 事件必须带事件 ID', raw)
   }
-  validatePublicEvent(event, data, raw)
+  if (!ordinary) validatePublicEvent(event, data, raw)
   return { id, event, data }
 }
 

@@ -40,6 +40,7 @@ class CampaignService:
                             idempotency_key=arm["idempotency_key"],
                             verification_mode=config["strategies"][arm_name]["verification_mode"],
                             budget_limits=RunBudgetLimits(**config["common"]["budget"]),
+                            automatic_presentation=False,
                         )
                         arm.update(
                             job_id=job["job_id"],

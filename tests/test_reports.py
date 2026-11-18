@@ -15,7 +15,8 @@ class ReportContractTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.app = create_app({"TESTING": True, "SHOWCASE_DATA_DIR": str(Path(self.temp_dir.name) / "data")})
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
 
     def tearDown(self) -> None:
         self.app.extensions["showcase_workspace_service"].close()

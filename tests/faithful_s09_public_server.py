@@ -158,6 +158,7 @@ def build_app(*, data_dir: str, executor=None, independent_review=False):
         "TESTING": True,
         "SHOWCASE_DATA_DIR": data_dir,
         "SHOWCASE_JOB_DELAY_SECONDS": 0.01,
+        "SHOWCASE_REVIEWER_SECRET": "local-s09-browser-fixture",
         "SHOWCASE_STAR_ENABLED": True,
         "SHOWCASE_STAR_EVIDENCE_KIND": "fault_injection",
         "SHOWCASE_STAR_FEATURES": {

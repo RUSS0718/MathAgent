@@ -45,7 +45,7 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
     def waiting(self, *replies):
         self.open_faithful(list(replies) or [SPEC])
         created = self.client.post("/api/agent/jobs", headers=self.headers(),
-            json={"session_id": self.session, "message": PROBLEM, "presentation_mode": "teach"})
+            json={"session_id": self.session, "message": PROBLEM, "presentation_mode": getattr(self, "output_mode", "solve")})
         self.assertEqual(202, created.status_code, created.get_json())
         job_id = created.get_json()["job_id"]
         job = self.wait_for(lambda: (value if (value := self.job(job_id))["status"]
@@ -359,6 +359,9 @@ class ClarificationTest(StarJobFixture, unittest.TestCase):
         self.assertEqual(1, len(self.outbound))
 
     def test_answer_invalidates_prior_candidate_dependencies_and_presentation(self):
+        from tests.test_s06_presentation import seed_legacy_jobs
+        seed_legacy_jobs(self)
+        self.output_mode = "teach"
         job_id, before = self.waiting()
         question = before["result"]["faithful"]["clarification"]
         service = self.app.extensions["showcase_workspace_service"]

@@ -572,7 +572,8 @@ def main():
         for item in patches:
             stack.enter_context(item)
         app = create_app(config(folder, crash_tools=window == "tool_unknown"))
-        client = app.test_client()
+        from tests.reviewer_support import reviewer_client
+        client, _ = reviewer_client(app)
         csrf = client.get("/api/check_auth").get_json()["csrf_token"]
         headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
         if window == "spec_resume":

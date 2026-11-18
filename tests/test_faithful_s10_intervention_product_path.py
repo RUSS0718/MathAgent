@@ -29,7 +29,8 @@ class FaithfulInterventionProductPathTest(unittest.TestCase):
             "SHOWCASE_FAITHFUL_INTERVENTION_ENABLED": True,
         })
         self.addCleanup(self.close_app)
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         headers = {"X-CSRF-Token": self.csrf}
         self.session_id = self.client.post("/api/new_chat", headers=headers).get_json()[

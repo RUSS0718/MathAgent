@@ -126,6 +126,8 @@ class StarFinalBindingTest(StarJobFixture, unittest.TestCase):
 
         def append(app):
             with app.test_client() as client:
+                from tests.reviewer_support import reviewer_client
+                reviewer_client(client.application, client)
                 csrf = client.get("/api/check_auth").get_json()["csrf_token"]
                 return client.post(f"/api/agent/jobs/{job_id}/polynomial-check",
                     json=payload, headers={"X-CSRF-Token": csrf}).status_code

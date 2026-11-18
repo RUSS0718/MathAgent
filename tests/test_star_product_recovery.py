@@ -73,7 +73,8 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
                     "llm_client.requests.post", side_effect=lambda *a, **kw: provider(folder, kw)):
                 app = create_app(config(folder))
                 try:
-                    client = app.test_client()
+                    from tests.reviewer_support import reviewer_client
+                    client, _ = reviewer_client(app)
                     csrf = client.get("/api/check_auth").get_json()["csrf_token"]
                     job = client.get(f"/api/agent/jobs/{job_id}").get_json()
                     original_budget = job["result"]["budget"]
@@ -146,7 +147,8 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
                 app = create_app(config(folder))
                 try:
                     self.app = app
-                    self.client = app.test_client()
+                    from tests.reviewer_support import reviewer_client
+                    self.client, _ = reviewer_client(app)
                     self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
                     original = self.job(job_id)["result"]["budget"]
                     response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={},
@@ -207,7 +209,8 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
                 app = create_app(config(folder))
                 try:
                     self.app = app
-                    self.client = app.test_client()
+                    from tests.reviewer_support import reviewer_client
+                    self.client, _ = reviewer_client(app)
                     self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
                     original = self.job(job_id)["result"]["budget"]
                     response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={},
@@ -270,7 +273,8 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
                 app = create_app(config(folder))
                 try:
                     self.app = app
-                    self.client = app.test_client()
+                    from tests.reviewer_support import reviewer_client
+                    self.client, _ = reviewer_client(app)
                     self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
                     original = self.job(job_id)["result"]["budget"]
                     if window == "tool_unknown":
@@ -516,7 +520,8 @@ class StarRecoveryTest(StarJobFixture, unittest.TestCase):
         old_id = self.terminal(job_id)["result"]["solver"]["recovery"]["unknown_calls"][0]["call_id"]
         barrier = threading.Barrier(2)
         def resume():
-            client = self.app.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, _ = reviewer_client(self.app)
             csrf = client.get("/api/check_auth").get_json()["csrf_token"]
             barrier.wait(2)
             return client.post(f"/api/agent/jobs/{job_id}/resume", json={"retry_call": {
@@ -583,7 +588,8 @@ class StarArchiveTransactionWindowTest(StarJobFixture, unittest.TestCase):
                 app = create_app(config(folder))
                 try:
                     self.app = app
-                    self.client = app.test_client()
+                    from tests.reviewer_support import reviewer_client
+                    self.client, _ = reviewer_client(app)
                     self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
                     original = self.job(job_id)["result"]["budget"]
                     self.assertEqual("safe", self.job(job_id)["result"]["solver"]["recovery"]["status"])

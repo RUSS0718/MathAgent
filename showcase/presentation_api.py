@@ -46,6 +46,23 @@ def register_presentation_api(app, *, workspace_service, job_loader: Callable, r
             public = report_loader(job_id, user_id)
         except WorkspaceError as exc:
             return _error(exc.code, exc.status)
+        if request.method == "POST":
+            body = request.get_json(silent=True)
+            if body is not None and not isinstance(body, Mapping):
+                return _error("presentation_request_invalid", 400)
+        if result.get("presentation_rule"):
+            from .output_generation import source_job
+            snapshot = presentation_snapshot(source_job(workspace_service, user_id, job_id))
+            artifact = workspace_service.get_presentation(
+                user_id=user_id, job_id=job_id, mode=mode,
+                source_fingerprint=snapshot["fingerprint"])
+            if artifact is None:
+                return _error("presentation_pending_or_stale", 409)
+            response = jsonify({"version": artifact["schema_version"], "evidence_id": job_id,
+                "status": job["status"], "mode": mode, "answer": snapshot["answer"],
+                "presentation": artifact, "presentation_history": [], "report": public["report"]})
+            response.headers["Cache-Control"] = "no-store"
+            return response
         snapshot = presentation_snapshot(job, public)
         body = request.get_json(silent=True) if request.method == "POST" else {}
         if body is None:
@@ -88,3 +105,47 @@ def register_presentation_api(app, *, workspace_service, job_loader: Callable, r
 
 def _error(code: str, status: int):
     return jsonify({"code": code, "error": code, "success": False}), status
+
+
+def get_final_answer(workspace_service, user_id, job_id, public_report=None):
+    """Read one saved final answer; never reconcile, generate, or resume work."""
+    from .output_generation import generation_state, source_job
+
+    job = source_job(workspace_service, user_id, job_id)
+    result = job.get('result') or {}
+    snapshot = presentation_snapshot(job)
+    mode = result.get('presentation_mode', 'solve')
+    answer = snapshot['answer']
+    artifact = None
+    status, notice = 'legacy', '历史答复，保留原有格式。'
+    if result.get('presentation_rule'):
+        state = generation_state(workspace_service, job_id)
+        status, notice = 'pending', '正在整理答复。'
+        answer = ''
+        if state:
+            if state['source'] != snapshot['fingerprint'] or state['status'] == 'stale':
+                status, notice = 'stale', '答复来源已变化，显示当前原答案。'
+            elif state['status'] in {'failed', 'unknown'}:
+                status, notice = 'failed', '所选格式生成失败或结果待核对，显示原答案。'
+            elif state['status'] == 'ready':
+                artifact = workspace_service.get_presentation(user_id=user_id, job_id=job_id,
+                    mode=mode, source_fingerprint=snapshot['fingerprint'])
+                if artifact and artifact['status'] == 'ready':
+                    answer = '\n\n'.join(p['text'] for p in artifact['paragraphs'])
+                    status, notice = 'ready', '答复表达不代表新增数学验证。'
+                else:
+                    artifact = None
+                    status, notice = 'unavailable', '答复暂不可用，显示原答案。'
+            if status not in {'ready', 'pending'}:
+                answer = snapshot['answer']
+    if status != 'pending' and not answer:
+        status, notice = 'unavailable', '当前没有可用答复，请核对任务状态。'
+    if answer:
+        scope = snapshot['scope']
+        completion = artifact.get('completion') if artifact else (snapshot.get('selection') or {}).get('completeness')
+        if completion in {'partial', 'incomplete'} or scope['unresolved'] or scope['covered'] < scope['total']:
+            notice += f" 当前仅为部分结果，仍有未完成目标；已覆盖 {scope['covered']}/{scope['total']} 项目标。"
+        if snapshot['whole_review'] != 'accepted' or (artifact and artifact.get('delivery', {}).get('grade') == 'not_verified'):
+            notice += ' 当前答复未验证，不代表整题证明。'
+    return {'job_id': job_id, 'status': job['status'], 'mode': mode, 'answer': answer,
+            'presentation_status': status, 'notice': notice}

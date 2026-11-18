@@ -771,6 +771,8 @@ class WorkspaceStore:
                 if any(expected.get(key) != value for key, value in actual.items()):
                     raise WorkspaceError("presentation_source_changed", status=409)
                 current_result = _loads(row["result_json"]) if row["result_json"] else {}
+                if artifact.get("rule") != current_result.get("presentation_rule"):
+                    raise WorkspaceError("presentation_source_changed", status=409)
                 if (current_result.get("final_response") or "") != (artifact.get("answer") or ""):
                     raise WorkspaceError("presentation_source_changed", status=409)
                 now = _utc_now()
@@ -1050,6 +1052,9 @@ class WorkspaceService:
                 pipeline.checkpointer = self.checkpointer
             if star_pipeline is not None:
                 star_pipeline.checkpointer = self.checkpointer
+        from .output_generation import initialize_generation
+
+        initialize_generation(self.store)
         self._waiting_input_jobs: set[str] = set()
         self.store.recover_incomplete_jobs(self.checkpointer)
         self.worker_capacity = 2
@@ -1093,6 +1098,7 @@ class WorkspaceService:
         experiment_binding: Mapping[str, Any] | None = None,
         problem_spec: Mapping[str, Any] | None = None,
         presentation_mode: str | None = None,
+        automatic_presentation: bool = True,
         formal_policy: Mapping[str, Any] | None = None,
         clarification_source: Mapping[str, Any] | None = None,
         revision_source: Mapping[str, Any] | None = None,
@@ -1102,11 +1108,14 @@ class WorkspaceService:
 
         identity = validate_mode(solver_mode, enabled=self.star_pipeline is not None, verification_mode=verification_mode, options=solver_options, pipeline=self.star_pipeline)
         validate_hint(solver_hint, solver_mode)
+        from .output_rules import frozen_rule
+
         presentation_identity = ({
             "presentation_mode": requested_presentation_mode,
             "presentation_schema_version": SCHEMA_VERSION,
             "presentation_policy_version": POLICY_VERSION,
-        } if presentation_mode is not None else {})
+            "presentation_rule": frozen_rule(requested_presentation_mode),
+        } if automatic_presentation and experiment_binding is None else {})
         selected = self.star_pipeline if solver_mode in STAR_MODES else self.pipeline
         from .solver_harness.formal_policy import FormalPolicyError, normalize_formal_policy
 
@@ -1610,6 +1619,9 @@ class WorkspaceService:
             if self.checkpointer is not None:
                 self.checkpointer.stop(job_id, "FAILED", "job_execution_failed")
         finally:
+            from .output_generation import generate_terminal
+
+            generate_terminal(self, job_id)
             if started:
                 from .task_revision import wake_revision_jobs
 
@@ -1731,7 +1743,7 @@ def _request_digest(*args: Any) -> str:
 def _presentation_identity(value: Mapping[str, Any]) -> dict[str, Any]:
     return {
         key: value[key]
-        for key in ("presentation_mode", "presentation_schema_version", "presentation_policy_version")
+        for key in ("presentation_mode", "presentation_schema_version", "presentation_policy_version", "presentation_rule")
         if key in value
     }
 

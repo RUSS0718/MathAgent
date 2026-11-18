@@ -8,7 +8,7 @@ import AgentConstellation from './AgentConstellation.vue'
 import AutonomousRouteStatus from './AutonomousRouteStatus.vue'
 import SerialInterventionStatus from './SerialInterventionStatus.vue'
 
-const props = defineProps<{ events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null; animateLive?: boolean }>()
+const props = defineProps<{ events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null; animateLive?: boolean; ordinary?: boolean }>()
 const view = ref('conversation')
 const role = ref('')
 const step = ref('')
@@ -30,7 +30,7 @@ const state = computed(() => replayCount.value === null ? all.value : projectWor
 const now = ref(Date.now())
 const phaseClock = setInterval(() => { now.value = Date.now() }, 1000)
 const elapsed = computed(() => state.value.phaseStartedAt === null ? '阶段耗时未知'
-  : props.replay || replayCount.value !== null || props.status !== 'running' ? '历史阶段时间见技术记录'
+  : props.replay || replayCount.value !== null || props.status !== 'running' ? '历史阶段记录'
     : `本阶段 ${Math.max(0, Math.floor((now.value - state.value.phaseStartedAt) / 1000))} 秒`)
 const filtered = computed(() => state.value.keyEntries.filter(entry => (!role.value || entry.role === role.value
   || entry.message?.from_role === role.value || entry.message?.to_role === role.value) && (!step.value || entry.step === step.value)))
@@ -75,8 +75,8 @@ onUnmounted(() => { pause(); clearTimeout(flightTimer); clearTimeout(displayTime
 <template>
   <section class="workbench" aria-label="对话式执行工作台">
     <header class="workbench-toolbar">
-      <strong>{{ replayCount === null ? all.source : 'REPLAY · 本地事件回放' }}</strong>
-      <span role="status" aria-atomic="true">当前阶段：{{ state.phase }}<span v-if="error"> · 请查看任务状态与运行详情</span></span>
+      <strong>{{ ordinary ? (replay || replayCount !== null ? '历史回放' : '求解进展') + ((result as { execution_mode?: string })?.execution_mode === 'fake' ? ' · 模拟运行' : (result as { execution_mode?: string })?.execution_mode === 'live' ? ' · 实际运行' : '') : replayCount === null ? all.source : 'REPLAY · 本地事件回放' }}</strong>
+      <span role="status" aria-atomic="true">当前阶段：{{ state.phase }}<span v-if="error"> · 请刷新任务状态</span></span>
       <small>{{ elapsed }}</small>
       <div class="view-controls" aria-label="执行视图">
         <button type="button" :aria-pressed="dark" @click="toggleTheme">{{ dark ? '浅色主题' : '深色主题' }}</button>
@@ -94,8 +94,8 @@ onUnmounted(() => { pause(); clearTimeout(flightTimer); clearTimeout(displayTime
         </div>
         <AgentConstellation v-show="view === 'constellation'" :selected="role" :role-states="state.roleStates" :messages="displayedMessages" @select="selectRole" />
         <ol v-show="view === 'conversation'" class="conversation-events">
-          <li v-for="entry in shown" :key="entry.event.id!" :data-thread-id="entry.message?.thread_id">
-            <article :data-workbench-event="entry.event.id">
+          <li v-for="entry in shown" :key="entry.event.id!" :data-thread-id="ordinary ? undefined : entry.message?.thread_id">
+            <article :data-workbench-event="ordinary ? undefined : entry.event.id">
               <small>{{ roleLabels[entry.role] }} <span v-if="entry.step">· {{ entry.step }}</span></small>
               <h3>{{ entry.title }}</h3><p v-if="entry.summary !== entry.title">{{ entry.summary }}</p>
               <p v-if="entry.message">{{ roleLabels[entry.message.from_role] ?? '角色待确认' }} → {{ roleLabels[entry.message.to_role] ?? '角色待确认' }}</p>
@@ -103,9 +103,9 @@ onUnmounted(() => { pause(); clearTimeout(flightTimer); clearTimeout(displayTime
             </article>
           </li>
         </ol>
-        <p v-if="!shown.length">等待关键进展；内部状态可在技术详情查看。</p>
+        <p v-if="!shown.length">等待关键进展；请稍候或刷新任务状态。</p>
         <button v-if="filtered.length > 6" type="button" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起完整过程' : `展开完整过程（${filtered.length} 项）` }}</button>
-        <details @toggle="technical = ($event.target as HTMLDetailsElement).open">
+        <details v-if="!ordinary" @toggle="technical = ($event.target as HTMLDetailsElement).open">
           <summary>技术详情（{{ state.events.length }} 条公开记录）</summary>
           <template v-if="technical">
             <p>仅显示公开事件身份、类型和分类，不展开模型正文。事件数不等于模型调用数。</p>
@@ -117,13 +117,13 @@ onUnmounted(() => { pause(); clearTimeout(flightTimer); clearTimeout(displayTime
       </div>
       <aside class="workbench-plan" aria-label="求解计划">
         <details><summary>求解计划与调度详情</summary>
-        <AutonomousRouteStatus :execution-switch="state.progress.execution_switch" :selection="state.progress.execution_selection" :population="state.progress.population" />
-        <SerialInterventionStatus :value="state.progress.serial_intervention" />
+        <AutonomousRouteStatus v-if="!ordinary" :execution-switch="state.progress.execution_switch" :selection="state.progress.execution_selection" :population="state.progress.population" />
+        <SerialInterventionStatus v-if="!ordinary" :value="state.progress.serial_intervention" />
         <h3>求解计划</h3>
         <p v-if="!state.steps.length">计划尚未生成</p>
         <p v-else class="interjection-note">目标来自已保存的计划；执行状态来自实际核验事件。</p>
         <ol><li v-for="item in state.steps" :key="item.label" :data-step-status="item.status"><strong>{{ item.label }}</strong><p v-if="item.goal">{{ item.goal }}</p><span>{{ statusLabels[item.status] ?? '状态待确认' }}</span></li></ol>
-        <details v-if="status === 'failed' && state.partial.unresolved.length">
+        <details v-if="!ordinary && status === 'failed' && state.partial.unresolved.length">
           <summary>已保存成果与未解决项</summary>
           <p>已核验：{{ state.partial.accepted.join('、') || '暂无' }}</p>
           <p>未解决：{{ state.partial.unresolved.map(item => item === 'whole_solution_review' ? '独立整题审查' : item).join('、') }}</p>

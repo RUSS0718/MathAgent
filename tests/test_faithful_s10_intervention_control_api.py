@@ -26,7 +26,8 @@ class FaithfulInterventionControlAPITest(unittest.TestCase):
             "SHOWCASE_FAITHFUL_INTERVENTION_ENABLED": True,
         })
         self.addCleanup(self._close_app)
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         self.session_id = self.client.post(
             "/api/new_chat", headers=self.headers()
@@ -66,7 +67,8 @@ class FaithfulInterventionControlAPITest(unittest.TestCase):
             "SHOWCASE_DATA_DIR": self.folder.name + "-disabled",
             "SHOWCASE_WORKER_ENABLED": False,
         })
-        self.assertEqual(404, disabled.test_client().get(self.base).status_code)
+        from tests.reviewer_support import reviewer_client
+        self.assertEqual(404, reviewer_client(disabled)[0].get(self.base).status_code)
         disabled.extensions["showcase_workspace_service"].close()
         disabled.extensions["showcase_run_service"].close()
         disabled.extensions["loopback_store"].close()
@@ -127,6 +129,7 @@ class FaithfulInterventionControlAPITest(unittest.TestCase):
                 "SHOWCASE_JOB_DELAY_SECONDS": 0.6, "SHOWCASE_WORKER_ENABLED": True,
                 "SHOWCASE_STAR_ENABLED": True,
                 "SHOWCASE_STAR_FEATURES": {
+                    "auto_problem_spec": True,
                     "problem_spec": True, "serial_routes": True,
                     "final_generation": True, "final_solution_review": True,
                 },
@@ -144,7 +147,8 @@ class FaithfulInterventionControlAPITest(unittest.TestCase):
             self.addCleanup(lambda: [app.extensions[name].close() for name in (
                 "showcase_workspace_service", "showcase_run_service", "loopback_store",
             )])
-            client = app.test_client()
+            from tests.reviewer_support import reviewer_client
+            client, _ = reviewer_client(app)
             csrf = client.get("/api/check_auth").get_json()["csrf_token"]
             headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
             session_id = client.post("/api/new_chat", headers=headers).get_json()["new_session_id"]
@@ -160,8 +164,12 @@ class FaithfulInterventionControlAPITest(unittest.TestCase):
                     break
                 time.sleep(0.01)
             self.assertEqual("running", job["status"], job)
-            paused = client.post(
-                f"/api/agent/jobs/{run_id}/interventions/pause", json={}, headers=headers,
+            ordinary = app.test_client()
+            ordinary_csrf = ordinary.get("/api/check_auth").get_json()["csrf_token"]
+            ordinary_headers = {"X-CSRF-Token": ordinary_csrf}
+            self.assertEqual(403, ordinary.get(f"/api/agent/jobs/{run_id}/report").status_code)
+            paused = ordinary.post(
+                f"/api/agent/jobs/{run_id}/interventions/pause", json={}, headers=ordinary_headers,
             )
             self.assertEqual(202, paused.status_code, paused.get_json())
             deadline = time.monotonic() + 5
@@ -180,6 +188,22 @@ class FaithfulInterventionControlAPITest(unittest.TestCase):
             control = client.get(f"/api/agent/jobs/{run_id}/interventions").get_json()["interventions"]
             self.assertEqual("paused", control["status"])
             self.assertEqual(solver_run["state_revision"], control["checkpoint_revision"])
+            public_job = ordinary.get(f"/api/agent/jobs/{run_id}").get_json()
+            self.assertIn("resume_intervention", public_job["result"]["faithful"]["allowed_actions"])
+            resumed = ordinary.post(
+                f"/api/agent/jobs/{run_id}/interventions/resume", json={},
+                headers={**ordinary_headers, "Idempotency-Key": str(uuid.uuid4())},
+            )
+            self.assertEqual(202, resumed.status_code, resumed.get_json())
+            self.assertEqual(403, ordinary.get(f"/api/agent/jobs/{run_id}/interventions").status_code)
+            self.assertEqual(403, ordinary.get(f"/api/agent/jobs/{run_id}/report").status_code)
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                public_job = ordinary.get(f"/api/agent/jobs/{run_id}").get_json()
+                if public_job["status"] in {"succeeded", "failed"}:
+                    break
+                time.sleep(0.01)
+            self.assertEqual("succeeded", public_job["status"], public_job)
 
     def test_hypothesis_requires_owned_source_event_and_structured_failure(self):
         from showcase.faithful_intervention_control import ensure_control_schema

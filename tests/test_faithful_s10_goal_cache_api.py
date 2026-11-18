@@ -21,7 +21,8 @@ class GoalCacheManagementAPITest(unittest.TestCase):
         self.app = self._create_app(enabled=True)
         self.apps = [self.app]
         self.addCleanup(self._close_apps)
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         auth = self.client.get("/api/check_auth").get_json()
         self.csrf = auth["csrf_token"]
         self.session_id = self.client.post(
@@ -88,7 +89,8 @@ class GoalCacheManagementAPITest(unittest.TestCase):
     def test_routes_are_absent_without_explicit_feature_flag(self):
         disabled = self._create_app(enabled=False)
         self.addCleanup(self._close_app, disabled)
-        response = disabled.test_client().get(self._url())
+        from tests.reviewer_support import reviewer_client
+        response = reviewer_client(disabled)[0].get(self._url())
         self.assertEqual(404, response.status_code)
 
     def test_get_requires_authenticated_session_and_mutations_require_csrf(self):
@@ -159,8 +161,10 @@ class GoalCacheManagementAPITest(unittest.TestCase):
                 "INSERT INTO auth_sessions VALUES (?,?,?,?,?,?)",
                 ("foreign-auth", "foreign-user", "foreign-csrf", now, now, None),
             )
-        foreign = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        foreign, _ = reviewer_client(self.app)
         foreign.set_cookie("auth_session", "foreign-auth")
+        reviewer_client(self.app, foreign)
         for method in ("get", "put", "delete"):
             response = getattr(foreign, method)(
                 self._url(), json={"enabled": False} if method == "put" else None,
@@ -222,7 +226,8 @@ class GoalCacheManagementAPITest(unittest.TestCase):
         cookie = self.client.get_cookie("auth_session").value
         self.app = self._create_app(enabled=True)
         self.apps.append(self.app)
-        self.client = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(self.app)
         self.client.set_cookie("auth_session", cookie)
         after = self.client.get(url)
         self.assertEqual(200, after.status_code, after.get_json())

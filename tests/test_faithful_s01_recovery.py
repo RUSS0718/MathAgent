@@ -75,7 +75,8 @@ class FaithfulS01RecoveryAcceptance(StarJobFixture, unittest.TestCase):
         app = create_app(app_config(folder, freeze_policy=False))
         cleanup.callback(self.close_app, app)
         self.app = app
-        self.client = app.test_client()
+        from tests.reviewer_support import reviewer_client
+        self.client, _ = reviewer_client(app)
         self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
         return app
 

@@ -1,12 +1,12 @@
 """Public resume of sourced historical identities; no invented review evidence."""
 import json
 import os
-from pathlib import Path
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from showcase.final_evidence import artifact_identity
@@ -74,7 +74,8 @@ class ResultHistoryTest(StarJobFixture, unittest.TestCase):
                         worker, "reply_value", side_effect=reply):
                 self.app = create_app(config(folder))
                 try:
-                    self.client = self.app.test_client()
+                    from tests.reviewer_support import reviewer_client
+                    self.client, _ = reviewer_client(self.app)
                     self.csrf = self.client.get("/api/check_auth").get_json()["csrf_token"]
                     response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json={},
                                                 headers=self.headers())

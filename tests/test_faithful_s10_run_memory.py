@@ -111,8 +111,10 @@ class FaithfulS10RunMemoryTest(StarJobFixture, unittest.TestCase):
                     None,
                 ),
             )
-        other_user = self.app.test_client()
+        from tests.reviewer_support import reviewer_client
+        other_user, _ = reviewer_client(self.app)
         other_user.set_cookie("auth_session", "second-session")
+        reviewer_client(self.app, other_user)
         self.assertEqual(404, other_user.get(f"/api/agent/jobs/{job_id}/memory").status_code)
         self.assertEqual(
             404, other_user.get(f"/api/sessions/{self.session}/population-memory").status_code
@@ -145,7 +147,8 @@ class FaithfulS10RunMemoryTest(StarJobFixture, unittest.TestCase):
         })
         for name in ("loopback_store", "showcase_run_service", "showcase_workspace_service"):
             self.addCleanup(restarted.extensions[name].close)
-        client = restarted.test_client()
+        from tests.reviewer_support import reviewer_client
+        client, _ = reviewer_client(restarted)
         client.set_cookie("auth_session", self.client.get_cookie("auth_session").value)
         response = client.get(f"/api/agent/jobs/{job_id}/memory")
         self.assertEqual(200, response.status_code, response.get_json())

@@ -1,12 +1,13 @@
 """CP-04 faults through public Jobs with the Reasoner checkpoint flag enabled."""
 
 import json
-import requests
 import sqlite3
 import threading
 import unittest
 import uuid
 from pathlib import Path
+
+import requests
 
 from showcase.run_budget import RunBudgetLimits
 from tests.star_product_support import ACCEPT, StarJobFixture
@@ -282,7 +283,8 @@ class CP04PublicFaultTest(StarJobFixture, unittest.TestCase):
                     side_effect=lambda *args, **kwargs: worker_provider(folder, kwargs)):
                 app = create_app(worker_config(folder))
                 try:
-                    client = app.test_client()
+                    from tests.reviewer_support import reviewer_client
+                    client, _ = reviewer_client(app)
                     csrf = client.get("/api/check_auth").get_json()["csrf_token"]
                     headers = {"X-CSRF-Token": csrf, "Idempotency-Key": str(uuid.uuid4())}
                     before_job = client.get(f"/api/agent/jobs/{job_id}").get_json()

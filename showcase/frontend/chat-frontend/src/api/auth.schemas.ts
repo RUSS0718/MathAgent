@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 export const checkAuthResponseSchema = z.object({
   isLoggedIn: z.boolean(),
+  permissions: z.array(z.string()).default([]),
   username: z.string().optional(),
   csrf_token: z.string().optional(),
 }).passthrough()
