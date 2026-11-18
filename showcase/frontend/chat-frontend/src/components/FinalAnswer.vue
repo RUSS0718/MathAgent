@@ -22,7 +22,7 @@ const title = computed(() => {
 const availability = computed(() => {
   if (partial.value) return '本次求解尚未成功完成，以下仅为已保存的部分结果。'
   if (!answer.value || content.value || answer.value.presentation_status === 'pending') return ''
-  return answer.value.status === 'unknown' ? '本次运行的结果尚无法确认，当前没有可用答案。' : '本次运行未生成可用答案。'
+  return answer.value.status === 'unknown' ? '本次运行的结果尚无法确认，当前没有可用答案。' : '本次运行没有可用答复。'
 })
 const html = computed(() => renderSafeMarkdown(content.value))
 let generation = 0
@@ -46,10 +46,10 @@ watch(() => [props.jobId, props.status], refresh, { immediate: true })
 onUnmounted(() => { generation++; clearTimeout(timer) })
 </script>
 <template>
-  <section class="report-section" :aria-label="title" :aria-busy="waiting">
+  <section class="report-section" aria-label="最终答复" :aria-busy="waiting">
     <h2>{{ title }}<span v-if="answer"> · {{ labels[answer.mode] }}</span></h2>
     <p v-if="availability" role="status">{{ availability }}</p>
-    <p v-if="answer && !answer.notice && boundaries[answer.presentation_status]" role="status">{{ boundaries[answer.presentation_status] }}</p>
+    <p v-if="answer && (content || (!answer.notice && answer.presentation_status === 'pending')) && boundaries[answer.presentation_status]" role="status">{{ boundaries[answer.presentation_status] }}</p>
     <p v-if="answer?.notice">{{ answer.notice }}</p>
     <div v-if="html" class="report-content" v-html="html"></div>
     <p v-if="!answer" role="status">{{ error || '正在读取答复…' }}</p>
