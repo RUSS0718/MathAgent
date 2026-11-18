@@ -9,6 +9,17 @@ from tests.test_dependency_routing_job_190 import DependencyRoutingJobTest
 class RoutingUiTest(StarJobFixture, unittest.TestCase):
     open_adaptive = AdaptiveJobTest.open_adaptive
 
+    def wait_for_saved_answer(self, ordinary, job_id):
+        def settled_answer():
+            response = ordinary.get(f'/api/agent/jobs/{job_id}/answer')
+            answer = response.get_json()
+            self.assertEqual(200, response.status_code, answer)
+            return answer if answer['presentation_status'] != 'pending' else None
+
+        answer = self.wait_for(settled_answer)
+        self.assertEqual('ready', answer['presentation_status'], answer)
+        return answer
+
     def test_ordinary_direct_review_and_saved_answer_are_consistent(self):
         self.open_adaptive([SPEC, {**SOLVED, 'solution_candidate': '1+1=2 by integer addition.'}, ACCEPT])
         created = self.client.post('/api/agent/jobs', headers=self.headers(),
@@ -18,6 +29,7 @@ class RoutingUiTest(StarJobFixture, unittest.TestCase):
         self.assertEqual('succeeded', final['status'])
         ordinary = self.app.test_client()
         ordinary.get('/api/check_auth')
+        self.wait_for_saved_answer(ordinary, job_id)
         from showcase.output_generation import source_job
         from showcase.presentation import presentation_snapshot, build_presentation
         service = self.app.extensions['showcase_workspace_service']
@@ -75,7 +87,7 @@ class RoutingUiTest(StarJobFixture, unittest.TestCase):
         self.terminal(job_id)
         ordinary = self.app.test_client()
         ordinary.get('/api/check_auth')
-        answer = ordinary.get(f'/api/agent/jobs/{job_id}/answer').get_json()
+        answer = self.wait_for_saved_answer(ordinary, job_id)
         self.assertIn('当前答复未验证', answer['notice'])
         self.assertNotIn('已完成并经整题模型审查', answer['notice'])
         self.assertEqual('改写后的数学答复：2。', answer['answer'])

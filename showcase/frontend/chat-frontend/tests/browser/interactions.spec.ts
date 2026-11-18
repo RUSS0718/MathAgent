@@ -19,7 +19,7 @@ test('new workspace replaces the observer and shares state across its views', as
   await page.goto('/dashboard-assets/session/session-demo')
   await expect(page.locator('[data-workspace="conversation-workbench"]')).toBeVisible()
   await expect(page.locator('.workspace-shell')).toHaveCount(0)
-  await page.locator('.execution-process > summary').click()
+  await page.getByRole('button', { name: '关键进展', exact: true }).click()
   const workbench = page.getByRole('region', { name: '对话式执行工作台' })
   await expect(workbench.locator('.conversation-events article')).toHaveCount(1)
   await workbench.getByRole('button', { name: '完整星图', exact: true }).click()

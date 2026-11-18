@@ -1,12 +1,11 @@
 import { expect, test } from '@playwright/test'
 import { mockWorkspace } from './fixtures'
-test('observatory star map preserves accessible role selection', async ({ page }) => {
+test('ordinary task defaults to the full star map and preserves accessible role selection', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   await mockWorkspace(page, true)
   await page.goto('/dashboard-assets/session/session-demo')
-  await page.locator('.execution-process > summary').click()
-  await page.getByRole('button', { name: '完整星图', exact: true }).click()
   const map = page.locator('.constellation:not(.mini)')
+  await expect(map).toBeVisible()
   await expect(map.locator('.orbit')).toHaveCount(3)
   const role = map.locator('button[data-role-state]').first()
   await map.getByRole('button', { name: '完整星图动效' }).click()
@@ -36,7 +35,7 @@ test('session search has recoverable empty state', async ({ page }) => {
 test('mini roles never overlap at desktop and narrow widths', async ({ page }) => {
   await mockWorkspace(page, true)
   await page.goto('/dashboard-assets/session/session-demo')
-  await page.locator('.execution-process > summary').click()
+  await page.getByRole('button', { name: '关键进展', exact: true }).click()
   for (const width of [1440, 390, 320]) {
     await page.setViewportSize({ width, height: 1000 })
     const buttons = page.locator('.constellation.mini button')
@@ -205,7 +204,6 @@ for (const width of [320,390]) test(`full map coordinates and readable bounds at
   await mockWorkspace(page,true)
   await page.setViewportSize({width,height:1000})
   await page.goto('/dashboard-assets/session/session-demo')
-  await page.locator('.execution-process > summary').click()
   await page.getByRole('button',{name:'完整星图',exact:true}).click()
   const map=page.locator('.constellation:not(.mini)')
   const geometry=await map.evaluate(el=>{

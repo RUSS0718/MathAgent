@@ -31,7 +31,7 @@ async function openRole(value: string, source?: string) {
   await nextTick()
   panel.value?.open(trigger, fallback)
 }
-const view = ref('conversation')
+const view = ref(props.ordinary ? 'constellation' : 'conversation')
 const role = ref('')
 const step = ref('')
 const expanded = ref(false)

@@ -129,11 +129,13 @@ class FaithfulServiceJobTest(StarJobFixture, unittest.TestCase):
         with store._lock:
             store._connection.execute("UPDATE run_budgets SET ledger_json=json_set(ledger_json, '$.deadline_at', 0) WHERE run_id=?", (job_id,))
             store._connection.commit()
+            # The terminal status is visible before the background writer finishes.
+            # Hold its gate so this check measures writes caused by these GETs.
             before = store._connection.total_changes
-        expired = self.job(job_id)
-        self.assertEqual([], expired["result"]["faithful"]["allowed_actions"])
-        self.job(job_id)
-        self.assertEqual(before, store._connection.total_changes)
+            expired = self.job(job_id)
+            self.assertEqual([], expired["result"]["faithful"]["allowed_actions"])
+            self.job(job_id)
+            self.assertEqual(before, store._connection.total_changes)
         for body in ({}, {"retry_call": {"call_id": old_id, "new_call_id": str(uuid.uuid4())}}):
             response = self.client.post(f"/api/agent/jobs/{job_id}/resume", json=body, headers=self.headers())
             self.assertEqual(409, response.status_code, response.get_json())

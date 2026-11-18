@@ -170,7 +170,11 @@ class StarJobFixture:
 
     def terminal(self, job_id, *, timeout=None):
         def terminal_job():
-            job = self.job(job_id)
+            response = self.client.get(f"/api/agent/jobs/{job_id}")
+            job = response.get_json()
+            if response.status_code == 503 and job.get("code") == "job_snapshot_busy":
+                return None
+            self.assertEqual(200, response.status_code, job)
             return job if job["status"] in {"succeeded", "failed", "canceled"} else None
 
         if timeout is None:

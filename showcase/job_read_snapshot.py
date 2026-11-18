@@ -27,7 +27,15 @@ def read_job(service, job_id, user_id):
     """Keep memory/legacy reads; isolate file-backed STAR reads from writers."""
     store = service.store
     if service.star_pipeline is not None and store.database_path != ":memory:":
-        return read_job_snapshot(store, job_id, user_id, pipeline=service.star_pipeline)
+        try:
+            return read_job_snapshot(store, job_id, user_id, pipeline=service.star_pipeline)
+        except sqlite3.OperationalError as exc:
+            code = getattr(exc, "sqlite_errorcode", 0)
+            if code & 0xff not in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}:
+                raise
+            from .workspace import WorkspaceError
+
+            raise WorkspaceError("job_snapshot_busy", status=503) from exc
     payload = store.get_job(job_id, user_id)
     star = (payload.get("result") or {}).get("solver_mode") in STAR_MODES
     if star:
