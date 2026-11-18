@@ -59,7 +59,8 @@ export function projectWorkbench(events: DecodedSseEvent[], result: unknown, rep
     const type = String(event.data.solver_event_type ?? '')
     const role = eventRole(event)
     return { event, role, step: message?.step_label ?? (typeof event.data.step_id === 'string' && /^步骤 \d+$/.test(event.data.step_id) ? event.data.step_id : ''),
-      title: timelineTitle(event), summary: message?.kind === 'challenge' && typeof event.data.objection_summary === 'string'
+      title: timelineTitle(event), summary: typeof event.data.role_stage_source === 'string' && typeof event.data.role_stage_summary === 'string'
+        ? event.data.role_stage_summary : message?.kind === 'challenge' && typeof event.data.objection_summary === 'string'
         ? `${message.summary}：${event.data.objection_summary}` : message?.summary ?? timelineSummary(event), message,
       evidence: evidence.success ? evidence.data : [] }
   })
@@ -79,13 +80,18 @@ export function projectWorkbench(events: DecodedSseEvent[], result: unknown, rep
   const keyEntries = entries.filter(entry => {
     if (!progressText(entry.event).key) return false
     const data = entry.event.data
-    const key = JSON.stringify([typeOf(entry.event), data.plan_version ?? entry.message?.plan_version,
+    const key = JSON.stringify([typeOf(entry.event), data.role_stage_source, data.plan_version ?? entry.message?.plan_version,
       data.attempt_index ?? entry.message?.attempt_index, entry.step, data.verdict, data.valid,
       progressText(entry.event).summary, data.status, data.call_lifecycle ?? data.call_status, data.solver_call_id, data.decision, entry.message?.thread_id, entry.message?.kind, entry.message?.summary])
     if (semantic.has(key)) return false
     semantic.add(key)
     return true
-  }).map(entry => ({ ...entry, ...progressText(entry.event) }))
+  }).map(entry => {
+    const progress = progressText(entry.event)
+    const savedSummary = typeof entry.event.data.role_stage_source === 'string'
+      && typeof entry.event.data.role_stage_summary === 'string'
+    return { ...entry, ...progress, summary: savedSummary ? entry.summary : progress.summary }
+  })
   const taskPhase = object(detail.faithful).phase
   const effectiveStatus = ['unknown', 'needs_review', 'waiting_input', 'paused', 'pause_requested', 'budget_exhausted', 'incomplete'].includes(String(taskPhase)) ? String(taskPhase) : status
   const activity = lifecycle(unique, replay, effectiveStatus)

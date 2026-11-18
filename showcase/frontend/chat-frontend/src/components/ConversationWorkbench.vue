@@ -1,14 +1,36 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, shallowRef, watch } from 'vue'
 import type { DecodedSseEvent } from '../api/events.schemas'
 import type { Collaboration } from '../api/workbench.schemas'
-import { roleLabels, statusLabels, typeOf } from '../runtime/jobs/causal-progress'
+import { eventRole, roleLabels, statusLabels, typeOf } from '../runtime/jobs/causal-progress'
 import { projectWorkbench, roles } from '../runtime/jobs/workbench'
 import AgentConstellation from './AgentConstellation.vue'
+import RoleStagePanel from './RoleStagePanel.vue'
 import AutonomousRouteStatus from './AutonomousRouteStatus.vue'
 import SerialInterventionStatus from './SerialInterventionStatus.vue'
 
-const props = defineProps<{ events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null; animateLive?: boolean; ordinary?: boolean }>()
+const props = defineProps<{ jobId?: string; events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null; animateLive?: boolean; ordinary?: boolean }>()
+const readingRole = ref('planner')
+const readingSource = ref<string>()
+const panel = ref<InstanceType<typeof RoleStagePanel>>()
+const progressControl = ref<HTMLButtonElement>()
+const savedSource = computed(() => props.events.filter(event =>
+  ['initial_plan_generated', 'plan_replaced', 'step_reported', 'step_reviewed', 'explore_assessed',
+    'solution_review_assessed', 'final_candidate_generated', 'final_candidate_reviewed', 'finalization_completed',
+    'meta_decided', 'meta_guidance_decided', 'meta_guidance_applied', 'trace_back_applied', 'plan_archived',
+    'reexploration_completed', 'counterexample_completed', 'formal_verification_completed'].includes(typeOf(event))
+  && (eventRole(event) === readingRole.value || readingRole.value === 'controller' && eventRole(event) === 'planner')
+  && typeof event.data.role_stage_source === 'string' && /^[0-9a-f]{64}$/.test(event.data.role_stage_source)
+).at(-1)?.data.role_stage_source as string | undefined)
+async function openRole(value: string, source?: string) {
+  if (!roles.some(item => item[0] === value)) return
+  const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+  const fallback = trigger?.closest<HTMLElement>('.constellation') ?? progressControl.value
+  readingRole.value = value
+  readingSource.value = source
+  await nextTick()
+  panel.value?.open(trigger, fallback)
+}
 const view = ref('conversation')
 const role = ref('')
 const step = ref('')
@@ -58,7 +80,7 @@ watch(displayEvents, () => {
   clearTimeout(flightTimer)
   flightTimer = setTimeout(() => { messages.value = [] }, 1400)
 })
-function selectRole(value: string) { role.value = role.value === value ? '' : value }
+function selectRole(value: string) { openRole(value) }
 function pause() { clearInterval(timer); playing.value = false }
 function play() {
   pause()
@@ -74,13 +96,14 @@ onUnmounted(() => { pause(); clearTimeout(flightTimer); clearTimeout(displayTime
 
 <template>
   <section class="workbench" aria-label="对话式执行工作台">
+    <RoleStagePanel ref="panel" :job-id="jobId" :role="readingRole" :source="readingSource" :saved-source="savedSource" :revision="events.length" :job-status="status" :runtime-state="state.roleStates[readingRole]" @filter="role = $event" />
     <header class="workbench-toolbar">
       <strong>{{ ordinary ? (replay || replayCount !== null ? '历史回放' : '求解进展') + ((result as { execution_mode?: string })?.execution_mode === 'fake' ? ' · 模拟运行' : (result as { execution_mode?: string })?.execution_mode === 'live' ? ' · 实际运行' : '') : replayCount === null ? all.source : 'REPLAY · 本地事件回放' }}</strong>
       <span role="status" aria-atomic="true">当前阶段：{{ state.phase }}<span v-if="error"> · 请刷新任务状态</span></span>
       <small>{{ elapsed }}</small>
       <div class="view-controls" aria-label="执行视图">
         <button type="button" :aria-pressed="dark" @click="toggleTheme">{{ dark ? '浅色主题' : '深色主题' }}</button>
-        <button type="button" :aria-pressed="view === 'conversation'" @click="view = 'conversation'">关键进展</button>
+        <button ref="progressControl" type="button" :aria-pressed="view === 'conversation'" @click="view = 'conversation'">关键进展</button>
         <button type="button" :aria-pressed="view === 'constellation'" @click="view = 'constellation'">完整星图</button>
       </div>
     </header>
@@ -96,7 +119,7 @@ onUnmounted(() => { pause(); clearTimeout(flightTimer); clearTimeout(displayTime
         <ol v-show="view === 'conversation'" class="conversation-events">
           <li v-for="entry in shown" :key="entry.event.id!" :data-thread-id="ordinary ? undefined : entry.message?.thread_id">
             <article :data-workbench-event="ordinary ? undefined : entry.event.id">
-              <small>{{ roleLabels[entry.role] }} <span v-if="entry.step">· {{ entry.step }}</span></small>
+              <small><button v-if="roles.some(item => item[0] === entry.role)" type="button" :aria-label="`查看${roleLabels[entry.role]}阶段成果`" @click="openRole(entry.role, typeof entry.event.data.role_stage_source === 'string' ? entry.event.data.role_stage_source : '')">{{ roleLabels[entry.role] }}</button><template v-else>{{ roleLabels[entry.role] }}</template> <span v-if="entry.step">· {{ entry.step }}</span></small>
               <h3>{{ entry.title }}</h3><p v-if="entry.summary !== entry.title">{{ entry.summary }}</p>
               <p v-if="entry.message">{{ roleLabels[entry.message.from_role] ?? '角色待确认' }} → {{ roleLabels[entry.message.to_role] ?? '角色待确认' }}</p>
               <p v-if="entry.evidence.length">步骤检查允许推进，不等于整题正确或形式化证明。</p>

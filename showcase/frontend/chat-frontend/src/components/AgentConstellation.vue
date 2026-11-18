@@ -9,7 +9,7 @@ function point(role: string) { return roles.find(item => item[0] === role) }
 </script>
 
 <template>
-  <div class="constellation" :class="{ mini }" :aria-label="mini ? '迷你星图角色筛选' : '智能体协作星图'">
+  <div class="constellation" tabindex="-1" :class="{ mini }" :aria-label="mini ? '迷你星图角色成果' : '智能体协作星图'">
     <svg viewBox="0 0 1000 700" aria-hidden="true">
       <line v-for="role in roles.slice(1)" :key="role[0]" x1="500" y1="306" :x2="role[2]" :y2="role[3]" />
       <template v-for="message in messages.filter(m => point(m.from_role) && point(m.to_role) && m.from_role !== m.to_role)" :key="message.message_id">
@@ -21,7 +21,7 @@ function point(role: string) { return roles.find(item => item[0] === role) }
     </svg>
     <button v-for="role in roles" :key="role[0]" type="button" :style="{ left: `${role[2] / 10}%`, top: `${role[3] / 7}%` }"
       :class="[roleStates[role[0]], { selected: selected === role[0] }]" :data-role-state="roleStates[role[0]]" :aria-pressed="selected === role[0]"
-      :aria-label="`筛选${roleLabels[role[0]]} ${stateLabels[roleStates[role[0]] ?? 'idle'] ?? '状态待确认'}角色`" @click="emit('select', role[0])"><span>{{ roleLabels[role[0]] }}</span><small>{{ stateLabels[roleStates[role[0]] ?? 'idle'] ?? '状态待确认' }}</small></button>
+      :aria-label="`查看${roleLabels[role[0]]} ${stateLabels[roleStates[role[0]] ?? 'idle'] ?? '状态待确认'}阶段成果`" @click="emit('select', role[0])"><span>{{ roleLabels[role[0]] }}</span><small>{{ stateLabels[roleStates[role[0]] ?? 'idle'] ?? '状态待确认' }}</small></button>
   </div>
 </template>
 
@@ -37,6 +37,7 @@ button.completed { border-color: var(--success); color: var(--success); }
 button.failed, button.unknown { border-color: var(--danger); color: var(--danger); }
 button.selected { background: var(--accent-wash); outline: 2px solid var(--accent); }
 button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.constellation:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 small { font-size: 10px; color: var(--muted); }
 .mini button { font-size: 10px; min-height: 30px; padding: 4px; }
 @keyframes fade-message { 99% { opacity: 1; } 100% { opacity: 0; } }

@@ -6,6 +6,7 @@ from contextlib import closing
 
 PERMISSION = 'reviewer.access'
 PUBLIC_RULES = {
+    '/api/agent/jobs/<job_id>/role-results/<role>',
     '/health', '/', '/dashboard', '/dashboard/', '/dashboard-assets/<path:asset_path>',
     '/api/check_auth', '/api/logout', '/api/reviewer/grant', '/api/capabilities',
     '/api/files', '/api/upload_file', '/api/delete_file', '/api/sessions',

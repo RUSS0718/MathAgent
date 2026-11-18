@@ -16,6 +16,17 @@ from .product_control import controlled_patch
 _SOLVER_STORAGE_LOCK = threading.RLock()
 
 
+def read_owned_snapshot(store, user_id: str, job_id: str) -> tuple[dict, dict]:
+    """Authorize each read and validate saved identity without harness recovery."""
+    with store._lock:
+        job = store.get_job(job_id, user_id)
+        try:
+            run = SolverStateStore(store._connection).get_run(job_id)
+        except SolverPersistenceError:
+            run = None
+        return job, run['state'] if run else {}
+
+
 class _PublicCallLookup(dict):
     """Keep persisted call keys private while accepting their public aliases."""
 
@@ -343,6 +354,10 @@ class SolverStateStore:
                     state_updates = {**state_updates, "route_budget": candidate["route_budget"]}
                 next_revision = current_revision + 1
                 now = datetime.now(UTC).isoformat()
+                from ..role_stage_results import save_committed_sources
+
+                publication_event = {**event, 'state_revision': next_revision}
+                state_updates, event = save_committed_sources(state, state_updates, publication_event)
                 state.update(state_updates)
                 state["state_revision"] = next_revision
                 state["updated_at"] = now
@@ -450,6 +465,9 @@ class SolverStateStore:
             except (sqlite3.Error, KeyError, TypeError, ValueError) as exc:
                 connection.rollback()
                 raise SolverPersistenceError("commit_event") from exc
+            except BaseException:
+                connection.rollback()
+                raise
 
     def _read_run(self, run_id: str) -> dict[str, Any] | None:
         try:

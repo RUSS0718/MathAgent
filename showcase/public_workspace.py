@@ -97,6 +97,12 @@ def event_data(event):
         safe['solver_call_id'] = opaque(raw['solver_call_id'])
     if isinstance(raw.get('solver'), Mapping):
         safe['solver'] = solver_view(raw['solver'])
+    if isinstance(raw.get('role_stage_source'), str):
+        safe['role_stage_source'] = raw['role_stage_source']
+        if isinstance(raw.get('role_stage_summary'), str):
+            from .faithful_public_progress import public_text
+
+            safe['role_stage_summary'] = public_text(raw['role_stage_summary'])
     workbench = obj(raw.get('workbench'))
     if workbench:
         safe['workbench'] = fields(workbench, ('version','kind','from_role','to_role','summary','step_label',

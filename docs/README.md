@@ -1,5 +1,12 @@
 # MathAgent 文档索引
 
+2026-11-18 #199 角色阶段成果工程验收完成：#200先独立退出，#201–#205随后按依赖集成。
+冻结ce5deca，后端77、前端单测25、桌面18及实际保存贯通1通过；最终双轴复查退出。
+见[已确认设计](frontend/role-stage-summaries-contract.md)、
+[实施退出合同](engineering/role-stage-199-implementation.md)与
+[逐项验收记录](engineering/role-stage-199-acceptance.md)。不将展示接线视作数学能力证据；
+#206将单独核对下述#189原依赖题失败的修复及原场景复验，并预登记有限真实实验。
+
 2026-11-17 #189补充真实验收未全通过：最终UI真实启动/跨重启恢复通过；新自然S2正确，D因unsupported_graph_step_dependency失败、U未运行。#189重新打开，PR198退回draft，详见[补验记录](evals/dependency-routing-189-20261117.md)。
 
 2026-11-17 #188 用户答疑工程退出完成：冻结8db1006门禁6/6通过，后端2241项、0失败/错误、42跳过，源码无漂移；原失败保留。受控表达与fake回退不代表教学质量或数学效果提升。
