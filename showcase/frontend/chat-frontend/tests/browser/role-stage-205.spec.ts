@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => { await mockWorkspace(page, true, '') })
 async function workspace(page: Page, stream = '') {
   if (stream) await page.route(/\/run-demo\/events(?:\?|$)/, route => route.fulfill({ contentType: 'text/event-stream', body: stream }))
   await page.goto('/dashboard-assets/session/session-demo')
-  await page.locator('.execution-process > summary').click()
+  await page.getByRole('button', { name: '关键进展', exact: true }).click()
 }
 const graph = (page: Page) => page.getByLabel('迷你星图角色成果', { exact: true })
 const panel = (page: Page) => page.getByRole('dialog')
@@ -238,7 +238,6 @@ for (const status of ['failed', 'canceled', 'unknown']) {
     if (status === 'unknown') await page.route(/\/run-demo\/events(?:\?|$)/, route => route.fulfill({ contentType: 'text/event-stream', body: 'id: 1\nevent: solver_progress\ndata: {"type":"solver_progress","solver_event_type":"call_audit","role":"reasoner","call_status":"unknown","solver_call_id":"synthetic-call"}\n\n' }))
     await page.route('**/role-results/*', route => route.fulfill({ json: dto('reasoner') }))
     await page.goto('/dashboard-assets/session/session-demo')
-    if (status !== 'unknown') await page.locator('.execution-process > summary').click()
     await page.getByRole('button', { name: '完整星图', exact: true }).click()
     const full = page.getByLabel('智能体协作星图', { exact: true })
     const node = full.getByRole('button', { name: /^查看推理 / })

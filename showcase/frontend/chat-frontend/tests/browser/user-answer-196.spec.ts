@@ -42,7 +42,6 @@ test('196 narrow final answer retains filters plan star replay and accessibility
   await page.route('**/api/agent/jobs/run-demo/answer', r => r.fulfill({ json: { job_id: 'run-demo', status: 'succeeded', mode: 'solve', answer: '可读答复', presentation_status: 'ready', notice: '有限检查。' } }))
   await page.goto('/dashboard-assets/session/session-demo')
   await expect(page.getByRole('region', { name: '最终答复' })).toContainText('可读答复')
-  await page.getByText('求解过程', { exact: true }).click()
   await expect(page.getByRole('combobox', { name: '角色', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '完整星图', exact: true }).click()
   await expect(page.getByText('求解计划与调度详情')).toBeVisible()

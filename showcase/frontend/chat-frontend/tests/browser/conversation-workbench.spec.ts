@@ -26,7 +26,6 @@ test('default page replaces old chat and submits the actual entered problem with
   await expect(page.getByRole('heading', { name: '数学工作区', exact: true })).toBeVisible()
   await page.getByRole('textbox', { name: '数学问题', exact: true }).fill('求解 x+1=2')
   await page.getByRole('button', { name: '发送', exact: true }).click()
-  await page.locator('.execution-process > summary').click()
   await expect(page.getByRole('region', { name: '对话式执行工作台' })).toBeVisible()
   await expect(page.locator('.workbench-problem')).toContainText('求解 x+1=2')
   await expect(page.getByRole('region', { name: '最终答复' })).toContainText('x=1')
@@ -66,7 +65,7 @@ for (const width of [320, 768, 1024, 1440]) {
       job_id: 'run-demo', status: 'succeeded', mode: 'solve', presentation_status: 'ready', answer: '已保存的模拟答复', notice: '未验证。',
     } }))
     await page.goto('/dashboard-assets/session/session-demo')
-    await page.locator('.execution-process > summary').click()
+    await page.getByRole('button', { name: '关键进展', exact: true }).click()
     const workbench = page.getByRole('region', { name: '对话式执行工作台' })
     const entries = workbench.locator('.conversation-events').getByRole('listitem')
     const titles = ['求解计划已形成', '步骤检查已完成', '正在评估调整方案', '已回应步骤疑问', '执行完成，请查看答案和实际检查结论']

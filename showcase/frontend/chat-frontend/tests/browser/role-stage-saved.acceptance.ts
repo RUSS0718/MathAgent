@@ -9,7 +9,7 @@ test('saved backend dual entry and history remain read-only after task failure',
   page.on('request', req => { if (req.method() !== 'GET') writes.push(new URL(req.url()).pathname) })
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(`/dashboard-assets/session/${seed.session_id}`)
-  await page.locator('.execution-process > summary').click()
+  await page.getByRole('button', { name: '关键进展', exact: true }).click()
   const workbench = page.getByRole('region', { name: '对话式执行工作台' })
   const star = workbench.getByLabel('迷你星图角色成果', { exact: true })
     .getByRole('button', { name: /^查看方案规划 / })

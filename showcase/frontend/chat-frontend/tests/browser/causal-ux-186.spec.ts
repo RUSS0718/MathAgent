@@ -24,16 +24,15 @@ for (const width of [390, 1440]) {
       } }))
       await page.goto('/dashboard-assets/session/session-demo')
       const process = page.locator('.execution-process')
-      await expect(process).toBeAttached()
+      await expect(process).toHaveAttribute('open', '')
       if (['succeeded', 'failed', 'canceled'].includes(status)) {
-        await expect(process).not.toHaveAttribute('open')
         if (status === 'succeeded') {
           await expect(page.getByRole('region', { name: '最终答复' })).toContainText('模拟答复，候选检查。')
           expect(await page.locator('.report-section').evaluate(el => Boolean(el.compareDocumentPosition(document.querySelector('.execution-process')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true)
         }
-        await process.locator(':scope > summary').click()
       }
       const workbench = page.getByRole('region', { name: '对话式执行工作台' })
+      await workbench.getByRole('button', { name: '关键进展', exact: true }).click()
       await expect(workbench.locator('.conversation-events > li')).toHaveCount(1)
       await expect(workbench.getByText('求解计划已形成', { exact: true })).toBeVisible()
       await expect(workbench.getByText(/技术详情/)).toHaveCount(0)
@@ -84,7 +83,7 @@ test('completed history keeps progress after an earlier answered interruption', 
     + 'id: 4\nevent: final_result\ndata: {"type":"final_result","data":{}}\n\n'
   await mockWorkspace(page, true, stream)
   await page.goto('/dashboard-assets/session/session-demo')
-  await page.locator('.execution-process > summary').click()
+  await page.getByRole('button', { name: '关键进展', exact: true }).click()
   const workbench = page.locator('.workbench')
   await expect(workbench.getByText('执行完成，请查看答案和实际检查结论')).toBeVisible()
   await expect(workbench.getByText('求解计划已形成')).toBeVisible()

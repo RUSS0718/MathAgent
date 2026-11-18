@@ -343,7 +343,7 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
         <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" :resuming="submitting" @resume="resumeCurrent" @changed="clarificationChanged" @cancel="cancelCurrent" />
         <FinalAnswer :status="selectedJob.status" :key="selectedJob.jobId" :job-id="selectedJob.jobId" />
         <TaskRevisionPanel :key="selectedJob.jobId + ':revision'" :job-id="selectedJob.jobId" :session-id="selectedJob.sessionId" :owner="auth.username" :mode="solverMode" :state="selectedJob.result?.faithful" :disabled="submitting || checkingSubmission" @changed="clarificationChanged" />
-        <details :open="!['succeeded', 'failed', 'canceled'].includes(selectedJob.status)" class="execution-process"><summary>求解过程</summary>
+        <details :key="selectedJob.jobId" open class="execution-process"><summary>求解过程</summary>
         <ConversationWorkbench :key="selectedJob.jobId" :job-id="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" :animate-live="locallyStartedJob === selectedJob.jobId" :execution-mode="locallyStartedJob === selectedJob.jobId ? executionMode : undefined" ordinary />
         </details>
       </section>
