@@ -96,7 +96,7 @@ def review_binding(run, answer):
         latest.get("invalidated") is not True
         and qualification_valid
         and latest.get("invalidated_by_specification_version") is None
-        and latest.get("verdict") in {"ACCEPT", "REJECT"}
+        and latest.get("verdict") in ("ACCEPT", "REJECT")
         and source.get("run_id") == run["run_id"]
         and source.get("candidate_version") == len(records)
         and source.get("plan_version") == run["state"]["plan_version"]
