@@ -472,6 +472,8 @@ class PopulationLoopbackJobTest(StarJobFixture, unittest.TestCase):
         from showcase.solver_harness import population_runtime
 
         collect = population_runtime._collect
+        crashed = threading.Event()
+
         def crash_before_accept(harness, run):
             latest = harness._state_store.get_run(run["run_id"])
             pop = latest["state"]["population"]
@@ -479,6 +481,11 @@ class PopulationLoopbackJobTest(StarJobFixture, unittest.TestCase):
                    and any(step.get("verification", {}).get("verdict") == "ACCEPT"
                            for step in pop["routes"][action["route_id"]]["snapshot"].get("steps", {}).values())
                    for action in pop["actions"].values()):
+                # Keep the crash between durable completion and acceptance.
+                # A separate process-exit test covers takeover with work still in flight.
+                for future in harness._population_futures.values():
+                    future.result(timeout=10)
+                crashed.set()
                 raise RuntimeError("controlled_crash_after_receipt_before_accept")
             return collect(harness, run)
 
@@ -486,6 +493,7 @@ class PopulationLoopbackJobTest(StarJobFixture, unittest.TestCase):
         with patch.object(population_runtime, "_collect", side_effect=crash_before_accept):
             job_id = self.create_population_job()
             failed = self.terminal(job_id, timeout=20)
+        self.assertTrue(crashed.is_set(), "did not reach the receipt-before-acceptance boundary")
         self.assertEqual("failed", failed["status"], failed)
         before = self.reasoners
         # A separate process acquires the persisted owner epoch before public recovery.
@@ -808,7 +816,7 @@ os._exit(74)
         self.assertEqual("failed", final["status"], final)
         service = self.app.extensions["showcase_workspace_service"]
         ledger = service.budget_ledger
-        row = ledger.connection.execute("SELECT ledger_json FROM run_budgets WHERE run_id=?", (job_id,)).fetchone()
+        row = ledger._read_row(job_id)
         raw = json.loads(row[0])
         attempt = next(item for item in raw["actions"]
                        if item["kind"] == "http" and item.get("status") == "error")

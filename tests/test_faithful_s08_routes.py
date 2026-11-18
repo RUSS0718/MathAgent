@@ -24,7 +24,7 @@ class FaithfulS08RoutesTest(unittest.TestCase):
         config = {"features": {"serial_routes": True, "problem_spec": True,
                                "progress_scheduling": True, "final_generation": True,
                                "final_solution_review": True}}
-        plan = {"version": 1, "steps": [{"step_id": "s1", "objective": "prove value",
+        plan = {"version": 1, "steps": [{"step_id": "s1", "title": "Prove value", "objective": "prove value",
                                           "method_id": "direct",
                                           "obligation_ids": ["root:value"]}]}
         decision = {"decision": "CONTINUE", "reason_summary": "Continue the same plan",
@@ -158,7 +158,7 @@ class FaithfulS08RoutesTest(unittest.TestCase):
         config = {"features": {"serial_routes": True, "problem_spec": True,
                                "progress_scheduling": True,
                                "final_generation": True, "final_solution_review": True}}
-        plan = {"version": 1, "steps": [{"step_id": "s1", "objective": "direct",
+        plan = {"version": 1, "steps": [{"step_id": "s1", "title": "Direct proof", "objective": "direct",
                                             "method_id": "direct",
                                             "obligation_ids": ["root:value"]}]}
         with tempfile.TemporaryDirectory() as directory:
