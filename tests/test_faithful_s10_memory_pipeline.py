@@ -166,6 +166,9 @@ class PopulationMemoryPipelineTest(StarJobFixture, unittest.TestCase):
         self.assertEqual("succeeded", self.terminal(source_run_id)["status"])
 
         with closing(sqlite3.connect(self.app.config["SHOWCASE_DATABASE_PATH"])) as db:
+            # The source worker can still be writing after terminal status is visible.
+            # Reserve the write transaction before the store reads the scope controls.
+            db.execute("BEGIN IMMEDIATE")
             historical_id = FaithfulMemoryStore(db).record_observation(
                 MemoryScope("run", source_run_id, "local-user", source_session),
                 {"outcome": "success", "applicability": {"domain": SPEC["domain"]},
