@@ -22,3 +22,9 @@
 ## 门禁
 
 首轮 `multimodal-01` 在发现禁用能力时 503 被改为 400 后主动停止，保留现场；修复后冻结 `62b9301` 启动 `multimodal-02`。快速阶段通过；离线阶段执行 2,450 项，49 跳过、0 断言失败、1 初始化错误。`test_star_experiment` 无法连接本机 Docker Desktop Linux 引擎。源码无漂移，门禁停在离线阶段。日志见 `artifacts/final-gates/multimodal-02/`。发布聚焦检查另行通过 27/27，独立执行 `npm audit --audit-level=high --json` 返回 0 告警。仍需在 Docker 引擎可用的环境补跑最终门禁。
+
+## 纯图超时回归与复验
+
+同一合成题 `2x + 3 = 11`，基线 `cf872a5` 上真实 Intern-S2 纯图和纯文字均返回 `x = 4`；未禁止工具的图文对照首次失败于 `tool_schema_invalid`，不归因于识读。补丁后的纯图和图文复跑均得到 `x = 4`；图文实际使用了 Python 数学工具，纯图没有请求工具。以上是真实模型冒烟，不代表自然超时已复现或题型准确率。
+
+Flask 纯图入口故障注入：修改前工具超时导致 Job 直接失败，修改后在同一工具调用身份下续答一次，返回答案但不判为验证通过；不重跑工具。定向工作区回归 19/19，工具测试独立复跑 7/7，快速门禁通过。证据为 `artifacts/timeout-red.json`、`artifacts/timeout-green-02.json`、`artifacts/timeout-tools-retry.json`、`artifacts/timeout-live.jsonl`。Docker 启动后，另在未修改的 `cf872a5` 工作树启动 `artifacts/final-gates/docker-retry-01/`，不将该运行视作补丁版的完整门禁。

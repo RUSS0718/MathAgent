@@ -127,7 +127,12 @@ def run_tool_roundtrip(
         "tool", "数学工具", "工具调用完成" if result.status == "success" else "工具调用失败，需要复核",
         "end", status="completed" if result.status == "success" else "failed",
     )
-    if result.status != "success":
+    timed_out = (
+        request.name in {"python_math", "polynomial_check"}
+        and result.status == "timeout"
+        and result.error_category in {"tool_timeout", "python_timeout"}
+    )
+    if result.status != "success" and not timed_out:
         if (not recovery_used and request.name == "python_math" and result.status == "rejected"
                 and result.error_category in SOURCE_REJECTIONS):
             if model_calls[0] >= max_model_calls:
@@ -182,16 +187,21 @@ def run_tool_roundtrip(
     try:
         ensure_runtime()
         record["continuation_tool_call_id"] = request.tool_call_id
+        receipt = {
+            "tool_call_id": request.tool_call_id,
+            "name": request.name,
+            "status": record["status"],
+            "value": result.value,
+            "result_summary": record["result_summary"],
+        }
+        if timed_out:
+            receipt.update(
+                value=None,
+                error_category=result.error_category,
+                instruction="The tool timed out. Continue without tools if possible, and do not claim tool verification.",
+            )
         continuation_response = continuation.continue_(
-            messages,
-            request,
-            {
-                "tool_call_id": request.tool_call_id,
-                "name": request.name,
-                "status": record["status"],
-                "value": result.value,
-                "result_summary": record["result_summary"],
-            },
+            messages, request, receipt,
         )
     except AdapterError:
         record["continuation_status"] = "missing"

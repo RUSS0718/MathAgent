@@ -14,8 +14,12 @@ from unittest.mock import patch
 from llm_client import InternChatClient
 from showcase.adapters import InternModelAdapter
 from showcase.flask_app import create_app
+from showcase.graph import ToolExecutionResult
 from showcase.image_intake import classify_problem
+from showcase.live_pipeline import LiveAgentPipeline
+from showcase.tools import ToolRegistry
 from tests.reviewer_support import reviewer_client
+from tests.test_live_tool_workspace import ProviderResponse, _native_tool_response
 from tests.test_live_workspace_pipeline import StubLivePipeline
 
 PNG = bytes.fromhex('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360f8cf00000004000101e2dd0000000049454e44ae426082')
@@ -116,6 +120,36 @@ class ShowcaseMultimodalTest(unittest.TestCase):
         self.assertIn("请保留计算过程。", self.pipeline.problems[0])
         self.assertIn("求解 x+1=2。", self.pipeline.problems[0])
         self.assertEqual("text_image", job["result"]["input_intake"]["modality"])
+
+    def test_image_only_can_finish_after_a_python_tool_timeout(self):
+        registry = ToolRegistry()
+        registry.register_python_math()
+        self.app.extensions["showcase_workspace_service"].pipeline = LiveAgentPipeline(self.pipeline.model, registry)
+        self.post.side_effect = [
+            self.reply,
+            ProviderResponse({"content": "Solve and check by substitution."}),
+            _native_tool_response("timed-out", "python_math", {"code": "print(1)"}),
+            ProviderResponse({"content": "Subtract 1 from both sides: x = 1."}),
+            ProviderResponse({"content": "x = 1; no tool evidence."}),
+        ]
+        with patch.object(registry, "invoke", return_value=ToolExecutionResult(
+            status="timeout", error_category="tool_timeout", tool_call_id="timed-out",
+        )) as invoke:
+            path, job, _ = self.submit("", image=True)
+        self.assertEqual("succeeded", job["status"], job.get("error"))
+        self.assertEqual("ready", job["result"]["input_intake"]["status"])
+        invoke.assert_called_once()
+        self.assertEqual(5, self.post.call_count)
+        continuation = json.loads(self.post.call_args_list[3].kwargs["data"])
+        self.assertNotIn("tools", continuation)
+        receipt = continuation["messages"][-1]
+        self.assertEqual("timed-out", receipt["tool_call_id"])
+        self.assertEqual("timeout", json.loads(receipt["content"])["status"])
+        reviewer, _ = reviewer_client(self.app)
+        result = reviewer.get(path).json["result"]
+        self.assertIn("x = 1", result["final_response"])
+        self.assertEqual("tool_timeout", result["tool_results"][0]["error_category"])
+        self.assertNotEqual("pass", result["verification"]["status"])
 
     def test_invalid_transcription_does_not_solve_only_the_caption(self):
         self.reply.content = '{"image_text": null, "problem_type": "unknown"}'
