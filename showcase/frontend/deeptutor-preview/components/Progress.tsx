@@ -27,7 +27,11 @@ export function Progress({ example, completed, paused, onPlayback }: { example: 
       {summaries.length ? summaries.map(step => <p key={step.label}>{step.note}</p>) : <p>当前没有已发布的阶段成果。</p>}
       {selected === 'step_verifier' && completed === steps.length && <p>{example.scope}</p>}
     </Dialog>)
-  const atlasProps = { selected, select: openRole, statusOf, steps, completed, paused, onPlayback: () => { if (!current) { inspectMessage(null); ask(null) }; onPlayback() },
+  // The atlas caption describes the active step before its result is published.
+  const atlasSteps = completed === example.review?.revision
+    ? steps.map((step, i) => i === completed ? { ...step, note: '修正待发布' } : step)
+    : steps
+  const atlasProps = { selected, select: openRole, statusOf, steps: atlasSteps, completed, paused, onPlayback: () => { if (!current) { inspectMessage(null); ask(null) }; onPlayback() },
     scripted: Boolean(example.script), review: example.review, highlight: followUp && steps[followUp.step]?.role,
     inspected: message, inspect: inspectMessage }
   return <section className="progress-area" aria-label="求解进展">
