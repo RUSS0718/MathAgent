@@ -25,6 +25,7 @@ IGNORED_DIRECTORY_NAMES = {
     "cache",
     "dist",
     "node_modules",
+    ".next",
 }
 IGNORED_FILE = Path("tests") / "test.md"
 
@@ -200,7 +201,7 @@ def _npm_command() -> str:
 
 
 def _stages(root: Path, run_dir: Path, require_reference: bool) -> list[dict[str, Any]]:
-    """Build the six standard final-gate stages for one run."""
+    """Build the standard final-gate stages for one run."""
 
     uv = ["uv", "run", "python"]
     release = [*uv, "scripts/check_showcase_release.py"]
@@ -208,6 +209,7 @@ def _stages(root: Path, run_dir: Path, require_reference: bool) -> list[dict[str
         release.append("--require-reference")
     npm = _npm_command()
     frontend = root / "showcase" / "frontend" / "chat-frontend"
+    preview = frontend.with_name("deeptutor-preview")
     return [
         {"name": "fast", "command": [*uv, "scripts/check_fast.py"], "cwd": root},
         {
@@ -233,6 +235,15 @@ def _stages(root: Path, run_dir: Path, require_reference: bool) -> list[dict[str
             "cwd": frontend,
         },
         {"name": "frontend-check", "command": [npm, "run", "check"], "cwd": frontend},
+        {
+            "name": "preview-install",
+            "command": [npm, "ci", "--no-audit", "--no-fund"],
+            "cwd": preview,
+        },
+        {"name": "preview-audit", "command": [npm, "audit", "--audit-level=high"], "cwd": preview},
+        {"name": "preview-build", "command": [npm, "run", "build"], "cwd": preview},
+        {"name": "workbench-build", "command": [npm, "run", "build:workbench"], "cwd": preview},
+        {"name": "workbench-smoke", "command": [*uv, "-m", "scripts.check_workbench_smoke"], "cwd": root},
     ]
 
 
@@ -329,7 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         "start_time": _timestamp(),
         "current_stage": "starting",
         "completed": 0,
-        "total": 6,
+        "total": None,
         "elapsed_seconds": 0.0,
         "final_status": "running",
         "status": "running",
