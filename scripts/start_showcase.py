@@ -9,20 +9,22 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FRONTEND = ROOT / "showcase" / "frontend" / "chat-frontend"
+FRONTENDS = ROOT / "showcase" / "frontend"
 HOST = "127.0.0.1"
 UV_RUN = ["uv", "run", "--locked", "--extra", "showcase"]
 
 
 def start_web(args: argparse.Namespace) -> None:
-    """Build the Vue workbench and serve it with the Showcase backend."""
+    """Build the public workbench and reviewer pages, then serve them with Flask."""
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
     if not npm:
         raise FileNotFoundError("Web mode requires Node.js and npm on PATH.")
-    subprocess.run(
-        [npm, "ci", "--include=dev", "--no-audit", "--no-fund"], cwd=FRONTEND, check=True
-    )
-    subprocess.run([npm, "run", "build"], cwd=FRONTEND, check=True)
+    for project, build in (("chat-frontend", "build"), ("deeptutor-preview", "build:workbench")):
+        directory = FRONTENDS / project
+        subprocess.run(
+            [npm, "ci", "--include=dev", "--no-audit", "--no-fund"], cwd=directory, check=True
+        )
+        subprocess.run([npm, "run", build], cwd=directory, check=True)
 
     data_dir = args.data_dir or f"artifacts/showcase-{'local' if args.mode == 'fake' else 'live'}"
     command = [
@@ -75,7 +77,7 @@ def main() -> int:
     """Parse the launch mode and forward the service's exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    web = commands.add_parser("web", help="Build and serve the Vue workbench")
+    web = commands.add_parser("web", help="Build and serve the MathAgent workbench")
     web.add_argument("--port", type=int, default=8090)
     web.add_argument("--data-dir", help="Showcase storage directory (relative to the repository)")
     web.add_argument("--faithful-config", help="Faithful service JSON file (requires live mode)")

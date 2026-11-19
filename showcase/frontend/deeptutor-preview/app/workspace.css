@@ -46,13 +46,6 @@
 .switcher button { font-size:12px; padding:6px 10px; border-radius:6px; }
 .switcher button[aria-pressed=true] { background:var(--muted); }
 .detail-link { color:var(--primary); margin-top:5px; }
-.star-map { position:relative; height:240px; border-radius:10px; background:#f5f8f7; overflow:hidden; }
-.star-map svg { width:100%; height:100%; fill:none; stroke:#c8d6d0; }
-.star-map line { stroke-dasharray:4 8; }
-.star-map button { position:absolute; transform:translate(-50%,-50%); background:var(--card); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:12px; line-height:1.3; }
-.star-map small { font-size:10px; color:var(--muted-foreground); display:block; }
-.star-map [data-status='已完成'] { border-color:#99b9ae; }
-.star-map [data-status='进行中'] { border-color:var(--primary); }
 .side-drawer { position:absolute; inset:0 0 0 auto; border-radius:0; max-height:100dvh; max-width:min(390px,94vw); background:var(--card); }
 .side-drawer p { margin-top:8px; font-size:14px; line-height:1.7; }
 .nav-drawer { inset:0 auto 0 0; }
@@ -66,6 +59,71 @@ button:focus-visible,.search:focus-visible { outline:2px solid var(--ring); outl
   .content { width:calc(100% - 32px); }
   .home { padding-top:64px; }
   .home h1 { font-size:26px; }
-  .star-map { height:265px; }
-  .star-map button { padding:4px; }
 }
+
+.answer details { padding:10px 0; border-top:1px solid var(--border); }
+.answer summary { cursor:pointer; font-size:14px; font-weight:550; }
+.answer summary:focus-visible { outline:2px solid var(--ring); }
+.route-options { list-style:decimal; padding-left:24px; }
+.route-options li { padding:5px 0; }
+.report-fields { display:grid; grid-template-columns:auto minmax(0,1fr); margin-top:10px; }
+.report-fields dt,.report-fields dd { padding:8px; border-bottom:1px solid var(--border); }
+.report-fields dt { color:var(--muted-foreground); font-size:13px; }
+.report-fields dd { overflow-x:auto; }
+.tool-mode select { font:inherit; background:transparent; cursor:pointer; }
+
+.theme-toggle { display:inline-grid; place-items:center; flex:none; min-width:36px; min-height:36px; border-radius:7px; }
+.theme-toggle:hover { background:var(--muted); }
+html.theme-snow .theme-toggle .to-light, html.dark .theme-toggle .to-dark { display:none; }
+.dark .answer .check { color:#a2d9bf; }
+.send { color:var(--background); }
+
+.answer-mode { margin:12px 0 4px; color:var(--muted-foreground); font-size:12px; }
+.report-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:10px 0; }
+.report-actions button { border:1px solid var(--border); border-radius:7px; padding:6px 10px; font-size:13px; }
+.report-actions button:hover { background:var(--muted); }
+.report-actions small { color:var(--muted-foreground); }
+
+.pagebar .page-title { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.side-content { overflow-y:auto; }
+.image-entry,.task-actions button,.file-picker { display:inline-flex; align-items:center; gap:6px; }
+.image-entry { min-height:32px; padding:5px 9px; border-radius:7px; color:var(--muted-foreground); font-size:13px; }
+.image-entry:hover,.task-actions button:hover,.step-questions button:hover { background:var(--secondary); color:var(--foreground); }
+.inline-panel { margin:18px 0; padding:18px; border:1px solid var(--border); border-radius:12px; background:var(--card); }
+.inline-panel h2,.step-questions h2 { margin:0 0 10px; font-weight:600; font-size:15px; }
+.inline-panel label { display:grid; gap:5px; font-size:13px; }
+.inline-panel input:not([type=file]),.inline-panel textarea,.image-toolbar select { border:1px solid var(--input); border-radius:7px; padding:7px 9px; background:var(--background); color:var(--foreground); }
+.dimension-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:12px; }
+.dimension-fields input { min-width:0; }
+.primary-action,.task-actions button,.step-questions button { border-radius:7px; padding:7px 12px; font-size:13px; }
+.primary-action { color:var(--background); background:var(--foreground); }
+.primary-action:disabled,.task-actions button:disabled { opacity:.45; cursor:default; }
+.task-actions,.step-questions>div,.image-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.task-actions { margin-bottom:10px; }
+.task-actions button,.step-questions button { border:1px solid var(--border); }
+.step-questions { margin-bottom:20px; }
+.step-questions button[aria-pressed=true] { color:var(--primary); border-color:var(--primary); }
+.step-questions p { margin-top:10px; padding-left:12px; border-left:2px solid var(--ring); font-size:14px; }
+.step-questions p strong { display:block; font-size:12px; margin-bottom:3px; }
+.archive-view h1,.image-view h1 { font-weight:650; font-size:24px; margin-bottom:6px; }
+.archive-source,.inline-panel small,.image-status { color:var(--muted-foreground); font-size:13px; }
+.archive-view .question { margin-top:20px; }
+.archive-view .inline-panel h2 { margin-top:8px; }
+.archive-result { display:block; margin-top:14px; font-size:19px; }
+.subview-footer { padding-bottom:32px; }
+.file-picker { width:100%; min-height:84px; justify-content:center; border:1px dashed var(--input); border-radius:8px; font-size:14px; }
+.file-picker:hover { background:var(--muted); }
+.image-form { display:grid; gap:12px; }
+.image-toolbar { justify-content:space-between; }
+.image-toolbar select { font-size:13px; }
+.image-attachment { display:flex; align-items:center; gap:10px; min-width:0; }
+.image-attachment img { width:82px; max-height:75px; object-fit:contain; border:1px solid var(--border); }
+.image-attachment span { min-width:0; overflow-wrap:anywhere; font-size:13px; }
+.file-options { display:grid; gap:5px; }
+.sample-image { justify-self:start; padding:5px 2px; text-decoration:underline; text-underline-offset:3px; font-size:13px; color:var(--primary); }
+.image-attachment img { width:min(44%,230px); max-height:120px; }
+.side-foot > a { margin-left:auto; }
+.saved-session-row { display:flex; align-items:center; }
+.saved-session-row > :first-child { min-width:0; flex:1; }
+.saved-session-row > button:not(:first-child) { display:grid; place-items:center; width:26px; height:32px; color:var(--muted-foreground); }
+.saved-session-row > button:hover { color:var(--foreground); }

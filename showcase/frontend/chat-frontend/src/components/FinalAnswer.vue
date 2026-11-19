@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api/client'
+import { downloadReport } from '../../../deeptutor-preview/lib/report-export'
 import { renderSafeMarkdown } from '../renderers/markdown-adapter'
-const props = defineProps<{ jobId: string; status?: string }>()
+const props = defineProps<{ jobId: string; status?: string; requestedMode?: string }>()
 const answer = ref<Awaited<ReturnType<typeof api.finalAnswer>> | null>(null)
 const error = ref('')
 const waiting = ref(true)
-const labels = { solve: '求解', teach: '教学', report: '报告' }
+const labels: Record<string, string> = { solve: '求解', teach: '教学', report: '报告', explore: '探索' }
+const mode = computed(() => props.requestedMode ?? answer.value?.mode ?? 'solve')
+const copyNotice = ref('')
+const markdown = computed(() => ['# 求解报告', content.value, answer.value?.notice].filter(Boolean).join('\n\n'))
+async function copyReport() {
+  try { await navigator.clipboard.writeText(markdown.value); copyNotice.value = '报告已复制' }
+  catch { copyNotice.value = '无法访问剪贴板，请使用导出 Markdown。' }
+}
 const boundaries = { ready: '', pending: '正在整理最终答复…', failed: '所选格式生成失败，以下为已有答案。', legacy: '历史结果，保留原有格式。', stale: '结果来源已变化，以下仅为当前可用答案。', unavailable: '当前答复格式暂不可用。' }
 const content = computed(() => {
   const text = answer.value?.answer ?? ''
@@ -47,10 +55,15 @@ onUnmounted(() => { generation++; clearTimeout(timer) })
 </script>
 <template>
   <section class="report-section" aria-label="最终答复" :aria-busy="waiting">
-    <h2>{{ title }}<span v-if="answer"> · {{ labels[answer.mode] }}</span></h2>
+    <h2>{{ title }}<span v-if="answer"> · {{ labels[mode] }}</span></h2>
     <p v-if="availability" role="status">{{ availability }}</p>
     <p v-if="answer && (content || (!answer.notice && answer.presentation_status === 'pending')) && boundaries[answer.presentation_status]" role="status">{{ boundaries[answer.presentation_status] }}</p>
     <p v-if="answer?.notice">{{ answer.notice }}</p>
+    <div v-if="mode === 'report' && content" class="report-actions" aria-label="报告操作">
+      <button type="button" @click="copyReport">复制报告</button>
+      <button type="button" @click="downloadReport('求解报告', markdown)">导出 Markdown</button>
+      <small role="status">{{ copyNotice }}</small>
+    </div>
     <div v-if="html" class="report-content" v-html="html"></div>
     <p v-if="!answer" role="status">{{ error || '正在读取答复…' }}</p>
     <button v-if="!waiting && (error || answer?.presentation_status === 'pending')" type="button" @click="refresh">重新读取答复</button>

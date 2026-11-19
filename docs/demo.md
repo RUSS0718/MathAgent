@@ -30,19 +30,15 @@ python demo_server.py --host 127.0.0.1 --port 8080
 
 ## v0.2 Workbench 与 CLI
 
-真实调试使用 Flask 工作区和 `live` 模式。先在仓库根目录准备未跟踪的 `.env`，至少设置 `INTERN_API_KEY`，然后分别启动后端和前端：
+从仓库根目录启动数学工作台。使用实时模式时先配置本机模型凭证，`--mode fake` 可体验模拟后端。
 
 ```powershell
-uv sync --all-groups
-uv run python showcase_server.py --mode live --data-dir artifacts/showcase-v0.2
-cd showcase/frontend/chat-frontend
-npm ci --no-audit --no-fund
-npm run dev
+uv run --no-project python scripts/start_showcase.py web --mode live --data-dir artifacts/showcase-v0.2
 ```
 
 长题的 live 预算默认按 Showcase 长槽运行（总运行 1100 秒、单次 Intern 请求 180 秒、2 次重试、16384 输出 tokens）；需要临时调整时使用 `.env` 中的 `SHOWCASE_*` 变量。官方 `user_agent.py` 的打榜预算不随之改变。
 
-浏览器打开 `http://localhost:5174/dashboard`。提交题目后，页面的“Agent 执行节点”会显示 `intake`、`planner`、`solver`、按需 `tool`、`verifier`、`synthesizer` 和 `terminal` 的公共事件；刷新页面会从已保存的 Job 事件重新订阅。
+浏览器打开 `http://127.0.0.1:8090/dashboard`。手动输入数学题可提交给服务，首页示例用于模拟演示。已保存会话通过原 `/dashboard/session/<id>` 地址读取。求解过程展示该任务的公开事件，刷新时从已保存的记录恢复。
 
 CLI 与网页共用身份、Job、SSE 和报告接口。默认 `probe` 拒绝 fake 或未配置凭证的服务，避免把离线结果当成真实 API 证据：
 

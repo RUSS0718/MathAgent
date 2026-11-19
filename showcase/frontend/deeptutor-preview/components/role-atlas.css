@@ -1,0 +1,140 @@
+.atlas {
+  --sky: #081421;
+  --sky-chrome: #20384b;
+  --sky-tool: #c3d6dc;
+  --sky-hover: #193147;
+  --sky-glow: #153344;
+  --sky-mid: #0d2232;
+  --sky-dust: #d5efee;
+  --sky-orbit: #456176;
+  --sky-idle: #7894a6;
+  --sky-node: #bbcbd0;
+  --sky-live-text: #ddfaff;
+  --sky-done-text: #dbefe3;
+  --sky-divider: #294355;
+  --sky-packet: #e5ffff;
+  --sky-border: #304a60;
+  --sky-ink: #e3eceb;
+  --sky-muted: #a5b9bb;
+  --sky-active: #83dbef;
+  --sky-done: #9de2bc;
+  background: var(--sky);
+  color: var(--sky-ink);
+  border: 1px solid var(--sky-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.atlas-head, .atlas-legend { display: flex; align-items: center; padding: 9px 16px; }
+.atlas-head { justify-content: space-between; border-bottom: 1px solid var(--sky-chrome); }
+.atlas-head span, .atlas-head button, .atlas-legend span { display:inline-flex; align-items:center; gap:7px; }
+.atlas-head span { font-size:13px; font-weight:600; }
+.atlas-head svg { color: var(--sky-active); }
+.atlas-head button { padding:6px 9px; border-radius:6px; font-size:12px; color:var(--sky-tool); }
+.atlas-head button:hover { background:var(--sky-hover); }
+.atlas-sky {
+  height:clamp(310px,38vh,410px); position:relative; isolation:isolate;
+  background:radial-gradient(ellipse at 45% 48%,var(--sky-glow) 0, var(--sky-mid) 37%,transparent 74%),var(--sky);
+}
+.atlas-sky svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+.atlas-stars { fill:var(--sky-dust); }
+.atlas-orbits ellipse { fill:none; stroke:var(--sky-orbit); stroke-opacity:.45; stroke-width:.85; vector-effect:non-scaling-stroke; }
+.atlas-orbits ellipse:nth-child(2) { stroke-dasharray:2 5; }
+.atlas-node {
+  --star:var(--sky-idle); display:grid; justify-items:center; align-content:center; position:absolute;
+  transform:translate(-50%,-50%); min-width:52px; min-height:48px; padding:3px 5px;
+  border-radius:7px; line-height:1.2; color:var(--sky-node); white-space:nowrap;
+}
+.atlas-node i { display:block; position:relative; width:7px; height:7px; border-radius:50%; background:var(--star); margin-bottom:5px; }
+.atlas-node strong { font-size:12px; font-weight:550; text-shadow:0 1px 3px var(--sky); }
+.atlas-node small { font-size:10px; color:var(--sky-muted); margin-top:2px; }
+.atlas-node[data-status='进行中'] { --star:var(--sky-active); color:var(--sky-live-text); }
+.atlas-node[data-status='已完成'] { --star:var(--sky-done); color:var(--sky-done-text); }
+.atlas-node[data-status='进行中'] i, .atlas-node[data-status='已完成'] i { box-shadow:0 0 5px 2px var(--star),0 0 14px 4px color-mix(in srgb,var(--star) 50%,transparent); }
+.atlas-node[data-status='进行中'] i::after, .atlas-node[aria-pressed='true'] i::after {
+  content:''; position:absolute; inset:-5px; border-radius:50%; border:1px solid var(--sky-active);
+}
+.atlas-node:hover, .atlas-node[aria-pressed='true'] { background:var(--sky-chrome); }
+.atlas button:focus-visible { outline:2px solid var(--sky-active); outline-offset:2px; }
+.atlas-legend { gap:16px; border-top:1px solid var(--sky-chrome); font-size:11px; color:var(--sky-muted); }
+.atlas-legend span::before { content:''; width:6px; height:6px; border-radius:50%; background:var(--sky-idle); }
+.atlas-legend span:first-child::before { background:var(--sky-active); }
+.atlas-legend span:nth-child(2)::before { background:var(--sky-done); }
+.atlas-dialog { width:min(1080px,96vw); max-height:96dvh; margin:auto; padding:0; border:0; border-radius:12px; background:var(--background); }
+.atlas-dialog::backdrop { background:rgb(4 12 19 / 76%); }
+.atlas-dialog .atlas-sky { height:clamp(260px,70dvh,720px); }
+@media(max-width:600px) {
+  .atlas-sky { height:340px; }
+  .atlas-head, .atlas-legend { padding-inline:12px; }
+  .atlas-dialog { width:calc(100vw - 12px); }
+}
+
+.atlas-controls { display:flex; gap:4px; }
+.atlas-wire { transform:translateY(-14px); }
+.atlas-link { stroke:var(--sky-active); stroke-width:1.5; fill:none; vector-effect:non-scaling-stroke; }
+.atlas { --flight-time: 720ms; }
+.atlas[data-scripted="true"] { --flight-time: 1.35s; }
+.atlas-arrival { position:absolute; inset:-4px; border:1.5px solid var(--sky-active); border-radius:50%; pointer-events:none; opacity:0; animation:atlas-arrive 420ms ease-out var(--flight-time) both; }
+@keyframes atlas-arrive {
+  0% { opacity:0; transform:scale(.55); }
+  14% { opacity:.95; }
+  100% { opacity:0; transform:scale(2.25); }
+}
+.atlas[data-paused="true"] :is(.atlas-packet,.atlas-arrival) { animation-play-state:paused; }
+.atlas-packet { fill:var(--sky-packet); filter:drop-shadow(0 0 4px var(--sky-active)); animation:atlas-transfer var(--flight-time) ease-in-out both; }
+@keyframes atlas-transfer { from { offset-distance:0%; } to { offset-distance:100%; } }
+@media(prefers-reduced-motion:reduce) { .atlas-arrival, .atlas-packet { display:none; animation:none; } }
+.atlas-caption { padding:10px 16px; border-top:1px solid var(--sky-divider); }
+.atlas-caption small { color:var(--sky-muted); font-size:11px; }
+.atlas-caption strong { display:block; font-size:14px; color:var(--sky-active); }
+.atlas-caption p { margin:3px 0; font-size:13px; color:var(--sky-ink); }
+.atlas-dialog:has(.atlas-caption) .atlas-sky { height:clamp(200px,58dvh,600px); }
+
+.theme-snow .atlas {
+  --sky:#f4f8fa;
+  --sky-border:#b3cbd2;
+  --sky-ink:#183138;
+  --sky-muted:#455e68;
+  --sky-active:#006d7a;
+  --sky-done:#237147;
+  --sky-chrome: #cbdadf;
+  --sky-tool: #324951;
+  --sky-hover: #d7e7eb;
+  --sky-glow: #c9e4e8;
+  --sky-mid: #dfedf0;
+  --sky-dust: #375c6d;
+  --sky-orbit: #688b9a;
+  --sky-idle: #617d88;
+  --sky-node: #374f59;
+  --sky-live-text: #005867;
+  --sky-done-text: #155637;
+  --sky-divider: #bed1d8;
+  --sky-packet: #00627a;
+}
+
+.atlas { --edge-send:#a3bbd4; --edge-challenge:#ffc078; --edge-rollback:#ff91a0; --edge-approve:#88d8a5; --message-color:var(--edge-send); }
+.theme-snow .atlas { --edge-send:#45667d; --edge-challenge:#994700; --edge-rollback:#ab3548; --edge-approve:#146d42; }
+.atlas[data-kind=challenge] { --message-color:var(--edge-challenge); }
+.atlas[data-kind=rollback] { --message-color:var(--edge-rollback); }
+.atlas[data-kind=approve] { --message-color:var(--edge-approve); }
+.atlas-link { stroke:var(--message-color); stroke-width:2; }
+.atlas[data-kind=rollback] .atlas-link { stroke-dasharray:6 5; }
+.atlas-packet { fill:var(--message-color); filter:drop-shadow(0 0 4px var(--message-color)); }
+.atlas-arrival { border-color:var(--message-color); }
+.atlas-hit { fill:none; stroke:transparent; stroke-width:20; vector-effect:non-scaling-stroke; pointer-events:stroke; cursor:pointer; }
+.atlas-edge-label { position:absolute; transform:translate(-50%,calc(-50% - 14px)); z-index:1; background:var(--sky); color:var(--message-color); border:1px solid currentColor; border-radius:5px; padding:2px 7px; font-size:11px; font-weight:600; }
+.atlas-edge-label:hover { background:var(--sky-hover); }
+.atlas-node[data-highlight=true] { outline:2px solid var(--sky-active); outline-offset:2px; }
+.atlas-records,.decision-evidence header,.edge-legend { display:flex; align-items:center; flex-wrap:wrap; gap:8px 14px; }
+.atlas-records,.decision-evidence { border-top:1px solid var(--sky-divider); padding:10px 16px; }
+.atlas-records { justify-content:space-between; font-size:12px; color:var(--sky-muted); }
+.atlas-records select { max-width:100%; border:1px solid var(--sky-orbit); border-radius:5px; margin-left:4px; padding:3px; background:var(--sky); color:var(--sky-ink); }
+.edge-legend span::before { content:''; display:inline-block; vertical-align:middle; width:13px; border-top:2px solid var(--edge-send); margin-right:4px; }
+.edge-legend span:nth-child(2)::before { border-color:var(--edge-challenge); }
+.edge-legend span:nth-child(3)::before { border-color:var(--edge-rollback); border-top-style:dashed; }
+.edge-legend span:nth-child(4)::before { border-color:var(--edge-approve); }
+.decision-evidence { font-size:13px; line-height:1.65; }
+.decision-evidence header { justify-content:space-between; color:var(--message-color); }
+.decision-evidence header button { color:var(--sky-muted); }
+.decision-evidence dl { display:grid; grid-template-columns:auto minmax(0,1fr); gap:5px 12px; margin-top:7px; }
+.decision-evidence dt { color:var(--sky-muted); }
+.atlas-dialog { overflow:auto; }

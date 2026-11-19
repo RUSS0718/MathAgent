@@ -1,45 +1,61 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { RoleAtlas, roles } from './RoleAtlas'
 import { Network, List, PanelRightOpen } from 'lucide-react'
 import { ActivityRow } from './activity/ActivityRow'
 import { ActivityStack } from './activity/ActivityStack'
 import { Dialog } from '@/shared/ui/Dialog'
-import type { Example } from '@/lib/examples'
+import { stepsFor, type Example } from '@/lib/examples'
 
-// Coordinates from the MathAgent workbench's AgentConstellation.
-const roles = [
-  ['controller', '任务协调', 500, 306], ['explore', '问题探索', 234, 175],
-  ['planner', '规划', 500, 90], ['reasoner', '推理', 766, 175],
-  ['step_verifier', '步骤校验', 831, 365], ['whole_solution_verifier', '整体校验', 648, 518],
-  ['final_generator', '终稿生成', 352, 518], ['meta', '元策略', 169, 365],
-  ['researcher', '资料研究', 500, 610],
-] as const
-export function Progress({ example, completed }: { example: Example; completed: number }) {
+export function Progress({ example, completed, paused, onPlayback }: { example: Example; completed: number; paused: boolean; onPlayback: () => void }) {
+  const expandedDialog = useRef<HTMLDialogElement>(null)
+  const [expanded, setExpanded] = useState(false)
   const [list, setList] = useState(false)
   const [selected, select] = useState('')
-  const steps = [
-    { role: 'planner', label: '制定求解计划', note: '确定求解方法，最后用题目给定的条件检查结果。' },
-    { role: 'reasoner', label: '推导候选答案', note: example.method },
-    { role: 'step_verifier', label: '检查候选结果', note: example.check },
-  ]
-  const stepIndex = (role: string) => steps.findIndex(step => step.role === role)
-  const status = (index: number) => index < 0 || index > completed ? '未参与' : index === completed ? '进行中' : '已完成'
-  const selectedIndex = stepIndex(selected)
+  const [message, inspectMessage] = useState<number | null>(null)
+  const [question, ask] = useState<number | null>(null)
+  const followUp = question === null ? undefined : example.followUps?.[question]
+  const steps = stepsFor(example)
+  const current = steps[completed]
+  const published = steps.slice(0, completed)
+  const statusOf = (id: string) => current?.role === id ? '进行中' : published.some(step => step.role === id) ? '已完成' : '未参与'
+  const [inspected, inspect] = useState<number | null>(null)
+  function openRole(id: string, index: number | null = null) { inspect(index); select(id) }
+  const summaries = published.filter((step,i) => step.role === selected && (inspected === null || i === inspected))
   const roleName = roles.find(role => role[0] === selected)?.[1]
+  const details = (<Dialog open={!!selected} onClose={() => select('')} closeLabel="关闭详情" title={(roleName ?? '')+' · 阶段成果'} className="side-drawer" description="模拟运行 · 公开摘要">
+      <h3>{inspected === null ? statusOf(selected) : inspected < completed ? '已完成' : '进行中'}</h3>
+      {summaries.length ? summaries.map(step => <p key={step.label}>{step.note}</p>) : <p>当前没有已发布的阶段成果。</p>}
+      {selected === 'step_verifier' && completed === steps.length && <p>{example.scope}</p>}
+    </Dialog>)
+  const atlasProps = { selected, select: openRole, statusOf, steps, completed, paused, onPlayback: () => { if (!current) { inspectMessage(null); ask(null) }; onPlayback() },
+    scripted: Boolean(example.script), review: example.review, highlight: followUp && steps[followUp.step]?.role,
+    inspected: message, inspect: inspectMessage }
   return <section className="progress-area" aria-label="求解进展">
-    <header className="progress-header"><h2>求解进展</h2><span aria-live="polite">{completed} / 3 步完成</span></header>
+    {!current && example.followUps && <section className="step-questions" aria-label="步骤追问"><h2>针对这一步追问</h2>
+      <div>{example.followUps.map((item, i) => <button key={item.question} type="button" aria-pressed={question === i} onClick={() => {
+        ask(i); setList(false); inspectMessage(example.script && item.step < steps.length - 1 ? item.step + 1 : null)
+      }}>{item.question}</button>)}</div>
+      {followUp && <p aria-live="polite"><strong>{steps[followUp.step].label}</strong>{followUp.answer}</p>}</section>}
+    <header className="progress-header"><h2>求解进展</h2><span aria-live="polite">{completed} / {steps.length} 步完成</span></header>
     <div className="switcher"><button aria-pressed={!list} onClick={() => setList(false)}><Network size={15}/>协作星图</button>
       <button aria-pressed={list} onClick={() => setList(true)}><List size={15}/>关键进展</button></div>
-    {list ? <ActivityStack>{steps.slice(0, completed + 1).map((step, i) => <ActivityRow key={step.role}
-      state={i === completed ? 'running' : 'done'} title={step.label} detail={status(i)}>
-      <p>{i < completed ? step.note : '正在执行此步骤。'}</p><button className="detail-link" onClick={() => select(step.role)}><PanelRightOpen size={14}/>阶段成果</button>
-    </ActivityRow>)}</ActivityStack> : <div className="star-map" role="group" aria-label="智能体协作星图">
-      <svg aria-hidden="true" viewBox="0 0 1000 700" preserveAspectRatio="none">{[150,245,330].map(r => <ellipse key={r} cx="500" cy="350" rx={r*1.3} ry={r} />)}
-        {roles.slice(1).map(([id,,x,y]) => <line key={id} x1="500" y1="306" x2={x} y2={y} />)}</svg>
-      {roles.map(([id,label,x,y]) => <button key={id} style={{ left: x/10+'%', top: y/7+'%' }}
-        data-status={status(stepIndex(id))} aria-label={'查看'+label+'阶段成果'} onClick={() => select(id)}>{label}<small>{status(stepIndex(id))}</small></button>)}
-    </div>}
-    <Dialog open={!!selected} onClose={() => select('')} closeLabel="关闭详情" title={(roleName ?? '')+' · 阶段成果'} className="side-drawer" description="模拟运行 · 公开摘要">
-      <h3>{status(selectedIndex)}</h3><p>{selectedIndex >= 0 && selectedIndex < completed ? steps[selectedIndex].note : '当前没有已发布的阶段成果。'}</p>
-    </Dialog>
+    {list ? <ActivityStack>{steps.slice(0, completed + 1).map((step, i) => <ActivityRow key={step.label}
+      state={i === completed ? 'running' : 'done'} title={step.label} detail={i < completed ? '已完成' : '进行中'}>
+      <p>{i < completed ? step.note : '正在执行此步骤。'}</p><button className="detail-link" onClick={() => openRole(step.role, i)}><PanelRightOpen size={14}/>阶段成果</button>
+    </ActivityRow>)}</ActivityStack> : <RoleAtlas {...atlasProps} expanded={false} toggle={() => {
+      expandedDialog.current?.showModal()
+      setExpanded(true)
+    }} />}
+    <dialog ref={expandedDialog} aria-label="协作星图" className="atlas-dialog" onClose={() => setExpanded(false)}
+      onKeyDown={event => {
+        if (event.key === 'Escape' && selected) {
+          event.preventDefault()
+          event.stopPropagation()
+          select('')
+        }
+      }}>
+      {expanded && <><RoleAtlas {...atlasProps} expanded toggle={() => expandedDialog.current?.close()} />{details}</>}
+    </dialog>
+    {!expanded && details}
   </section>
 }

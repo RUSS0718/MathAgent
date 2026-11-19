@@ -31,6 +31,12 @@ const visibleMessages = computed(() => {
   return [...paths.values()]
 })
 const visibleFlights = computed(() => props.flights?.filter(canDraw) ?? [])
+function decisionStyle(message: Collaboration) {
+  if (message.kind === 'rollback' || ['TRACE_BACK', 'ABORT'].includes(message.chosen ?? '')) return 'rollback'
+  if (message.kind === 'challenge' || message.kind === 'escalation') return 'challenge'
+  if (message.chosen === 'CONTINUE' || message.chosen === 'APPROVE_REPLAN') return 'approve'
+  return 'handoff'
+}
 function trajectory(message: Collaboration) {
   const a = point(message.from_role)!
   const b = point(message.to_role)!
@@ -45,8 +51,8 @@ function point(role: string) { return roles.find(item => item[0] === role) }
     <svg v-if="!mini" preserveAspectRatio="none" viewBox="0 0 1000 700" aria-hidden="true">
       <ellipse v-for="r in [150, 245, 330]" :key="r" class="orbit" cx="500" cy="350" :rx="r * 1.3" :ry="r" />
       <line v-for="role in roles.slice(1)" :key="role[0]" x1="500" y1="306" :x2="role[2]" :y2="role[3]" />
-      <path v-for="message in visibleMessages" :key="message.message_id" :d="trajectory(message)" class="message-wire" />
-      <g v-for="message in visibleFlights" :key="message.message_id" :data-flight="message.message_id">
+      <path v-for="message in visibleMessages" :key="message.message_id" :d="trajectory(message)" :data-decision="decisionStyle(message)" class="message-wire"><title>{{ message.summary }}</title></path>
+      <g v-for="message in visibleFlights" :key="message.message_id" :data-flight="message.message_id" :data-decision="decisionStyle(message)">
         <path :d="trajectory(message)" class="message-highlight" />
         <circle v-for="particle in 6" :key="particle" :r="8 - particle" class="message-flight" :style="{ animationDelay: `${(particle - 1) * .045}s`, offsetPath: `path('${trajectory(message)}')`, opacity: 1 - particle * .12 }">
         </circle>
@@ -64,10 +70,14 @@ function point(role: string) { return roles.find(item => item[0] === role) }
 svg { position: absolute; width: 100%; height: 100%; overflow: visible; }
 .orbit { fill: none; stroke: #92b7d0; stroke-opacity: .12; stroke-width: 1; }
 line { stroke: #80a8c2; stroke-opacity: .25; stroke-dasharray: 2 8; }
-.message-wire { fill: none; stroke: #64dbef; stroke-width: 1.5; opacity: .45; }
-.message-highlight { fill: none; stroke: #b5f4ff; stroke-width: 3; opacity: 0; }
-.message-flight { fill: #d4fbff; filter: drop-shadow(0 0 6px #68dff5); }
-.arrival { fill: none; stroke: #8ceaff; stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
+[data-decision] { --wire-color: #a3bbd4; }
+[data-decision=challenge] { --wire-color: #ffc078; }
+[data-decision=rollback] { --wire-color: #ff91a0; stroke-dasharray: 6 5; }
+[data-decision=approve] { --wire-color: #88d8a5; }
+.message-wire { fill: none; stroke: var(--wire-color); stroke-width: 2; opacity: .8; }
+.message-highlight { fill: none; stroke: var(--wire-color); stroke-width: 3; opacity: 0; }
+.message-flight { fill: var(--wire-color); filter: drop-shadow(0 0 6px var(--wire-color)); }
+.arrival { fill: none; stroke: var(--wire-color); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
 button:not(.motion-toggle) { position: absolute; transform: translate(-50%, -50%); display: grid; gap: 4px; min-height: 40px; padding: 8px 12px; border: 1px solid #446277; border-radius: var(--radius-md); background: #11283a; color: #c0d2df; cursor: pointer; font: inherit; white-space: nowrap; }
 button.running { border-color: #79e4f3; color: #ecfcff; background: #18455a; }
 button.completed { border-color: #82d9b0; color: #a4efcb; }

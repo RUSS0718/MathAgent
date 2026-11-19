@@ -9,7 +9,7 @@ import RoleStagePanel from './RoleStagePanel.vue'
 import AutonomousRouteStatus from './AutonomousRouteStatus.vue'
 import SerialInterventionStatus from './SerialInterventionStatus.vue'
 
-const props = defineProps<{ jobId?: string; executionMode?: string; events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null; animateLive?: boolean; ordinary?: boolean }>()
+const props = defineProps<{ jobId?: string; executionMode?: string; events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null; animateLive?: boolean; ordinary?: boolean; sharedTheme?: boolean }>()
 const readingRole = ref('planner')
 const readingSource = ref<string>()
 const panel = ref<InstanceType<typeof RoleStagePanel>>()
@@ -136,7 +136,7 @@ onUnmounted(() => { pause(); clearFlights(); clearTimeout(displayTimer); clearIn
       <span role="status" aria-atomic="true">当前阶段：{{ state.phase }}<span v-if="error"> · 请刷新任务状态</span></span>
       <small>{{ elapsed }}</small>
       <div class="view-controls" aria-label="执行视图">
-        <button type="button" :aria-pressed="dark" @click="toggleTheme">{{ dark ? '浅色主题' : '深色主题' }}</button>
+        <button v-if="!sharedTheme" type="button" :aria-pressed="dark" @click="toggleTheme">{{ dark ? '浅色主题' : '深色主题' }}</button>
         <button ref="progressControl" type="button" :aria-pressed="view === 'conversation'" @click="view = 'conversation'">关键进展</button>
         <button type="button" :aria-pressed="view === 'constellation'" @click="view = 'constellation'">完整星图</button>
       </div>
