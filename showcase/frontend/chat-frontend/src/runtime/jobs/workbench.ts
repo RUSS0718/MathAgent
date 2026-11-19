@@ -36,7 +36,7 @@ export function projectHandoffs(entries: ReturnType<typeof projectWorkbench>['en
       action = kind === 'challenge' ? '质疑' : '升级质询'
     } else if (chosen === 'CONTINUE' || chosen === 'APPROVE_REPLAN'
       || kind === 'decision' && type === 'step_reviewed' && event.data.verdict === 'ACCEPT' && event.data.valid === true
-      || kind === 'decision' && type === 'final_candidate_reviewed' && message.summary === '整题审查通过') {
+      || kind === 'decision' && type === 'final_candidate_reviewed' && event.data.verdict === 'ACCEPT') {
       tone = 'approve'
       action = '通过'
     } else if (chosen === 'ABORT') action = '终止'

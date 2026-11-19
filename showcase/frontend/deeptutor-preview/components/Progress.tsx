@@ -7,6 +7,7 @@ import { Dialog } from '@/shared/ui/Dialog'
 import { stepsFor, type Example } from '@/lib/examples'
 
 export function Progress({ example, completed, paused, onPlayback }: { example: Example; completed: number; paused: boolean; onPlayback: () => void }) {
+  const evidenceTrigger = useRef<HTMLElement | null>(null)
   const expandedDialog = useRef<HTMLDialogElement>(null)
   const [expanded, setExpanded] = useState(false)
   const [list, setList] = useState(false)
@@ -33,10 +34,11 @@ export function Progress({ example, completed, paused, onPlayback }: { example: 
     : steps
   const atlasProps = { selected, select: openRole, statusOf, steps: atlasSteps, completed, paused, onPlayback: () => { if (!current) { inspectMessage(null); ask(null) }; onPlayback() },
     scripted: Boolean(example.script), review: example.review, highlight: followUp && steps[followUp.step]?.role,
-    inspected: message, inspect: inspectMessage }
+    inspected: message, inspect: inspectMessage, trigger: evidenceTrigger }
   return <section className="progress-area" aria-label="求解进展">
     {!current && example.followUps && <section className="step-questions" aria-label="步骤追问"><h2>针对这一步追问</h2>
-      <div>{example.followUps.map((item, i) => <button key={item.question} type="button" aria-pressed={question === i} onClick={() => {
+      <div>{example.followUps.map((item, i) => <button key={item.question} type="button" aria-pressed={question === i} onClick={event => {
+        evidenceTrigger.current = event.currentTarget
         ask(i); setList(false); inspectMessage(example.script && item.step < steps.length - 1 ? item.step + 1 : null)
       }}>{item.question}</button>)}</div>
       {followUp && <p aria-live="polite"><strong>{steps[followUp.step].label}</strong>{followUp.answer}</p>}</section>}

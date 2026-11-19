@@ -1,5 +1,5 @@
 import { Maximize2, Minimize2, Orbit } from 'lucide-react'
-import { useId } from 'react'
+import { useId, useRef } from 'react'
 import type { DemoStep, Example } from '@/lib/examples'
 import { ThemeToggle } from './ThemeToggle'
 import './role-atlas.css'
@@ -36,10 +36,23 @@ interface AtlasProps {
   highlight?: string
   inspected: number | null
   inspect: (value: number | null) => void
+  trigger: { current: HTMLElement | null }
 }
 
-export function RoleAtlas({ expanded, toggle, select, selected, statusOf, steps, completed, paused, onPlayback, scripted, review, highlight, inspected, inspect }: AtlasProps) {
+export function RoleAtlas({ expanded, toggle, select, selected, statusOf, steps, completed, paused, onPlayback, scripted, review, highlight, inspected, inspect, trigger }: AtlasProps) {
   const marker = useId()
+  const edgeButton = useRef<HTMLButtonElement>(null)
+  const recordSelector = useRef<HTMLSelectElement>(null)
+  function openEvidence(value: number | null, control: HTMLElement | null) {
+    trigger.current = value === null ? null : control
+    inspect(value)
+  }
+  function closeEvidence() {
+    const control = trigger.current?.isConnected ? trigger.current : recordSelector.current
+    trigger.current = null
+    inspect(null)
+    control?.focus()
+  }
   const current = steps[completed]
   const previousRole = roles.find(r => r[0] === steps[completed-1]?.role)
   const currentRole = roles.find(r => r[0] === current?.role)
@@ -79,11 +92,11 @@ export function RoleAtlas({ expanded, toggle, select, selected, statusOf, steps,
       {path && <svg className="atlas-wire" viewBox="0 0 1000 700" preserveAspectRatio="none" aria-hidden="true">
         <defs><marker id={marker} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L8 4 L0 8Z" fill="var(--message-color)" /></marker></defs>
         <path className="atlas-link" d={path} markerEnd={'url(#'+marker+')'} />
-        {scripted && <path className="atlas-hit" d={path} onClick={() => inspect(message)} />}
+        {scripted && <path className="atlas-hit" d={path} onClick={() => openEvidence(message, edgeButton.current)} />}
         {inFlight && <circle key={completed} className="atlas-packet" r="4.5" style={{offsetPath:'path("'+path+'")'}} />}
       </svg>}
-      {scripted && path && <button type="button" className="atlas-edge-label" style={{left:midX/10+'%',top:midY/7+'%'}}
-        aria-label={action.label+' · '+route} aria-expanded={inspected === message} onClick={() => inspect(message)}>{action.label}</button>}
+      {scripted && path && <button ref={edgeButton} type="button" className="atlas-edge-label" style={{left:midX/10+'%',top:midY/7+'%'}}
+        aria-label={action.label+' · '+route} aria-expanded={inspected === message} onClick={e => openEvidence(message, e.currentTarget)}>{action.label}</button>}
       {roles.map(([id,label,x,y]) => {
         const status = statusOf(id)
         return <button key={id} type="button" className="atlas-node" style={{left:x/10+'%',top:y/7+'%'}}
@@ -97,14 +110,14 @@ export function RoleAtlas({ expanded, toggle, select, selected, statusOf, steps,
       {current && <p>{current.note}</p>}
     </div>}
     {scripted && lastMessage > 0 && <div className="atlas-records">
-      <label>交接记录 <select aria-label="选择交接记录" value={inspected ?? ''} onChange={e => inspect(e.target.value ? Number(e.target.value) : null)}>
+      <label>交接记录 <select ref={recordSelector} aria-label="选择交接记录" value={inspected ?? ''} onChange={e => openEvidence(e.target.value ? Number(e.target.value) : null, e.currentTarget)}>
         <option value="">{current ? '跟随演示' : '选择一条交接'}</option>
         {steps.slice(1, lastMessage + 1).map((s, i) => <option key={s.label} value={i+1}>{i+1}. {s.incoming?.label ?? '交接'} · {steps[i].label}</option>)}
       </select></label>
       <div className="edge-legend" aria-label="连线图例"><span>送审</span><span>质疑</span><span>退回</span><span>通过</span></div>
     </div>}
     {inspected !== null && step && from && <section className="decision-evidence" aria-label="决策依据">
-      <header><strong>{action.label} · {route}</strong><button type="button" onClick={() => inspect(null)} aria-label="关闭决策依据">收起</button></header>
+      <header><strong>{action.label} · {route}</strong><button type="button" onClick={closeEvidence} aria-label="关闭决策依据">收起</button></header>
       {comparing ? <dl><dt>候选区间</dt><dd>{steps[review.candidate].note}</dd>
         <dt>反例</dt><dd>{steps[review.challenge].note}</dd><dt>修正结果</dt>
         <dd>{completed > review.revision ? steps[review.revision].note : '修正待发布'}</dd></dl>
