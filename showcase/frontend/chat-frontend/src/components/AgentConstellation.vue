@@ -59,9 +59,10 @@ async function openEvidence(handoff: PublicHandoff, event: MouseEvent) {
   evidenceDialog.value?.showModal()
 }
 function closeEvidence() {
+  // The native close event can arrive after a new handoff has opened.
+  if (evidenceDialog.value?.open) return
   selectedHandoff.value = undefined
-  if (invoker?.isConnected && invoker.getClientRects().length) invoker.focus()
-  else (listHeading.value ?? map.value)?.focus()
+  if (!invoker?.isConnected || !invoker.getClientRects().length) (listHeading.value ?? map.value)?.focus()
   invoker = undefined
 }
 function curve(message: Collaboration) {
