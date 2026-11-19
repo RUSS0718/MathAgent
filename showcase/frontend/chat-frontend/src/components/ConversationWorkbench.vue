@@ -3,7 +3,7 @@ import { computed, nextTick, onUnmounted, ref, shallowRef, watch } from 'vue'
 import type { DecodedSseEvent } from '../api/events.schemas'
 import type { Collaboration } from '../api/workbench.schemas'
 import { eventRole, roleLabels, statusLabels, typeOf } from '../runtime/jobs/causal-progress'
-import { projectWorkbench, roles } from '../runtime/jobs/workbench'
+import { projectHandoffs, projectWorkbench, roles } from '../runtime/jobs/workbench'
 import AgentConstellation from './AgentConstellation.vue'
 import RoleStagePanel from './RoleStagePanel.vue'
 import AutonomousRouteStatus from './AutonomousRouteStatus.vue'
@@ -59,7 +59,7 @@ const motionEnabled = ref(true)
 const systemAllowsMotion = ref(true)
 const eligibleEvents = new Set<number>()
 const flightTimers = new Map<string, ReturnType<typeof setTimeout>>()
-const displayedMessages = computed(() => state.value.entries.flatMap(entry => entry.message ? [entry.message] : []))
+const displayedMessages = computed(() => projectHandoffs(state.value.entries))
 const motionActive = computed(() => view.value === 'constellation' && motionEnabled.value && systemAllowsMotion.value
   && props.animateLive && !props.replay && replayCount.value === null)
 function clearFlights() {
@@ -187,7 +187,7 @@ onUnmounted(() => { pause(); clearFlights(); clearTimeout(displayTimer); clearIn
           <article v-for="(candidate, i) in state.partial.candidates" :key="i"><small>候选 {{ i + 1 }} · {{ candidate.review }} · {{ candidate.eligible ? '已通过审查' : '未获通过' }}</small><p>{{ candidate.text }}</p></article>
         </details>
         </details>
-        <AgentConstellation v-show="view === 'conversation'" mini :selected="role" :role-states="state.roleStates" :messages="displayedMessages" @select="selectRole" />
+        <AgentConstellation v-show="view === 'conversation'" mini :selected="role" :role-states="state.roleStates" :messages="[]" @select="selectRole" />
         <p class="interjection-note">节点依据公开生命周期更新；历史在途状态不冒充实时执行。</p>
       </aside>
     </div>
