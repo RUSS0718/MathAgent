@@ -11,4 +11,3 @@ test('whole-solution handoff tone reflects the public verdict independently of s
   assert.equal(project('Review accepted', 'ACCEPT').tone, 'approve')
   assert.equal(project('整题审查通过', 'REJECT').tone, 'handoff')
 })
-
