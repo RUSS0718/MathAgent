@@ -1,62 +1,80 @@
-# MathAgent Showcase
+<p align="center">
+  <img alt="MathAgent · Causality-Inspired Multi-Agent Math Reasoning" width="100%" src="https://capsule-render.vercel.app/api?type=rounded&amp;color=0F3D46&amp;height=180&amp;section=header&amp;text=MathAgent&amp;fontColor=FFFFFF&amp;fontSize=58&amp;fontAlignY=42&amp;desc=Causality-Inspired%20Multi-Agent%20Math%20Reasoning&amp;descSize=18&amp;descAlignY=68" />
+</p>
 
-MathAgent 的 Showcase 用于本地主观评测演示和工程验收。它包含 Vue 工作区、Flask API、命令行客户端，以及独立的官方入口演示页。fake 模式可离线查看交互；live 模式会调用 Intern 服务。fake、回放和结构测试不能证明数学正确性或能力提升。
+# MathAgent · 因果启发的多智能体数学推理系统
 
-## Showcase 组件
+MathAgent 面向「基于 Intern-S1 的数学智能体设计与推理创新」赛题。它把命题、推导、候选路线和验证证据保存为共享状态，让系统在长程求解中定位失效前提、复用仍有效的结论，并根据独立校验结果决定下一步。
 
-- **工作区前端**：会话与文件管理、Job 提交与恢复、SSE 执行时间线、结果报告和配对实验审阅页。源码位于 `showcase/frontend/chat-frontend/`。
-- **Flask 后端**：提供工作区 API、Job 与事件流、报告和 Evidence；默认 `fake` 模式，运行数据写入忽略目录 `artifacts/`。
-- **STAR SolverHarness**：显式 Showcase 路径中的 Python 编排与求解运行时，包含 Explore、Planner、Reasoner、Verifier、Meta 和 Researcher 角色；通过共享预算、隔离工具、持久状态和整题最终答案绑定组织运行。冻结实验 CLI 负责受控派发，独立核验器复核运行身份、事件与交付证据。它不是官方评分入口，也不因安装依赖而自动启用。
-- **CLI**：`showcase_cli.py` 调用同一套会话、Job、事件和报告 API。
-- **独立演示页**：`demo_server.py` 展示官方 `ReasoningAgent` 的 `/solve` 合同，不属于工作区，也不改变官方评分入口。
+<p align="center">
+  <img alt="技术栈：Python、Flask、SQLite、Vue、TypeScript、Vite、Node.js、Docker" src="https://skillicons.dev/icons?i=py,flask,sqlite,vue,ts,vite,nodejs,docker&amp;theme=dark" />
+</p>
 
-### 编排框架边界
+[**启动 Showcase Web**](#一键启动-showcase-web) · [**因果启发的三项机制**](#因果启发的三项机制) · [**系统架构**](#系统架构) · [**验收与文档**](#验收与文档)
 
-LangGraph 承载工作区图执行及检查点；当前 STAR 产品入口在求解结束后保存图投影，不由 LangGraph 接管角色循环或自动压缩。STAR 的具体业务决策、角色协议、工具准入、预算、证据及最终绑定由仓库自己的 Python SolverHarness 实现。`pyproject.toml` 将 LangGraph 与 DeepAgents 列为 `showcase` 可选依赖。DeepAgents 只通过 `AgentAdapter` 边界提供可选角色适配器，不是 STAR 编排器，也不代表当前 STAR 路径默认使用它。
+## 一键启动 Showcase Web
 
-## 安装与运行
+在仓库根目录运行。需要 **uv、Python 3.11 或 3.12、Node.js 24 和 npm**。首次安装依赖需要联网。
 
-### 一键启动
+1. 在仓库根目录未跟踪的 `.env` 中设置 `INTERN_API_KEY`。
+2. 启动工作台。脚本会安装锁定依赖、构建 Vue 前端并启动本机 Flask 服务。
 
-在仓库根目录运行下列命令。两种入口都需要 uv 和 Python 3.11 或 3.12，首次安装依赖需要联网。默认使用 `live`，请先在未跟踪的 `.env` 中配置 `INTERN_API_KEY`。
+   ```shell
+   uv run --no-project python scripts/start_showcase.py web
+   ```
+
+3. 打开 [127.0.0.1:8090/dashboard](http://127.0.0.1:8090/dashboard)，提交题目，例如 `求解 x² − 1 = 0，并检查候选根。`。发送题目会创建 Job 并调用 Intern。
+
+只体验界面时，追加 `--mode fake`，无需模型凭证。端口冲突时追加 `--port <端口>`。按 Ctrl+C 停止服务，运行数据默认保存在 `artifacts/showcase-live/` 或 `artifacts/showcase-local/`。
+
+<details>
+<summary>查看工作台预览与 Notebook 入口</summary>
+
+![Showcase 工作台模拟预览，包含角色事件、回放和数学报告](showcase/frontend/chat-frontend/tests/browser/snapshots/win32/conversation-1440.png)
+
+上图是浏览器测试的模拟快照。真实运行时可在工作台查看公开执行事件、角色阶段成果和最终答复。现场演示和回放范围见 [Showcase 彩排记录](docs/evals/onsite-demo-209-20261118.md)。
 
 ```shell
-# Web
-uv run --no-project python scripts/start_showcase.py web
-
-# Jupyter Notebook
 uv run --no-project python scripts/start_showcase.py notebook
 ```
 
-- **Web** 需要 Node.js 24 和 npm。脚本安装前端锁定依赖、构建 Vue 页面并启动本机 Flask 服务。打开 [Showcase 工作台](http://127.0.0.1:8090/dashboard) 提交题目，live 数据写入 `artifacts/showcase-live/`。如需 Faithful 服务，添加 `--faithful-config` 并指定已准备好的配置文件。
-- **Notebook** 在本机 8888 端口启动 JupyterLab，打开 [示例 Notebook](examples/showcase.ipynb) 的工作副本。选择 **Run → Run All Cells**。提交单元格启动本机 Showcase HTTP 服务、创建 Job，并显示执行事件和答复。副本和任务数据保存在 `artifacts/showcase-notebook/`。Notebook 无需 Node.js。
+JupyterLab 在本机 8888 端口打开[示例 Notebook](examples/showcase.ipynb)的工作副本。选择 **Run → Run All Cells**，通过本机 Showcase HTTP API 创建 Job，读取执行事件与答复。Notebook 无需 Node.js，也支持 `--mode fake`。副本和任务数据保存在 `artifacts/showcase-notebook/`。
 
-Web 发送题目或 Notebook 运行提交单元格都会触发 Intern 请求。需要离线演示时，在相应命令后添加 `--mode fake`。
+</details>
 
-```shell
-uv run --no-project python scripts/start_showcase.py web --mode fake
-uv run --no-project python scripts/start_showcase.py notebook --mode fake
-```
+## 因果启发的三项机制
 
-端口已被占用时，在相应命令后添加 `--port` 和可用端口。用 Ctrl+C 停止服务。
+这里的“因果启发”指把**推理动作、状态变化和可验证进展**联系起来。技术报告 v0.6 第 2–4 章给出了三项机制的设计。下面的合同记录对应的代码路径、适用条件和验收范围。
 
-### 手动启动与前端开发
+| 机制 | 技术设计 |
+| --- | --- |
+| **依赖追溯与局部回退** | 命题–推导图记录版本、来源和验证证据。一次推导的前提是 **AND**，同一命题的多个有效支撑是 **OR**。撤销一个支撑时，仍有独立支撑的命题可继续使用。最后一个有效支撑消失时，沿依赖关系传播失效，并从 Checkpoint 恢复适用的状态。见[证明图合同](docs/engineering/faithful-s07-contract-exit-20261108.md)。 |
+| **验证反馈驱动搜索** | Population 持久保存候选路线与谱系。Rater、Pareto 与 APRS 根据已验证的目标进展、路线差异和已知资源成本安排下一步。共享预算统一计入模型、工具与时间，重复成果在总进展中去重。见[串行 APRS 合同](docs/engineering/faithful-s08-contract.md)和[并发调度合同](docs/engineering/faithful-population-contract.md)。 |
+| **同源策略干预** | 从同一 Checkpoint 派生基线与干预分支，固定题目、模型、工具和预算，只改变一个登记的推理动作，再比较验证进展与成本。当前工程合同限定在显式暂停、受支持的串行步骤。结果用于比较修复策略，因果解释限于该比较的设置。见[干预工程合同](docs/engineering/faithful-s10-contract.md)。 |
 
-需要单独启动后端或使用 Vite 热更新时，先在仓库根目录安装开发依赖。
+## 系统架构
+
+![MathAgent 系统架构：Python 编排器、统一证明状态、验证驱动的证明搜索与反事实策略优化](docs/assets/mathagent-architecture.png)
+
+上图描述技术报告中的主循环与干预循环。高级机制按模式和服务配置启用，`live` 表示调用真实 Intern 服务。
+
+- **求解控制面**：Python STAR Solver Harness 编排 Explore、Planner、Reasoner、Verifier、Meta 和 Researcher，管理角色交接、Checkpoint、共享预算和持久证据。LangGraph 承载工作区图执行与检查点。STAR 的角色循环由 Harness 管理，DeepAgents 通过 `AgentAdapter` 提供可选适配。见[框架边界](docs/adr/0002-langgraph-deepagents-boundary.md)。
+- **分层验证**：Verifier 记录独立审查与证据等级。确定性工具的有限检查最高为 L1。受支持的 Lean 目标通过内核及依赖审计后可达 L2，再经独立的原题与形式规格对应审查才可达 L3。整题模型审查单独记录为 `LLM_REVIEWED`。见[分层验证合同](docs/engineering/faithful-s09-contract.md)。
+- **交互与追溯**：Vue 工作台通过 Flask Job API 与 SSE 展示进展，从持久记录读取答复、公开摘要及可用证据。CLI 使用同一组服务接口，配对实验另有审阅入口。运行记录和观测范围见[角色阶段成果验收](docs/engineering/role-stage-199-acceptance.md)。
+
+## 开发与高级配置
+
+<details>
+<summary>手动启动、Vite 热更新与 CLI</summary>
+
+在仓库根目录安装开发依赖并启动本机后端。
 
 ```powershell
 uv sync --locked --all-groups
-```
-
-#### 离线 fake 模式
-
-在仓库根目录启动后端：
-
-```powershell
 uv run python showcase_server.py --host 127.0.0.1 --port 8090 --mode fake --data-dir artifacts/showcase-local
 ```
 
-如需前端开发服务器，在另一个终端运行：
+另开一个终端启动 Vite，打开 [127.0.0.1:5174/dashboard-assets/](http://127.0.0.1:5174/dashboard-assets/)。Vite 将 `/api` 代理到本机 8090 端口。
 
 ```powershell
 Set-Location showcase/frontend/chat-frontend
@@ -64,83 +82,53 @@ npm ci --no-audit --no-fund
 npm run dev -- --host 127.0.0.1
 ```
 
-打开 `http://127.0.0.1:5174/dashboard-assets/`。Vite 将 `/api` 请求代理到本机 8090 端口。也可先构建前端，再直接访问后端的 `http://127.0.0.1:8090/dashboard`：
-
-```powershell
-npm run build
-```
-
-以下 CLI 命令在仓库根目录执行，可检查服务或创建本地会话：
+执行 `npm run build` 后也可从 Flask 的 `/dashboard` 访问构建产物。在仓库根目录运行以下命令检查服务和创建会话。
 
 ```powershell
 uv run python showcase_cli.py health
 uv run python showcase_cli.py session create
 ```
 
-fake 模式返回确定性的演示结果，不访问模型。需要浏览器演示时，运行 `npm run dev`；前端不是后端启动的前置条件。
+配置凭证后，可将后端切换至 `--mode live --data-dir artifacts/showcase-live`。CLI 的 `probe` 会创建 Job 并调用真实模型。详见 [Demo 与 CLI 使用说明](docs/demo.md)。
 
-#### Intern live 模式
+</details>
 
-在仓库根目录的未跟踪 `.env` 中配置 `INTERN_API_KEY`，然后启动 live 后端：
+<details>
+<summary>启用图文读题或 Faithful 服务</summary>
 
-```powershell
-uv run python showcase_server.py --host 127.0.0.1 --port 8090 --mode live --data-dir artifacts/showcase-live
-```
+- **图文读题**：启动 live Web 前，在 PowerShell 设置 `$env:SHOWCASE_VISION_ENABLED = '1'`。普通工作区支持单张 PNG、纯文本或文字加图。PNG 上限为 128 KiB，读图和求解共用任务预算。见[图文读题合同](docs/engineering/showcase-multimodal-intake.md)。
+- **Faithful 服务**：复制[配置示例](examples/faithful-service.json)，核对隔离工具所需的 Docker 镜像、预算和模型上下文策略。使用填写好的本地配置路径。就绪检查有独立入口，普通模式的模型请求从提交 Job 开始。
 
-前端开发服务器命令与 fake 模式相同。需要提交题图时，在启动 live 后端前设置 `$env:SHOWCASE_VISION_ENABLED = '1'`。普通工作区支持文字、单张 PNG，以及文字加图片。工作台显示读图状态和基础题型。上传上限为 128 KiB（大图请先裁剪或压缩），读图与求解共享当前任务预算。详见[图文读题合同](docs/engineering/showcase-multimodal-intake.md)。
-
-确认设置页显示 live 且凭证已配置后，CLI 的 `probe` 会创建 Job 并调用模型：
-
-```powershell
-uv run python showcase_cli.py capabilities
-uv run python showcase_cli.py probe "求解 x^2-1=0，并检查候选根。"
-```
-
-`probe` 会产生真实 provider 请求；不要将其当作无 API 的本地检查。CLI 默认拒绝 fake 服务上的 `probe`。服务和 CLI 默认使用 loopback 地址及本地 cookie 文件。
-
-官方评分入口位于根目录 `user_agent.py`，其演示页和 `/solve` 用法见 [Demo 使用说明](docs/demo.md)。
-
-#### Faithful 普通输入服务
-
-本机 live 服务可使用 [配置示例](examples/faithful-service.json)。先在本地副本中核对 Python 镜像 ID、预算和模型上下文策略，并配置未跟踪 `.env` 中的 Intern 凭证；上下文容量未知保持 `null`，示例不承诺提供方硬上限。先启动 Docker，再执行：
-
-```powershell
+```shell
 uv run python showcase_server.py --mode live --faithful-config examples/faithful-service.json --check-runtime
-uv run python showcase_server.py --mode live --faithful-config examples/faithful-service.json --data-dir artifacts/faithful-local
+uv run --no-project python scripts/start_showcase.py web --faithful-config examples/faithful-service.json --data-dir artifacts/faithful-local
 ```
 
-前端构建后访问 `http://127.0.0.1:8090/dashboard`，普通输入会进入自动规格和求解，无需手填技术模式。开发前端仍可使用上方 Vite 命令。用 Ctrl+C 停止服务，再使用相同数据目录启动可读取持久任务。就绪检查不调用模型，不代表真实求解验收；可选能力限制与实验性状态会显示在入口。并发、自主干预、形式化和记忆完整闭环按 [#168 实施规格](https://github.com/RUSS0718/MathAgent/issues/168) 的后续子票验收。
+适用配置中可显式启用 `adaptive_solving`。完整候选进入独立整题审查，明确异议最多触发一次局部修正，再转入规划。预算许可见[高预算配置示例](examples/faithful-service-high-budget.json)，策略范围见[自适应求解合同](docs/engineering/adaptive-solving-185-contract.md)。
 
-按需求解可在新的本地配置中显式加入 `"adaptive_solving": true`：完整候选直接送独立整题检查，具体数学异议最多触发一次局部修正，再进入已有规划。省略时保持原策略。高预算候选示例见 [faithful-service-high-budget.json](examples/faithful-service-high-budget.json)：根上限 96 模型调用、96 HTTP、24 工具、4194304 本地计账 token、7200 秒；这些是授权上限，不是实际用量或成功承诺。该配置只作用于使用它启动的新 Run，不自动启用并发或 Lean；实际并发仍需显式容量配置与准入。策略与未验收边界见 [#185 合同](docs/engineering/adaptive-solving-185-contract.md)。
+</details>
 
-## 工程状态与验收边界
+## 验收与文档
 
-官方客观评测入口是根目录 `user_agent.py` 的 `ReasoningAgent`，评分实现位于 `implementations/`。Showcase 作为独立展示路径；未经独立验收的改动不得接入官方默认路径或改变其请求预算。官方文件和基线哈希见 [BASELINE.json](BASELINE.json)。
+官方客观评测使用 [`user_agent.ReasoningAgent`](user_agent.py)。官方 baseline 的文件哈希和评测结果见 [BASELINE.json](BASELINE.json)，Showcase 通过独立入口运行。报告中的消融按题集、分母和预算解读，数学能力结论以仓库中可复核的评测证据为准。
 
-截至 2026-11-06，Issue #127 的 provider-live readiness **未通过**；最新 readiness-31 的自然多步结果为 UNKNOWN，未完成最终答案、整题审查和同文本绑定。Issue #128 的线上两臂均为 **NOT_RUN**。这些结果不支持数学能力提升结论；详见 [readiness-31 记录](docs/evals/provider-live-natural-20261106-readiness-31.md) 和 [文档索引](docs/README.md)。
+| 想了解 | 入口 |
+| --- | --- |
+| 当前版本、实现状态与证据 | [文档索引](docs/README.md) |
+| 真实依赖消费、Lean 尝试与适用范围 | [机制专项验收](docs/evals/mechanism-206-20261118.md) |
+| 真实模型就绪、对照实验及历史发布 | [就绪记录](docs/evals/provider-live-natural-20261106-readiness-31.md) · [v0.2 发布证据](docs/evals/v0.2-release-evidence.md) |
+| 快速、离线完整、发布与前端检查 | [工程门禁](docs/engineering/development-gates.md) |
+| 官方评分路径与 Showcase 的合并纪律 | [发布边界](docs/release-boundary.md) |
 
-仓库提供以下工程门禁命令：
+<details>
+<summary>本地检查命令</summary>
 
-```powershell
+```shell
 uv run python scripts/check_fast.py
 uv run python scripts/check.py --offline
 uv run python scripts/check_showcase_release.py
 ```
 
-快速门禁、离线完整检查和发布检查覆盖不同范围；通过离线门禁不等于真实 provider 验收。前端检查在 `showcase/frontend/chat-frontend/` 执行：
+在 `showcase/frontend/chat-frontend/` 执行 `npm ci --no-audit --no-fund`、`npm audit --audit-level=high` 和 `npm run check`。各检查覆盖范围见[工程门禁](docs/engineering/development-gates.md)。
 
-```powershell
-npm ci --no-audit --no-fund
-npm audit --audit-level=high
-npm run check
-```
-
-当前运行结果以实际门禁输出和对应评测记录为准；本 README 不据此宣称所有门禁已通过。发布判定及验收限制见 [v0.2 发布证据](docs/evals/v0.2-release-evidence.md)，检查范围见 [工程门禁说明](docs/engineering/development-gates.md)。
-
-## 文档导航
-
-- [版本、开发阶段与能力证据索引](docs/README.md)
-- [Demo、Showcase 与 CLI 使用细节](docs/demo.md)
-- [工程门禁与最终验收入口](docs/engineering/development-gates.md)
-- [官方评分路径合并边界](docs/release-boundary.md)
-- [v0.2 发布验收记录](docs/evals/v0.2-release-evidence.md)
+</details>
