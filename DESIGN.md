@@ -110,7 +110,8 @@ components:
 
 - 对话居中，运行观察与会话导航分列；窄屏使用原生模态抽屉。
 - 设置、配对实验和运行证据共享阅读页框架。
-- 自有 Vue 控件源码，单一 SVG 图标库；旧展示入口共享同一 token 文件。
+- 核心会话及技术审阅使用自有 Vue 控件和既有 token，旧展示入口共享同一 token 文件。
+- [DeepTutor 工作台设计](docs/specs/deeptutor-workbench-ui.md)为默认 Web 启动器的普通 `/dashboard` 外壳批准了限定例外。Flask 同源服务提供 React 外壳和现有 API，外壳通过桥接挂载 Vue 会话组件。这个范围复用已选定的 DeepTutor 导航、输入和示例交互，并沿用核心会话、权限和求解合同。Next 入口提供独立模拟预览。
 
 前置 YAML 是设计记录的规范层；运行时唯一值来源是 `showcase/frontend/chat-frontend/src/styles/tokens.css`。二者有差异时核对实际实现、修正记录，禁止另建一套运行时变量。
 

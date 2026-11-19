@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, Response, g, jsonify, request, send_from_directory
+from flask import Flask, Response, g, jsonify, redirect, request, send_from_directory
 from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 
 from presentation_pages import render_presentation_page
@@ -240,18 +240,24 @@ def create_app(
     @app.get("/dashboard/")
     @app.get("/dashboard/<path:subpath>")
     def dashboard(subpath: str = "") -> Response:
-        del subpath
-        frontend_index = Path(__file__).parent / "frontend" / "chat-frontend" / "dist" / "index.html"
+        public = subpath in {"", "chat", "workspace"} or re.fullmatch(r"session/[A-Za-z0-9._-]{1,64}", subpath)
+        project = "deeptutor-preview" if public else "chat-frontend"
+        frontend_index = Path(__file__).parent / "frontend" / project / "dist" / "index.html"
         body = frontend_index.read_text(encoding="utf-8") if frontend_index.is_file() else _dashboard_page()
         response = Response(body, content_type="text/html; charset=utf-8")
+        response.headers["Cache-Control"] = "no-store"
         return _set_auth_cookie_if_new(response, loopback_store)
 
     @app.get("/dashboard-assets/<path:asset_path>")
     def dashboard_asset(asset_path: str) -> Response:
-        asset_root = Path(__file__).parent / "frontend" / "chat-frontend" / "dist"
-        if not (asset_root / asset_path).is_file():
-            return _json_error("not_found", 404)[0], 404
-        return send_from_directory(asset_root, asset_path)
+        if asset_path in {"index.html", "chat", "workspace"}:
+            return redirect("/dashboard")
+        if re.fullmatch(r"session/[A-Za-z0-9._-]{1,64}", asset_path):
+            return redirect(f"/dashboard/{asset_path}")
+        root = Path(__file__).parent / "frontend"
+        if asset_path.startswith("workbench/"):
+            return send_from_directory(root / "deeptutor-preview" / "dist", asset_path.removeprefix("workbench/"))
+        return send_from_directory(root / "chat-frontend" / "dist", asset_path)
 
     @app.get("/api/check_auth")
     def check_auth() -> Response:

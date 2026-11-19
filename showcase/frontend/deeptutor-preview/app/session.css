@@ -1,0 +1,24 @@
+@import '../../chat-frontend/src/styles/tokens.css' layer(task-defaults);
+@import '../../chat-frontend/src/styles/primitives.css' layer(task-defaults);
+@import '../../chat-frontend/src/styles/conversation.css' layer(task-defaults);
+@import '../../chat-frontend/src/styles/inspector.css' layer(task-defaults);
+
+.session-surface {
+  --text:var(--foreground); --surface:var(--card); --surface-muted:var(--secondary);
+  --muted:var(--muted-foreground); --border-strong:var(--input); --accent:var(--ring);
+  --accent-strong:var(--foreground); --accent-wash:var(--secondary); --on-accent:var(--background);
+  width:min(calc(100% - 64px), 760px); margin:0 auto; padding:18px 0 48px; overflow-wrap:anywhere;
+}
+.session-surface .constellation-page { overflow:visible; }
+.session-surface .constellation-topbar { border:0; background:transparent; padding:0 0 14px; min-height:36px; }
+.session-surface .constellation-actions { gap:10px; }
+.session-surface .ui-button { min-height:32px; padding:4px 10px; border-radius:7px; font-size:13px; }
+.session-surface .active-workbench { width:100%; padding:0; }
+.session-surface .workbench-problem { width:fit-content; max-width:90%; margin:12px 0 20px auto; padding:10px 16px; border:0; border-radius:16px; background:var(--secondary); }
+.session-surface .report-section { padding:0; background:transparent; border:0; line-height:1.65; }
+.session-surface .report-section h2 { font-size:17px; font-weight:600; margin:0 0 10px; }
+.session-surface .report-content { font-size:15px; }
+.session-surface .report-content p { margin:8px 0; }
+.session-surface .execution-process > summary { margin-top:20px; padding:12px 0; border-top:1px solid var(--border); font-weight:600; cursor:pointer; }
+.session-surface .workbench-entry { max-width:100%; }
+@media(max-width:720px) { .session-surface { width:calc(100% - 32px); } }

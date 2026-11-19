@@ -97,16 +97,23 @@ class FinalGateTest(unittest.TestCase):
                     [r"C:\node\npm.cmd", "ci", "--no-audit", "--no-fund"],
                     [r"C:\node\npm.cmd", "audit", "--audit-level=high"],
                     [r"C:\node\npm.cmd", "run", "check"],
+                    [r"C:\node\npm.cmd", "ci", "--no-audit", "--no-fund"],
+                    [r"C:\node\npm.cmd", "audit", "--audit-level=high"],
+                    [r"C:\node\npm.cmd", "run", "build"],
+                    [r"C:\node\npm.cmd", "run", "build:workbench"],
+                    ["uv", "run", "python", "-m", "scripts.check_workbench_smoke"],
                 ],
                 commands,
             )
             self.assertEqual([root, root, root], [call[1] for call in calls[:3]])
-            self.assertEqual([root / "showcase" / "frontend" / "chat-frontend"] * 3,
+            frontend = root / "showcase" / "frontend"
+            self.assertEqual([frontend / "chat-frontend"] * 3 + [frontend / "deeptutor-preview"] * 4 + [root],
                              [call[1] for call in calls[3:]])
             self.assertEqual({False}, {call[3] for call in calls})
             self.assertEqual(
                 {"fast.log", "offline.log", "release.log", "frontend-install.log",
-                 "frontend-audit.log", "frontend-check.log"},
+                 "frontend-audit.log", "frontend-check.log", "preview-install.log",
+                 "preview-audit.log", "preview-build.log", "workbench-build.log", "workbench-smoke.log"},
                 {call[2] for call in calls},
             )
 

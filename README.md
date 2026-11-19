@@ -19,22 +19,22 @@ MathAgent is a multi-agent system built for the Intern-S1 mathematical agent des
 Run these steps from the repository root. You need **uv, Python 3.11 or 3.12, Node.js 24, and npm**. The first dependency install requires internet access.
 
 1. Set `INTERN_API_KEY` in an untracked `.env` file at the repository root.
-2. Run the launcher. It installs locked dependencies, builds the Vue frontend, and starts a local Flask server.
+2. Run the launcher. It installs locked dependencies, builds the MathAgent workbench and reviewer pages, and starts a local Flask server.
 
    ```shell
    uv run --no-project python scripts/start_showcase.py web
    ```
 
-3. Open [127.0.0.1:8090/dashboard](http://127.0.0.1:8090/dashboard) and submit a problem such as `Solve x² − 1 = 0 and check the candidate roots.` Submitting creates a Job and calls Intern.
+3. Open [127.0.0.1:8090/dashboard](http://127.0.0.1:8090/dashboard) and submit a problem such as `Solve x² − 1 = 0 and check the candidate roots.` Sending your own question creates a Job and calls Intern. Selecting a demo example starts a local simulation.
 
 Add `--mode fake` to try the interface without model credentials. Use `--port <port>` if the default port is in use. Press Ctrl+C to stop the service. Run data defaults to `artifacts/showcase-live/` in live mode and `artifacts/showcase-local/` in fake mode.
 
 <details>
 <summary>Workbench preview and Notebook launcher</summary>
 
-![Simulated Showcase workbench with role events, replay controls, and a math report](showcase/frontend/chat-frontend/tests/browser/snapshots/win32/conversation-1440.png)
+![Saved D2 solution in the MathAgent workbench](docs/assets/workbench-session.png)
 
-This screenshot shows simulated data from a browser test. During a live run, the workbench displays public execution events, saved outputs from individual roles, and the final answer. The [Showcase rehearsal record](docs/evals/onsite-demo-209-20261118.md) describes the demo and replay coverage.
+The screenshot shows the public answer from the D2 rehearsal session. The [rehearsal record](docs/evals/onsite-demo-209-20261118.md) documents the saved task and the scope of its mathematical review.
 
 ```shell
 uv run --no-project python scripts/start_showcase.py notebook
@@ -62,7 +62,7 @@ The diagram shows the main search loop and the intervention loop from the techni
 
 - **Solver orchestration**. The Python STAR Solver Harness coordinates Explore, Planner, Reasoner, Verifier, Meta, and Researcher. It manages role handoffs, Checkpoints, the shared budget, and persistent evidence. LangGraph runs workbench graphs and manages checkpoints. The Harness owns the STAR role loop. DeepAgents is available as an optional `AgentAdapter`. See the [framework boundary](docs/adr/0002-langgraph-deepagents-boundary.md).
 - **Tiered verification**. The Verifier records independent review and evidence grades. A bounded deterministic tool check can reach L1. A supported Lean goal can reach L2 after kernel checking and a dependency audit. L3 also requires an independent review of how the formal specification corresponds to the original problem. Whole-solution model review is recorded as `LLM_REVIEWED`. See the [verification contract](docs/engineering/faithful-s09-contract.md).
-- **Workbench and traceability**. The Vue workbench shows progress via the Flask Job API and server-sent events (SSE). It reads answers, public summaries, and available evidence from persisted records. The CLI uses the same API, and paired experiments have a review interface. See the [role output validation record](docs/engineering/role-stage-199-acceptance.md).
+- **Workbench and traceability**. The workbench shows progress via the Flask Job API and server-sent events (SSE). It reads answers, public summaries, and available evidence from persisted records. The CLI uses the same API, and paired experiments have a review interface. See the [role output validation record](docs/engineering/role-stage-199-acceptance.md).
 
 ## Development and advanced configuration
 
@@ -76,7 +76,7 @@ uv sync --locked --all-groups
 uv run python showcase_server.py --host 127.0.0.1 --port 8090 --mode fake --data-dir artifacts/showcase-local
 ```
 
-Start Vite in another terminal and open [127.0.0.1:5174/dashboard-assets/](http://127.0.0.1:5174/dashboard-assets/). Vite proxies `/api` to local port 8090.
+To develop the Vue session and reviewer components, start Vite in another terminal and open [127.0.0.1:5174/dashboard-assets/](http://127.0.0.1:5174/dashboard-assets/). Vite proxies `/api` to local port 8090.
 
 ```powershell
 Set-Location showcase/frontend/chat-frontend
@@ -84,7 +84,7 @@ npm ci --no-audit --no-fund
 npm run dev -- --host 127.0.0.1
 ```
 
-After running `npm run build`, visit the Flask `/dashboard` route to view the production build. From the repository root, check the service and create a local session with these commands.
+The Web launcher builds and serves the public workbench at `/dashboard`. From the repository root, check the service and create a local session with these commands.
 
 ```powershell
 uv run python showcase_cli.py health

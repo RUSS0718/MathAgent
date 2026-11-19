@@ -54,7 +54,9 @@ jobs:
         with:
           node-version: 24.18.0
           cache: npm
-          cache-dependency-path: showcase/frontend/chat-frontend/package-lock.json
+          cache-dependency-path: |
+            showcase/frontend/chat-frontend/package-lock.json
+            showcase/frontend/deeptutor-preview/package-lock.json
       - name: Install locked frontend dependencies
         id: install
         run: npm ci --no-audit --no-fund
@@ -71,3 +73,24 @@ jobs:
       - name: Check frontend
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm run check
+      - name: Install and audit locked DeepTutor preview dependencies
+        working-directory: showcase/frontend/deeptutor-preview
+        run: |
+          npm ci --no-audit --no-fund
+          npm audit --audit-level=high
+      - name: Build standalone preview and production workbench
+        working-directory: showcase/frontend/deeptutor-preview
+        run: |
+          node tests/preview-read-only.mjs
+          npm run build
+          npm run build:workbench
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Smoke test the Flask workbench as an ordinary user
+        working-directory: ${{ github.workspace }}
+        run: uv run --locked python -m scripts.check_workbench_smoke

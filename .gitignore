@@ -24,6 +24,7 @@ build/
 .vite/
 *.tsbuildinfo
 .next/
+/showcase/frontend/deeptutor-preview/next-env.d.ts
 coverage/
 
 # Local application state and generated run output

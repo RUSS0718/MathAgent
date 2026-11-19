@@ -353,7 +353,8 @@ v0.2 文档已归档为历史合同；v1.1 规格不覆盖这些 accepted ADR，
 
 ## 工程环境与 agent 约定
 
-- [DeepTutor 工作台源码复用规格](specs/deeptutor-workbench-ui.md)的阶段一已交付[本地交互预览](../showcase/frontend/deeptutor-preview/UPSTREAM.md)，文档说明六个组件区域、并排预览和主入口切换的验收条件。
+- [DeepTutor 工作台源码复用规格](specs/deeptutor-workbench-ui.md)已接入普通首页和历史会话深链。[启动与源码对照](../showcase/frontend/deeptutor-preview/UPSTREAM.md)说明工作台与独立预览各自的入口。
+- [星图交接与数学修正规格](specs/showcase-decision-evidence.md)、[七项工作台验收记录](evals/showcase-decision-evidence-218-20261120.md)。
 - [UI 复现指导](frontend/ui-reproduction-guide.md)：后续 agent 的执行入口，包含环境、页面矩阵、组件、状态与像素回归步骤。
 - [设计系统](../DESIGN.md)、[产品边界](../PRODUCT.md)：当前统一视觉语言与产品事实。
 - [前端统一验收合同](frontend/ui-unification-contract.md)、[验证记录](frontend/ui-verification.md)：实施范围、实际检查结果和证据限制。

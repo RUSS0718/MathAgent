@@ -1,1 +1,4 @@
-module.exports = { devIndicators: false, turbopack: { root: __dirname } }
+module.exports = {
+  devIndicators: false,
+  turbopack: { root: __dirname },
+}

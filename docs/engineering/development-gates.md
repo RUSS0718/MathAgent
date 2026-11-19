@@ -43,7 +43,7 @@ uv run python scripts/run_unittest_report.py --expect-count 1 tests.test_module.
 uv run python scripts/run_final_gate.py --root . --output-dir artifacts/final-gates --run-id review-01
 ```
 
-每次使用新的 run ID，避免覆盖已有证据。该入口统一执行快速检查、完整仓库检查、发布检查及前端安装、审计与检查；失败后不继续下一阶段。`--require-reference` 额外要求指定 Reference 用例实际执行，需要先配置仓库既有的 Docker 测试环境。默认离线门禁不代表真实 provider 或数学效果验收。
+每次使用新的 run ID，避免覆盖已有证据。该入口统一执行快速检查、完整仓库检查、发布检查、两套前端的锁定安装与依赖审计、Vue 检查、Next 独立预览和 Flask 工作台构建，以及普通用户 `/dashboard` 与会话列表冒烟检查；失败后不继续下一阶段。`--require-reference` 额外要求指定 Reference 用例实际执行，需要先配置仓库既有的 Docker 测试环境。默认离线门禁不代表真实 provider 或数学效果验收。
 
 启动长测试时只保留一个运行进程。读取独立 run 目录的 `status.json` 查看 PID、开始时间、当前阶段、完成阶段数与日志位置；每 30 分钟的定时检查在状态无变化时静默，完成或失败后移除。
 

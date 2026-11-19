@@ -1,5 +1,5 @@
 import type { DecodedSseEvent } from '../../api/events.schemas.ts'
-import { collaborationSchema, evidenceChainSchema } from '../../api/workbench.schemas.ts'
+import { collaborationSchema, evidenceChainSchema, type Collaboration } from '../../api/workbench.schemas.ts'
 import { timelineSummary, timelineTitle } from './star-event-presentation.ts'
 import { eventRole, lifecycle, progressText, roleLabels, statusLabels, typeOf } from './causal-progress.ts'
 
@@ -10,6 +10,43 @@ export const roles = [
   ['final_generator', '终稿生成', 352, 518], ['meta', '元策略', 169, 365],
   ['researcher', '资料研究', 500, 610],
 ] as const
+export interface PublicHandoff {
+  message: Collaboration
+  order: number
+  action: string
+  tone: 'handoff' | 'challenge' | 'rollback' | 'approve'
+  objection?: string
+}
+
+/** Preserve the first public record for each message within the visible event prefix. */
+export function projectHandoffs(entries: ReturnType<typeof projectWorkbench>['entries']): PublicHandoff[] {
+  const handoffs = new Map<string, PublicHandoff>()
+  for (const { event, message } of entries) {
+    if (!message || handoffs.has(message.message_id)) continue
+    const { kind, chosen } = message
+    const type = typeOf(event)
+    let tone: PublicHandoff['tone'] = 'handoff'
+    let action = kind === 'reply' ? '答复' : '交接'
+    if (type === 'step_reported' || type === 'final_candidate_generated') action = '送审'
+    if (kind === 'rollback' || chosen === 'TRACE_BACK') {
+      tone = 'rollback'
+      action = '退回'
+    } else if (kind === 'challenge' || kind === 'escalation') {
+      tone = 'challenge'
+      action = kind === 'challenge' ? '质疑' : '升级质询'
+    } else if (chosen === 'CONTINUE' || chosen === 'APPROVE_REPLAN'
+      || kind === 'decision' && type === 'step_reviewed' && event.data.verdict === 'ACCEPT' && event.data.valid === true
+      || kind === 'decision' && type === 'final_candidate_reviewed' && event.data.verdict === 'ACCEPT') {
+      tone = 'approve'
+      action = '通过'
+    } else if (chosen === 'ABORT') action = '终止'
+    const objection = kind === 'challenge' && typeof event.data.objection_summary === 'string'
+      ? event.data.objection_summary.trim() : undefined
+    handoffs.set(message.message_id, { message, order: handoffs.size + 1, tone, action, objection })
+  }
+  return [...handoffs.values()]
+}
+
 export interface PlanStep { label: string; status: string; goal: string }
 export function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}

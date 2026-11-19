@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1 --port 3090",
     "build": "next build",
+    "build:workbench": "node ../chat-frontend/node_modules/vite/bin/vite.js build --config ../chat-frontend/vite.workbench.config.ts",
     "start": "next start --hostname 127.0.0.1 --port 3090"
   },
   "dependencies": {

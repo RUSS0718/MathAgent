@@ -1,6 +1,6 @@
 # MathAgent 工作台复用 DeepTutor 前端源码的实施规格
 
-**状态**　阶段 1 已交付独立夹具预览，2026-11-19；阶段 2、3 待实施。启动、源码对照与截图复核见[预览说明](../../showcase/frontend/deeptutor-preview/UPSTREAM.md)。MathAgent 对照源码为 `efa3cfb1f3ee9d9e9a167a4b32e9f4d1cc5329f6`。上游固定为 DeepTutor `v1.7.3`，提交 `4c1e000d8563c5ac3b231baaaf149dc4dc4d2406`。[上游提交][dt-commit]
+**状态**　2026-11-19，普通首页和已保存会话已切换到同源工作台，使用 Vite 打包共享的 React 界面和按需加载的 Vue 任务组件。技术审阅专用页使用现有实现。下文保留分阶段设计和验收项。启动、源码对照与截图复核见[预览说明](../../showcase/frontend/deeptutor-preview/UPSTREAM.md)。MathAgent 对照源码为 `efa3cfb1f3ee9d9e9a167a4b32e9f4d1cc5329f6`。上游固定为 DeepTutor `v1.7.3`，提交 `4c1e000d8563c5ac3b231baaaf149dc4dc4d2406`。[上游提交][dt-commit]
 
 目标是让用户在同一台机器打开两个工作台，用同一道数学题判断是否采用 DeepTutor 的界面。预览直接运行上游 React 组件，范围从输入框、会话侧栏一直到答复、执行进展和右侧详情。求解、数学内容、权限与结果来源由 MathAgent 提供。第一份可看的交付是可点击的本机页面，以及新建题、求解中、完成后三种状态的并排截图。
 

@@ -3,13 +3,13 @@ import { computed, nextTick, onUnmounted, ref, shallowRef, watch } from 'vue'
 import type { DecodedSseEvent } from '../api/events.schemas'
 import type { Collaboration } from '../api/workbench.schemas'
 import { eventRole, roleLabels, statusLabels, typeOf } from '../runtime/jobs/causal-progress'
-import { projectWorkbench, roles } from '../runtime/jobs/workbench'
+import { projectHandoffs, projectWorkbench, roles } from '../runtime/jobs/workbench'
 import AgentConstellation from './AgentConstellation.vue'
 import RoleStagePanel from './RoleStagePanel.vue'
 import AutonomousRouteStatus from './AutonomousRouteStatus.vue'
 import SerialInterventionStatus from './SerialInterventionStatus.vue'
 
-const props = defineProps<{ jobId?: string; executionMode?: string; events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null; animateLive?: boolean; ordinary?: boolean }>()
+const props = defineProps<{ jobId?: string; executionMode?: string; events: DecodedSseEvent[]; result?: unknown; replay?: boolean; status: string; error?: string | null; animateLive?: boolean; ordinary?: boolean; sharedTheme?: boolean }>()
 const readingRole = ref('planner')
 const readingSource = ref<string>()
 const panel = ref<InstanceType<typeof RoleStagePanel>>()
@@ -59,7 +59,7 @@ const motionEnabled = ref(true)
 const systemAllowsMotion = ref(true)
 const eligibleEvents = new Set<number>()
 const flightTimers = new Map<string, ReturnType<typeof setTimeout>>()
-const displayedMessages = computed(() => state.value.entries.flatMap(entry => entry.message ? [entry.message] : []))
+const displayedMessages = computed(() => projectHandoffs(state.value.entries))
 const motionActive = computed(() => view.value === 'constellation' && motionEnabled.value && systemAllowsMotion.value
   && props.animateLive && !props.replay && replayCount.value === null)
 function clearFlights() {
@@ -136,7 +136,7 @@ onUnmounted(() => { pause(); clearFlights(); clearTimeout(displayTimer); clearIn
       <span role="status" aria-atomic="true">当前阶段：{{ state.phase }}<span v-if="error"> · 请刷新任务状态</span></span>
       <small>{{ elapsed }}</small>
       <div class="view-controls" aria-label="执行视图">
-        <button type="button" :aria-pressed="dark" @click="toggleTheme">{{ dark ? '浅色主题' : '深色主题' }}</button>
+        <button v-if="!sharedTheme" type="button" :aria-pressed="dark" @click="toggleTheme">{{ dark ? '浅色主题' : '深色主题' }}</button>
         <button ref="progressControl" type="button" :aria-pressed="view === 'conversation'" @click="view = 'conversation'">关键进展</button>
         <button type="button" :aria-pressed="view === 'constellation'" @click="view = 'constellation'">完整星图</button>
       </div>
@@ -187,7 +187,7 @@ onUnmounted(() => { pause(); clearFlights(); clearTimeout(displayTimer); clearIn
           <article v-for="(candidate, i) in state.partial.candidates" :key="i"><small>候选 {{ i + 1 }} · {{ candidate.review }} · {{ candidate.eligible ? '已通过审查' : '未获通过' }}</small><p>{{ candidate.text }}</p></article>
         </details>
         </details>
-        <AgentConstellation v-show="view === 'conversation'" mini :selected="role" :role-states="state.roleStates" :messages="displayedMessages" @select="selectRole" />
+        <AgentConstellation v-show="view === 'conversation'" mini :selected="role" :role-states="state.roleStates" :messages="[]" @select="selectRole" />
         <p class="interjection-note">节点依据公开生命周期更新；历史在途状态不冒充实时执行。</p>
       </aside>
     </div>

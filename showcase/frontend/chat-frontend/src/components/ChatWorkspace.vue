@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { requestedImageMode } from '../../../deeptutor-preview/lib/image-workspace'
+import { modes } from '../../../deeptutor-preview/lib/output-modes'
 import { api } from '../api/client'
 import type { CapabilitiesResponse } from '../api/capabilities.schemas'
 import { faithfulTaskStateSchema, clarificationStateSchema } from '../api/jobs.schemas'
@@ -54,15 +56,16 @@ const checkingSubmission = ref(false)
 const loading = ref(true)
 const loadFailed = ref(false)
 let reportDisposed = false
-const props = defineProps<{ path: string; sessionId: string | null }>()
+const props = defineProps<{ path: string; sessionId: string | null; embedded?: boolean }>()
 const current = computed(() => sessions.currentId ? jobs.activeForSession(sessions.currentId) : undefined)
 const selectedJob = computed(() => {
   if (current.value) return current.value
   const jobId = sessions.messages.at(-1)?.analysis_job_id
   return jobId ? jobs.byId(jobId) : undefined
 })
-const presentationMode = computed(() => selectedJob.value?.presentationMode ?? null)
+const presentationMode = computed(() => (props.embedded && selectedJob.value ? requestedImageMode(selectedJob.value.jobId) : undefined) ?? selectedJob.value?.presentationMode ?? undefined)
 const taskState = computed(() => faithfulTaskStateSchema.safeParse(selectedJob.value?.result?.faithful).data)
+const completedInShell = computed(() => props.embedded && taskState.value?.phase === 'completed' && !taskState.value.allowed_actions.some(action => ['pause', 'resume', 'resume_intervention', 'cancel'].includes(action)))
 const clarification = computed(() => clarificationStateSchema.safeParse(selectedJob.value?.result?.faithful).data)
 const selectedProblem = computed(() => {
   const jobId = selectedJob.value?.jobId
@@ -294,6 +297,7 @@ async function solveAgain(): Promise<void> {
   try {
     const id = await sessions.create()
     sessionStorage.setItem(`mathagent:resolve:${id}`, JSON.stringify(input))
+    if (props.embedded) { globalThis.location.assign(sessionHref(id)); return }
     globalThis.history.pushState({}, '', sessionHref(id))
     globalThis.dispatchEvent(new PopStateEvent('popstate'))
   } catch (error) { notice.value = error instanceof Error ? error.message : '创建新求解失败。' }
@@ -351,6 +355,11 @@ async function initialize(): Promise<void> {
       notice.value = error instanceof Error ? error.message : '任务状态加载失败。'
     }
     await loadReport(latest.analysis_job_id)
+    const startedKey = `mathagent:just-submitted:${sessions.currentId}`
+    if (props.embedded && sessionStorage.getItem(startedKey) === latest.analysis_job_id) {
+      sessionStorage.removeItem(startedKey)
+      if (current.value) locallyStartedJob.value = latest.analysis_job_id
+    }
     observeJob(latest.analysis_job_id)
   }
   } catch (error) { loadFailed.value = true; notice.value = error instanceof Error ? error.message : '会话加载失败，请重试。' }
@@ -361,39 +370,39 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
 </script>
 
 <template>
-  <div class="constellation-shell" data-workspace="conversation-workbench">
-    <a class="skip-link" href="#main-content">跳到主要内容</a>
-    <SessionSidebar :items="sessions.items" :current-id="sessions.currentId" :open="sidebarOpen" @new="newSession" @select="selectSession" @rename="rename" @remove="remove" @settings="openSettings" @close="sidebarOpen = false" />
-    <main id="main-content" tabindex="-1" class="constellation-page">
+  <div :class="embedded ? 'embedded-workspace' : 'constellation-shell'" data-workspace="conversation-workbench">
+    <a v-if="!embedded" class="skip-link" href="#main-content">跳到主要内容</a>
+    <SessionSidebar v-if="!embedded" :items="sessions.items" :current-id="sessions.currentId" :open="sidebarOpen" @new="newSession" @select="selectSession" @rename="rename" @remove="remove" @settings="openSettings" @close="sidebarOpen = false" />
+    <component :is="embedded ? 'section' : 'main'" id="main-content" tabindex="-1" class="constellation-page">
       <header class="constellation-topbar">
-        <UiButton icon-only variant="ghost" class="mobile-only" aria-label="打开会话栏" @click="sidebarOpen = true"><UiIcon name="menu" /></UiButton>
-        <div class="workspace-heading"><h1>{{ selectedJob ? '求解工作台' : '数学工作区' }}</h1><span v-if="jobProvenance">{{ jobProvenance }}</span></div>
-        <div class="constellation-actions"><span v-if="!taskState">{{ current?.status === 'waiting_input' ? '等待输入' : current ? '任务执行中' : selectedJob ? '已保存的求解' : '准备提交' }}</span><UiButton v-if="!taskState && current && clarification?.clarification.status !== 'waiting'" variant="danger" @click="cancelCurrent">取消任务</UiButton><UiButton v-if="selectedJob" @click="newSession">新建求解</UiButton><UiButton v-if="selectedJob || notice" :disabled="submitting || checkingSubmission || !!current" @click="solveAgain">再次求解</UiButton><a v-if="selectedJob && auth.reviewer" :href="`/dashboard/run/${selectedJob.jobId}`">运行详情</a></div>
+        <UiButton v-if="!embedded" icon-only variant="ghost" class="mobile-only" aria-label="打开会话栏" @click="sidebarOpen = true"><UiIcon name="menu" /></UiButton>
+        <div class="workspace-heading"><h1 v-if="!embedded">{{ selectedJob ? '求解工作台' : '数学工作区' }}</h1><span v-if="jobProvenance">{{ jobProvenance }}</span><span v-if="completedInShell">已完成</span></div>
+        <div class="constellation-actions"><span v-if="!taskState">{{ current?.status === 'waiting_input' ? '等待输入' : current ? '任务执行中' : selectedJob ? '已保存的求解' : '准备提交' }}</span><UiButton v-if="!taskState && current && clarification?.clarification.status !== 'waiting'" variant="danger" @click="cancelCurrent">取消任务</UiButton><UiButton v-if="selectedJob && !embedded" @click="newSession">新建求解</UiButton><UiButton v-if="selectedJob || notice" :disabled="submitting || checkingSubmission || !!current" @click="solveAgain">再次求解</UiButton><a v-if="selectedJob && auth.reviewer" :href="`/dashboard/run/${selectedJob.jobId}`">运行详情</a></div>
       </header>
-      <p v-if="notice" class="notice" role="status">{{ notice }}<UiButton v-if="!loadFailed && !submitting && !checkingSubmission" @click="recoverSubmission">核对原提交</UiButton><UiButton v-if="loadFailed" @click="initialize">重新加载</UiButton></p>
+      <p v-if="notice" class="notice" :role="loadFailed ? 'alert' : 'status'">{{ notice }}<UiButton v-if="!loadFailed && !submitting && !checkingSubmission" @click="recoverSubmission">核对原提交</UiButton><UiButton v-if="loadFailed" @click="initialize">重新加载</UiButton></p>
       <p v-if="!taskState && current?.status === 'waiting_input' && !clarification" class="notice notice--warning" role="status">运行已暂停。恢复执行不会追加新约束。<UiButton :disabled="submitting" @click="resumeCurrent">恢复执行</UiButton></p>
-      <FaithfulTaskStatus v-if="taskState" :state="taskState" :busy="submitting" :clarification="clarification?.clarification.status === 'waiting'" @pause="pauseCurrent" @resume="resumeCurrent" @cancel="cancelCurrent" @refresh="refreshTask" />
+      <FaithfulTaskStatus v-if="taskState && !completedInShell" :state="taskState" :busy="submitting" :clarification="clarification?.clarification.status === 'waiting'" @pause="pauseCurrent" @resume="resumeCurrent" @cancel="cancelCurrent" @refresh="refreshTask" />
       <div v-if="loading" class="loading-state" role="status">正在加载工作台…</div>
-      <section v-else-if="!selectedJob" class="workbench-entry" aria-label="提交数学题干">
+      <section v-else-if="!selectedJob && !loadFailed" class="workbench-entry" aria-label="提交数学题干">
         <div class="entry-heading"><h2>输入数学问题</h2></div>
         <ComposerBar :command-enabled="presentationEnabled" :submit-label="checkingSubmission ? '正在核对…' : submitting ? '正在提交…' : '发送'" v-model="draft" :disabled="loadFailed || submitting || checkingSubmission" :busy="submitting || checkingSubmission" :submit-disabled="faithfulBlocked" :running="false" :vision-enabled="visionEnabled" :has-image="Boolean(selectedFile)" :uploading="uploadingImage" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"></ComposerBar>
         <div class="entry-examples"><span>示例题干 · 点击回填</span><button type="button" @click="useStarter('解方程 x² − 5x + 6 = 0，并验证候选根。')"><strong>方程与候选根</strong><span>解方程 x² − 5x + 6 = 0，并验证候选根。</span><UiIcon name="arrowRight" /></button><button type="button" @click="useStarter('分步推导 1 + 2 + … + n 的求和公式，n 为正整数。')"><strong>数列求和</strong><span>分步推导 1 + 2 + … + n 的求和公式。</span><UiIcon name="arrowRight" /></button></div>
       </section>
-      <section v-else class="active-workbench">
+      <section v-else-if="selectedJob" class="active-workbench">
         <article class="workbench-problem">
-          <small>当前题干 · {{ { solve: '求解', teach: '教学', report: '报告' }[presentationMode ?? 'solve'] }}</small>
+          <small>当前题干<span v-if="presentationMode"> · 请求格式：{{ modes[presentationMode] }}</span></small>
           <small v-if="inputIntake?.problem_type" class="problem-type">{{ problemTypeLabels[inputIntake.problem_type] }}</small>
           <p v-if="selectedProblem">{{ selectedProblem }}</p>
           <p v-if="imageIntakeNotice" role="status">{{ imageIntakeNotice }}</p>
         </article>
         <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" :resuming="submitting" @resume="resumeCurrent" @changed="clarificationChanged" @cancel="cancelCurrent" />
-        <FinalAnswer :status="selectedJob.status" :key="selectedJob.jobId" :job-id="selectedJob.jobId" />
+        <FinalAnswer :source="jobProvenance" :status="selectedJob.status" :key="selectedJob.jobId" :job-id="selectedJob.jobId" />
         <TaskRevisionPanel :key="selectedJob.jobId + ':revision'" :job-id="selectedJob.jobId" :session-id="selectedJob.sessionId" :owner="auth.username" :mode="solverMode" :state="selectedJob.result?.faithful" :disabled="submitting || checkingSubmission" @changed="clarificationChanged" />
         <details :key="selectedJob.jobId" open class="execution-process"><summary>求解过程</summary>
-        <ConversationWorkbench :key="selectedJob.jobId" :job-id="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" :animate-live="locallyStartedJob === selectedJob.jobId" :execution-mode="locallyStartedJob === selectedJob.jobId ? executionMode : undefined" ordinary />
+        <ConversationWorkbench :key="selectedJob.jobId" :job-id="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" :animate-live="locallyStartedJob === selectedJob.jobId" :execution-mode="locallyStartedJob === selectedJob.jobId ? executionMode : undefined" :shared-theme="embedded" ordinary />
         </details>
       </section>
-    </main>
+    </component>
   </div>
 </template>
 

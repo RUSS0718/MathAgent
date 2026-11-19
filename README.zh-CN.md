@@ -19,22 +19,22 @@ MathAgent 面向「基于 Intern-S1 的数学智能体设计与推理创新」�
 在仓库根目录运行。需要 **uv、Python 3.11 或 3.12、Node.js 24 和 npm**。首次安装依赖需要联网。
 
 1. 在仓库根目录未跟踪的 `.env` 中设置 `INTERN_API_KEY`。
-2. 启动工作台。脚本会安装锁定依赖、构建 Vue 前端并启动本机 Flask 服务。
+2. 启动工作台。脚本会安装锁定依赖、构建数学工作台和技术审阅页面并启动本机 Flask 服务。
 
    ```shell
    uv run --no-project python scripts/start_showcase.py web
    ```
 
-3. 打开 [127.0.0.1:8090/dashboard](http://127.0.0.1:8090/dashboard)，提交题目，例如 `求解 x² − 1 = 0，并检查候选根。`。发送题目会创建 Job 并调用 Intern。
+3. 打开 [127.0.0.1:8090/dashboard](http://127.0.0.1:8090/dashboard)，提交题目，例如 `求解 x² − 1 = 0，并检查候选根。`。手动输入题目会创建 Job 并调用 Intern，选择首页示例会启动本地模拟演示。
 
 只体验界面时，追加 `--mode fake`，无需模型凭证。端口冲突时追加 `--port <端口>`。按 Ctrl+C 停止服务，运行数据默认保存在 `artifacts/showcase-live/` 或 `artifacts/showcase-local/`。
 
 <details>
 <summary>查看工作台预览与 Notebook 入口</summary>
 
-![Showcase 工作台模拟预览，包含角色事件、回放和数学报告](showcase/frontend/chat-frontend/tests/browser/snapshots/win32/conversation-1440.png)
+![MathAgent 工作台中的 D2 历史会话与原始答复](docs/assets/workbench-session.png)
 
-上图是浏览器测试的模拟快照。真实运行时可在工作台查看公开执行事件、角色阶段成果和最终答复。现场演示和回放范围见 [Showcase 彩排记录](docs/evals/onsite-demo-209-20261118.md)。
+图中为 D2 彩排会话的公开答复。原任务和数学审查范围见[现场彩排记录](docs/evals/onsite-demo-209-20261118.md)。
 
 ```shell
 uv run --no-project python scripts/start_showcase.py notebook
@@ -62,7 +62,7 @@ JupyterLab 在本机 8888 端口打开[示例 Notebook](examples/showcase.ipynb)
 
 - **求解控制面**：Python STAR Solver Harness 编排 Explore、Planner、Reasoner、Verifier、Meta 和 Researcher，管理角色交接、Checkpoint、共享预算和持久证据。LangGraph 承载工作区图执行与检查点。STAR 的角色循环由 Harness 管理，DeepAgents 通过 `AgentAdapter` 提供可选适配。见[框架边界](docs/adr/0002-langgraph-deepagents-boundary.md)。
 - **分层验证**：Verifier 记录独立审查与证据等级。确定性工具的有限检查最高为 L1。受支持的 Lean 目标通过内核及依赖审计后可达 L2，再经独立的原题与形式规格对应审查才可达 L3。整题模型审查单独记录为 `LLM_REVIEWED`。见[分层验证合同](docs/engineering/faithful-s09-contract.md)。
-- **交互与追溯**：Vue 工作台通过 Flask Job API 与 SSE 展示进展，从持久记录读取答复、公开摘要及可用证据。CLI 使用同一组服务接口，配对实验另有审阅入口。运行记录和观测范围见[角色阶段成果验收](docs/engineering/role-stage-199-acceptance.md)。
+- **交互与追溯**：工作台通过 Flask Job API 与 SSE 展示进展，从持久记录读取答复、公开摘要及可用证据。CLI 使用同一组服务接口，配对实验另有审阅入口。运行记录和观测范围见[角色阶段成果验收](docs/engineering/role-stage-199-acceptance.md)。
 
 ## 开发与高级配置
 
@@ -76,7 +76,7 @@ uv sync --locked --all-groups
 uv run python showcase_server.py --host 127.0.0.1 --port 8090 --mode fake --data-dir artifacts/showcase-local
 ```
 
-另开一个终端启动 Vite，打开 [127.0.0.1:5174/dashboard-assets/](http://127.0.0.1:5174/dashboard-assets/)。Vite 将 `/api` 代理到本机 8090 端口。
+开发 Vue 会话组件和技术审阅页时，可另开一个终端启动 Vite，打开 [127.0.0.1:5174/dashboard-assets/](http://127.0.0.1:5174/dashboard-assets/)。Vite 将 `/api` 代理到本机 8090 端口。
 
 ```powershell
 Set-Location showcase/frontend/chat-frontend
@@ -84,7 +84,7 @@ npm ci --no-audit --no-fund
 npm run dev -- --host 127.0.0.1
 ```
 
-执行 `npm run build` 后也可从 Flask 的 `/dashboard` 访问构建产物。在仓库根目录运行以下命令检查服务和创建会话。
+一键启动命令会构建普通工作台，并从 Flask 的 `/dashboard` 提供访问。在仓库根目录运行以下命令检查服务和创建会话。
 
 ```powershell
 uv run python showcase_cli.py health
