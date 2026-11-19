@@ -61,8 +61,11 @@ test('late messages follow SVG coordinates and respect motion controls', async (
     host.id = 'motion-fixture'
     host.style.cssText = 'position:fixed;inset:0;background:white;z-index:9999;width:1000px'
     document.body.append(host)
-    vue.createApp({ render: () => vue.h(Map, { selected:'',roleStates:{},messages:messages.value,flights:messages.value }) }).mount(host)
-    ;(window as any).appendMessage = () => messages.value.push({ message_id:'late',from_role:'controller',to_role:'planner' })
+    vue.createApp({ render: () => vue.h(Map, { selected:'',roleStates:{},messages:messages.value,flights:messages.value.map(handoff => handoff.message) }) }).mount(host)
+    ;(window as any).appendMessage = () => messages.value.push({
+      message: { message_id: 'late', from_role: 'controller', to_role: 'planner', summary: '公开交接测试' },
+      action: '交接', tone: 'handoff', order: 1,
+    })
   })
   await page.evaluate(() => (window as any).appendMessage())
   const map = page.locator('#motion-fixture')
