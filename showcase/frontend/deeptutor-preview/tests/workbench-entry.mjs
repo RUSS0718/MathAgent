@@ -72,7 +72,7 @@ try {
     await expect(page.getByRole('region',{name:'最终答复'})).toContainText(answer.answer)
     assert.deepEqual(writes,['/api/agent/jobs/run-demo/clarifications/req-demo'])
   })
-  await scenario('题图能力开关、大小限制、提交中断恢复与报告', async page => {
+  await scenario('题图能力开关、大小限制与提交中断恢复', async page => {
     const uploads=[], requests=[], lookups=[]; let enabled=false
     await page.route('**/api/capabilities', r => r.fulfill({json:{...caps,files:{upload:{enabled,max_bytes:131072}}}}))
     await page.route('**/api/upload_file', r => { uploads.push(r.request().method()); return r.fulfill({json:{file:{file_id:'file-demo'}}}) })
@@ -90,14 +90,68 @@ try {
     await button(page,'发送题图').click(); await expect(page.getByRole('alert')).toBeVisible()
     await expect(page).toHaveURL(/#image\/pending\//); await page.reload(); assert.equal(requests.length,1)
     await button(page,'核对原提交').click(); await expect(page).toHaveURL(base+'/dashboard/session/session-demo')
-    await page.reload(); await expect(page.getByRole('heading',{name:'最终答复 · 报告'})).toBeVisible()
-    await page.context().grantPermissions(['clipboard-read','clipboard-write'])
-    await button(page,'复制报告').click(); await expect(page.getByText('报告已复制')).toBeVisible()
-    const downloaded=page.waitForEvent('download'); await button(page,'导出 Markdown').click()
-    const file=await downloaded; const text=await readFile(await file.path(),'utf8')
-    assert.equal(text,(await page.evaluate(()=>navigator.clipboard.readText())).replaceAll('\r\n','\n')); assert.ok(text.includes(answer.answer))
+    await page.reload(); await expect(page.getByRole('heading',{name:'最终答复 · 求解'})).toBeVisible()
+    await expect(button(page,'导出 Markdown')).toHaveCount(0)
     assert.deepEqual(uploads,['POST']); assert.equal(requests.length,1); assert.equal(requests[0].body.input_user_file_id,'file-demo')
     assert.match(requests[0].body.message,/请代回。.*求解报告/s); assert.deepEqual(lookups,[requests[0].key])
+  })
+  for (const status of ['ready', 'failed', 'stale', 'unavailable', 'legacy']) {
+    await scenario(`服务端报告状态 ${status}`, async page => {
+      const writes = []
+      page.on('request', r => { if (r.method() === 'POST') writes.push(r.url()) })
+      await page.addInitScript(() => sessionStorage.setItem('mathagent:image-mode:run-demo', 'teach'))
+      await page.route('**/api/agent/jobs/run-demo/answer', r => r.fulfill({ json: {
+        ...answer, mode: 'report', presentation_status: status, answer: '已保存的原题与推导 $x = 4$。',
+      } }))
+      await page.route('**/api/agent/jobs/run-demo', r => r.fulfill({ json: {
+        ...saved, result: { execution_mode: 'live', presentation_mode: 'report' },
+      } }))
+      await page.goto(base + '/dashboard/session/session-demo')
+      const final = page.getByRole('region', { name: '最终答复' })
+      await expect(final).toHaveCount(1)
+      await expect(final).toContainText('已保存的原题与推导')
+      if (status !== 'ready') {
+        await expect(final.getByRole('heading')).toHaveText('最终答复')
+        await expect(final.getByRole('status').filter({ hasText: /格式生成失败|来源已变化|暂不可用|保留原有格式/ })).toBeVisible()
+        await expect(button(page, '导出 Markdown')).toHaveCount(0)
+      } else {
+        await expect(final.getByRole('heading')).toHaveText('最终答复 · 报告')
+        await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+        await button(page, '复制报告').click()
+        await expect(page.getByText('报告已复制')).toBeVisible()
+        const downloaded = page.waitForEvent('download')
+        await button(page, '导出 Markdown').click()
+        const text = await readFile(await (await downloaded).path(), 'utf8')
+        assert.equal(text, (await page.evaluate(() => navigator.clipboard.readText())).replaceAll('\r\n', '\n'))
+        for (const value of ['真实历史记录', '已就绪', '已代回检查。']) {
+          await expect(final).toContainText(value)
+          assert.ok(text.includes(value), value)
+        }
+        assert.ok(text.includes('$x = 4$'))
+      }
+      assert.deepEqual(writes, [])
+    })
+  }
+  await scenario('显式开启服务答复格式时用结构化字段提交', async page => {
+    const sent = []
+    await page.route('**/api/capabilities', r => r.fulfill({ json: {
+      ...caps, presentation: { enabled: true, modes: ['solve', 'teach', 'report'] },
+    } }))
+    await page.route('**/api/agent/jobs', r => {
+      sent.push(r.request().postDataJSON())
+      return r.fulfill({ json: saved })
+    })
+    await page.route('**/api/agent/jobs/run-demo/answer', r => r.fulfill({ json: answer }))
+    for (const mode of ['solve', 'teach', 'report', 'explore']) {
+      await page.goto(base + '/dashboard')
+      await page.getByLabel('数学问题').fill(`/${mode} 解方程 3x = 12`)
+      await button(page, '发送').click()
+      await expect(page).toHaveURL(base + '/dashboard/session/session-demo')
+    }
+    assert.deepEqual(sent.map(({ message, presentation_mode }) => [message, presentation_mode]), [
+      ...['solve', 'teach', 'report'].map(mode => ['解方程 3x = 12', mode]),
+      ['解方程 3x = 12\n请探索可行的解题路线，比较思路并说明如何检验。', undefined],
+    ])
   })
   await scenario('手输题目走服务，选择示例走演示', async page => {
     let sent

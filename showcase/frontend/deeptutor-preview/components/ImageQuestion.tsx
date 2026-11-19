@@ -92,7 +92,7 @@ export function ImageQuestion({ hash, initialInput, sampleUrl }: { hash: string;
       <label>补充要求（可选）<textarea value={text} maxLength={32000} rows={2} disabled={busy} onChange={e=>setText(e.target.value)} placeholder="例如：请用手算，并代回检验。"/></label>
       <div className="image-toolbar"><select aria-label="题图输出模式" value={mode} disabled={busy} onChange={e=>setMode(e.target.value as OutputMode)}>{modeKeys.map(m=><option key={m} value={m}>/{m} · {modes[m]}</option>)}</select>
         <button type="submit" className="primary-action" disabled={!file || busy}>{busy ? '正在提交…' : '发送题图'}</button></div>
-      {mode !== 'solve' && !(caps.presentation?.enabled && caps.presentation.modes.includes(mode)) && <small>此模式的格式要求会随题图一同提交。</small>}
+      {mode !== 'solve' && !(caps.presentation?.enabled && caps.presentation.modes.includes(mode)) && <small>此模式会作为题图的文字要求提交。服务提供原答复格式。</small>}
     </form>}
     {error && <p role="alert" className="error">{error} {!caps && <button onClick={()=>setRetry(n=>n+1)}>重新连接</button>}</p>}
   </section>

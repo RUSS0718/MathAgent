@@ -390,13 +390,13 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
       </section>
       <section v-else-if="selectedJob" class="active-workbench">
         <article class="workbench-problem">
-          <small>当前题干 · {{ modes[presentationMode ?? 'solve'] }}</small>
+          <small>当前题干<span v-if="presentationMode"> · 请求格式：{{ modes[presentationMode] }}</span></small>
           <small v-if="inputIntake?.problem_type" class="problem-type">{{ problemTypeLabels[inputIntake.problem_type] }}</small>
           <p v-if="selectedProblem">{{ selectedProblem }}</p>
           <p v-if="imageIntakeNotice" role="status">{{ imageIntakeNotice }}</p>
         </article>
         <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" :resuming="submitting" @resume="resumeCurrent" @changed="clarificationChanged" @cancel="cancelCurrent" />
-        <FinalAnswer :requested-mode="presentationMode" :status="selectedJob.status" :key="selectedJob.jobId" :job-id="selectedJob.jobId" />
+        <FinalAnswer :source="jobProvenance" :status="selectedJob.status" :key="selectedJob.jobId" :job-id="selectedJob.jobId" />
         <TaskRevisionPanel :key="selectedJob.jobId + ':revision'" :job-id="selectedJob.jobId" :session-id="selectedJob.sessionId" :owner="auth.username" :mode="solverMode" :state="selectedJob.result?.faithful" :disabled="submitting || checkingSubmission" @changed="clarificationChanged" />
         <details :key="selectedJob.jobId" open class="execution-process"><summary>求解过程</summary>
         <ConversationWorkbench :key="selectedJob.jobId" :job-id="selectedJob.jobId" :events="selectedJob.events" :result="workbenchResult" :replay="selectedJob.replay" :status="selectedJob.status" :error="selectedJob.error" :animate-live="locallyStartedJob === selectedJob.jobId" :execution-mode="locallyStartedJob === selectedJob.jobId ? executionMode : undefined" :shared-theme="embedded" ordinary />
