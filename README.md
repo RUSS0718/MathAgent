@@ -16,13 +16,39 @@ LangGraph 承载工作区图执行及检查点；当前 STAR 产品入口在求�
 
 ## 安装与运行
 
-需要 Python 3.11 或 3.12、uv，以及 Node.js/npm。先在仓库根目录安装依赖：
+### 一键启动
+
+在仓库根目录运行下列命令。两种入口都需要 uv 和 Python 3.11 或 3.12，首次安装依赖需要联网。默认使用 `live`，请先在未跟踪的 `.env` 中配置 `INTERN_API_KEY`。
+
+```shell
+# Web
+uv run --no-project python scripts/start_showcase.py web
+
+# Jupyter Notebook
+uv run --no-project python scripts/start_showcase.py notebook
+```
+
+- **Web** 需要 Node.js 24 和 npm。脚本安装前端锁定依赖、构建 Vue 页面并启动本机 Flask 服务。打开 [Showcase 工作台](http://127.0.0.1:8090/dashboard) 提交题目，live 数据写入 `artifacts/showcase-live/`。如需 Faithful 服务，添加 `--faithful-config` 并指定已准备好的配置文件。
+- **Notebook** 在本机 8888 端口启动 JupyterLab，打开 [示例 Notebook](examples/showcase.ipynb) 的工作副本。选择 **Run → Run All Cells**。提交单元格启动本机 Showcase HTTP 服务、创建 Job，并显示执行事件和答复。副本和任务数据保存在 `artifacts/showcase-notebook/`。Notebook 无需 Node.js。
+
+Web 发送题目或 Notebook 运行提交单元格都会触发 Intern 请求。需要离线演示时，在相应命令后添加 `--mode fake`。
+
+```shell
+uv run --no-project python scripts/start_showcase.py web --mode fake
+uv run --no-project python scripts/start_showcase.py notebook --mode fake
+```
+
+端口已被占用时，在相应命令后添加 `--port` 和可用端口。用 Ctrl+C 停止服务。
+
+### 手动启动与前端开发
+
+需要单独启动后端或使用 Vite 热更新时，先在仓库根目录安装开发依赖。
 
 ```powershell
 uv sync --locked --all-groups
 ```
 
-### 离线 fake 模式
+#### 离线 fake 模式
 
 在仓库根目录启动后端：
 
@@ -53,7 +79,7 @@ uv run python showcase_cli.py session create
 
 fake 模式返回确定性的演示结果，不访问模型。需要浏览器演示时，运行 `npm run dev`；前端不是后端启动的前置条件。
 
-### Intern live 模式
+#### Intern live 模式
 
 在仓库根目录的未跟踪 `.env` 中配置 `INTERN_API_KEY`，然后启动 live 后端：
 
@@ -74,7 +100,7 @@ uv run python showcase_cli.py probe "求解 x^2-1=0，并检查候选根。"
 
 官方评分入口位于根目录 `user_agent.py`，其演示页和 `/solve` 用法见 [Demo 使用说明](docs/demo.md)。
 
-### Faithful 普通输入服务
+#### Faithful 普通输入服务
 
 本机 live 服务可使用 [配置示例](examples/faithful-service.json)。先在本地副本中核对 Python 镜像 ID、预算和模型上下文策略，并配置未跟踪 `.env` 中的 Intern 凭证；上下文容量未知保持 `null`，示例不承诺提供方硬上限。先启动 Docker，再执行：
 
