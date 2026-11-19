@@ -108,7 +108,10 @@ def authorize_resume(connection, row, decision, *, read_only=False):
     ).fetchone() is None:
         raise WorkspaceError("star_recovery_revision_unavailable", status=409)
     # The resumed task must be the problem this Solver Run was initialized with.
-    if hashlib.sha256(str(row["problem"]).encode("utf-8")).hexdigest() != state["problem_hash"]:
+    from .image_intake import effective_problem
+
+    problem = effective_problem(row["problem"], identity.get("input_intake", {}))
+    if hashlib.sha256(problem.encode("utf-8")).hexdigest() != state["problem_hash"]:
         raise WorkspaceError("star_recovery_task_mismatch", status=409)
     budget = resume_budget(connection, row["job_id"])
     receipts = {event[0] for event in connection.execute(

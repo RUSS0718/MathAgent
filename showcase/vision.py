@@ -118,7 +118,7 @@ class VisionAdapter:
             _content=content,
         )
 
-    def complete(self, problem: str, asset: ImageAsset) -> VisionResult:
+    def complete(self, problem: str, asset: ImageAsset, **model_options: Any) -> VisionResult:
         """Call Intern with a normalized text/image content array."""
 
         if not isinstance(problem, str) or not problem.strip():
@@ -133,7 +133,8 @@ class VisionAdapter:
                             {"type": "image_url", "image_url": {"url": asset.data_url()}},
                         ],
                     }
-                ]
+                ],
+                **model_options,
             )
         except AdapterError as exc:
             return VisionResult(

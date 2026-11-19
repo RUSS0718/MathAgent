@@ -61,7 +61,9 @@ fake 模式返回确定性的演示结果，不访问模型。需要浏览器演
 uv run python showcase_server.py --host 127.0.0.1 --port 8090 --mode live --data-dir artifacts/showcase-live
 ```
 
-前端开发服务器命令与 fake 模式相同。确认设置页显示 live 且凭证已配置后，CLI 的 `probe` 会创建 Job 并调用模型：
+前端开发服务器命令与 fake 模式相同。需要提交题图时，在启动 live 后端前设置 `$env:SHOWCASE_VISION_ENABLED = '1'`。普通工作区支持文字、单张 PNG，以及文字加图片。工作台显示读图状态和基础题型。上传上限为 128 KiB（大图请先裁剪或压缩），读图与求解共享当前任务预算。详见[图文读题合同](docs/engineering/showcase-multimodal-intake.md)。
+
+确认设置页显示 live 且凭证已配置后，CLI 的 `probe` 会创建 Job 并调用模型：
 
 ```powershell
 uv run python showcase_cli.py capabilities

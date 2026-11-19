@@ -28,8 +28,12 @@ def _public_question(question, *, include_answer=True):
 
 
 def public_run_result(result):
-    """Do not copy internal clarification persistence into a Run snapshot."""
+    """Do not copy private intake or clarification text into a Run snapshot."""
+    from .image_intake import public_intake
+
     public = dict(result)
+    if "input_intake" in public:
+        public["input_intake"] = public_intake(public["input_intake"])
     identity = public.get("faithful")
     if isinstance(identity, dict) and (reply := identity.get("clarification_reply")):
         public["faithful"] = {key: value for key, value in identity.items() if key != "clarification_reply"}

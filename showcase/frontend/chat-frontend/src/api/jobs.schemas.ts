@@ -1,5 +1,16 @@
 import { z } from 'zod'
 
+export const problemTypeLabels = {
+  calculation: '计算题', equation: '方程题', inequality: '不等式题', geometry: '几何题',
+  probability_statistics: '概率统计题', proof: '证明题', unknown: '题型未识别',
+} as const
+export const inputIntakeSchema = z.object({
+  modality: z.enum(['text', 'image', 'text_image']),
+  status: z.enum(['pending', 'ready', 'failed']),
+  problem_type: z.enum(Object.keys(problemTypeLabels) as Array<keyof typeof problemTypeLabels>).optional(),
+  error: z.string().optional(),
+})
+
 export const backendJobStatusSchema = z.enum(['queued', 'running', 'waiting_input', 'succeeded', 'failed', 'canceled'])
 export const jobActionResponseSchema = z.object({ success: z.boolean(), job_id: z.string().optional(), status: backendJobStatusSchema.optional(), existing: z.boolean().optional(), error: z.string().optional() }).passthrough()
 export const activeJobSchema = z.object({ job_id: z.string(), session_id: z.string(), status: backendJobStatusSchema, last_event_id: z.number().int().nonnegative().nullable().optional() }).passthrough()

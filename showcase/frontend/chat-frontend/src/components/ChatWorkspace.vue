@@ -16,6 +16,7 @@ import { JobController } from '../runtime/jobs/job-controller'
 import { parsePresentationInput } from '../runtime/presentation/mode'
 import type { PresentationMode } from '../runtime/presentation/mode'
 import SessionSidebar from './SessionSidebar.vue'
+import { inputIntakeSchema, problemTypeLabels } from '../api/jobs.schemas'
 import ComposerBar from './ComposerBar.vue'
 import FaithfulTaskStatus from './FaithfulTaskStatus.vue'
 import UiButton from './ui/UiButton.vue'
@@ -45,6 +46,8 @@ const executionMode = ref<string>()
 const faithfulBlocked = computed(() => faithful.value?.enabled === true && !faithful.value.ready)
 const selectedFile = ref<string | undefined>()
 const selectedFileName = ref<string | undefined>()
+const uploadingImage = ref(false)
+const imageLimit = ref(0)
 const sidebarOpen = ref(false)
 const submitting = ref(false)
 const checkingSubmission = ref(false)
@@ -66,6 +69,21 @@ const selectedProblem = computed(() => {
   return [...sessions.messages].reverse().find((message) => message.analysis_job_id === jobId && message.sender === 'user')?.text ?? ''
 })
 const workbenchResult = computed(() => selectedJob.value?.result)
+const inputIntake = computed(() => inputIntakeSchema.safeParse(workbenchResult.value?.input_intake).data)
+const imageIntakeNotice = computed(() => {
+  const intake = inputIntake.value
+  if (!intake || intake.modality === 'text') return ''
+  if (intake.status === 'pending') {
+    return selectedJob.value?.status === 'failed' ? '题图读取中断，请重新提交。'
+      : selectedJob.value?.status === 'canceled' ? '题图读取已停止。' : '正在读取题图…'
+  }
+  if (intake.status === 'failed') {
+    if (intake.error === 'image_intake_interrupted') return '题图读取中断，原任务不会重发。请重新提交。'
+    if (intake.error === 'run_budget_exhausted') return '题图超出当前任务预算，请缩小图片后重新提交。'
+    return '未能读取题图，请更换清晰的图片或输入题干后再试。'
+  }
+  return '已读取题图。'
+})
 const jobProvenance = computed(() => {
   const job = selectedJob.value
   if (!job) return executionMode.value === 'fake' ? '模拟运行' : executionMode.value === 'live' ? '实时求解入口' : ''
@@ -85,7 +103,7 @@ async function send(): Promise<void> {
     notice.value = '所选答复规则当前不可用；题目未提交。'
     return
   }
-  if (!message || current.value || !sessions.currentId || submitting.value) {
+  if ((!message && !selectedFile.value) || current.value || !sessions.currentId || submitting.value || uploadingImage.value) {
     if (!message && parsed.presentationMode) notice.value = '请在输出命令后输入数学题目，例如：/teach 证明 1+1=2。'
     return
   }
@@ -184,7 +202,26 @@ async function rename(id: string): Promise<void> { const title = globalThis.prom
 async function remove(id: string): Promise<void> { if (!globalThis.confirm('删除此会话？此操作无法撤销。')) return; await sessionAction(async () => { await sessions.remove(id); if (!sessions.currentId) { globalThis.history.pushState({}, '', workspaceHref()); globalThis.dispatchEvent(new PopStateEvent('popstate')) } }) }
 function useStarter(value: string): void { draft.value = value; document.getElementById('math-question')?.focus() }
 function openSettings(): void { globalThis.location.assign(settingsHref()) }
-async function chooseFile(event: Event): Promise<void> { const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (!file) return; try { await files.upload(file); selectedFile.value = files.items.at(-1)?.file_id; selectedFileName.value = file.name } catch (error) { notice.value = error instanceof Error ? error.message : '题图上传失败，请重试。' } finally { input.value = '' } }
+async function chooseFile(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file || uploadingImage.value || submitting.value) return
+  clearFile()
+  notice.value = ''
+  if (imageLimit.value && file.size > imageLimit.value) {
+    notice.value = `题图大小不能超过 ${Math.floor(imageLimit.value / 1024)} KiB，请裁剪或压缩后重试。`
+    return
+  }
+  uploadingImage.value = true
+  try {
+    const attached = await files.upload(file)
+    selectedFile.value = attached.file_id
+    selectedFileName.value = file.name
+  } catch (error) {
+    notice.value = error instanceof Error ? error.message : '题图上传失败，请重试。'
+  } finally { uploadingImage.value = false }
+}
 function clearFile(): void { selectedFile.value = undefined; selectedFileName.value = undefined }
 async function loadReport(jobId: string): Promise<void> {
   if (sessions.messages.at(-1)?.analysis_job_id !== jobId) return
@@ -193,7 +230,9 @@ async function loadReport(jobId: string): Promise<void> {
   } catch { /* A later read can restore the saved task. */ }
 }
 function observeJob(jobId: string): void {
-  void jobController.subscribe(jobId).then(async () => {
+  void jobController.subscribe(jobId, ({ data }) => {
+    if (data.stage === 'image_intake_ready') void loadReport(jobId)
+  }).then(async () => {
     await loadReport(jobId)
     const record = jobs.byId(jobId)
     if (record?.error && selectedJob.value?.jobId === jobId) notice.value = '进展连接暂不可用，请刷新任务状态；不会自动重发求解。'
@@ -225,6 +264,7 @@ async function recoverSubmission(): Promise<void> {
       if (!record.input.revision) {
         draft.value = (record.input.presentationMode ? `/${record.input.presentationMode} ` : '') + record.input.message
         selectedFile.value = record.input.fileId
+        selectedFileName.value = record.input.fileId ? '已附题图' : undefined
       }
       solverMode.value = record.input.mode
       notice.value = '原提交尚未受理；再次提交将复用同一身份。'
@@ -247,7 +287,7 @@ async function solveAgain(): Promise<void> {
     draft: submitted
       ? (submitted.presentationMode ? `/${submitted.presentationMode} ` : '') + submitted.message
       : selectedProblem.value || draft.value,
-    fileId: submitted ? submitted.fileId : selectedFile.value,
+    fileId: submitted ? submitted.fileId : selectedJob.value?.fileId ?? selectedFile.value,
     fileName: selectedFileName.value,
     mode: submitted ? submitted.mode : solverMode.value,
   }
@@ -274,6 +314,7 @@ async function initialize(): Promise<void> {
     }
     presentationEnabled.value = capabilities.presentation?.enabled ?? false
     visionEnabled.value = capabilities.files.upload.enabled
+    imageLimit.value = capabilities.files.upload.max_bytes ?? 0
     if (visionEnabled.value) await files.load()
   } catch (error) {
     loadFailed.value = true
@@ -335,11 +376,16 @@ onUnmounted(() => { reportDisposed = true; jobController.stopAll(); document.rem
       <div v-if="loading" class="loading-state" role="status">正在加载工作台…</div>
       <section v-else-if="!selectedJob" class="workbench-entry" aria-label="提交数学题干">
         <div class="entry-heading"><h2>输入数学问题</h2></div>
-        <ComposerBar :command-enabled="presentationEnabled" :submit-label="checkingSubmission ? '正在核对…' : submitting ? '正在提交…' : '发送'" v-model="draft" :disabled="loadFailed || submitting || checkingSubmission" :busy="submitting || checkingSubmission" :submit-disabled="faithfulBlocked" :running="false" :vision-enabled="visionEnabled" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"></ComposerBar>
+        <ComposerBar :command-enabled="presentationEnabled" :submit-label="checkingSubmission ? '正在核对…' : submitting ? '正在提交…' : '发送'" v-model="draft" :disabled="loadFailed || submitting || checkingSubmission" :busy="submitting || checkingSubmission" :submit-disabled="faithfulBlocked" :running="false" :vision-enabled="visionEnabled" :has-image="Boolean(selectedFile)" :uploading="uploadingImage" :selected-file-name="selectedFileName" @submit="send" @cancel="cancelCurrent" @upload="chooseFile" @clear-file="clearFile"></ComposerBar>
         <div class="entry-examples"><span>示例题干 · 点击回填</span><button type="button" @click="useStarter('解方程 x² − 5x + 6 = 0，并验证候选根。')"><strong>方程与候选根</strong><span>解方程 x² − 5x + 6 = 0，并验证候选根。</span><UiIcon name="arrowRight" /></button><button type="button" @click="useStarter('分步推导 1 + 2 + … + n 的求和公式，n 为正整数。')"><strong>数列求和</strong><span>分步推导 1 + 2 + … + n 的求和公式。</span><UiIcon name="arrowRight" /></button></div>
       </section>
       <section v-else class="active-workbench">
-        <article class="workbench-problem"><small>当前题干 · {{ { solve: '求解', teach: '教学', report: '报告' }[presentationMode ?? 'solve'] }}</small><p>{{ selectedProblem }}</p></article>
+        <article class="workbench-problem">
+          <small>当前题干 · {{ { solve: '求解', teach: '教学', report: '报告' }[presentationMode ?? 'solve'] }}</small>
+          <small v-if="inputIntake?.problem_type" class="problem-type">{{ problemTypeLabels[inputIntake.problem_type] }}</small>
+          <p v-if="selectedProblem">{{ selectedProblem }}</p>
+          <p v-if="imageIntakeNotice" role="status">{{ imageIntakeNotice }}</p>
+        </article>
         <ClarificationPanel v-if="clarification" :key="clarification.clarification.request_id" :state="clarification" :resuming="submitting" @resume="resumeCurrent" @changed="clarificationChanged" @cancel="cancelCurrent" />
         <FinalAnswer :status="selectedJob.status" :key="selectedJob.jobId" :job-id="selectedJob.jobId" />
         <TaskRevisionPanel :key="selectedJob.jobId + ':revision'" :job-id="selectedJob.jobId" :session-id="selectedJob.sessionId" :owner="auth.username" :mode="solverMode" :state="selectedJob.result?.faithful" :disabled="submitting || checkingSubmission" @changed="clarificationChanged" />
@@ -376,6 +422,7 @@ h1 { margin: 0; font-size: 16px; }
 .active-workbench { width: min(1100px, 100%); margin-inline: auto; padding: 12px 32px 48px; }
 .workbench-problem { padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .workbench-problem small { color: var(--muted); font-size: 11px; }
+.problem-type { margin-inline-start: 12px; }
 .workbench-problem p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.7; margin: 6px 0; }
 @media(max-width: 760px) { .constellation-shell { grid-template-columns: minmax(0, 1fr); } .constellation-topbar { padding: 12px; flex-wrap: wrap; } .constellation-actions { gap: 8px; } .active-workbench { padding: 12px; } .workbench-entry { padding: 32px 0; } }
 </style>
