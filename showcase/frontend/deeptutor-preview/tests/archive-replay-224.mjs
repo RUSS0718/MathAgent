@@ -18,8 +18,16 @@ const roleUrl = `${base}/api/agent/jobs/${originalJob}/role-results/reasoner`
 const stepWait = { timeout: 20_000 }
 
 async function verifySavedSession(page, device) {
+  const listRead = page.waitForResponse(`${base}/api/sessions`)
+  assert.equal((await page.goto(`${base}/dashboard`)).status(), 200)
+  const listResponse = await listRead
+  assert.equal(listResponse.status(), 200)
+  const saved = (await listResponse.json()).find(([id]) => id === originalSession)
+  assert.ok(saved, 'D2 must be listed for the ordinary workspace account')
+  if (device === 'mobile') await page.getByRole('button', { name: '打开导航' }).click()
   const initialAnswer = page.waitForResponse(answerUrl)
-  assert.equal((await page.goto(originalSessionUrl)).status(), 200)
+  await page.locator('.saved-session-row').getByRole('button', { name: saved[1].preview, exact: true }).click()
+  await expect(page).toHaveURL(originalSessionUrl)
   assert.equal((await initialAnswer).status(), 200)
   const answer = page.getByRole('region', { name: '最终答复' })
   await expect(answer).toBeVisible(stepWait)
@@ -27,6 +35,16 @@ async function verifySavedSession(page, device) {
   await expect(answer).toContainText('a = 3', stepWait)
   const savedAnswer = await answerHash()
   await page.getByRole('button', { name: '完整星图', exact: true }).click(stepWait)
+  const handoffs = page.getByRole('list', { name: '公开交接' })
+    .getByRole('button', { name: /推理 → 步骤检查 · 送审$/ })
+  await expect(handoffs).toHaveCount(5, stepWait)
+  const handoffDetail = page.getByRole('dialog', { name: '交接依据' })
+  for (const [trigger, summary] of [[handoffs.first(), /a = 3/], [handoffs.last(), /x² − 3x \+ 2 = 0/]]) {
+    await trigger.press('Enter')
+    await expect(handoffDetail).toContainText(summary)
+    await page.keyboard.press('Escape')
+    await expect(trigger).toBeFocused()
+  }
   await page.getByRole('button', { name: /^查看推理 .*阶段成果$/ }).click(stepWait)
 
   const dialog = page.getByRole('dialog', { name: '推理阶段成果' })
@@ -94,8 +112,8 @@ try {
 
       if (device === 'mobile') await page.getByRole('button', { name: '打开导航' }).click()
       await page.getByRole('navigation', { name: '工作台导航' })
-        .getByRole('button', { name: 'D2 协作回放' }).click()
-      await expect(page.getByText('D2 真实历史', { exact: false })).toBeVisible()
+        .getByRole('button', { name: 'D2 公开成果摘录' }).click()
+      await expect(page.getByText(/原会话仅在当前工作区仍保存该记录时可从「我的会话」打开/)).toBeVisible()
       const job = page.getByText(`原任务 ${originalJob}`, { exact: true })
       await expect(job).toBeVisible()
       const step = page.getByRole('region', { name: '历史成果' })

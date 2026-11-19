@@ -10,7 +10,8 @@ export function ArchiveReplay({ index }: { index: number }) {
   function seek(i: number) { window.location.hash = `d2/${i+1}` }
   const [title, text, result] = stages[index]
   return <section className="content conversation archive-view"><h1>参数传递与复核</h1>
-    <p className="archive-source">D2 真实历史 · 2026 年 11 月 18 日 · 公开成果摘录</p>
+    <p className="archive-source">D2 公开成果摘录 · 2026 年 11 月 18 日</p>
+    <p>原会话仅在当前工作区仍保存该记录时可从「我的会话」打开。</p>
     <div className="question">先求出满足 2a + 1 = 7 的实数 a，再用所得的 a 解方程 x² − ax + 2 = 0，列出全部实数解并说明没有遗漏。</div>
     <section className="inline-panel" aria-label="历史成果" aria-live="polite"><small>步骤 {index+1} / {stages.length}</small><h2>{title}</h2><p>{text}</p><strong className="archive-result">{result}</strong></section>
     <div className="task-actions"><button disabled={index===0} onClick={() => seek(index-1)}><ArrowLeft size={14}/>上一步</button>

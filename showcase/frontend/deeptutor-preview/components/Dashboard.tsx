@@ -43,7 +43,7 @@ export function Dashboard({ service }: { service?: WorkspaceViews }) {
   const [path, fragment = ''] = route.split('#')
   const hash = '#' + fragment
   const session = service && /^\/dashboard\/session\/([A-Za-z0-9._-]{1,64})$/.exec(path)?.[1]
-  const pending = hash.startsWith('#submit/')
+  const pending = !!service && hash.startsWith('#submit/')
   const sending = useRef(false)
   const [busy, setBusy] = useState(false)
   const archive = /^#d2(?:\/[1-3])?$/.test(hash)
@@ -55,7 +55,7 @@ export function Dashboard({ service }: { service?: WorkspaceViews }) {
   const finished = !!example && completed === total
   const parent = history.find(item => item.id === active?.parentId)
   const child = active && history.find(item => item.parentId === active.id)
-  const title = session ? '会话记录' : pending ? '提交题目' : archive ? 'D2 协作回放' : image ? '题图求解' : active ? example?.title ?? triangleTitle : '新建题目'
+  const title = session ? '会话记录' : pending ? '提交题目' : archive ? 'D2 公开成果摘录' : image ? service ? '题图求解' : '题图示例' : active ? example?.title ?? triangleTitle : '新建题目'
   useEffect(() => {
     if (!example || paused || finished || archive || image || session || pending) return
     const timer = window.setTimeout(() => {
@@ -103,7 +103,7 @@ export function Dashboard({ service }: { service?: WorkspaceViews }) {
     if (!question) { setError('请选择示例题目，或在命令后输入示例原题。'); return }
     if (service && question !== chosenExample) { void sendText(question, mode); return }
     const record = examples.find(e => e.question === question)
-    if (!record && question !== triangleQuestion) { setError('请选择下方示例进行模拟，或使用题图求解。'); return }
+    if (!record && question !== triangleQuestion) { setError('请选择下方示例进行模拟。'); return }
     createTask(record ?? null, mode); setError('')
   }
   function openVariant() {
@@ -118,17 +118,21 @@ export function Dashboard({ service }: { service?: WorkspaceViews }) {
     {search !== null && <input autoFocus aria-label="搜索题目" placeholder="搜索示例和最近题目" className="search" value={search} onChange={e => setSearch(e.target.value)} />}
     <Section title="示例题库">{starters.filter(e => e.title.includes((search ?? '').trim())).map(e => <NavigationRow key={e.title} label={e.title} icon={MessageSquare} onClick={() => home(e.question)} />)}
       {search && !starters.some(e => e.title.includes(search.trim())) && <small>没有匹配的题目</small>}</Section>
-    <Section title="真实历史"><NavigationRow label="D2 协作回放" icon={History} active={archive} onClick={() => navigate('d2')} /></Section>
+    <Section title="公开摘录"><NavigationRow label="D2 公开成果摘录" icon={History} active={archive} onClick={() => navigate('d2')} /></Section>
     {service && <service.Library id={session || null} query={(search ?? '').trim()}/>}
     {history.length > 0 && <Section title="最近题目">{history.filter(item => (item.example?.title ?? triangleTitle).includes((search ?? '').trim())).map(item => <NavigationRow key={item.id} label={(item.example?.title ?? triangleTitle)+' · '+modes[item.mode]} icon={History} active={!archive && !image && !session && !pending && active?.id === item.id} onClick={() => reopen(item)} />)}</Section>}
     <div className="side-foot"><span className="status-light"/>本地工作区{service?.reviewerLink}</div>
   </nav>
   return <div className="workspace"><aside className="desktop-side">{side}</aside>
     <main><header className="pagebar"><button className="mobile-menu dt-nav-icon" onClick={() => setDrawer(true)} title="打开导航" aria-label="打开导航"><Menu size={19}/></button>
-      <Compass size={16}/>数学工作台<span className="separator">/</span><span className="page-title">{title}</span><small className="source-label">{session ? '已保存的会话' : archive ? '历史回放' : image ? '题图工作台' : service && !active && (!chosenExample || parseOutput(input).question !== chosenExample) ? '本机工作台' : '模拟运行'}</small><ThemeToggle /></header>
+      <Compass size={16}/>数学工作台<span className="separator">/</span><span className="page-title">{title}</span><small className="source-label">{session ? '已保存的会话' : archive ? '公开摘录' : image && service ? '题图工作台' : service && !active && (!chosenExample || parseOutput(input).question !== chosenExample) ? '本机工作台' : '模拟运行'}</small><ThemeToggle /></header>
     {session && service ? <service.Session key={session} id={session}/> : pending ? <section className="content conversation"><h1>提交题目</h1>
       <p role="status">{busy ? '正在提交…' : '本次提交等待确认。'}</p>{error && <p className="error" role="alert">{error}</p>}
-      <button className="primary-action" disabled={busy} onClick={() => sendText('', 'solve', fragment.slice(7))}>核对原提交</button></section> : archive || image ? <>{archive ? <ArchiveReplay index={Number(hash.split('/')[1] ?? 1)-1}/> : <ImageQuestion hash={hash} initialInput={input} sampleUrl={service ? "/dashboard-assets/workbench/examples/linear-equation.png" : "/examples/linear-equation.png"}/>}
+      <button className="primary-action" disabled={busy} onClick={() => sendText('', 'solve', fragment.slice(7))}>核对原提交</button></section> : archive || image ? <>{archive ? <ArchiveReplay index={Number(hash.split('/')[1] ?? 1)-1}/> : service ? <ImageQuestion hash={hash} initialInput={input} sampleUrl="/dashboard-assets/workbench/examples/linear-equation.png"/> :
+      <section className="content conversation image-view"><h1>题图示例</h1>
+        <p>此预览只展示示例。请打开本机 MathAgent 工作台上传 PNG 题图并求解。</p>
+        <img src="/examples/linear-equation.png" alt="示例题图：解方程 3x = 12" style={{maxWidth:'100%',height:'auto'}}/>
+      </section>}
       <div className="content subview-footer"><Button variant="ghost" size="sm" icon={<Plus size={15}/>} onClick={() => home()}>新建题目</Button></div></>
     : !active ? <section className="home content">
       <div className="dt-page-icon"><FunctionSquare size={26} strokeWidth={1.6}/></div><h1 className="dt-page-title">今天想解哪道题？</h1>

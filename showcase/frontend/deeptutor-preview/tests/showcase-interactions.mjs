@@ -61,17 +61,27 @@ try {
     await expect(page.getByRole('article')).toContainText('20')
     await expect(page.locator('.question')).toContainText('求这个三角形')
   })
-  await scenario('真实历史只读回放', async page => {
+  await scenario('公开成果摘录只读回放', async page => {
     const writes=[]; page.on('request',r=>{if(r.method()==='POST')writes.push(r.url())})
-    await btn(page,'D2 协作回放').click({timeout:1800})
+    await btn(page,'D2 公开成果摘录').click({timeout:1800})
     await visible(page.getByRole('heading',{name:'参数传递与复核'}))
     await btn(page,'下一步').click(); await expect(page.getByRole('region',{name:'历史成果'})).toContainText('x² − 3x + 2 = 0')
     await page.reload(); await visible(page.getByRole('heading',{name:'参数传递与复核'})); await expect(page.getByRole('region',{name:'历史成果'})).toContainText('步骤 2 / 3'); assert.deepEqual(writes,[])
   })
-  await scenario('图片输入独立入口', async page => {
-    await visible(btn(page,'题图求解'))
+  await scenario('独立预览只展示题图样例', async page => {
+    const apiRequests = []
+    page.on('request', request => {
+      if (new URL(request.url()).pathname.startsWith('/api/')) apiRequests.push(request.url())
+    })
     await btn(page,'题图求解').click()
-    await expect(page.getByLabel('选择 PNG 题图')).toHaveCount(1,{timeout:1800})
+    await visible(page.getByRole('img', { name: /示例题图/ }))
+    await expect(btn(page,'发送题图')).toHaveCount(0)
+    for (const hash of ['#submit/pending', '#image/pending/example', '#image/run/example']) {
+      await page.goto(new URL(hash, page.url()).href)
+      await expect(btn(page,'核对原提交')).toHaveCount(0)
+    }
+    assert.deepEqual(apiRequests, [])
+    assert.equal((await page.request.get(new URL('/api/capabilities', page.url()).href)).status(), 404)
   })
 } finally { await browser.close() }
 for (const check of checks) console.log(check.join(' | '))
