@@ -4,22 +4,25 @@
 
 ## 当前 Runtime 入口
 
-当前 CLI 仅运行确定性离线端口上的单路线样例。它不是 Provider 运行、三个机制的集成或数学效果验收。
+CLI 默认运行确定性离线端口上的单路线样例；`--population` 可运行两个预先给定候选路线的串行扩展样例：
 
 ```powershell
 $runRoot = Join-Path $env:TEMP "ricl-runtime-smoke"
 uv run python -m ricl_runtime --problem "Compute 2 + 2." --offline-answer "4" --output-root $runRoot
+
+$populationRoot = Join-Path $env:TEMP "ricl-population-smoke"
+uv run python -m ricl_runtime --population --problem "Compute 2 + 2." --offline-answer "4" --model-request-limit 2 --output-root $populationRoot
 ```
 
-命令打印结果 JSON，并在 `$runRoot/<run_id>/` 写入 `run.json` 与 `trace.jsonl`。当前验证器只适用于整数加法提示；没有适用判据时返回 `unknown`。查看 [CLI 实现](../ricl_runtime/__main__.py)、[Runtime 记录](../ricl_runtime/runtime.py)和[独立验证器](../ricl_runtime/verification.py)。当前没有 Runtime 专属的复现或能力证据文档。
+人口样例可用 `--no-aprs` 关闭排序作为普通搜索对照；两种模式复用相同候选路线与预算参数。它只验证离线调度、预算、选择和脱敏 trace，不代表 Provider 运行或数学效果。命令打印结果 JSON，并在输出目录下写入 `run.json` 与 `trace.jsonl`。当前验证器只适用于整数加法提示；没有适用判据时返回 `unknown`。查看 [CLI 实现](../ricl_runtime/__main__.py)、[Runtime 记录](../ricl_runtime/runtime.py)和[独立验证器](../ricl_runtime/verification.py)。当前没有 Runtime 专属的复现或能力证据文档。
 
 ## 三项研究机制及当前状态
 
 | 机制 | 范围入口 | Runtime CLI 状态 |
 | --- | --- | --- |
-| Shared Reasoning State | [已验证成果的存储与消费，#239](https://github.com/RUSS0718/RiCL/issues/239) | 尚未集成 |
-| Causal Search Loop：固定候选 APRS | [APRS 排序，#240](https://github.com/RUSS0718/RiCL/issues/240) | 尚未集成 |
-| Causal Search Loop：串行候选扩展 | [Population 扩展与选择，#241](https://github.com/RUSS0718/RiCL/issues/241) | 尚未集成 |
+| Shared Reasoning State | [已验证成果的存储与消费，#239](https://github.com/RUSS0718/RiCL/issues/239) | 用于 #241 样例内的验证证据上下文；无独立 CLI 开关 |
+| Causal Search Loop：固定候选 APRS | [APRS 排序，#240](https://github.com/RUSS0718/RiCL/issues/240) | 可通过 `--population` 观察排序 |
+| Causal Search Loop：串行候选扩展 | [Population 扩展与选择，#241](https://github.com/RUSS0718/RiCL/issues/241) | 可通过 `--population` 观察两个固定候选的扩展与选择 |
 | Counterfactual Control | [同源隔离分支与反馈消费，#242](https://github.com/RUSS0718/RiCL/issues/242) | 尚未集成 |
 
 三个机制分别指共享推理状态、因果搜索循环和反事实调控。搜索循环目前由两个单独的工作范围定义：先在固定候选集验收排序，再单独扩展和选择候选。路线图、代码存在和离线样例都不能证明真实运行参与或数学收益。
