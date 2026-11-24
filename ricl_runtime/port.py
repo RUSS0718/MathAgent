@@ -1,22 +1,42 @@
-"""Model-port contracts for the independent offline Runtime."""
+"""Model and controlled-tool contracts for the independent offline Runtime."""
 
 from dataclasses import dataclass
 from typing import Protocol
 
 
 @dataclass(frozen=True)
+class ToolCall:
+    """A model-proposed call, which is not evidence until an executor returns a receipt."""
+
+    tool_name: str
+    input: str
+
+
+@dataclass(frozen=True)
 class ModelReply:
-    """A free-text model result with optional provider-reported metadata."""
+    """A free-text model result with optional provider metadata and tool proposals."""
 
     text: str
     model: str = "unknown"
     input_tokens: int | str = "unknown"
     output_tokens: int | str = "unknown"
     usage_source: str = "unknown"
+    tool_calls: tuple[ToolCall, ...] = ()
+
+
+@dataclass(frozen=True)
+class ToolReceipt:
+    """A controlled executor's correlated result for a proposed tool invocation."""
+
+    invocation_id: str
+    receipt_id: str
+    tool_name: str
+    success: bool
+    output: str
 
 
 class ModelPort(Protocol):
-    """Small seam through which the Runtime requests one free-text answer."""
+    """Small seam through which the Runtime sends one bounded free-text request."""
 
     name: str
 
@@ -24,15 +44,22 @@ class ModelPort(Protocol):
         """Return one answer without controlling Runtime state or budgets."""
 
 
+class ToolExecutor(Protocol):
+    """Controlled capability that may return evidence-bearing execution receipts."""
+
+    def execute(self, invocation_id: str, call: ToolCall) -> ToolReceipt:
+        """Execute a proposed call and return its correlated result."""
+
+
 @dataclass(frozen=True)
 class DeterministicModelPort:
-    """Offline test port that returns the caller-supplied answer unchanged."""
+    """Offline port that returns the caller-supplied answer without network access."""
 
     answer: str
     name: str = "deterministic-offline"
 
     def complete(self, problem: str) -> ModelReply:
-        """Return a fixed reply and make no network or provider request."""
+        """Return a fixed reply unchanged and make no Provider request."""
 
         del problem
         return ModelReply(text=self.answer, model=self.name)
