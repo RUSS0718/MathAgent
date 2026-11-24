@@ -1,0 +1,16 @@
+# RiCL Runtime 的最小依赖边界
+
+静态盘点，源码 `9d5e7afde27ec8623ab18c010f8c4d2adad394b6`。本报告没有运行测试或模型。
+
+| 固定版本来源 | 已确认的事实 | 对迁移的含义（建议） |
+|---|---|---|
+| [SolverHarness.solve](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/solver_harness/harness.py)、[controller](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/solver_harness/controller.py) | 无计划从 Explore 开始，有计划进入 plan；`SOLVED` 可进入 review。Harness 构造 SQLiteStore 与共享连接的 SolverStateStore。 | 新 CLI 不应导入整个 Harness；内存 SQLite 不等于消除了产品状态合同。 |
+| [Explore / ModelPort](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/solver_harness/explore.py)、[VerifierPort](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/solver_harness/review.py)、[result](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/solver_harness/result.py) | `complete(request)` 与 `verify(request)` 分离；现有 `export_result()` 只导出答案文本。Explore 导入 LangGraph，[包初始化](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/__init__.py) 又引入多个产品模块。 | 复用调用约定而非旧 import 链。最小目标链是 CLI → 题目、预算 → 模型生成 → 受支持题型的独立数学检查 → 结果、状态、证据与用量文件；相同模型二次审阅不是数学 oracle。 |
+| [状态事务](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/solver_harness/storage.py)、[图演化](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/solver_harness/proof_graph_evolution.py) | ProofGraph 版本快照随 Run 状态事务演化，并触发路线失效。 | 接入时保持依赖、有效性和证据版本一致；不要求复刻产品数据库。 |
+| [APRS](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/solver_harness/aprs.py)、[Population](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/solver_harness/population_runtime.py) | APRS 可基于快照评分与重放；Population 的 worker、调度提交依赖 SQLite、CAS 和 Run 状态。 | 保留 Verified Gain 与 Pareto 选择，先串行运行，暂不移植并发 worker。 |
+| [Faithful Intervention](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/solver_harness/faithful_intervention.py)、[Serial Intervention](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/solver_harness/serial_intervention.py) | 配对实验目前用 SQLite 表，串行采用绑定父 Run、checkpoint、预算；公开 Job/API 另有身份与控制约束。 | 保留同源分支隔离、成本和采用来源，不迁移 Flask/Job 控制。 |
+| [ContextPack](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/showcase/solver_harness/context_pack.py) | 上下文投影及摘要较独立；本地字节启发式估算不等于服务商实际 token。 | 只投影当前调用需要的有效成果，记录实际进入请求的引用；估算与实测分开。 |
+
+候选聚焦检查：现有 `FinalizeTest.test_explore_plan_step_final_runs_without_supplied_plan`、`FaithfulS07GraphTest.test_sqlite_or_support_withdrawal_restart_snapshot_and_cas`、`AprsReplayTest.test_persisted_inputs_recompute_vectors_and_reject_tampering` 可在改动对应机制时作为语义参照，不应整体移植为新门禁。 [旧 ADR](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/docs/adr/0013-solver-harness-boundary-and-shared-transaction.md) 的共享产品事务是历史设计，不是新 Runtime 的前置条件。
+
+[历史真实验收](https://github.com/RUSS0718/RiCL/blob/9d5e7afde27ec8623ab18c010f8c4d2adad394b6/docs/evals/mechanism-206-20261118.md) 不是新运行时的验证。后续按模型等待、工具执行、本地状态/校验分别计时，先取得真实轨迹再决定是否合并重复校验；不从一次旧运行推断普遍瓶颈。
