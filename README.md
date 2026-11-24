@@ -4,17 +4,47 @@
 
 <p align="center"><strong>English</strong> · <a href="README.zh-CN.md">简体中文</a></p>
 
-# MathAgent · Causality-Inspired Multi-Agent Math Reasoning
+# RiCL Runtime
 
-MathAgent is a multi-agent system built for the Intern-S1 mathematical agent design and reasoning challenge. It stores propositions, inferences, candidate routes, and verification evidence in a shared state. During long reasoning runs, this lets it trace invalidated premises, reuse conclusions that still hold, and choose its next action based on independent checks.
+This repository is moving toward a research-focused mathematics reasoning runtime. The current runnable Runtime is a deterministic, offline, single-route CLI example. It is not evidence of a ready model provider, completed research mechanisms, real-model runs, or improved mathematical performance.
 
 <p align="center">
   <img alt="Technology stack: Python, Flask, SQLite, Vue, TypeScript, Vite, Node.js, and Docker" src="https://skillicons.dev/icons?i=py,flask,sqlite,vue,ts,vite,nodejs,docker&amp;theme=dark" />
 </p>
 
-[**Launch Showcase Web**](#launch-showcase-web) · [**Three causality-inspired mechanisms**](#three-causality-inspired-mechanisms) · [**Architecture**](#architecture) · [**Validation and documentation**](#validation-and-documentation)
+[**Run the offline CLI**](#run-the-offline-single-route-cli) · [**Runtime mechanisms and status**](#three-runtime-mechanisms) · [**Documentation index**](docs/README.md) · [**Legacy Showcase**](#legacy-showcase-web)
 
-## Launch Showcase Web
+## Run the offline single-route CLI
+
+From the repository root, run this deterministic example:
+
+```shell
+uv run python -m ricl_runtime --problem "Compute 2 + 2." --offline-answer "4"
+```
+
+The offline port returns the answer supplied by `--offline-answer`; it does not solve the problem with a model. The current independent verifier checks only integer addition in its supported prompt form. Other prompts have no applicable criterion and are recorded as `unknown`, not as verified. The CLI prints a JSON result and writes `run.json` and a redacted `trace.jsonl` beneath `artifacts/<run_id>/` by default. Pass `--output-root <path>` to write those artifacts elsewhere.
+
+## Three Runtime mechanisms
+
+These are separately scoped research mechanisms, not capabilities of the current single-route CLI. Their linked issues define the work and acceptance evidence.
+
+| Mechanism | Current Runtime status and scope |
+| --- | --- |
+| **Shared Reasoning State** | Not in the current CLI. [Issue #239](https://github.com/RUSS0718/RiCL/issues/239) scopes verified-result storage, dependency validity, and consumption by later requests. |
+| **Causal Search Loop** | Not in the current CLI. [Issue #240](https://github.com/RUSS0718/RiCL/issues/240) scopes APRS ranking on a fixed candidate set; [issue #241](https://github.com/RUSS0718/RiCL/issues/241) separately scopes serial candidate expansion and selection. |
+| **Counterfactual Control** | Not in the current CLI. [Issue #242](https://github.com/RUSS0718/RiCL/issues/242) scopes isolated branches from one checkpoint and verified feedback into the main loop. |
+
+## Read next
+
+- [Documentation index](docs/README.md) for the current CLI entry, scoped work, decisions, and evidence status.
+- [Development gates](docs/engineering/development-gates.md) for documentation checks and focused Runtime validation.
+- [Repository instructions](AGENTS.md), [Runtime specification #236](https://github.com/RUSS0718/RiCL/issues/236), [offline CLI issue #237](https://github.com/RUSS0718/RiCL/issues/237), and [mechanism evidence order #232](https://github.com/RUSS0718/RiCL/issues/232) for constraints and acceptance boundaries.
+
+## Legacy Showcase Web
+
+The repository also retains a separate Showcase and official-evaluation path. It is not the RiCL Runtime CLI described above. The following instructions and historical design references apply only to that legacy path.
+
+### Launch Showcase Web
 
 Run these steps from the repository root. You need **uv, Python 3.11 or 3.12, Node.js 24, and npm**. The first dependency install requires internet access.
 
@@ -44,7 +74,10 @@ JupyterLab opens a working copy of the [example notebook](examples/showcase.ipyn
 
 </details>
 
-## Three causality-inspired mechanisms
+### Showcase mechanism design
+
+The historical Showcase design below is separate from the Runtime mechanisms listed above. Its contracts and diagrams do not establish that those mechanisms run in the current CLI.
+
 
 MathAgent connects **reasoning actions, state changes, and verifiable progress**. Chapters 2–4 of the v0.6 technical report describe the design. The implementation contracts below specify the code paths, prerequisites, and validation scope.
 
@@ -54,7 +87,7 @@ MathAgent connects **reasoning actions, state changes, and verifiable progress**
 | **Verification-guided search** | Population persists candidate routes and their lineage. Rater, Pareto ranking, and APRS schedule work based on verified progress, differences between routes, and known resource costs. Routes share a budget for model calls, tools, and time. The scheduler counts repeated results only once toward overall progress. See the [serial APRS contract](docs/engineering/faithful-s08-contract.md) and [concurrent scheduling contract](docs/engineering/faithful-population-contract.md). |
 | **Strategy intervention from a shared Checkpoint** | The system forks baseline and intervention branches from the same Checkpoint. It changes one registered reasoning action while holding the problem, model, tools, and budget fixed, then compares verified progress and cost. The current contract applies to supported serial steps at an explicit pause. The comparison informs repair strategy within those conditions. See the [intervention contract](docs/engineering/faithful-s10-contract.md). |
 
-## Architecture
+### Showcase architecture
 
 ![MathAgent architecture showing the Python Orchestrator, shared proof state, verification-guided proof search, and counterfactual strategy optimization](docs/assets/mathagent-architecture.png)
 
@@ -64,7 +97,7 @@ The diagram shows the main search loop and the intervention loop from the techni
 - **Tiered verification**. The Verifier records independent review and evidence grades. A bounded deterministic tool check can reach L1. A supported Lean goal can reach L2 after kernel checking and a dependency audit. L3 also requires an independent review of how the formal specification corresponds to the original problem. Whole-solution model review is recorded as `LLM_REVIEWED`. See the [verification contract](docs/engineering/faithful-s09-contract.md).
 - **Workbench and traceability**. The Vue workbench shows progress via the Flask Job API and server-sent events (SSE). It reads answers, public summaries, and available evidence from persisted records. The CLI uses the same API, and paired experiments have a review interface. See the [role output validation record](docs/engineering/role-stage-199-acceptance.md).
 
-## Development and advanced configuration
+### Showcase development and advanced configuration
 
 <details>
 <summary>Manual startup, Vite hot reload, and CLI</summary>
@@ -110,7 +143,7 @@ You can enable `adaptive_solving` in supported configurations. Complete candidat
 
 </details>
 
-## Validation and documentation
+### Showcase validation and historical references
 
 The official evaluation uses [`user_agent.ReasoningAgent`](user_agent.py). [BASELINE.json](BASELINE.json) records the official baseline file hashes and evaluation results. Showcase runs through separate entry points. Interpret the report's ablation results within their respective datasets, denominators, and budgets. The repository validation records document the scope of the evidence for each capability.
 
