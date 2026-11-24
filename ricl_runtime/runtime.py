@@ -5,11 +5,13 @@ import json
 import subprocess
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+from .counterfactual import CounterfactualCheckpoint, InterventionAudit
 from .identity import stable_id
-from .port import ModelPort, ToolExecutor
+from .port import ModelPort, ModelReply, ToolExecutor
 from .reasoning_state import Evidence, SharedReasoningState
 from .verification import verify_integer_addition
 
@@ -22,6 +24,294 @@ class Runtime:
 
         self._model_port = model_port
         self._tool_executor = tool_executor
+
+    def run_counterfactual(
+        self,
+        problem: str,
+        *,
+        checkpoint: CounterfactualCheckpoint,
+        intervention_feedback: str,
+        intervention_auditor: Callable[[str, ModelReply], InterventionAudit] | None = None,
+        feedback_kind: Literal["random", "diagnostic"] = "diagnostic",
+        enabled: bool = True,
+        problem_id: str | None = None,
+        condition_id: str = "offline-counterfactual",
+        output_root: Path = Path("artifacts"),
+        model_request_limit: int = 3,
+    ) -> dict[str, Any]:
+        """Run isolated branches and, when budget permits, a parent continuation."""
+
+        eligible = checkpoint.failure_count > 0 and checkpoint.trigger_count < checkpoint.max_trigger_count
+        if not enabled or not eligible:
+            return self.run(problem, problem_id=problem_id, condition_id=condition_id, output_root=output_root)
+        if model_request_limit < 2:
+            raise ValueError("counterfactual branches require two shared model requests")
+        if feedback_kind not in ("random", "diagnostic"):
+            raise ValueError("feedback kind must be random or diagnostic")
+        if not intervention_feedback.strip():
+            raise ValueError("intervention feedback must be nonempty")
+
+        checkpoint_trigger_count = checkpoint.trigger_count
+        checkpoint.trigger_count += 1
+        run_id = f"run_{uuid.uuid4().hex}"
+        problem_sha256 = hashlib.sha256(problem.encode("utf-8")).hexdigest()
+        problem_id = problem_id or problem_sha256
+        parent_state = checkpoint.reasoning_state.fork()
+        evidence = parent_state.valid_evidence()
+        checkpoint_record = {
+            "visible_prefix_sha256": hashlib.sha256(
+                checkpoint.visible_prefix.encode("utf-8")
+            ).hexdigest(),
+            "failure_count": checkpoint.failure_count,
+            "trigger_count": checkpoint_trigger_count,
+            "current_action": checkpoint.current_action,
+            "current_route": checkpoint.current_route,
+            "evidence": parent_state.public_snapshot(),
+        }
+        checkpoint_sha256 = hashlib.sha256(_canonical_json(checkpoint_record).encode()).hexdigest()
+        common_parts = [problem, checkpoint.visible_prefix]
+        context = _render_evidence(evidence)
+        if context:
+            common_parts.append(f"Verified context:\n{context}")
+        common_prompt = "\n\n".join(common_parts)
+        branch_states = {"control": parent_state.fork(), "treatment": parent_state.fork()}
+        replies: list[ModelReply] = []
+        branches: dict[str, dict[str, Any]] = {}
+        trace: list[dict[str, Any]] = [
+            {
+                "event": "run_started",
+                "run_id": run_id,
+                "problem_id": problem_id,
+                "problem_sha256": problem_sha256,
+                "condition_id": condition_id,
+                "mode": "counterfactual_pair",
+            },
+            {
+                "event": "counterfactual_trigger_evaluated",
+                "qualified": True,
+                "failure_count": checkpoint.failure_count,
+                "trigger_count": checkpoint_trigger_count,
+                "maximum_trigger_count": checkpoint.max_trigger_count,
+                "checkpoint_sha256": checkpoint_sha256,
+            },
+        ]
+        started = time.perf_counter()
+        for index, arm in enumerate(("control", "treatment"), start=1):
+            prompt = common_prompt
+            if arm == "treatment":
+                prompt += f"\n\nIntervention feedback:\n{intervention_feedback}"
+            request_id = f"{run_id}_request_{index:03d}"
+            trace.append(
+                {
+                    "event": "model_request_sent",
+                    "request_id": request_id,
+                    "arm": arm,
+                    "checkpoint_sha256": checkpoint_sha256,
+                    "context_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                }
+            )
+            reply = self._model_port.complete(prompt)
+            replies.append(reply)
+            verification = verify_integer_addition(problem, reply.text)
+            scope = f"{problem_sha256}:{verification['scope']}"
+            branch_result_id = stable_id("result", {"content": reply.text, "scope": scope})
+            trace.append(
+                {
+                    "event": "branch_outcome_recorded",
+                    "request_id": request_id,
+                    "arm": arm,
+                    "result_id": branch_result_id,
+                    "answer_sha256": hashlib.sha256(reply.text.encode("utf-8")).hexdigest(),
+                    "verification_status": verification["status"],
+                }
+            )
+            if verification["status"] == "verified":
+                branch_states[arm].add_verified_result(reply.text, scope=scope)
+            branches[arm] = {
+                "request_count": 1,
+                "checkpoint_sha256": checkpoint_sha256,
+                "answer": reply.text,
+                "action": reply.action,
+                "route": reply.route,
+                "verification": verification,
+                "evidence": branch_states[arm].public_snapshot(),
+            }
+
+        control = branches["control"]
+        treatment = branches["treatment"]
+        action_changed = treatment["action"] != control["action"]
+        route_changed = treatment["route"] != control["route"]
+        audit: InterventionAudit | None = None
+        if intervention_auditor is not None:
+            proposed_audit = intervention_auditor(intervention_feedback, replies[1])
+            if isinstance(proposed_audit, InterventionAudit):
+                audit = proposed_audit
+        audit_approved = bool(
+            audit is not None
+            and audit.status == "approved"
+            and audit.source.strip()
+            and audit.feedback_consumed is True
+        )
+        effective = action_changed or route_changed
+        feedback_available = bool(
+            audit_approved and effective and treatment["verification"]["status"] == "verified"
+        )
+        parent_request_id: str | None = None
+        parent_referenced_ids: list[str] = []
+        parent_continuation: dict[str, Any] | None = None
+        parent_budget_available = feedback_available and len(replies) < model_request_limit
+        stop_reason = (
+            "parent_feedback_budget_exhausted"
+            if feedback_available and not parent_budget_available
+            else "counterfactual_pair_completed"
+        )
+        if parent_budget_available:
+            intervention_evidence = parent_state.add_verified_result(
+                treatment["answer"],
+                scope=f"{problem_sha256}:{treatment['verification']['scope']}",
+            )
+            parent_request_id = f"{run_id}_request_{len(replies) + 1:03d}"
+            parent_referenced_ids = [
+                item.evidence_id for item in parent_state.valid_evidence()
+            ]
+            parent_prompt_parts = [problem, checkpoint.visible_prefix]
+            parent_context = _render_evidence(parent_state.valid_evidence())
+            if parent_context:
+                parent_prompt_parts.append(f"Verified context:\n{parent_context}")
+            parent_prompt = "\n\n".join(parent_prompt_parts)
+            trace.append(
+                {
+                    "event": "model_request_sent",
+                    "request_id": parent_request_id,
+                    "arm": "parent",
+                    "checkpoint_sha256": checkpoint_sha256,
+                    "referenced_evidence_ids": parent_referenced_ids,
+                    "context_sha256": hashlib.sha256(parent_prompt.encode("utf-8")).hexdigest(),
+                }
+            )
+            parent_reply = self._model_port.complete(parent_prompt)
+            replies.append(parent_reply)
+            parent_verification = verify_integer_addition(problem, parent_reply.text)
+            parent_scope = f"{problem_sha256}:{parent_verification['scope']}"
+            parent_result_id = stable_id(
+                "result", {"content": parent_reply.text, "scope": parent_scope}
+            )
+            parent_continuation = {
+                "request_id": parent_request_id,
+                "answer": parent_reply.text,
+                "action": parent_reply.action,
+                "route": parent_reply.route,
+                "verification": parent_verification,
+            }
+            if parent_verification["status"] == "verified":
+                parent_state.add_verified_result(parent_reply.text, scope=parent_scope)
+            trace.append(
+                {
+                    "event": "parent_continuation_recorded",
+                    "request_id": parent_request_id,
+                    "result_id": parent_result_id,
+                    "answer_sha256": hashlib.sha256(parent_reply.text.encode("utf-8")).hexdigest(),
+                    "verification_status": parent_verification["status"],
+                }
+            )
+        trace.extend(
+            [
+                {
+                    "event": "intervention_feedback_consumed",
+                    "feedback_consumed": bool(
+                        intervention_evidence.evidence_id in parent_referenced_ids
+                    ) if parent_budget_available else False,
+                    "consumption_basis": "present_in_parent_request" if parent_budget_available else (
+                        "budget_exhausted" if feedback_available else "not_qualified"
+                    ),
+                    "parent_request_id": parent_request_id,
+                    "referenced_evidence_ids": parent_referenced_ids,
+                    "treatment_reported_feedback_consumed": bool(
+                        audit and audit.feedback_consumed is True
+                    ),
+                    "audit_status": audit.status if audit else "unknown",
+                    "audit_source": audit.source if audit else "",
+                },
+                {"event": "intervention_action_change_observed", "changed": action_changed},
+                {"event": "intervention_route_change_observed", "changed": route_changed},
+                {
+                    "event": "intervention_adjudicated",
+                    "effective": effective,
+                    "treatment_verified": treatment["verification"]["status"] == "verified",
+                    "feedback_available_to_parent": parent_budget_available,
+                    "feedback_eligible": feedback_available,
+                    "feedback_consumed_by_parent": bool(parent_request_id),
+                },
+            ]
+        )
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+        config = {
+            "mode": "offline",
+            "route": "single",
+            "model_port": self._model_port.name,
+            "mechanisms": {"counterfactual_intervention": True},
+            "feedback_kind": feedback_kind,
+            "budget": {"scope": "run_shared", "model_requests": model_request_limit},
+            "verifier": "integer_addition_v1",
+        }
+        config_sha256 = hashlib.sha256(_canonical_json(config).encode("utf-8")).hexdigest()
+        run_dir = output_root / run_id
+        run_dir.mkdir(parents=True, exist_ok=False)
+        trace_path = run_dir / "trace.jsonl"
+        run_path = run_dir / "run.json"
+        trace.append({"event": "run_stopped", "status": "completed", "stop_reason": stop_reason})
+        result_record = {
+            "schema_version": 1,
+            "run_id": run_id,
+            "source": {"revision": _source_revision()},
+            "config": config,
+            "config_sha256": config_sha256,
+            "problem": {"id": problem_id, "sha256": problem_sha256},
+            "condition_id": condition_id,
+            "model": {"requested": self._model_port.name, "actual": replies[-1].model or "unknown"},
+            "budget": {
+                "scope": "run_shared",
+                "model_requests": {"limit": model_request_limit, "used": len(replies)},
+                "tokens": {"limit": "unknown", "used": _sum_usage(replies, "tokens")},
+                "tools": {"limit": 0, "used": 0},
+                "elapsed_ms": elapsed_ms,
+            },
+            "usage": {
+                "input_tokens": _sum_usage(replies, "input_tokens"),
+                "output_tokens": _sum_usage(replies, "output_tokens"),
+                "source": _usage_source(replies),
+            },
+            "checkpoint": checkpoint_record,
+            "branches": branches,
+            "intervention": {
+                "qualified": True,
+                "feedback_kind": feedback_kind,
+                "audit_status": audit.status if audit else "unknown",
+                "audit_source": audit.source if audit else "",
+                "feedback_consumed": feedback_available,
+                "feedback_consumed_by_parent": bool(parent_request_id),
+                "treatment_reported_feedback_consumed": bool(
+                    audit and audit.feedback_consumed is True
+                ),
+                "action_changed": action_changed,
+                "route_changed": route_changed,
+                "effective": effective,
+                "feedback_available_to_parent": parent_budget_available,
+                "feedback_eligible": feedback_available,
+                "parent_feedback": treatment["answer"] if parent_request_id else None,
+                "parent_request_id": parent_request_id,
+                "trigger_count_after": checkpoint.trigger_count,
+            },
+            "parent_continuation": parent_continuation,
+            "parent_evidence": parent_state.public_snapshot(),
+            "run": {"status": "completed", "stop_reason": stop_reason},
+            "artifacts": {"run": str(run_path), "trace": str(trace_path)},
+        }
+        trace_path.write_text(
+            "".join(f"{_canonical_json(event)}\n" for event in trace), encoding="utf-8"
+        )
+        run_path.write_text(json.dumps(result_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return result_record
 
     def run(
         self,

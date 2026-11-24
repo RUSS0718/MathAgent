@@ -22,6 +22,8 @@ class ModelReply:
     output_tokens: int | str = "unknown"
     usage_source: str = "unknown"
     tool_calls: tuple[ToolCall, ...] = ()
+    action: str | None = None
+    route: str | None = None
 
 
 @dataclass(frozen=True)

@@ -113,6 +113,13 @@ class SharedReasoningState:
         evidence = self._evidence.get(evidence_id)
         return evidence is not None and evidence.valid
 
+    def fork(self) -> "SharedReasoningState":
+        """Copy the current evidence snapshot for an isolated branch."""
+
+        branch = SharedReasoningState()
+        branch._evidence = self._evidence.copy()
+        return branch
+
     def valid_evidence(self) -> tuple[Evidence, ...]:
         """Return current valid evidence in insertion order."""
 
