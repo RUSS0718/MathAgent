@@ -6,21 +6,50 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 from urllib.parse import urlsplit
 
-from ..port import ModelReply
+from ..port import ModelPortFailure, ModelReply
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_RESPONSE_BYTES = 1_048_576
+MAX_OUTPUT_TOKENS = 256
+ALLOWED_HOST = "api.deepseek.com"
+ALLOWED_MODELS = (
+    "deepseek-flash",
+    "deepseek-v4-flash",
+    "deepseek-v4-flash-vision-exp",
+)
+MAX_PROMPT_BYTES = 16 * 1024
+INPUT_FRAMING_MARGIN_TOKENS = 1024
+COST_LIMIT_USD = Decimal("0.05")
+INPUT_PEAK_USD_PER_MILLION = Decimal("0.30")
+OUTPUT_PEAK_USD_PER_MILLION = Decimal("1.20")
+PRICING_SOURCE = "https://api-docs.deepseek.com/quick_start/pricing/"
+MAX_PREFLIGHT_INPUT_TOKENS = MAX_PROMPT_BYTES + INPUT_FRAMING_MARGIN_TOKENS
+MAX_PREFLIGHT_COST_USD = (
+    MAX_PREFLIGHT_INPUT_TOKENS * INPUT_PEAK_USD_PER_MILLION
+    + MAX_OUTPUT_TOKENS * OUTPUT_PEAK_USD_PER_MILLION
+) / Decimal(1_000_000)
 
 
 class ProviderConfigurationError(ValueError):
     """Report missing or malformed adapter configuration without exposing values."""
 
 
-class ProviderHTTPError(RuntimeError):
+class ProviderPreflightError(ModelPortFailure):
+    """Report a rejected request that was stopped before opening a connection."""
+
+    failure_status = "preflight_rejected"
+    request_sent = False
+
+
+class ProviderHTTPError(ModelPortFailure):
     """Report a complete non-success HTTP response using only its status code."""
+
+    failure_status = "protocol_failed"
+    request_sent = True
 
     def __init__(self, status_code: int) -> None:
         """Retain a safe status code without response headers or body."""
@@ -29,16 +58,25 @@ class ProviderHTTPError(RuntimeError):
         super().__init__(f"provider returned HTTP status {status_code}")
 
 
-class ProviderProtocolError(RuntimeError):
+class ProviderProtocolError(ModelPortFailure):
     """Report an invalid or over-limit successful provider response, redacted."""
 
+    failure_status = "protocol_failed"
+    request_sent = True
 
-class ProviderTimeoutError(TimeoutError):
+
+class ProviderTimeoutError(ModelPortFailure, TimeoutError):
     """Report that the single provider request exceeded its transport timeout."""
 
+    failure_status = "timeout"
+    request_sent = "unknown"
 
-class ProviderOutcomeUnknownError(ConnectionError):
+
+class ProviderOutcomeUnknownError(ModelPortFailure, ConnectionError):
     """Report an interrupted request whose remote completion cannot be known."""
+
+    failure_status = "unknown_outcome"
+    request_sent = "unknown"
 
 
 class _RejectRedirects(urllib.request.HTTPRedirectHandler):
@@ -53,9 +91,10 @@ class _RejectRedirects(urllib.request.HTTPRedirectHandler):
 
 @dataclass(frozen=True)
 class DeepSeekReply(ModelReply):
-    """Carry the provider request ID without expanding the shared ModelPort contract."""
+    """Carry provider response metadata without expanding the shared ModelPort contract."""
 
     request_id: str = "unknown"
+    finish_reason: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -65,6 +104,7 @@ class DeepSeekModelPort:
     api_key: str = field(repr=False)
     base_url: str
     model: str
+    thinking: str = "disabled"
 
     def __post_init__(self) -> None:
         """Reject incomplete values without echoing credentials or URLs in errors."""
@@ -73,23 +113,11 @@ class DeepSeekModelPort:
             raise ProviderConfigurationError("API_KEY must be a non-empty header-safe value")
         if not self.model or not self.model.strip():
             raise ProviderConfigurationError("MODEL must be non-empty")
-        try:
-            parsed = urlsplit(self.base_url)
-            valid_base_url = (
-                parsed.scheme in {"http", "https"}
-                and bool(parsed.netloc)
-                and parsed.username is None
-                and parsed.password is None
-                and not parsed.query
-                and not parsed.fragment
-            )
-        except ValueError:
-            valid_base_url = False
-        if not valid_base_url:
-            raise ProviderConfigurationError("BASE_URL must be an HTTP(S) base URL")
+        if self.thinking not in {"enabled", "disabled"}:
+            raise ProviderConfigurationError("thinking must be enabled or disabled")
 
     @classmethod
-    def from_environment(cls) -> "DeepSeekModelPort":
+    def from_environment(cls, *, thinking: str = "disabled") -> "DeepSeekModelPort":
         """Read only the three explicitly selected, non-persisted environment values."""
 
         api_key = os.environ.get("API_KEY")
@@ -97,7 +125,7 @@ class DeepSeekModelPort:
         model = os.environ.get("MODEL")
         if not api_key or not base_url or not model:
             raise ProviderConfigurationError("API_KEY, BASE_URL, and MODEL must be configured")
-        return cls(api_key=api_key, base_url=base_url, model=model)
+        return cls(api_key=api_key, base_url=base_url, model=model, thinking=thinking)
 
     @property
     def name(self) -> str:
@@ -105,11 +133,87 @@ class DeepSeekModelPort:
 
         return self.model
 
+    @property
+    def provider(self) -> str:
+        """Identify this adapter without including endpoint or credential data."""
+
+        return "deepseek"
+
+    @property
+    def max_output_tokens(self) -> int:
+        """Expose the fixed completion-token ceiling for the Run config digest."""
+
+        return MAX_OUTPUT_TOKENS
+
+    @property
+    def cost_limit_usd(self) -> float:
+        """Expose the fixed per-request ceiling used by preflight."""
+
+        return float(COST_LIMIT_USD)
+
+    @property
+    def preflight_cost_upper_bound_usd(self) -> str:
+        """Expose the fixed worst-case input and output bound."""
+
+        return format(MAX_PREFLIGHT_COST_USD, "f")
+
+    @property
+    def preflight_config(self) -> dict[str, object]:
+        """Expose only non-secret request bounds and pricing inputs for the Run digest."""
+
+        return {
+            "endpoint_host": ALLOWED_HOST,
+            "model_allowlist": list(ALLOWED_MODELS),
+            "max_prompt_bytes": MAX_PROMPT_BYTES,
+            "input_token_framing_margin": INPUT_FRAMING_MARGIN_TOKENS,
+            "max_input_tokens_upper_bound": MAX_PREFLIGHT_INPUT_TOKENS,
+            "peak_price_usd_per_million_tokens": {
+                "input": str(INPUT_PEAK_USD_PER_MILLION),
+                "output": str(OUTPUT_PEAK_USD_PER_MILLION),
+            },
+            "cost_limit_usd": self.cost_limit_usd,
+            "preflight_cost_upper_bound_usd": self.preflight_cost_upper_bound_usd,
+            "pricing_source": PRICING_SOURCE,
+        }
+
     def complete(self, problem: str) -> DeepSeekReply:
         """Return one validated completion or a sanitized, non-retryable transport error."""
 
+        try:
+            parsed = urlsplit(self.base_url)
+            valid_base_url = (
+                parsed.scheme == "https"
+                and parsed.hostname == ALLOWED_HOST
+                and parsed.port in (None, 443)
+                and parsed.path.rstrip("/") in {"", "/v1"}
+                and parsed.username is None
+                and parsed.password is None
+                and not parsed.query
+                and not parsed.fragment
+            )
+        except ValueError:
+            valid_base_url = False
+        if not valid_base_url or self.model not in ALLOWED_MODELS:
+            raise ProviderPreflightError("provider host or model is not allowlisted")
+
+        prompt_bytes = len(problem.encode("utf-8"))
+        if prompt_bytes > MAX_PROMPT_BYTES:
+            raise ProviderPreflightError("prompt exceeds the configured byte limit")
+        input_tokens_upper_bound = prompt_bytes + INPUT_FRAMING_MARGIN_TOKENS
+        cost_upper_bound = (
+            input_tokens_upper_bound * INPUT_PEAK_USD_PER_MILLION
+            + MAX_OUTPUT_TOKENS * OUTPUT_PEAK_USD_PER_MILLION
+        ) / Decimal(1_000_000)
+        if cost_upper_bound > COST_LIMIT_USD:
+            raise ProviderPreflightError("request exceeds the configured cost limit")
+
         payload = json.dumps(
-            {"model": self.model, "messages": [{"role": "user", "content": problem}]},
+            {
+                "model": self.model,
+                "messages": [{"role": "user", "content": problem}],
+                "max_tokens": MAX_OUTPUT_TOKENS,
+                "thinking": {"type": self.thinking},
+            },
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
@@ -167,6 +271,7 @@ class DeepSeekModelPort:
             output_tokens=_token_count(usage.get("completion_tokens")),
             usage_source="provider" if _has_usage(usage) else "unknown",
             request_id=_nonempty_string(response_data.get("id")) or "unknown",
+            finish_reason=_nonempty_string(choices[0].get("finish_reason")) or "unknown",
         )
 
 

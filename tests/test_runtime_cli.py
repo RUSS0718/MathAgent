@@ -2,13 +2,19 @@
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
 
 from ricl_runtime import DeterministicModelPort, Runtime
+from ricl_runtime.__main__ import main
+from ricl_runtime.port import ModelPortFailure
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
@@ -52,6 +58,204 @@ class RuntimeOfflineTests(unittest.TestCase):
         self.assertEqual(
             events[1]["answer_sha256"], hashlib.sha256(answer.encode("utf-8")).hexdigest()
         )
+
+    def test_runtime_normalizes_provider_specific_failure_status(self) -> None:
+        class UnclassifiedFailurePort:
+            name = "fixture-model"
+
+            def complete(self, problem: str):
+                del problem
+                failure = ModelPortFailure()
+                failure.failure_status = "provider_custom_failure"
+                raise failure
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = Runtime(UnclassifiedFailurePort()).run(
+                "fixture problem",
+                output_root=Path(directory),
+            )
+
+        self.assertEqual(result["run"]["failure_status"], "unknown_outcome")
+        self.assertEqual(
+            result["provider_requests"][0]["failure_status"], "unknown_outcome"
+        )
+        self.assertEqual(result["provider_requests"][0]["status"], "unknown_outcome")
+
+    def test_deepseek_cli_persists_a_redacted_timeout_failure(self) -> None:
+        problem = "private fixture problem"
+        credential = "inert-fixture-secret"
+        base_url = "https://api.deepseek.com/v1"
+        opener = Mock()
+        opener.open.side_effect = TimeoutError(f"{problem} {credential} {base_url}")
+        output = StringIO()
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(
+                os.environ,
+                {"API_KEY": credential, "BASE_URL": base_url, "MODEL": "deepseek-flash"},
+            ),
+            patch(
+                "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+                return_value=opener,
+            ),
+            redirect_stdout(output),
+        ):
+            exit_code = main(
+                [
+                    "--provider",
+                    "deepseek",
+                    "--thinking",
+                    "disabled",
+                    "--problem",
+                    problem,
+                    "--output-root",
+                    directory,
+                ]
+            )
+            result = json.loads(output.getvalue())
+            run_dir = Path(directory) / result["run_id"]
+            saved = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+            trace = (run_dir / "trace.jsonl").read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(saved, result)
+        self.assertEqual(result["run"]["status"], "failed")
+        self.assertEqual(result["run"]["failure_status"], "timeout")
+        self.assertEqual(result["run"]["stop_reason"], "timeout")
+        self.assertEqual(result["model"]["requested"], "deepseek-flash")
+        self.assertEqual(result["model"]["actual"], "unknown")
+        self.assertEqual(result["model"]["provider_request_id"], "unknown")
+        self.assertEqual(result["usage"]["tokens"], "unknown")
+        self.assertEqual(result["usage"]["source"], "unknown")
+        self.assertEqual(result["budget"]["model_requests"], {"limit": 1, "used": 1})
+        self.assertEqual(result["provider_requests"][0]["status"], "timeout")
+        self.assertEqual(result["provider_requests"][0]["failure_status"], "timeout")
+        self.assertEqual(opener.open.call_count, 1)
+        for secret in (problem, credential, base_url):
+            self.assertNotIn(secret, output.getvalue() + json.dumps(saved) + trace)
+
+    def test_deepseek_cli_persists_success_without_secret_configuration(self) -> None:
+        credential = "inert-cli-secret"
+        base_url = "https://api.deepseek.com/v1"
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps(
+            {
+                "id": "provider-request-fixture",
+                "model": "DeepSeek-V4.1-Flash-1017",
+                "choices": [{"message": {"content": "4"}}],
+                "usage": {"prompt_tokens": 12, "completion_tokens": 3},
+            }
+        ).encode()
+        opener = Mock()
+        opener.open.return_value = response
+        output = StringIO()
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(
+                os.environ,
+                {"API_KEY": credential, "BASE_URL": base_url, "MODEL": "deepseek-v4-flash"},
+            ),
+            patch(
+                "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+                return_value=opener,
+            ),
+            redirect_stdout(output),
+        ):
+            exit_code = main(
+                [
+                    "--provider",
+                    "deepseek",
+                    "--thinking",
+                    "enabled",
+                    "--problem",
+                    "Compute 2 + 2.",
+                    "--output-root",
+                    directory,
+                ]
+            )
+            result = json.loads(output.getvalue())
+            run_dir = Path(directory) / result["run_id"]
+            saved = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+            trace = (run_dir / "trace.jsonl").read_text(encoding="utf-8")
+
+        request = opener.open.call_args.args[0]
+        payload = json.loads(request.data)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(saved, result)
+        self.assertEqual(result["run"]["status"], "completed")
+        self.assertEqual(result["model"]["requested"], "deepseek-v4-flash")
+        self.assertEqual(result["model"]["actual"], "DeepSeek-V4.1-Flash-1017")
+        self.assertEqual(result["model"]["provider_request_id"], "provider-request-fixture")
+        self.assertIs(result["provider_requests"][0]["request_sent"], True)
+        self.assertEqual(result["usage"]["tokens"], 15)
+        self.assertEqual(result["usage"]["source"], "provider")
+        self.assertEqual(result["config"]["reasoning_config"], {"type": "enabled"})
+        self.assertEqual(payload["max_tokens"], 256)
+        self.assertEqual(payload["thinking"], {"type": "enabled"})
+        self.assertEqual(payload["model"], "deepseek-v4-flash")
+        self.assertNotIn("tools", payload)
+        self.assertEqual(opener.open.call_count, 1)
+        self.assertNotIn(credential, output.getvalue() + json.dumps(saved) + trace)
+        self.assertNotIn(base_url, output.getvalue() + json.dumps(saved) + trace)
+
+    def test_deepseek_cli_rejects_oversized_prompt_before_request(self) -> None:
+        credential = "inert-cli-secret"
+        base_url = "https://api.deepseek.com/v1"
+        problem = "x" * (16 * 1024 + 1)
+        opener = Mock()
+        output = StringIO()
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(
+                os.environ,
+                {"API_KEY": credential, "BASE_URL": base_url, "MODEL": "deepseek-flash"},
+            ),
+            patch(
+                "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+                return_value=opener,
+            ),
+            redirect_stdout(output),
+        ):
+            exit_code = main(
+                [
+                    "--provider",
+                    "deepseek",
+                    "--thinking",
+                    "enabled",
+                    "--problem",
+                    problem,
+                    "--output-root",
+                    directory,
+                ]
+            )
+            result = json.loads(output.getvalue())
+            run_dir = Path(directory) / result["run_id"]
+            saved = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+            trace = (run_dir / "trace.jsonl").read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(saved, result)
+        self.assertEqual(result["run"]["failure_status"], "preflight_rejected")
+        self.assertEqual(result["provider_requests"][0]["status"], "preflight_rejected")
+        self.assertEqual(
+            result["provider_requests"][0]["failure_status"], "preflight_rejected"
+        )
+        self.assertIs(result["provider_requests"][0]["request_sent"], False)
+        self.assertEqual(result["budget"]["cost_usd"]["limit"], 0.05)
+        self.assertEqual(
+            result["budget"]["cost_usd"]["preflight_upper_bound"], "0.0055296"
+        )
+        self.assertEqual(result["budget"]["cost_usd"]["used"], "unknown")
+        self.assertEqual(result["config"]["provider_config"]["cost_limit_usd"], 0.05)
+        self.assertEqual(
+            result["config"]["provider_config"]["preflight_cost_upper_bound_usd"], "0.0055296"
+        )
+        opener.open.assert_not_called()
+        for secret in (problem, credential, base_url):
+            self.assertNotIn(secret, output.getvalue() + json.dumps(saved) + trace)
 
     def test_missing_independent_criterion_is_explicitly_unknown(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -109,6 +313,7 @@ class RuntimeOfflineTests(unittest.TestCase):
         self.assertEqual(saved, result)
         self.assertEqual(result["result"]["answer"], "The sum is 4.")
         self.assertEqual(result["verification"]["status"], "verified")
+        self.assertIs(result["provider_requests"][0]["request_sent"], False)
         self.assertTrue(trace)
 
 
