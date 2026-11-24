@@ -1,5 +1,6 @@
 """Minimal independent RiCL research Runtime."""
 
+from .aprs import Candidate, VerifierEvidence, evaluate_fixed_candidates
 from .counterfactual import CounterfactualCheckpoint, InterventionAudit
 from .port import (
     DeterministicModelPort,
@@ -13,6 +14,7 @@ from .reasoning_state import Evidence, SharedReasoningState
 from .runtime import Runtime
 
 __all__ = [
+    "Candidate",
     "CounterfactualCheckpoint",
     "DeterministicModelPort",
     "Evidence",
@@ -24,4 +26,6 @@ __all__ = [
     "ToolCall",
     "ToolExecutor",
     "ToolReceipt",
+    "VerifierEvidence",
+    "evaluate_fixed_candidates",
 ]
