@@ -4,6 +4,12 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+class ModelPortFailure(Exception):
+    """A sanitized model-call failure with a stable Run classification."""
+
+    failure_status = "unknown_outcome"
+
+
 @dataclass(frozen=True)
 class ToolCall:
     """A model-proposed call, which is not evidence until an executor returns a receipt."""

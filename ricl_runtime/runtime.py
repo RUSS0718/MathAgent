@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from .counterfactual import CounterfactualCheckpoint, InterventionAudit
 from .identity import stable_id
-from .port import ModelPort, ModelReply, ToolExecutor
+from .port import ModelPort, ModelPortFailure, ModelReply, ToolExecutor
 from .reasoning_state import Evidence, SharedReasoningState
 from .verification import verify_integer_addition
 
@@ -350,8 +350,10 @@ class Runtime:
             }
         ]
         replies = []
+        provider_requests: list[dict[str, Any]] = []
         result: dict[str, Any] | None = None
         verification: dict[str, object] = {}
+        failure_status: str | None = None
         started = time.perf_counter()
 
         while request_count < request_limit:
@@ -380,10 +382,117 @@ class Runtime:
                 result["id"] if result else None,
                 _state_fingerprint(state),
             )
-            reply = self._model_port.complete(prompt)
             request_count += 1
-            replies.append(reply)
+            try:
+                reply = self._model_port.complete(prompt)
+            except ModelPortFailure as error:
+                failure_status = error.failure_status
+                if failure_status not in {
+                    "protocol_failed",
+                    "unknown_outcome",
+                    "timeout",
+                    "budget_exhausted",
+                    "invalid_output",
+                    "preflight_rejected",
+                }:
+                    failure_status = "unknown_outcome"
+                request_sent = getattr(error, "request_sent", "unknown")
+                request_record = {
+                    "request_id": request_id,
+                    "requested_model": self._model_port.name,
+                    "actual_model": "unknown",
+                    "provider_request_id": "unknown",
+                    "request_sent": request_sent,
+                    "status": failure_status,
+                    "failure_status": failure_status,
+                    "usage": {
+                        "input_tokens": "unknown",
+                        "output_tokens": "unknown",
+                        "source": "unknown",
+                    },
+                }
+                if isinstance(getattr(error, "status_code", None), int):
+                    request_record["http_status"] = error.status_code
+                provider_requests.append(request_record)
+                trace.append(
+                    {
+                        "event": (
+                            "model_request_rejected_before_send"
+                            if request_sent is False
+                            else "model_request_failed"
+                        ),
+                        "request_id": request_id,
+                        "request_sent": request_sent,
+                        "status": failure_status,
+                        "failure_status": failure_status,
+                        **(
+                            {"http_status": error.status_code}
+                            if "http_status" in request_record
+                            else {}
+                        ),
+                    }
+                )
+                break
 
+            replies.append(reply)
+            provider_request_id = getattr(reply, "request_id", "unknown") or "unknown"
+            actual_model = reply.model or "unknown"
+            finish_reason = getattr(reply, "finish_reason", "unknown") or "unknown"
+            if finish_reason == "length":
+                failure_status = "budget_exhausted"
+            elif not reply.text.strip():
+                failure_status = "invalid_output"
+            if failure_status is not None:
+                verification = {
+                    "status": "unknown",
+                    "applicable": False,
+                    "scope": "none",
+                    "reason": failure_status,
+                }
+                provider_requests.append(
+                    {
+                        "request_id": request_id,
+                        "requested_model": self._model_port.name,
+                        "actual_model": actual_model,
+                        "provider_request_id": provider_request_id,
+                        "request_sent": getattr(self._model_port, "provider", "offline") != "offline",
+                        "status": failure_status,
+                        "failure_status": failure_status,
+                        "usage": {
+                            "input_tokens": reply.input_tokens,
+                            "output_tokens": reply.output_tokens,
+                            "source": reply.usage_source,
+                        },
+                    }
+                )
+                trace.append(
+                    {
+                        "event": "model_request_failed",
+                        "request_id": request_id,
+                        "provider_request_id": provider_request_id,
+                        "status": failure_status,
+                        "failure_status": failure_status,
+                        "actual_model": actual_model,
+                        "usage_source": reply.usage_source,
+                    }
+                )
+                break
+
+            provider_requests.append(
+                {
+                    "request_id": request_id,
+                    "requested_model": self._model_port.name,
+                    "actual_model": actual_model,
+                    "provider_request_id": provider_request_id,
+                    "request_sent": getattr(self._model_port, "provider", "offline") != "offline",
+                    "status": "completed",
+                    "usage": {
+                        "input_tokens": reply.input_tokens,
+                        "output_tokens": reply.output_tokens,
+                        "source": reply.usage_source,
+                    },
+                }
+            )
             verification = verify_integer_addition(problem, reply.text)
             result_scope = f"{problem_sha256}:{verification['scope']}"
             result_id = stable_id("result", {"content": reply.text, "scope": result_scope})
@@ -470,22 +579,32 @@ class Runtime:
             stop_reason = "model_request_budget_exhausted"
             break
 
-        if result is None:
+        if result is None and failure_status is None:
             raise RuntimeError("Runtime ended without a model response")
         if stop_reason is None:
             stop_reason = "model_request_budget_exhausted"
 
         elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+        provider_config = {
+            "provider": getattr(self._model_port, "provider", "offline"),
+            "thinking": {"type": self._model_port.thinking}
+            if hasattr(self._model_port, "thinking")
+            else "none",
+            "max_tokens": getattr(self._model_port, "max_output_tokens", "unknown"),
+            "tools_enabled": False,
+        }
+        provider_config.update(getattr(self._model_port, "preflight_config", {}))
         config = {
-            "mode": "offline",
+            "mode": "provider" if provider_config["provider"] != "offline" else "offline",
             "route": "single",
             "model_port": self._model_port.name,
-            "reasoning_config": "none",
+            "provider_config": provider_config,
+            "reasoning_config": provider_config["thinking"],
             "mechanisms": {"shared_reasoning_state": reasoning_state_enabled},
             "budget": {
                 "scope": "run_shared",
                 "model_requests": request_limit,
-                "tokens": "unknown",
+                "tokens": provider_config["max_tokens"],
                 "tools": tool_limit,
                 "elapsed_limit_ms": "unknown",
                 "cost_usd": "unknown",
@@ -500,7 +619,13 @@ class Runtime:
         run_path = run_dir / "run.json"
         input_tokens = _sum_usage(replies, "input_tokens")
         output_tokens = _sum_usage(replies, "output_tokens")
-        trace.append({"event": "run_stopped", "status": "completed", "stop_reason": stop_reason})
+        trace.append(
+            {
+                "event": "run_stopped",
+                "status": "failed" if failure_status else "completed",
+                "stop_reason": failure_status or stop_reason,
+            }
+        )
         result_record = {
             "schema_version": 1,
             "run_id": run_id,
@@ -511,17 +636,30 @@ class Runtime:
             "condition_id": condition_id,
             "model": {
                 "requested": self._model_port.name,
-                "actual": replies[-1].model or "unknown",
+                "actual": replies[-1].model or "unknown" if replies else "unknown",
+                "provider_request_id": getattr(replies[-1], "request_id", "unknown")
+                if replies
+                else "unknown",
                 "reasoning_config": config["reasoning_config"],
             },
+            "provider_requests": provider_requests,
             "budget": {
                 "scope": "run_shared",
                 "model_requests": {"limit": request_limit, "used": request_count},
-                "tokens": {"limit": "unknown", "used": _sum_usage(replies, "tokens")},
+                "tokens": {
+                    "limit": provider_config["max_tokens"],
+                    "used": _sum_usage(replies, "tokens"),
+                },
                 "tools": {"limit": tool_limit, "used": tool_count},
                 "elapsed_ms": elapsed_ms,
                 "elapsed_limit_ms": "unknown",
-                "cost_usd": {"limit": "unknown", "used": "unknown"},
+                "cost_usd": {
+                    "limit": provider_config.get("cost_limit_usd", "unknown"),
+                    "preflight_upper_bound": provider_config.get(
+                        "preflight_cost_upper_bound_usd", "unknown"
+                    ),
+                    "used": "unknown",
+                },
             },
             "usage": {
                 "input_tokens": input_tokens,
@@ -537,7 +675,11 @@ class Runtime:
             "result": result,
             "verification": verification,
             "evidence": state.public_snapshot(),
-            "run": {"status": "completed", "stop_reason": stop_reason},
+            "run": {
+                "status": "failed" if failure_status else "completed",
+                "stop_reason": failure_status or stop_reason,
+                **({"failure_status": failure_status} if failure_status else {}),
+            },
             "artifacts": {"run": str(run_path), "trace": str(trace_path)},
         }
         trace_path.write_text(
@@ -579,6 +721,8 @@ def _evidence_event(event: str, evidence: Evidence) -> dict[str, Any]:
 def _sum_usage(replies: list[Any], key: str) -> int | str:
     """Sum a usage field only when every request reports an integer measurement."""
 
+    if not replies:
+        return "unknown"
     if key == "tokens":
         values = [
             reply.input_tokens + reply.output_tokens
@@ -594,6 +738,8 @@ def _sum_usage(replies: list[Any], key: str) -> int | str:
 def _usage_source(replies: list[Any]) -> str:
     """Keep the measurement source only when all requests share the same known source."""
 
+    if not replies:
+        return "unknown"
     sources = {reply.usage_source for reply in replies}
     return sources.pop() if len(sources) == 1 else "mixed_or_unknown"
 
