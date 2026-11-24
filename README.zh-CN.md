@@ -4,17 +4,47 @@
 
 <p align="center"><a href="README.md">English</a> · <strong>简体中文</strong></p>
 
-# MathAgent · 因果启发的多智能体数学推理系统
+# RiCL Runtime
 
-MathAgent 面向「基于 Intern-S1 的数学智能体设计与推理创新」赛题。它把命题、推导、候选路线和验证证据保存为共享状态，让系统在长程求解中定位失效前提、复用仍有效的结论，并根据独立校验结果决定下一步。
+本仓库正转向面向研究的数学推理运行时。当前可运行的 Runtime 是一个确定性、离线、单路线 CLI 样例。它不代表模型 Provider 已就绪、研究机制已完成、已有真实模型运行证据或数学效果提升。
 
 <p align="center">
   <img alt="技术栈：Python、Flask、SQLite、Vue、TypeScript、Vite、Node.js、Docker" src="https://skillicons.dev/icons?i=py,flask,sqlite,vue,ts,vite,nodejs,docker&amp;theme=dark" />
 </p>
 
-[**启动 Showcase Web**](#一键启动-showcase-web) · [**因果启发的三项机制**](#因果启发的三项机制) · [**系统架构**](#系统架构) · [**验收与文档**](#验收与文档)
+[**运行离线 CLI**](#运行离线单路线-cli) · [**Runtime 机制与状态**](#三项-runtime-机制) · [**文档索引**](docs/README.md) · [**旧版 Showcase**](#旧版-showcase-web)
 
-## 一键启动 Showcase Web
+## 运行离线单路线 CLI
+
+在仓库根目录运行以下确定性样例：
+
+```shell
+uv run python -m ricl_runtime --problem "Compute 2 + 2." --offline-answer "4"
+```
+
+离线端口直接返回 `--offline-answer` 提供的答案，不会调用模型解题。当前独立验证器仅检查符合其支持形式的整数加法题。其他题目没有适用判据，状态记为 `unknown`，而不是已验证。CLI 会打印 JSON 结果，并默认将 `run.json` 和脱敏后的 `trace.jsonl` 写入 `artifacts/<run_id>/`。传入 `--output-root <path>` 可将产物写到其他位置。
+
+## 三项 Runtime 机制
+
+以下机制是分别定义范围的研究工作，不是当前单路线 CLI 已具备的能力。关联 Issue 描述各自的工作范围与验收证据。
+
+| 机制 | 当前 Runtime 状态与范围 |
+| --- | --- |
+| **Shared Reasoning State（共享推理状态）** | 当前 CLI 尚未实现。[Issue #239](https://github.com/RUSS0718/RiCL/issues/239)定义已验证成果、依赖有效性及后续请求消费的工作范围。 |
+| **Causal Search Loop（因果搜索循环）** | 当前 CLI 尚未实现。[Issue #240](https://github.com/RUSS0718/RiCL/issues/240)定义固定候选集上的 APRS 排序；[Issue #241](https://github.com/RUSS0718/RiCL/issues/241)另行定义候选路线的串行扩展与选择。 |
+| **Counterfactual Control（反事实调控）** | 当前 CLI 尚未实现。[Issue #242](https://github.com/RUSS0718/RiCL/issues/242)定义同一检查点派生的隔离分支及经验证反馈进入主循环的工作范围。 |
+
+## 接下来阅读
+
+- [文档索引](docs/README.md)：当前 CLI 入口、独立机制范围、决策与证据状态。
+- [开发门禁](docs/engineering/development-gates.md)：文档检查与 Runtime 聚焦验证。
+- [仓库指引](AGENTS.md)、[Runtime 规格 #236](https://github.com/RUSS0718/RiCL/issues/236)、[离线 CLI Issue #237](https://github.com/RUSS0718/RiCL/issues/237)及[机制证据顺序 #232](https://github.com/RUSS0718/RiCL/issues/232)：研究边界和验收条件。
+
+## 旧版 Showcase Web
+
+仓库仍保留独立的旧版 Showcase 与官方评测路径。它们不是上文介绍的 RiCL Runtime CLI。以下说明和历史设计只适用于旧路径。
+
+### 一键启动 Showcase Web
 
 在仓库根目录运行。需要 **uv、Python 3.11 或 3.12、Node.js 24 和 npm**。首次安装依赖需要联网。
 
@@ -44,7 +74,10 @@ JupyterLab 在本机 8888 端口打开[示例 Notebook](examples/showcase.ipynb)
 
 </details>
 
-## 因果启发的三项机制
+### Showcase 机制设计
+
+以下旧版 Showcase 设计与上文列出的 Runtime 机制相互独立。其合同和图示不能证明当前 CLI 已运行这些机制。
+
 
 这里的“因果启发”指把**推理动作、状态变化和可验证进展**联系起来。技术报告 v0.6 第 2–4 章给出了三项机制的设计。下面的合同记录对应的代码路径、适用条件和验收范围。
 
@@ -54,7 +87,7 @@ JupyterLab 在本机 8888 端口打开[示例 Notebook](examples/showcase.ipynb)
 | **验证反馈驱动搜索** | Population 持久保存候选路线与谱系。Rater、Pareto 与 APRS 根据已验证的目标进展、路线差异和已知资源成本安排下一步。共享预算统一计入模型、工具与时间，重复成果在总进展中去重。见[串行 APRS 合同](docs/engineering/faithful-s08-contract.md)和[并发调度合同](docs/engineering/faithful-population-contract.md)。 |
 | **同源策略干预** | 从同一 Checkpoint 派生基线与干预分支，固定题目、模型、工具和预算，只改变一个登记的推理动作，再比较验证进展与成本。当前工程合同限定在显式暂停、受支持的串行步骤。结果用于比较修复策略，因果解释限于该比较的设置。见[干预工程合同](docs/engineering/faithful-s10-contract.md)。 |
 
-## 系统架构
+### Showcase 架构
 
 ![MathAgent 系统架构：Python 编排器、统一证明状态、验证驱动的证明搜索与反事实策略优化](docs/assets/mathagent-architecture.png)
 
@@ -64,7 +97,7 @@ JupyterLab 在本机 8888 端口打开[示例 Notebook](examples/showcase.ipynb)
 - **分层验证**：Verifier 记录独立审查与证据等级。确定性工具的有限检查最高为 L1。受支持的 Lean 目标通过内核及依赖审计后可达 L2，再经独立的原题与形式规格对应审查才可达 L3。整题模型审查单独记录为 `LLM_REVIEWED`。见[分层验证合同](docs/engineering/faithful-s09-contract.md)。
 - **交互与追溯**：Vue 工作台通过 Flask Job API 与 SSE 展示进展，从持久记录读取答复、公开摘要及可用证据。CLI 使用同一组服务接口，配对实验另有审阅入口。运行记录和观测范围见[角色阶段成果验收](docs/engineering/role-stage-199-acceptance.md)。
 
-## 开发与高级配置
+### Showcase 开发与高级配置
 
 <details>
 <summary>手动启动、Vite 热更新与 CLI</summary>
@@ -110,7 +143,7 @@ uv run --no-project python scripts/start_showcase.py web --faithful-config examp
 
 </details>
 
-## 验收与文档
+### Showcase 验收与历史参考
 
 官方客观评测使用 [`user_agent.ReasoningAgent`](user_agent.py)。官方 baseline 的文件哈希和评测结果见 [BASELINE.json](BASELINE.json)，Showcase 通过独立入口运行。报告中的消融按题集、分母和预算解读，数学能力结论以仓库中可复核的评测证据为准。
 

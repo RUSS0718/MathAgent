@@ -1,4 +1,39 @@
-# MathAgent 文档索引
+# RiCL Runtime 文档索引
+
+本索引先介绍当前可运行的研究入口，再将旧 Showcase 与竞赛记录明确分开。Issue 是 Runtime 的规格、机制范围和决策追溯入口；只有仓库内实际存在的材料才作为证据链接。
+
+## 当前 Runtime 入口
+
+当前 CLI 仅运行确定性离线端口上的单路线样例。它不是 Provider 运行、三个机制的集成或数学效果验收。
+
+```powershell
+$runRoot = Join-Path $env:TEMP "ricl-runtime-smoke"
+uv run python -m ricl_runtime --problem "Compute 2 + 2." --offline-answer "4" --output-root $runRoot
+```
+
+命令打印结果 JSON，并在 `$runRoot/<run_id>/` 写入 `run.json` 与 `trace.jsonl`。当前验证器只适用于整数加法提示；没有适用判据时返回 `unknown`。查看 [CLI 实现](../ricl_runtime/__main__.py)、[Runtime 记录](../ricl_runtime/runtime.py)和[独立验证器](../ricl_runtime/verification.py)。当前没有 Runtime 专属的复现或能力证据文档。
+
+## 三项研究机制及当前状态
+
+| 机制 | 范围入口 | Runtime CLI 状态 |
+| --- | --- | --- |
+| Shared Reasoning State | [已验证成果的存储与消费，#239](https://github.com/RUSS0718/RiCL/issues/239) | 尚未集成 |
+| Causal Search Loop：固定候选 APRS | [APRS 排序，#240](https://github.com/RUSS0718/RiCL/issues/240) | 尚未集成 |
+| Causal Search Loop：串行候选扩展 | [Population 扩展与选择，#241](https://github.com/RUSS0718/RiCL/issues/241) | 尚未集成 |
+| Counterfactual Control | [同源隔离分支与反馈消费，#242](https://github.com/RUSS0718/RiCL/issues/242) | 尚未集成 |
+
+三个机制分别指共享推理状态、因果搜索循环和反事实调控。搜索循环目前由两个单独的工作范围定义：先在固定候选集验收排序，再单独扩展和选择候选。路线图、代码存在和离线样例都不能证明真实运行参与或数学收益。
+
+## 决策、实验与证据边界
+
+- [研究型 Runtime 决策地图，#227](https://github.com/RUSS0718/RiCL/issues/227)、[起步范围决议，#234](https://github.com/RUSS0718/RiCL/issues/234)、[Runtime 规格，#236](https://github.com/RUSS0718/RiCL/issues/236)、[机制验收与证据顺序，#232](https://github.com/RUSS0718/RiCL/issues/232)记录目标、实现边界和证据等级。
+- [单路线离线 CLI，#237](https://github.com/RUSS0718/RiCL/issues/237)及上方的 `uv run` 命令提供可重复的离线入口。该入口固定答案并使用有限整数加法判据；它不构成真实 Provider、机制参与或研究效果证据。
+- [配对消融实验，#243](https://github.com/RUSS0718/RiCL/issues/243)仍是单独的实验范围；当前索引没有对应的 Runtime 复现实验材料。 [第二模型系列，#244](https://github.com/RUSS0718/RiCL/issues/244)与[旧资产退役，#246](https://github.com/RUSS0718/RiCL/issues/246)同样不是当前 CLI 的完成证据。
+- [开发门禁](engineering/development-gates.md)说明日常 Runtime 工作的差异、链接和聚焦命令检查。当前根目录 [AGENTS.md](../AGENTS.md) 是仓库工作约束入口。
+
+## 旧版 Showcase 与竞赛历史
+
+以下既有记录保留为历史和后续退役盘点线索。它们不描述当前 RiCL Runtime CLI，也不作为其 Provider 或数学能力证据。
 
 Showcase 支持显式启用单张 PNG 题图输入、文字加图和基础题型提示，见[图文读题合同](engineering/showcase-multimodal-intake.md)及[验收记录](evals/showcase-multimodal-intake-20261119.md)。该入口不影响官方评测骨架；定向通过，最终门禁因本机 Docker 引擎未运行未通过。
 
