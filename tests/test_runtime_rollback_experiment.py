@@ -144,6 +144,8 @@ class RollbackExperimentTests(unittest.TestCase):
         self.assertIn(
             "Recompute invalidated step IDs: bad-step, and-step, dependent-step", treatment
         )
+        for prompt in (baseline, treatment):
+            self.assertIn("End with a separate line beginning Final answer:", prompt)
         self.assertNotIn("Recompute invalidated step IDs", baseline)
         self.assertNotIn("Replay suffix step IDs", treatment)
         self.assertEqual(

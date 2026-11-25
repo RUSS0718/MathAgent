@@ -357,6 +357,7 @@ def _render_arm_prompt(
     operation.append(
         "Return a concise repair record containing exactly one line named Evidence used: "
         "<comma-separated evidence IDs or none> and, if needed, one Repair line. "
+        "End with a separate line beginning Final answer: followed by the answer. "
         "Do not include private reasoning."
     )
     return "\n\n".join((*common, *operation))
