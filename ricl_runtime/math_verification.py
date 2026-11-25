@@ -270,7 +270,12 @@ def _rationals(values: object, *, limit: int) -> tuple[Fraction, ...] | None:
 
 def _answer_set(answer: str) -> set[Fraction] | None:
     lines = [line.strip() for line in answer.splitlines() if line.strip()]
-    match = _SOLUTION_ANSWER.fullmatch(lines[-1]) if lines else None
+    matches = [
+        match
+        for line in lines
+        for match in _SOLUTION_ANSWER.finditer(line)
+    ]
+    match = matches[-1] if len(matches) == 1 else None
     if match is None:
         return None
     if match[1] is not None:

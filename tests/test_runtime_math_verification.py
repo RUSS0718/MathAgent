@@ -154,6 +154,8 @@ class RuntimeMathVerificationTests(unittest.TestCase):
         cases = {
             "Solution set: {-2, 3}": "failed",
             "The answer is the positive number discussed above.": "unknown",
+            "After checking both candidates, only 3 satisfies the original equation. Solution set: {3}": "verified",
+            "Solution set: {3} and Solution set: {-2, 3}": "unknown",
         }
         with tempfile.TemporaryDirectory() as directory:
             for answer, expected in cases.items():
