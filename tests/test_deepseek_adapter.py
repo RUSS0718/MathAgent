@@ -138,6 +138,20 @@ class DeepSeekModelPortTests(unittest.TestCase):
 
         self.assertEqual(port.name, "deepseek-flash")
 
+    def test_default_transport_timeout_allows_longer_gateway_replies(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "API_KEY": "inert-environment-credential",
+                "BASE_URL": f"https://{ALLOWED_GATEWAY_HOST}/v1",
+                "MODEL": "deepseek-v4.1-flash",
+            },
+        ):
+            port = DeepSeekModelPort.from_environment()
+
+        self.assertEqual(port.transport_timeout_seconds, 60.0)
+        self.assertEqual(port.preflight_config["transport_timeout_seconds"], 60.0)
+
     def test_missing_environment_configuration_is_sanitized(self) -> None:
         with patch.dict(os.environ, {"API_KEY": "", "BASE_URL": "", "MODEL": ""}):
             with self.assertRaises(ProviderConfigurationError) as raised:
