@@ -873,9 +873,13 @@ class Runtime:
                 "status": "unknown", "applicable": False, "scope": "none",
             }
             verification["reason"] = failure_status or stop_reason
-        run_status = "failed" if failure_status else (
-            "stopped" if stop_reason == "model_request_budget_exhausted" else "completed"
-        )
+        run_status = "failed" if failure_status else "completed"
+        if (
+            not failure_status
+            and stop_reason == "model_request_budget_exhausted"
+            and (math_verification is not None or request_count == 0)
+        ):
+            run_status = "stopped"
 
         elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
         provider_config = {
