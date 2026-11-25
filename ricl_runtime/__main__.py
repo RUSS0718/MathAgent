@@ -7,11 +7,22 @@ from pathlib import Path
 
 from .aprs import Candidate
 from .population import CandidateRoute, PopulationBudget
-from .port import DeterministicModelPort
+from .port import DeterministicModelPort, ModelReply
 from .providers.chat_completions import ProviderConfigurationError
 from .providers.deepseek import DeepSeekModelPort
 from .providers.minimax import MiniMaxModelPort
 from .runtime import Runtime
+
+
+class _OfflineReplySequence:
+    name = "deterministic-offline"
+
+    def __init__(self, answers: Sequence[str]) -> None:
+        self._answers = iter(answers)
+
+    def complete(self, problem: str) -> ModelReply:
+        del problem
+        return ModelReply(next(self._answers, ""), model=self.name)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -20,7 +31,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run one RiCL Runtime problem.")
     parser.add_argument("--provider", choices=("offline", "deepseek", "minimax"), default="offline")
     parser.add_argument("--problem", required=True, help="single text math problem")
-    parser.add_argument("--offline-answer", help="fixed free-text answer or structured offline reply")
+    parser.add_argument(
+        "--offline-answer", action="append",
+        help="offline reply (repeat for candidate generation, then each online-search expansion)",
+    )
     parser.add_argument("--thinking", choices=("enabled", "disabled"))
     parser.add_argument("--problem-id", help="optional stable problem identifier")
     parser.add_argument("--condition-id", default="offline-single-route")
@@ -28,8 +42,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--reasoning-state", action="store_true", help="enable shared reasoning state"
     )
-    parser.add_argument(
+    route = parser.add_mutually_exclusive_group()
+    route.add_argument(
         "--population", action="store_true", help="run the offline serial population example"
+    )
+    route.add_argument(
+        "--online-search", choices=("aprs", "round_robin"), help="schedule model-proposed routes online"
     )
     parser.add_argument(
         "--aprs",
@@ -53,7 +71,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.provider == "offline":
         if args.offline_answer is None:
             parser.error("--offline-answer is required for the offline provider")
-        model_port = DeterministicModelPort(args.offline_answer)
+        model_port = (
+            _OfflineReplySequence(args.offline_answer) if args.online_search
+            else DeterministicModelPort(args.offline_answer[-1])
+        )
     else:
         if args.thinking is None:
             parser.error("--thinking must be explicitly set for a live provider")
@@ -113,6 +134,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             reasoning_state_enabled=args.reasoning_state,
             model_request_limit=args.model_request_limit,
             tool_call_limit=args.tool_call_limit,
+            online_search=args.online_search,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 1 if result["run"]["status"] == "failed" else 0

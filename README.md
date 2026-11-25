@@ -33,6 +33,19 @@ uv run python -m ricl_runtime --problem "sqrt(x+6)=x" --offline-answer $reply
 
 The single-route verifier covers supported integer addition and equations of the form `sqrt(a*x+b)=c*x+d` with rational coefficients and positive slopes. For these equations, it freezes equal-weight goals before the first request and uses exact rational arithmetic to check the domain, the squared constraint, its rational candidate set, and substitution. A local check can be `verified` while completeness is `unknown`. The Run records certified completeness and whether it matches the final solution set stated in the free-text answer. The independent model review field remains `unknown` in this offline example. Cases outside the exact criterion remain `unknown`. Use `--model-request-limit` to set the Run's request cap.
 
+### Replay online route search
+
+Provide the candidate proposal first and then one reply per expansion. The root request limit includes the proposal. This example reuses `$reply` from the radical equation above.
+
+```powershell
+$candidates = '{"candidates":[{"strategy":"Find the domain first."},{"strategy":"Derive and filter the squared candidates."}]}'
+$step = '{"answer":"The exact checks are available in shared state.","checks":[]}'
+uv run python -m ricl_runtime --problem "sqrt(x+6)=x" --online-search aprs `
+  --model-request-limit 3 --offline-answer $candidates --offline-answer $reply --offline-answer $step
+```
+
+Use `--online-search round_robin` to replay fixed rotation with the same request limit. The Run records the candidate opportunities, active goal credit, token usage, and the request ID for each selection. Offline replies leave model token usage `unknown`.
+
 ## Runtime mechanisms
 
 | Mechanism | Offline entry point | Scope |
