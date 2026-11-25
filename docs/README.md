@@ -28,9 +28,9 @@ uv run python -m ricl_runtime.experiments --order-seed 17
 
 `pilot.json` 的 `rollback_pair` 指向另两个 Run。两个条件读取同一失败 Checkpoint，分别重推后缀和撤销失效的 AND/OR 依赖。配对记录以依赖状态核对回复中明确引用的依据，并记录夹具报告的返工输出 Token。[回退对照实现](../ricl_runtime/rollback_experiment.py)
 
-## 首轮真实 Provider 证据
+## 真实 Provider 证据
 
-一次获批的 DeepSeek 请求完成了整数加法校验。记录包含请求与返回模型、供应商用量、分阶段耗时和复跑参数。[DeepSeek smoke 记录](evals/runtime-deepseek-smoke.md)
+DeepSeek 与 MiniMax 分别用一次获批的真实请求完成了同一道整数加法校验。两次运行共用 CLI、ModelPort、独立验证和 Run 账本。记录包含请求与返回模型、供应商用量、阶段耗时和复跑参数。[DeepSeek smoke 记录](evals/runtime-deepseek-smoke.md)、[MiniMax smoke 记录](evals/runtime-minimax-smoke.md)
 
 ## 三项研究机制及当前状态
 
@@ -47,7 +47,7 @@ uv run python -m ricl_runtime.experiments --order-seed 17
 
 - [研究型 Runtime 决策地图，#227](https://github.com/RUSS0718/RiCL/issues/227)、[起步范围决议，#234](https://github.com/RUSS0718/RiCL/issues/234)、[Runtime 规格，#236](https://github.com/RUSS0718/RiCL/issues/236)、[机制验收与证据顺序，#232](https://github.com/RUSS0718/RiCL/issues/232)记录目标、实现边界和证据等级。
 - [单路线离线 CLI，#237](https://github.com/RUSS0718/RiCL/issues/237)及上方的 `uv run` 命令提供可重复的离线入口。该入口固定答案并使用有限整数加法判据；它不构成真实 Provider、机制参与或研究效果证据。
-- [第二模型系列 #244](https://github.com/RUSS0718/RiCL/issues/244)与[旧资产退役 #246](https://github.com/RUSS0718/RiCL/issues/246)记录后续工作的验证要求和人工决策。
+- [第二模型系列 #244](https://github.com/RUSS0718/RiCL/issues/244)记录 ModelPort 通用性验收要求。[旧资产退役 #246](https://github.com/RUSS0718/RiCL/issues/246)记录退役证据和人工决策要求。
 - [开发门禁](engineering/development-gates.md)说明日常 Runtime 工作的差异、链接和聚焦命令检查。当前根目录 [AGENTS.md](../AGENTS.md) 是仓库工作约束入口。
 
 ## 旧版 Showcase 与竞赛历史
