@@ -29,6 +29,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--reasoning-state", action="store_true", help="enable shared reasoning state"
     )
     parser.add_argument(
+        "--counterfactual", action="store_true", help="enable bounded online intervention on a checked failure"
+    )
+    parser.add_argument(
         "--population", action="store_true", help="run the offline serial population example"
     )
     parser.add_argument(
@@ -46,6 +49,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.population and args.provider != "offline":
         parser.error("--population requires the offline provider")
+    if args.population and args.counterfactual:
+        parser.error("--counterfactual requires the single-route Runtime")
     if not args.population and any(
         value is not None for value in (args.token_limit, args.elapsed_limit_ms, args.cost_limit_usd)
     ):
@@ -111,6 +116,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             condition_id=args.condition_id,
             output_root=args.output_root,
             reasoning_state_enabled=args.reasoning_state,
+            counterfactual_enabled=args.counterfactual,
             model_request_limit=args.model_request_limit,
             tool_call_limit=args.tool_call_limit,
         )

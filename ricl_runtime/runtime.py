@@ -20,6 +20,12 @@ from .counterfactual import (
 from .derivations import DerivationScope, ScopedDerivation
 from .identity import stable_id
 from .math_verification import prepare_math_verification
+from .online_intervention import (
+    InterventionContinuation,
+    OnlineIntervention,
+    Revocation,
+    recheck_derivations,
+)
 from .population import CandidateRoute, PopulationBudget
 from .port import ModelPort, ModelPortFailure, ModelReply, ToolCall, ToolExecutor, ToolReceipt
 from .reasoning_state import Evidence, SharedReasoningState
@@ -37,6 +43,97 @@ class _RunScope:
 
     def request_id(self, index: int) -> str:
         return f"{self.run_id}_request_{self.request_offset + index:03d}"
+
+
+@dataclass
+class _ModelAttempt:
+    request_id: str
+    reply: ModelReply
+    elapsed_ms: float
+    record: dict[str, Any]
+    failure_status: str | None = None
+
+
+@dataclass
+class _RunModelRequests:
+    """Settle both solve and auxiliary ModelPort requests in one ledger."""
+
+    execution: _RunScope
+    port: ModelPort
+    trace: list[dict[str, Any]]
+    count: int = 0
+    replies: list[ModelReply] = field(default_factory=list)
+    records: list[dict[str, Any]] = field(default_factory=list)
+
+    def dispatch(self, prompt: str, event: dict[str, Any] | None = None) -> _ModelAttempt:
+        self.count += 1
+        request_id = self.execution.request_id(self.count)
+        if event is not None:
+            self.trace.append({
+                "event": "model_request_sent", "request_id": request_id, **event,
+                "context_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+            })
+        started = time.perf_counter()
+        failure_status = None
+        request_sent = getattr(self.port, "provider", "offline") != "offline"
+        http_status = None
+        rejected_before_send = False
+        try:
+            reply = self.port.complete(prompt)
+        except ModelPortFailure as error:
+            reply = _failure_reply(error)
+            failure_status = _model_failure_status(error)
+            request_sent = getattr(error, "request_sent", "unknown")
+            rejected_before_send = request_sent is False
+            http_status = getattr(error, "status_code", None)
+            if request_sent is not False:
+                self.replies.append(reply)
+        else:
+            self.replies.append(reply)
+            if getattr(reply, "finish_reason", "unknown") == "length":
+                failure_status = "budget_exhausted"
+            elif not reply.text.strip():
+                failure_status = "invalid_output"
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+        record = {
+            **(event or {}),
+            "request_id": request_id,
+            "requested_model": self.port.name,
+            "actual_model": reply.model or "unknown",
+            "provider_request_id": getattr(reply, "request_id", "unknown") or "unknown",
+            "finish_reason": getattr(reply, "finish_reason", "unknown") or "unknown",
+            "request_sent": request_sent,
+            "status": "completed",
+            "elapsed_ms": elapsed_ms,
+            "usage": {"input_tokens": reply.input_tokens, "output_tokens": reply.output_tokens,
+                      "source": reply.usage_source},
+            **({"http_status": http_status} if isinstance(http_status, int) else {}),
+        }
+        self.records.append(record)
+        attempt = _ModelAttempt(request_id, reply, elapsed_ms, record)
+        if failure_status is not None:
+            self.reject(attempt, failure_status, rejected_before_send=rejected_before_send)
+        return attempt
+
+    def reject(
+        self, attempt: _ModelAttempt, status: str, *, rejected_before_send: bool = False,
+    ) -> None:
+        """Classify a transport or reply-contract failure on the existing request."""
+        attempt.failure_status = status
+        record = attempt.record
+        record.update(status=status, failure_status=status)
+        self.trace.append({
+            "event": (
+                "model_request_rejected_before_send"
+                if rejected_before_send else "model_request_failed"
+            ),
+            **{key: record[key] for key in (
+                "request_id", "provider_request_id", "actual_model", "finish_reason",
+                "request_sent", "status", "failure_status", "elapsed_ms",
+            )},
+            "usage_source": attempt.reply.usage_source,
+            **({"http_status": record["http_status"]} if "http_status" in record else {}),
+        })
 
 
 def _write_run(result: dict[str, Any], trace: list[dict[str, Any]]) -> None:
@@ -515,6 +612,7 @@ class Runtime:
         condition_id: str = "offline-single-route",
         output_root: Path = Path("artifacts"),
         reasoning_state_enabled: bool = False,
+        counterfactual_enabled: bool = False,
         model_request_limit: int = 1,
         tool_call_limit: int = 0,
         visible_context: str = "",
@@ -525,6 +623,7 @@ class Runtime:
         if model_request_limit < 0 or tool_call_limit < 0:
             raise ValueError("model request and tool limits must be nonnegative")
 
+        reasoning_state_enabled = reasoning_state_enabled or counterfactual_enabled
         execution = _scope or _RunScope()
         run_id = execution.run_id
         problem_sha256 = hashlib.sha256(problem.encode("utf-8")).hexdigest()
@@ -532,7 +631,6 @@ class Runtime:
         request_limit = model_request_limit
         tool_limit = tool_call_limit
         state = execution.state
-        request_count = 0
         tool_count = 0
         diagnosis_used = False
         request_kind = "solve"
@@ -546,8 +644,7 @@ class Runtime:
                 "condition_id": condition_id,
             }
         ], _scope)
-        replies = []
-        provider_requests: list[dict[str, Any]] = []
+        requests = _RunModelRequests(execution, self._model_port, trace)
         ordinary_tool_results: list[str] = []
         result: dict[str, Any] | None = None
         result_request_id = ""
@@ -557,6 +654,11 @@ class Runtime:
         derivations = state.derivations if math_verification is not None and reasoning_state_enabled else None
         derivation_scope = DerivationScope()
         math_goals = math_verification.public_goals() if math_verification is not None else []
+        intervention = (
+            OnlineIntervention(math_verification, trace, self._math_evidence_recheck)
+            if math_verification is not None and counterfactual_enabled else None
+        )
+        continuation: InterventionContinuation | None = None
         checked_claims: dict[tuple[str, str | None], dict[str, Any]] = {}
         if math_verification is not None:
             trace.append({
@@ -566,7 +668,7 @@ class Runtime:
             })
         started = time.perf_counter()
 
-        while request_count < request_limit:
+        def solve_prompt(kind: str) -> tuple[str, tuple[Evidence, ...], tuple[dict[str, Any], ...], list[dict[str, Any]]]:
             evidence = state.valid_evidence() if reasoning_state_enabled else ()
             context = _render_evidence(evidence)
             parts = [problem]
@@ -574,7 +676,6 @@ class Runtime:
                 tuple(support.check for support in derivations.applicable(derivation_scope))
                 if derivations is not None else tuple(checked_claims.values())
             )
-            delivered_check_ids = tuple(check["evidence_id"] for check in prior_checks)
             open_goals = []
             if math_verification is not None:
                 parts.append(math_verification.instructions(scoped_derivations=derivations is not None))
@@ -590,105 +691,102 @@ class Runtime:
                 parts.append(f"Verified context:\n{context}")
             if ordinary_tool_results:
                 parts.append("Tool results:\n" + "\n".join(ordinary_tool_results))
-            if request_kind == "diagnosis":
+            if kind == "diagnosis":
                 parts.append("One bounded diagnosis: make a substantive correction or stop.")
                 if not reasoning_state_enabled and result is not None:
                     parts.append(f"Previous answer failed the reference check:\n{result['answer']}")
-            prompt = "\n\n".join(parts)
-            referenced_ids = [item.evidence_id for item in evidence]
-            request_id = execution.request_id(request_count + 1)
-            if math_verification is not None or reasoning_state_enabled or request_kind != "solve":
-                trace.append(
-                    {
-                        "event": "model_request_sent",
-                        "request_id": request_id,
-                        "request_kind": request_kind,
-                        "referenced_evidence_ids": referenced_ids,
-                        "context_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
-                        **(
-                            {
-                                "delivered_check_evidence_ids": list(delivered_check_ids),
-                            }
-                            if math_verification is not None else {}
-                        ),
-                        **(
-                            {"open_goal_ids": [goal["id"] for goal in open_goals]}
-                            if derivations is not None else {}
-                        ),
-                    }
+            return "\n\n".join(parts), evidence, prior_checks, open_goals
+
+        def execute_tools(
+            attempt: _ModelAttempt, target_state: SharedReasoningState, limit: int,
+        ) -> tuple[int, str | None]:
+            nonlocal tool_count
+            before = tool_count
+            failure_status = None
+            request_id, reply = attempt.request_id, attempt.reply
+            for call in reply.tool_calls:
+                if self._tool_executor is None:
+                    trace.append(
+                        {"event": "tool_call_not_executed", "request_id": request_id, "reason": "no_executor"}
+                    )
+                    continue
+                if tool_count - before >= limit:
+                    trace.append(
+                        {
+                            "event": "tool_call_not_executed",
+                            "request_id": request_id,
+                            "reason": "tool_budget_exhausted",
+                        }
+                    )
+                    break
+
+                invocation_id = f"{run_id}_tool_{tool_count + 1:03d}"
+                tool_count += 1
+                receipt, failure_status = _execute_tool(
+                    self._tool_executor, call, invocation_id, request_id, trace
                 )
+                if failure_status:
+                    break
+                try:
+                    item = target_state.add_tool_receipt(
+                        receipt, invocation_id=invocation_id, call=call
+                    )
+                except ValueError:
+                    trace.append({"event": "tool_receipt_rejected", "invocation_id": invocation_id})
+                else:
+                    trace.append(
+                        {
+                            **_evidence_event("tool_receipt_accepted", item),
+                            "request_id": request_id,
+                            "invocation_id": invocation_id,
+                            "receipt_id": receipt.receipt_id,
+                            "output_sha256": hashlib.sha256(
+                                receipt.output.encode("utf-8")
+                            ).hexdigest(),
+                        }
+                    )
+                    if target_state is state and not reasoning_state_enabled:
+                        ordinary_result = f"{receipt.tool_name}: {receipt.output}"
+                        if ordinary_result not in ordinary_tool_results:
+                            ordinary_tool_results.append(ordinary_result)
+
+            return tool_count - before, failure_status
+
+        while requests.count < request_limit:
+            prompt, evidence, prior_checks, open_goals = solve_prompt(request_kind)
+            delivered_check_ids = tuple(check["evidence_id"] for check in prior_checks)
+            referenced_ids = [item.evidence_id for item in evidence]
+            resumed = continuation
+            continuation = None
+            request_event = None
+            if math_verification is not None or reasoning_state_enabled or request_kind != "solve":
+                request_event = {
+                    "request_kind": request_kind,
+                    "referenced_evidence_ids": referenced_ids,
+                    **(
+                        {"delivered_check_evidence_ids": list(delivered_check_ids)}
+                        if math_verification is not None else {}
+                    ),
+                    **(
+                        {"open_goal_ids": [goal["id"] for goal in open_goals]}
+                        if derivations is not None else {}
+                    ),
+                    **(resumed.request_metadata() if resumed is not None else {}),
+                }
             previous_state = (
                 verification.get("status"),
                 result["id"] if result else None,
                 _state_fingerprint(state),
             )
-            request_count += 1
-            request_started = time.perf_counter()
-            try:
-                reply = self._model_port.complete(prompt)
-            except ModelPortFailure as error:
-                request_elapsed_ms = round((time.perf_counter() - request_started) * 1000, 3)
-                failure_status = _model_failure_status(error)
-                request_sent = getattr(error, "request_sent", "unknown")
-                metadata = _failure_reply(error)
-                if request_sent is not False:
-                    replies.append(metadata)
-                request_record = {
-                    "request_id": request_id,
-                    "requested_model": self._model_port.name,
-                    "actual_model": metadata.model,
-                    "provider_request_id": getattr(metadata, "request_id", "unknown"),
-                    "finish_reason": getattr(metadata, "finish_reason", "unknown"),
-                    "request_sent": request_sent,
-                    "status": failure_status,
-                    "failure_status": failure_status,
-                    "elapsed_ms": request_elapsed_ms,
-                    "usage": {
-                        "input_tokens": metadata.input_tokens,
-                        "output_tokens": metadata.output_tokens,
-                        "source": metadata.usage_source,
-                    },
-                }
-                if isinstance(getattr(error, "status_code", None), int):
-                    request_record["http_status"] = error.status_code
-                provider_requests.append(request_record)
-                trace.append(
-                    {
-                        "event": (
-                            "model_request_rejected_before_send"
-                            if request_sent is False
-                            else "model_request_failed"
-                        ),
-                        "request_id": request_id,
-                        "provider_request_id": request_record["provider_request_id"],
-                        "actual_model": request_record["actual_model"],
-                        "finish_reason": request_record["finish_reason"],
-                        "usage_source": metadata.usage_source,
-                        "request_sent": request_sent,
-                        "status": failure_status,
-                        "failure_status": failure_status,
-                        "elapsed_ms": request_elapsed_ms,
-                        **(
-                            {"http_status": error.status_code}
-                            if "http_status" in request_record
-                            else {}
-                        ),
-                    }
-                )
+            attempt = requests.dispatch(prompt, request_event)
+            request_id, reply, request_elapsed_ms = attempt.request_id, attempt.reply, attempt.elapsed_ms
+            if attempt.failure_status is not None:
+                failure_status = attempt.failure_status
                 break
-
-            request_elapsed_ms = round((time.perf_counter() - request_started) * 1000, 3)
-            replies.append(reply)
-            provider_request_id = getattr(reply, "request_id", "unknown") or "unknown"
-            actual_model = reply.model or "unknown"
-            finish_reason = getattr(reply, "finish_reason", "unknown") or "unknown"
             verification_started = time.perf_counter()
             derivations_changed = False
-            if finish_reason == "length":
-                failure_status = "budget_exhausted"
-            elif not reply.text.strip():
-                failure_status = "invalid_output"
-            elif math_verification is None:
+            revocations: tuple[Revocation, ...] = ()
+            if math_verification is None:
                 answer = reply.text
                 attempt_verification = verify_integer_addition(problem, answer)
             else:
@@ -710,15 +808,12 @@ class Runtime:
                     trace.extend(
                         {"event": "derivation_added", **support.public()} for support in added_derivations
                     )
-                    if self._math_evidence_recheck is not None:
-                        for evidence_id in self._math_evidence_recheck(derivations.active()):
-                            change = derivations.revoke(evidence_id, scope=derivation_scope)
-                            if change is not None:
-                                derivations_changed = True
-                                trace.append({
-                                    "event": "derivation_revoked", "request_id": request_id,
-                                    "source": "independent_recheck", **change.public(),
-                                })
+                    revocations = recheck_derivations(derivations, derivation_scope, self._math_evidence_recheck)
+                    derivations_changed = bool(revocations)
+                    trace.extend({
+                        "event": "derivation_revoked", "request_id": request_id,
+                        "source": "independent_recheck", **change.public(),
+                    } for _, change in revocations)
                     surviving = derivations.goal_supports(derivation_scope)
                     if derivations_changed and result is not None:
                         math_verification.bind_derivations(
@@ -736,56 +831,9 @@ class Runtime:
                     })
             verification_elapsed_ms = round((time.perf_counter() - verification_started) * 1000, 3)
             if failure_status is not None:
-                provider_requests.append(
-                    {
-                        "request_id": request_id,
-                        "requested_model": self._model_port.name,
-                        "actual_model": actual_model,
-                        "provider_request_id": provider_request_id,
-                        "finish_reason": finish_reason,
-                        "request_sent": getattr(self._model_port, "provider", "offline") != "offline",
-                        "status": failure_status,
-                        "failure_status": failure_status,
-                        "elapsed_ms": request_elapsed_ms,
-                        "usage": {
-                            "input_tokens": reply.input_tokens,
-                            "output_tokens": reply.output_tokens,
-                            "source": reply.usage_source,
-                        },
-                    }
-                )
-                trace.append(
-                    {
-                        "event": "model_request_failed",
-                        "request_id": request_id,
-                        "provider_request_id": provider_request_id,
-                        "finish_reason": finish_reason,
-                        "status": failure_status,
-                        "failure_status": failure_status,
-                        "elapsed_ms": request_elapsed_ms,
-                        "actual_model": actual_model,
-                        "usage_source": reply.usage_source,
-                    }
-                )
+                requests.reject(attempt, failure_status)
                 break
 
-            provider_requests.append(
-                {
-                    "request_id": request_id,
-                    "requested_model": self._model_port.name,
-                    "actual_model": actual_model,
-                    "provider_request_id": provider_request_id,
-                    "finish_reason": finish_reason,
-                    "request_sent": getattr(self._model_port, "provider", "offline") != "offline",
-                    "status": "completed",
-                    "elapsed_ms": request_elapsed_ms,
-                    "usage": {
-                        "input_tokens": reply.input_tokens,
-                        "output_tokens": reply.output_tokens,
-                        "source": reply.usage_source,
-                    },
-                }
-            )
             result_scope = f"{problem_sha256}:{attempt_verification['scope']}"
             result_id = stable_id("result", {"content": answer, "scope": result_scope})
             if (
@@ -821,54 +869,47 @@ class Runtime:
                 trace.append(_evidence_event("verified_result_added", item))
 
             previous_tool_results = len(ordinary_tool_results)
-            for call in reply.tool_calls:
-                if self._tool_executor is None:
-                    trace.append(
-                        {"event": "tool_call_not_executed", "request_id": request_id, "reason": "no_executor"}
-                    )
-                    continue
-                if tool_count >= tool_limit:
-                    trace.append(
-                        {
-                            "event": "tool_call_not_executed",
-                            "request_id": request_id,
-                            "reason": "tool_budget_exhausted",
-                        }
-                    )
-                    break
-
-                invocation_id = f"{run_id}_tool_{tool_count + 1:03d}"
-                tool_count += 1
-                receipt, failure_status = _execute_tool(
-                    self._tool_executor, call, invocation_id, request_id, trace
-                )
-                if failure_status:
-                    break
-                try:
-                    item = state.add_tool_receipt(
-                        receipt, invocation_id=invocation_id, call=call
-                    )
-                except ValueError:
-                    trace.append({"event": "tool_receipt_rejected", "invocation_id": invocation_id})
-                else:
-                    trace.append(
-                        {
-                            **_evidence_event("tool_receipt_accepted", item),
-                            "invocation_id": invocation_id,
-                            "receipt_id": receipt.receipt_id,
-                            "output_sha256": hashlib.sha256(
-                                receipt.output.encode("utf-8")
-                            ).hexdigest(),
-                        }
-                    )
-                    if not reasoning_state_enabled:
-                        ordinary_result = f"{receipt.tool_name}: {receipt.output}"
-                        if ordinary_result not in ordinary_tool_results:
-                            ordinary_tool_results.append(ordinary_result)
+            _, failure_status = execute_tools(attempt, state, tool_limit - tool_count)
+            if resumed is not None:
+                used_evidence_ids = attempt_verification["references"]["used_evidence_ids"]
+                trace.append({
+                    "event": "counterfactual_parent_action", "request_id": request_id,
+                    **resumed.request_metadata(),
+                    "used_evidence_ids": used_evidence_ids,
+                    "used_merged_evidence_ids": [
+                        evidence_id for evidence_id in resumed.merged_evidence_ids if evidence_id in used_evidence_ids
+                    ],
+                    "verification_status": attempt_verification["status"],
+                    "submitted_checks": [
+                        {"kind": check["kind"], "status": check["status"], "evidence_id": check.get("evidence_id")}
+                        for check in attempt_verification["checks"]
+                    ],
+                })
 
             if failure_status:
                 break
             if math_verification is not None:
+                if intervention is not None:
+                    continuation = intervention.consider(
+                        request_id=request_id, build_prompt=lambda: solve_prompt("continuation")[0],
+                        checks=attempt_verification["checks"], revocations=revocations,
+                        state=state, scope=derivation_scope,
+                        remaining_requests=request_limit - requests.count,
+                        remaining_tools=tool_limit - tool_count if self._tool_executor is not None else 0,
+                        max_output_tokens=getattr(self._model_port, "max_output_tokens", "unknown"),
+                        dispatch=requests.dispatch, execute_tools=execute_tools,
+                    )
+                    if continuation is not None:
+                        if continuation.failure_status is not None:
+                            failure_status = continuation.failure_status
+                            break
+                        if continuation.merged_evidence_ids:
+                            math_verification.bind_derivations(
+                                result["answer"], verification, derivations.goal_supports(derivation_scope),
+                                request_id=result_request_id,
+                            )
+                        request_kind = "counterfactual_continuation"
+                        continue
                 if derivations is None:
                     for check in attempt_verification["checks"]:
                         if check["status"] == "verified":
@@ -876,7 +917,7 @@ class Runtime:
                 if attempt_verification["status"] == "verified":
                     stop_reason = "answer_generated"
                     break
-                if request_count >= request_limit:
+                if requests.count >= request_limit:
                     stop_reason = "model_request_budget_exhausted"
                     break
                 if (
@@ -889,7 +930,7 @@ class Runtime:
                 stop_reason = "no_progress"
                 break
             if not reasoning_state_enabled:
-                if request_count < request_limit:
+                if requests.count < request_limit:
                     if len(ordinary_tool_results) > previous_tool_results:
                         request_kind = "tool_continuation"
                         continue
@@ -913,7 +954,7 @@ class Runtime:
                 }
             )
             if substantive_change:
-                if request_count < request_limit:
+                if requests.count < request_limit:
                     request_kind = "continuation"
                     continue
                 stop_reason = "answer_generated"
@@ -922,7 +963,7 @@ class Runtime:
             if request_kind == "diagnosis" or diagnosis_used:
                 stop_reason = "no_progress"
                 break
-            if request_count < request_limit:
+            if requests.count < request_limit:
                 diagnosis_used = True
                 request_kind = "diagnosis"
                 continue
@@ -940,7 +981,7 @@ class Runtime:
         if (
             not failure_status
             and stop_reason == "model_request_budget_exhausted"
-            and (math_verification is not None or request_count == 0)
+            and (math_verification is not None or requests.count == 0)
         ):
             run_status = "stopped"
 
@@ -964,7 +1005,10 @@ class Runtime:
                 {"visible_context_sha256": hashlib.sha256(visible_context.encode()).hexdigest()}
                 if visible_context else {}
             ),
-            "mechanisms": {"shared_reasoning_state": reasoning_state_enabled},
+            "mechanisms": {
+                "shared_reasoning_state": reasoning_state_enabled,
+                **({"counterfactual_intervention": True} if counterfactual_enabled else {}),
+            },
             **(
                 {"math_evidence_recheck": "controlled"}
                 if derivations is not None and self._math_evidence_recheck is not None else {}
@@ -984,8 +1028,8 @@ class Runtime:
         run_dir = output_root / run_id
         trace_path = run_dir / "trace.jsonl"
         run_path = run_dir / "run.json"
-        input_tokens = _sum_usage(replies, "input_tokens")
-        output_tokens = _sum_usage(replies, "output_tokens")
+        input_tokens = _sum_usage(requests.replies, "input_tokens")
+        output_tokens = _sum_usage(requests.replies, "output_tokens")
         trace.append(
             {
                 "event": "run_stopped",
@@ -1003,19 +1047,19 @@ class Runtime:
             "condition_id": condition_id,
             "model": {
                 "requested": self._model_port.name,
-                "actual": replies[-1].model or "unknown" if replies else "unknown",
-                "provider_request_id": getattr(replies[-1], "request_id", "unknown")
-                if replies
+                "actual": requests.replies[-1].model or "unknown" if requests.replies else "unknown",
+                "provider_request_id": getattr(requests.replies[-1], "request_id", "unknown")
+                if requests.replies
                 else "unknown",
                 "reasoning_config": config["reasoning_config"],
             },
-            "provider_requests": provider_requests,
+            "provider_requests": requests.records,
             "budget": {
                 "scope": "run_shared",
-                "model_requests": {"limit": request_limit, "used": request_count},
+                "model_requests": {"limit": request_limit, "used": requests.count},
                 "tokens": {
                     "limit": provider_config["max_tokens"],
-                    "used": _sum_usage(replies, "tokens"),
+                    "used": _sum_usage(requests.replies, "tokens"),
                 },
                 "tools": {"limit": tool_limit, "used": tool_count},
                 "elapsed_ms": elapsed_ms,
@@ -1036,7 +1080,7 @@ class Runtime:
                     if isinstance(input_tokens, int) and isinstance(output_tokens, int)
                     else "unknown"
                 ),
-                "source": _usage_source(replies),
+                "source": _usage_source(requests.replies),
             },
             "cost": {"amount_usd": "unknown", "source": "unknown"},
             "result": result,

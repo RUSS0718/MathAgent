@@ -104,6 +104,11 @@ class MathVerification:
                 check["evidence_id"] = stable_id(
                     "evidence", {"criterion_goal": goal.id, "check": check},
                 )
+            elif verdict.status == "failed":
+                check["premise_kinds"] = list(verdict.premise_kinds)
+                check["evidence_id"] = stable_id(
+                    "failure-evidence", {"criterion_goal": goal.id, "check": check},
+                )
             if verdict.solutions is not None:
                 check["solutions"] = list(verdict.solutions)
             checks.append(check)
@@ -323,7 +328,10 @@ def _check_radical(equation: _RadicalEquation, kind: str, claim: dict[str, Any])
         if radicand is None or rhs is None:
             return ScopedCheck("unknown", scope, "missing_or_unsupported_bound")
         if (radicand, rhs) != (-equation.radicand_offset / equation.radicand_slope, equation.rhs_bound):
-            return ScopedCheck("failed", scope, "incorrect_necessary_conditions")
+            return ScopedCheck(
+                "failed", scope, "incorrect_necessary_conditions",
+                {"radicand_lower_bound": str(radicand), "rhs_lower_bound": str(rhs)},
+            )
         return ScopedCheck(
             "verified", scope, "real_principal_square_root_conditions",
             {"radicand_lower_bound": str(radicand), "rhs_lower_bound": str(rhs),
@@ -340,7 +348,11 @@ def _check_radical(equation: _RadicalEquation, kind: str, claim: dict[str, Any])
             return ScopedCheck("unknown", scope, "unsupported_constraint")
         scale = coefficients[0] / squared[0]
         if not scale or coefficients != tuple(value * scale for value in squared):
-            return ScopedCheck("failed", scope, "incorrect_squared_constraint", direction=direction)
+            return ScopedCheck(
+                "failed", scope, "incorrect_squared_constraint",
+                {"coefficients": [str(value) for value in coefficients]}, direction=direction,
+                premise_kinds=("necessary_conditions",) if direction == "equivalent" else (),
+            )
         if direction == "equivalent" and claim.get("rhs_nonnegative") is not True:
             return ScopedCheck("unknown", scope, "missing_equivalence_premise", direction=direction)
         premises = (
@@ -367,13 +379,21 @@ def _check_radical(equation: _RadicalEquation, kind: str, claim: dict[str, Any])
                 return ScopedCheck("unknown", scope, "unsupported_factorization")
             first, second = constants
             if (first + second, first * second) != (squared[1] / squared[0], squared[2] / squared[0]):
-                return ScopedCheck("failed", scope, "incorrect_factorization")
+                return ScopedCheck(
+                    "failed", scope, "incorrect_factorization",
+                    {"factor_constants": [str(value) for value in constants]},
+                    premise_kinds=("candidate_constraint",),
+                )
             candidates = {-first, -second}
             method = "exact_quadratic_factorization"
         if candidates is None:
             return ScopedCheck("unknown", scope, "unsupported_candidate_set")
         if set(proposed) != candidates:
-            return ScopedCheck("failed", scope, "candidate_set_incorrect_or_incomplete")
+            return ScopedCheck(
+                "failed", scope, "candidate_set_incorrect_or_incomplete",
+                {"candidates": [str(value) for value in sorted(set(proposed))]},
+                premise_kinds=("candidate_constraint",),
+            )
         return ScopedCheck(
             "verified", scope, method,
             {"candidates": [str(candidate) for candidate in sorted(candidates)]},
@@ -388,7 +408,11 @@ def _check_radical(equation: _RadicalEquation, kind: str, claim: dict[str, Any])
         return ScopedCheck("unknown", scope, "unsupported_substitution_values")
 
     if not all(map(equation.contains, accepted)) or any(map(equation.contains, rejected)):
-        return ScopedCheck("failed", scope, "incorrect_substitution_classification")
+        return ScopedCheck(
+            "failed", scope, "incorrect_substitution_classification",
+            {"accepted": [str(value) for value in accepted], "rejected": [str(value) for value in rejected]},
+            premise_kinds=("necessary_conditions", "candidate_coverage"),
+        )
     complete = candidates is not None and set((*accepted, *rejected)) == candidates
     if not complete and not accepted and not rejected:
         return ScopedCheck("unknown", scope, "no_values_checked")
