@@ -69,10 +69,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--population requires the offline provider")
     if args.population and args.counterfactual:
         parser.error("--counterfactual requires the single-route Runtime")
-    if not args.population and any(
-        value is not None for value in (args.token_limit, args.elapsed_limit_ms, args.cost_limit_usd)
-    ):
-        parser.error("--token-limit, --elapsed-limit-ms, and --cost-limit-usd require --population")
     if args.provider == "offline":
         if args.offline_answer is None:
             parser.error("--offline-answer is required for the offline provider")
@@ -83,8 +79,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         if args.thinking is None:
             parser.error("--thinking must be explicitly set for a live provider")
-        if args.model_request_limit != 1:
-            parser.error("the live CLI smoke requires --model-request-limit 1")
+        if args.model_request_limit < 1:
+            parser.error("--model-request-limit must be positive for a live provider")
         if args.provider == "minimax" and args.thinking != "enabled":
             parser.error("MiniMax M3.1 Flash requires --thinking enabled")
         try:
@@ -140,6 +136,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             counterfactual_enabled=args.counterfactual,
             model_request_limit=args.model_request_limit,
             tool_call_limit=args.tool_call_limit,
+            token_limit=args.token_limit,
+            elapsed_limit_ms=args.elapsed_limit_ms,
+            cost_limit_usd=args.cost_limit_usd,
             online_search=args.online_search,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))

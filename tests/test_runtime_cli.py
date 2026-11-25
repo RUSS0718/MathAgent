@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 from ricl_runtime import DeterministicModelPort, Runtime
 from ricl_runtime.__main__ import main
-from ricl_runtime.port import ModelPortFailure
+from ricl_runtime.port import ModelPortFailure, ModelReply
 from ricl_runtime.providers.deepseek import DeepSeekModelPort
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -36,22 +36,36 @@ class RuntimeOfflineTests(unittest.TestCase):
         self.assertIn("--population requires the offline provider", stderr.getvalue())
         load_provider.assert_not_called()
 
-    def test_single_route_cli_rejects_unavailable_budget_overrides_before_provider_load(self) -> None:
-        for flags in (
-            ["--token-limit", "0"],
-            ["--elapsed-limit-ms", "0"],
-            ["--cost-limit-usd", "0"],
-            ["--model-request-limit", "2"],
-        ):
-            with (
-                self.subTest(flags=flags),
-                redirect_stderr(StringIO()),
-                patch("ricl_runtime.__main__.DeepSeekModelPort.from_environment") as load_provider,
-                self.assertRaises(SystemExit) as raised,
-            ):
-                main(["--provider", "deepseek", "--thinking", "disabled", "--problem", "Compute 2 + 2.", *flags])
-            self.assertEqual(raised.exception.code, 2)
-            load_provider.assert_not_called()
+    def test_live_cli_passes_the_complete_multi_round_root_budget(self) -> None:
+        patcher = patch("ricl_runtime.__main__.DeepSeekModelPort.from_environment")
+        load_provider = patcher.start()
+        self.addCleanup(patcher.stop)
+        class FixtureProviderPort:
+            name = "deepseek"
+            provider = "deepseek"
+            thinking = "disabled"
+
+            def complete(self, problem: str):
+                del problem
+                return ModelReply("4", model=self.name)
+
+        provider = FixtureProviderPort()
+        load_provider.return_value = provider
+        output = StringIO()
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(output):
+            exit_code = main([
+                "--provider", "deepseek", "--thinking", "disabled",
+                "--problem", "Compute 2 + 2.", "--output-root", directory,
+                "--model-request-limit", "2", "--token-limit", "100",
+                "--elapsed-limit-ms", "10000", "--cost-limit-usd", "0.05",
+            ])
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(result["budget"]["model_requests"]["limit"], 2)
+        self.assertEqual(result["budget"]["tokens"]["limit"], 100)
+        self.assertEqual(result["budget"]["elapsed_limit_ms"], 10000)
+        self.assertEqual(result["budget"]["cost_usd"]["limit"], 0.05)
+        load_provider.assert_called_once()
 
     def test_verification_leaves_ambiguous_answer_text_unknown(self) -> None:
         cases = {
