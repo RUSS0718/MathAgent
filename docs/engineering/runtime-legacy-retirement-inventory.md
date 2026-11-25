@@ -7,8 +7,8 @@
 | 证据 | 当前状态 |
 | --- | --- |
 | 真实先导具备统一预算、可复核 Run 和失败记录 | 九个矩阵条件和两个回退条件已完成。26 个 Provider 响应可追溯 |
-| 关键机制在真实条件中执行 | 观察到搜索扩展、APRS 选路、证据进入后续请求和同源干预分支。父路线消费反馈仍缺少真实实例 |
-| 独立复跑能复核同样的边界 | 已从同一提交导出到新目录并完成离线复跑。独立 Provider 复跑待确认 |
+| 关键机制在真实条件中执行 | 观察到搜索扩展、APRS 选路、证据进入后续请求和同源干预分支。第二批的真实父回复显式引用处理证据并给出匹配的重组等式，已对原产物离线复核 |
+| 独立复跑能复核同样的边界 | 已从干净检出完成第二批真实先导，九个矩阵及两个回退条件均结束。两批使用公开加法题和合成 Checkpoint |
 | 数据处置和回滚边界齐备 | 路径候选已初步识别。混合目录、旧数据权利和共享引用仍需逐项核查 |
 
 [真实先导记录](../evals/runtime-deepseek-paired-pilot.md)
@@ -32,3 +32,11 @@
 | 未跟踪的本地日志、题集、答案及结果 | 此处只盘点了跟踪路径 | 单独确认位置、所有者和处置权限。远端发布和 Git 历史各有独立边界 |
 
 执行时将入口、调用者迁移和数据处置拆开提交。回滚以确认时的分支提交为锚点，逐批回退提交并复跑受影响的入口。已迁移研究算法、ADR、真实先导和脱敏失败证据列入保留范围。
+
+## 可执行入口的直接引用
+
+第一批退役候选应从 `showcase_server.py`、`showcase_cli.py`、`demo_server.py`、`user_agent.py` 四个入口的直接调用者开始核对。静态扫描在 6 个脚本和 7 个测试中找到了相关引用。需要逐项判断是旧入口调用、边界检查还是历史复现：
+
+- 脚本包括 `check_experiment_setup.py`、`check_fast.py`、`check_showcase_release.py`、`check.py`、`check_workspace.py`、`start_showcase.py`。
+- 测试包括 `test_boundary_check_path.py`、`test_campaigns.py`、`test_demo_server.py`、`test_faithful_s10_run_memory.py`、`test_fast_gate.py`、`test_showcase_cli.py`、`test_showcase_run.py`。
+- 其他跟踪引用位于 `pyproject.toml`、`implementations/candidates/sl_v3_cont/__init__.py`、`showcase/__init__.py` 和 `showcase/experiment_sources.py`。还需核对 README、开发门禁和旧 Notebook 的引用。
