@@ -2,6 +2,7 @@
 
 from .aprs import Candidate, VerifierEvidence, evaluate_fixed_candidates
 from .counterfactual import CounterfactualCheckpoint, InterventionAudit
+from .population import CandidateRoute, PopulationBudget
 from .port import (
     DeterministicModelPort,
     ModelPort,
@@ -15,12 +16,14 @@ from .runtime import Runtime
 
 __all__ = [
     "Candidate",
+    "CandidateRoute",
     "CounterfactualCheckpoint",
     "DeterministicModelPort",
     "Evidence",
     "ModelPort",
     "InterventionAudit",
     "ModelReply",
+    "PopulationBudget",
     "Runtime",
     "SharedReasoningState",
     "ToolCall",
