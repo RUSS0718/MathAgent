@@ -5,11 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from test_runtime_math_verification import ANSWER, CHECKS, PROBLEM, increment
+
 from ricl_runtime import Runtime
 from ricl_runtime.derivations import DerivationScope, ScopedDerivationGraph
 from ricl_runtime.port import ModelReply
-
-from test_runtime_math_verification import ANSWER, CHECKS, PROBLEM, increment
 
 
 class ScriptedDerivationPort:
