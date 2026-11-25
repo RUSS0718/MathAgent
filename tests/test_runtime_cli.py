@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
@@ -21,6 +21,19 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 class RuntimeOfflineTests(unittest.TestCase):
     """Exercise the Runtime and command-line public boundaries without a Provider."""
+
+    def test_population_cli_rejects_live_provider_before_configuration(self) -> None:
+        stderr = StringIO()
+        with (
+            redirect_stderr(stderr),
+            patch("ricl_runtime.__main__.DeepSeekModelPort.from_environment") as load_provider,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            main(["--provider", "deepseek", "--population", "--problem", "Compute 2 + 2."])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--population requires the offline provider", stderr.getvalue())
+        load_provider.assert_not_called()
 
     def test_run_persists_answer_verification_budget_and_redacted_trace(self) -> None:
         answer = "Adding the two numbers gives 4."
@@ -55,6 +68,8 @@ class RuntimeOfflineTests(unittest.TestCase):
         self.assertEqual(events[-1]["event"], "run_stopped")
         self.assertNotIn("Compute 2 + 2.", trace)
         self.assertNotIn(answer, trace)
+        self.assertGreaterEqual(result["provider_requests"][0]["elapsed_ms"], 0)
+        self.assertGreaterEqual(events[2]["elapsed_ms"], 0)
         self.assertEqual(
             events[1]["answer_sha256"], hashlib.sha256(answer.encode("utf-8")).hexdigest()
         )

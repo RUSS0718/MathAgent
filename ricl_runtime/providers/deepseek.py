@@ -164,6 +164,7 @@ class DeepSeekModelPort:
         return {
             "endpoint_host": ALLOWED_HOST,
             "model_allowlist": list(ALLOWED_MODELS),
+            "transport_timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
             "max_prompt_bytes": MAX_PROMPT_BYTES,
             "input_token_framing_margin": INPUT_FRAMING_MARGIN_TOKENS,
             "max_input_tokens_upper_bound": MAX_PREFLIGHT_INPUT_TOKENS,

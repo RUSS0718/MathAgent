@@ -385,9 +385,11 @@ class Runtime:
                 _state_fingerprint(state),
             )
             request_count += 1
+            request_started = time.perf_counter()
             try:
                 reply = self._model_port.complete(prompt)
             except ModelPortFailure as error:
+                request_elapsed_ms = round((time.perf_counter() - request_started) * 1000, 3)
                 failure_status = error.failure_status
                 if failure_status not in {
                     "protocol_failed",
@@ -398,6 +400,12 @@ class Runtime:
                     "preflight_rejected",
                 }:
                     failure_status = "unknown_outcome"
+                verification = {
+                    "status": "unknown",
+                    "applicable": False,
+                    "scope": "none",
+                    "reason": failure_status,
+                }
                 request_sent = getattr(error, "request_sent", "unknown")
                 request_record = {
                     "request_id": request_id,
@@ -407,6 +415,7 @@ class Runtime:
                     "request_sent": request_sent,
                     "status": failure_status,
                     "failure_status": failure_status,
+                    "elapsed_ms": request_elapsed_ms,
                     "usage": {
                         "input_tokens": "unknown",
                         "output_tokens": "unknown",
@@ -427,6 +436,7 @@ class Runtime:
                         "request_sent": request_sent,
                         "status": failure_status,
                         "failure_status": failure_status,
+                        "elapsed_ms": request_elapsed_ms,
                         **(
                             {"http_status": error.status_code}
                             if "http_status" in request_record
@@ -436,6 +446,7 @@ class Runtime:
                 )
                 break
 
+            request_elapsed_ms = round((time.perf_counter() - request_started) * 1000, 3)
             replies.append(reply)
             provider_request_id = getattr(reply, "request_id", "unknown") or "unknown"
             actual_model = reply.model or "unknown"
@@ -460,6 +471,7 @@ class Runtime:
                         "request_sent": getattr(self._model_port, "provider", "offline") != "offline",
                         "status": failure_status,
                         "failure_status": failure_status,
+                        "elapsed_ms": request_elapsed_ms,
                         "usage": {
                             "input_tokens": reply.input_tokens,
                             "output_tokens": reply.output_tokens,
@@ -474,6 +486,7 @@ class Runtime:
                         "provider_request_id": provider_request_id,
                         "status": failure_status,
                         "failure_status": failure_status,
+                        "elapsed_ms": request_elapsed_ms,
                         "actual_model": actual_model,
                         "usage_source": reply.usage_source,
                     }
@@ -488,6 +501,7 @@ class Runtime:
                     "provider_request_id": provider_request_id,
                     "request_sent": getattr(self._model_port, "provider", "offline") != "offline",
                     "status": "completed",
+                    "elapsed_ms": request_elapsed_ms,
                     "usage": {
                         "input_tokens": reply.input_tokens,
                         "output_tokens": reply.output_tokens,
@@ -495,7 +509,9 @@ class Runtime:
                     },
                 }
             )
+            verification_started = time.perf_counter()
             verification = verify_integer_addition(problem, reply.text)
+            verification_elapsed_ms = round((time.perf_counter() - verification_started) * 1000, 3)
             result_scope = f"{problem_sha256}:{verification['scope']}"
             result_id = stable_id("result", {"content": reply.text, "scope": result_scope})
             result = {"id": result_id, "answer": reply.text}
@@ -505,10 +521,18 @@ class Runtime:
                     "request_id": request_id,
                     "result_id": result_id,
                     "model": reply.model or "unknown",
+                    "elapsed_ms": request_elapsed_ms,
                     "answer_sha256": hashlib.sha256(reply.text.encode("utf-8")).hexdigest(),
                 }
             )
-            trace.append({"event": "verification_completed", "result_id": result_id, **verification})
+            trace.append(
+                {
+                    "event": "verification_completed",
+                    "result_id": result_id,
+                    "elapsed_ms": verification_elapsed_ms,
+                    **verification,
+                }
+            )
 
             if reasoning_state_enabled and verification["status"] == "verified":
                 item = state.add_verified_result(reply.text, scope=result_scope)
