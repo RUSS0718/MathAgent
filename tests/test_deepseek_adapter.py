@@ -149,8 +149,16 @@ class DeepSeekModelPortTests(unittest.TestCase):
         ):
             port = DeepSeekModelPort.from_environment()
 
-        self.assertEqual(port.transport_timeout_seconds, 60.0)
-        self.assertEqual(port.preflight_config["transport_timeout_seconds"], 60.0)
+        self.assertEqual(port.transport_timeout_seconds, 180.0)
+        self.assertEqual(port.preflight_config["transport_timeout_seconds"], 180.0)
+
+        official_port = DeepSeekModelPort(
+            api_key="inert-test-credential",
+            base_url="https://api.deepseek.com/v1",
+            model="deepseek-flash",
+        )
+        self.assertEqual(official_port.transport_timeout_seconds, 60.0)
+        self.assertEqual(official_port.preflight_config["transport_timeout_seconds"], 60.0)
 
     def test_missing_environment_configuration_is_sanitized(self) -> None:
         with patch.dict(os.environ, {"API_KEY": "", "BASE_URL": "", "MODEL": ""}):
@@ -318,7 +326,8 @@ class DeepSeekModelPortTests(unittest.TestCase):
             reply = port.complete("fixture prompt")
 
         self.assertEqual(reply.request_id, "gateway-request")
-        request, _ = opener.calls[0]
+        request, timeout = opener.calls[0]
+        self.assertEqual(timeout, 180.0)
         self.assertEqual(request.full_url, f"https://{ALLOWED_GATEWAY_HOST}/v1/chat/completions")
         self.assertEqual(json.loads(request.data)["model"], "deepseek-v4.1-flash")
         self.assertEqual(json.loads(request.data)["max_tokens"], 16384)
