@@ -20,6 +20,7 @@ EvidenceRecheck = Callable[[tuple[ScopedDerivation, ...]], Iterable[str]]
 Revocation = tuple[ScopedDerivation, DerivationChange]
 _INTERVENTION_REQUESTS = 4  # Diagnosis, two single-step arms, and a parent continuation.
 _INTERVENTION_VERIFICATIONS = 3  # One independent check per arm and one parent merge recheck.
+_INTERVENTION_TOOL_CALLS = 3  # One tool opportunity per arm and one for the parent continuation.
 
 
 def recheck_derivations(
@@ -175,6 +176,8 @@ class OnlineIntervention:
             "affected_goal_ids": list(failure.targets),
             "remaining_model_requests": remaining_requests,
             "required_model_requests": _INTERVENTION_REQUESTS,
+            "remaining_tool_calls": remaining_tools,
+            "required_tool_calls": _INTERVENTION_TOOL_CALLS,
             "required_local_verifications": _INTERVENTION_VERIFICATIONS
             if reason == "admitted" else "unknown",
             "budget_reserve_reason": reserve_reason,

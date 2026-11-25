@@ -284,6 +284,39 @@ class RuntimeOnlineInterventionTests(unittest.TestCase):
         self.assertEqual([e["kind"] for e in run["derivations"]["supports"]],
                          ["necessary_conditions", "candidate_constraint"])
 
+    def test_admission_requires_tool_capacity_for_both_arms_and_parent(self):
+        class UnusedTool:
+            def execute(self, invocation_id, call):
+                raise AssertionError("tool should not execute before intervention admission")
+
+        port = InterventionPort(
+            increment(*CHECKS[:2], BAD_COVERAGE),
+            increment(*CHECKS, answer="Skipped CCL."),
+            increment(*CHECKS, answer="Skipped CCL."),
+        )
+        run, trace = self.run_script(port, tools=2, tool_executor=UnusedTool())
+
+        trigger = next(e for e in trace if e["event"] == "counterfactual_trigger_evaluated")
+        self.assertEqual(trigger["reason"], "insufficient_full_budget")
+        self.assertEqual(trigger["budget_reserve_reason"], "insufficient_tool_calls")
+        self.assertEqual(trigger["remaining_tool_calls"], 2)
+        self.assertEqual(trigger["required_tool_calls"], 3)
+        blocked = next(e for e in trace if e["event"] == "counterfactual_budget_blocked")
+        self.assertEqual((blocked["stage"], blocked["reason"]),
+                         ("admission", "insufficient_tool_calls"))
+        self.assertNotEqual(run["run"]["stop_reason"], "insufficient_tool_calls")
+        self.assertEqual(run["run"]["status"], "completed")
+        self.assertEqual(run["budget"]["model_requests"]["used"], 3)
+        self.assertEqual(run["budget"]["tools"], {"used": 0, "limit": 2})
+        self.assertEqual(len(port.prompts), 3)
+        self.assertFalse(any(
+            event["event"] == "counterfactual_started" for event in trace
+        ))
+        self.assertFalse(any(
+            str(event.get("request_kind", "")).startswith("counterfactual_")
+            for event in trace if event["event"] == "model_request_sent"
+        ))
+
     def test_arms_share_tool_reservations_and_keep_receipts_out_of_parent_state(self):
         class Tool:
             def execute(self, invocation_id, call):

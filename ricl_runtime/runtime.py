@@ -23,6 +23,7 @@ from .identity import stable_id
 from .math_verification import prepare_math_verification
 from .online_intervention import (
     _INTERVENTION_REQUESTS,
+    _INTERVENTION_TOOL_CALLS,
     InterventionContinuation,
     OnlineIntervention,
     Revocation,
@@ -743,6 +744,11 @@ class Runtime:
         def intervention_budget_reserve_reason() -> str | None:
             if request_limit - requests.count < _INTERVENTION_REQUESTS:
                 return "insufficient_model_requests"
+            if (
+                self._tool_executor is not None
+                and tool_limit - tool_count < _INTERVENTION_TOOL_CALLS
+            ):
+                return "insufficient_tool_calls"
             if token_limit is not None:
                 tokens_used = _run_token_total(requests.replies)
                 provider_bounded = isinstance(
@@ -946,8 +952,6 @@ class Runtime:
                     "route_id": route.route_id,
                     "decision_id": decision["decision_id"],
                     "selection_strategy": decision["strategy"],
-                    "aprs_selected_route_id": route.route_id,
-                    "aprs_selection_overridden": False,
                     "parent_route_id": resumed.parent_route_id,
                     "checkpoint_id": resumed.checkpoint_id,
                     "merged_evidence_ids": list(resumed.merged_evidence_ids),
@@ -1175,8 +1179,9 @@ class Runtime:
                     None,
                 )
                 if trigger is not None:
-                    stop_reason = trigger["reason"]
-                    break
+                    if trigger["reason"] in _RESOURCE_BUDGET_STOP_REASONS:
+                        stop_reason = trigger["reason"]
+                        break
             if search is not None:
                 if verification["status"] == "verified" and search.cold_start_complete:
                     stop_reason = "answer_generated"
