@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from .aprs import Candidate, VerifierEvidence, evaluate_fixed_candidates
-from .counterfactual import CounterfactualCheckpoint, InterventionAudit
+from .counterfactual import CounterfactualCheckpoint, InterventionAudit, RepairOptions
 from .identity import stable_id
 from .population import CandidateRoute, PopulationBudget
 from .port import ModelPort, ModelPortFailure, ModelReply, ToolExecutor
@@ -32,7 +32,8 @@ class Runtime:
         problem: str,
         *,
         checkpoint: CounterfactualCheckpoint,
-        intervention_feedback: str,
+        intervention_feedback: str | None = None,
+        repair_options: RepairOptions | None = None,
         intervention_auditor: Callable[[str, ModelReply], InterventionAudit] | None = None,
         feedback_kind: Literal["random", "diagnostic"] = "diagnostic",
         enabled: bool = True,
@@ -50,7 +51,14 @@ class Runtime:
             raise ValueError("counterfactual branches require two shared model requests")
         if feedback_kind not in ("random", "diagnostic"):
             raise ValueError("feedback kind must be random or diagnostic")
-        if not intervention_feedback.strip():
+        if repair_options is not None and intervention_feedback is not None:
+            raise ValueError("provide repair options or direct diagnostic feedback")
+        if feedback_kind == "random" and repair_options is None:
+            raise ValueError("random repair requires a shared option pool and seed")
+        selected_repair_id: str | None = None
+        if repair_options is not None:
+            selected_repair_id, intervention_feedback = repair_options.select(feedback_kind)
+        if not intervention_feedback or not intervention_feedback.strip():
             raise ValueError("intervention feedback must be nonempty")
 
         checkpoint_trigger_count = checkpoint.trigger_count
@@ -109,6 +117,7 @@ class Runtime:
                     "request_id": request_id,
                     "arm": arm,
                     "checkpoint_sha256": checkpoint_sha256,
+                    **({"selected_repair_id": selected_repair_id} if arm == "treatment" else {}),
                     "context_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
                 }
             )
@@ -132,6 +141,7 @@ class Runtime:
             branches[arm] = {
                 "request_count": 1,
                 "checkpoint_sha256": checkpoint_sha256,
+                "result_id": branch_result_id,
                 "answer": reply.text,
                 "action": reply.action,
                 "route": reply.route,
@@ -200,6 +210,7 @@ class Runtime:
             )
             parent_continuation = {
                 "request_id": parent_request_id,
+                "result_id": parent_result_id,
                 "answer": parent_reply.text,
                 "action": parent_reply.action,
                 "route": parent_reply.route,
@@ -214,6 +225,16 @@ class Runtime:
                     "result_id": parent_result_id,
                     "answer_sha256": hashlib.sha256(parent_reply.text.encode("utf-8")).hexdigest(),
                     "verification_status": parent_verification["status"],
+                    "action_changed_from_checkpoint": (
+                        parent_reply.action != checkpoint.current_action
+                        if parent_reply.action is not None and checkpoint.current_action is not None
+                        else "unknown"
+                    ),
+                    "route_changed_from_checkpoint": (
+                        parent_reply.route != checkpoint.current_route
+                        if parent_reply.route is not None and checkpoint.current_route is not None
+                        else "unknown"
+                    ),
                 }
             )
         trace.extend(
@@ -253,6 +274,17 @@ class Runtime:
             "model_port": self._model_port.name,
             "mechanisms": {"counterfactual_intervention": True},
             "feedback_kind": feedback_kind,
+            "feedback_sha256": hashlib.sha256(intervention_feedback.encode()).hexdigest(),
+            **(
+                {
+                    "repair_option_ids": [option_id for option_id, _ in repair_options.options],
+                    "repair_options_sha256": hashlib.sha256(
+                        _canonical_json(repair_options.options).encode()
+                    ).hexdigest(),
+                    "repair_seed": repair_options.seed,
+                }
+                if repair_options is not None else {}
+            ),
             "budget": {"scope": "run_shared", "model_requests": model_request_limit},
             "verifier": "integer_addition_v1",
         }
@@ -262,6 +294,7 @@ class Runtime:
         trace_path = run_dir / "trace.jsonl"
         run_path = run_dir / "run.json"
         trace.append({"event": "run_stopped", "status": "completed", "stop_reason": stop_reason})
+        final = parent_continuation or control
         result_record = {
             "schema_version": 1,
             "run_id": run_id,
@@ -283,11 +316,15 @@ class Runtime:
                 "output_tokens": _sum_usage(replies, "output_tokens"),
                 "source": _usage_source(replies),
             },
+            "cost": {"amount_usd": "unknown", "source": "unknown"},
+            "result": {"id": final["result_id"], "answer": final["answer"]},
+            "verification": final["verification"],
             "checkpoint": checkpoint_record,
             "branches": branches,
             "intervention": {
                 "qualified": True,
                 "feedback_kind": feedback_kind,
+                "selected_repair_id": selected_repair_id,
                 "audit_status": audit.status if audit else "unknown",
                 "audit_source": audit.source if audit else "",
                 "feedback_consumed": feedback_available,

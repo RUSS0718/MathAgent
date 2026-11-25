@@ -1,9 +1,32 @@
 """Public contracts for bounded, offline Runtime counterfactual branches."""
 
 from dataclasses import dataclass, field
+from random import Random
 from typing import Literal
 
 from .reasoning_state import SharedReasoningState
+
+
+@dataclass(frozen=True)
+class RepairOptions:
+    """Common repair opportunities and the recorded diagnostic selection for a pair."""
+
+    options: tuple[tuple[str, str], ...]
+    diagnosed_id: str
+    seed: int
+
+    def __post_init__(self) -> None:
+        ids = {option_id for option_id, _ in self.options}
+        if len(ids) < 2 or len(ids) != len(self.options) or self.diagnosed_id not in ids:
+            raise ValueError("repair options need distinct IDs and a diagnosis in the same pool")
+        if any(not option_id.strip() or not feedback.strip() for option_id, feedback in self.options):
+            raise ValueError("repair options require a nonempty ID and feedback")
+
+    def select(self, kind: Literal["random", "diagnostic"]) -> tuple[str, str]:
+        """Choose blindly for random repair or use the diagnosed ID."""
+        if kind == "random":
+            return Random(self.seed).choice(self.options)
+        return self.diagnosed_id, dict(self.options)[self.diagnosed_id]
 
 
 @dataclass

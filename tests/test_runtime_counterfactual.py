@@ -339,21 +339,51 @@ class CounterfactualRuntimeTests(unittest.TestCase):
         self.assertNotIn("intervention", result)
         self.assertFalse(any("intervention" in event["event"] or "counterfactual" in event["event"] for event in events))
 
-    def test_random_and_diagnostic_conditions_get_equal_branch_opportunity_and_budget(self) -> None:
+    def test_random_and_diagnostic_select_from_the_same_repair_opportunities(self) -> None:
+        from ricl_runtime.counterfactual import RepairOptions
+
+        options = RepairOptions(
+            options=(("regroup", "Try regrouping the terms."), ("recheck", "Recheck the arithmetic.")),
+            diagnosed_id="recheck",
+            seed=1,
+        )
+        pairs = {}
         for kind in ("random", "diagnostic"):
             with self.subTest(kind=kind):
-                result, _, port, _ = self._run(
-                    audit=InterventionAudit(
-                        status="approved", source="offline-independent-review", feedback_consumed=True
-                    ),
-                    feedback_kind=kind,
-                )
+                checkpoint = CounterfactualCheckpoint(visible_prefix="failed verification", failure_count=1)
+                port = ScriptedModelPort([
+                    ModelReply("5", action="continue"),
+                    ModelReply("4", action="repair"),
+                    ModelReply("4", action="continue"),
+                ])
+                with tempfile.TemporaryDirectory() as directory:
+                    result = Runtime(port).run_counterfactual(
+                        "Compute 2 + 2.",
+                        checkpoint=checkpoint,
+                        repair_options=options,
+                        feedback_kind=kind,
+                        intervention_auditor=lambda feedback, reply: InterventionAudit(
+                            status="approved", source="offline-independent-review", feedback_consumed=True
+                        ),
+                        output_root=Path(directory),
+                    )
+                pairs[kind] = (result, port.prompts)
                 self.assertEqual(len(port.prompts), 3)
                 self.assertEqual(result["budget"]["model_requests"], {"limit": 3, "used": 3})
                 self.assertEqual(result["branches"]["control"]["request_count"], 1)
                 self.assertEqual(result["branches"]["treatment"]["request_count"], 1)
                 self.assertEqual(result["intervention"]["feedback_kind"], kind)
                 self.assertTrue(result["intervention"]["qualified"])
+        random_result, random_prompts = pairs["random"]
+        diagnostic_result, diagnostic_prompts = pairs["diagnostic"]
+        self.assertEqual(random_result["checkpoint"], diagnostic_result["checkpoint"])
+        self.assertEqual(random_prompts[0], diagnostic_prompts[0])
+        self.assertIn("Try regrouping the terms.", random_prompts[1])
+        self.assertIn("Recheck the arithmetic.", diagnostic_prompts[1])
+        self.assertEqual(random_result["config"]["repair_option_ids"], ["regroup", "recheck"])
+        self.assertEqual(random_result["config"]["repair_option_ids"], diagnostic_result["config"]["repair_option_ids"])
+        self.assertEqual(random_result["intervention"]["selected_repair_id"], "regroup")
+        self.assertEqual(diagnostic_result["intervention"]["selected_repair_id"], "recheck")
 
 
 if __name__ == "__main__":

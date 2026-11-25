@@ -1,7 +1,7 @@
 """Minimal independent RiCL research Runtime."""
 
 from .aprs import Candidate, VerifierEvidence, evaluate_fixed_candidates
-from .counterfactual import CounterfactualCheckpoint, InterventionAudit
+from .counterfactual import CounterfactualCheckpoint, InterventionAudit, RepairOptions
 from .population import CandidateRoute, PopulationBudget
 from .port import (
     DeterministicModelPort,
@@ -24,6 +24,7 @@ __all__ = [
     "InterventionAudit",
     "ModelReply",
     "PopulationBudget",
+    "RepairOptions",
     "Runtime",
     "SharedReasoningState",
     "ToolCall",
