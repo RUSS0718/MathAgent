@@ -724,6 +724,9 @@ class Runtime:
         def current_elapsed_ms() -> float:
             return round((time.perf_counter() - started) * 1000, 3)
 
+        def verified_answer_available() -> bool:
+            return result is not None and verification.get("status") == "verified"
+
         def budget_admission_reason() -> str | None:
             if token_limit is not None:
                 tokens_used = _run_token_total(requests.replies)
@@ -736,6 +739,8 @@ class Runtime:
             if cost_limit_usd is not None:
                 cost_used = 0.0 if not requests.replies else _run_cost_total(requests.replies)
                 if cost_used == "unknown":
+                    if verified_answer_available():
+                        return None
                     return "cost_budget_unknown"
                 if cost_used >= cost_limit_usd:
                     return "cost_budget_exhausted"
@@ -830,6 +835,8 @@ class Runtime:
             if cost_limit_usd is not None:
                 cost_used = _run_cost_total(requests.replies)
                 if cost_used == "unknown":
+                    if verified_answer_available():
+                        return None
                     return "cost_budget_unknown"
                 if cost_used > cost_limit_usd:
                     return "cost_budget_exhausted"

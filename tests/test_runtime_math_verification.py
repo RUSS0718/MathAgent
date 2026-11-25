@@ -253,7 +253,7 @@ class RuntimeMathVerificationTests(unittest.TestCase):
                     increment(*CHECKS), input_tokens=4, output_tokens=6,
                     usage_source="fixture",
                 ),
-                "cost_budget_unknown",
+                "answer_generated",
                 "unknown",
                 "unknown",
             ),
@@ -268,7 +268,10 @@ class RuntimeMathVerificationTests(unittest.TestCase):
 
                 self.assertEqual(len(port.prompts), 1)
                 self.assertEqual(run["verification"]["status"], "verified")
-                self.assertEqual(run["run"]["status"], "stopped")
+                self.assertEqual(
+                    run["run"]["status"],
+                    "completed" if expected_reason == "answer_generated" else "stopped",
+                )
                 self.assertEqual(run["run"]["stop_reason"], expected_reason)
                 self.assertEqual(run["budget"]["verifications"]["used"], 1)
                 self.assertGreaterEqual(
