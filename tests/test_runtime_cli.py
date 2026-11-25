@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, Mock, patch
 from ricl_runtime import DeterministicModelPort, Runtime
 from ricl_runtime.__main__ import main
 from ricl_runtime.port import ModelPortFailure
+from ricl_runtime.providers.deepseek import DeepSeekModelPort
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
@@ -167,6 +168,36 @@ class RuntimeOfflineTests(unittest.TestCase):
         self.assertEqual(opener.open.call_count, 1)
         for secret in (problem, credential, base_url):
             self.assertNotIn(secret, output.getvalue() + json.dumps(saved) + trace)
+
+    def test_completed_protocol_failure_retains_known_usage_and_model(self) -> None:
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "id": "provider-protocol-fixture",
+            "model": "deepseek-flash",
+            "choices": [{"finish_reason": "stop", "message": {
+                "content": None, "reasoning_content": "private reasoning sentinel",
+            }}],
+            "usage": {"prompt_tokens": 12, "completion_tokens": -3},
+        }).encode()
+        opener = Mock()
+        opener.open.return_value = response
+        port = DeepSeekModelPort("inert-fixture-key", "https://api.deepseek.com/v1", "deepseek-v4-flash")
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("ricl_runtime.providers.deepseek.urllib.request.build_opener", return_value=opener),
+        ):
+            run = Runtime(port).run("Compute 2 + 2.", output_root=Path(directory))
+            trace = Path(run["artifacts"]["trace"]).read_text(encoding="utf-8")
+
+        self.assertEqual(run["run"]["stop_reason"], "protocol_failed")
+        self.assertEqual(run["model"]["actual"], "deepseek-flash")
+        self.assertEqual(run["model"]["provider_request_id"], "provider-protocol-fixture")
+        self.assertEqual(run["usage"], {
+            "input_tokens": 12, "output_tokens": "unknown", "tokens": "unknown", "source": "provider",
+        })
+        self.assertEqual(run["provider_requests"][0]["finish_reason"], "stop")
+        self.assertIsNone(run["result"])
+        self.assertNotIn("private reasoning sentinel", json.dumps(run) + trace)
 
     def test_deepseek_cli_persists_success_without_secret_configuration(self) -> None:
         credential = "inert-cli-secret"

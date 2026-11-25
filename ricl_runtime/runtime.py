@@ -502,19 +502,25 @@ class Runtime:
                     "reason": failure_status,
                 }
                 request_sent = getattr(error, "request_sent", "unknown")
+                metadata = getattr(error, "reply", None)
+                if not isinstance(metadata, ModelReply):
+                    metadata = ModelReply("")
+                if request_sent is not False:
+                    replies.append(metadata)
                 request_record = {
                     "request_id": request_id,
                     "requested_model": self._model_port.name,
-                    "actual_model": "unknown",
-                    "provider_request_id": "unknown",
+                    "actual_model": metadata.model,
+                    "provider_request_id": getattr(metadata, "request_id", "unknown"),
+                    "finish_reason": getattr(metadata, "finish_reason", "unknown"),
                     "request_sent": request_sent,
                     "status": failure_status,
                     "failure_status": failure_status,
                     "elapsed_ms": request_elapsed_ms,
                     "usage": {
-                        "input_tokens": "unknown",
-                        "output_tokens": "unknown",
-                        "source": "unknown",
+                        "input_tokens": metadata.input_tokens,
+                        "output_tokens": metadata.output_tokens,
+                        "source": metadata.usage_source,
                     },
                 }
                 if isinstance(getattr(error, "status_code", None), int):
@@ -528,6 +534,10 @@ class Runtime:
                             else "model_request_failed"
                         ),
                         "request_id": request_id,
+                        "provider_request_id": request_record["provider_request_id"],
+                        "actual_model": request_record["actual_model"],
+                        "finish_reason": request_record["finish_reason"],
+                        "usage_source": metadata.usage_source,
                         "request_sent": request_sent,
                         "status": failure_status,
                         "failure_status": failure_status,
@@ -563,6 +573,7 @@ class Runtime:
                         "requested_model": self._model_port.name,
                         "actual_model": actual_model,
                         "provider_request_id": provider_request_id,
+                        "finish_reason": finish_reason,
                         "request_sent": getattr(self._model_port, "provider", "offline") != "offline",
                         "status": failure_status,
                         "failure_status": failure_status,
@@ -579,6 +590,7 @@ class Runtime:
                         "event": "model_request_failed",
                         "request_id": request_id,
                         "provider_request_id": provider_request_id,
+                        "finish_reason": finish_reason,
                         "status": failure_status,
                         "failure_status": failure_status,
                         "elapsed_ms": request_elapsed_ms,
@@ -594,6 +606,7 @@ class Runtime:
                     "requested_model": self._model_port.name,
                     "actual_model": actual_model,
                     "provider_request_id": provider_request_id,
+                    "finish_reason": finish_reason,
                     "request_sent": getattr(self._model_port, "provider", "offline") != "offline",
                     "status": "completed",
                     "elapsed_ms": request_elapsed_ms,

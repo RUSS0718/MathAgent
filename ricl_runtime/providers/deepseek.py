@@ -5,7 +5,7 @@ import json
 import os
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlsplit
@@ -63,6 +63,10 @@ class ProviderProtocolError(ModelPortFailure):
 
     failure_status = "protocol_failed"
     request_sent = True
+
+    def __init__(self, message: str, *, reply: "DeepSeekReply | None" = None) -> None:
+        self.reply = reply
+        super().__init__(message)
 
 
 class ProviderTimeoutError(ModelPortFailure, TimeoutError):
@@ -256,24 +260,31 @@ class DeepSeekModelPort:
 
         response_data = _decode_response(body)
         choices = response_data.get("choices")
-        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-            raise ProviderProtocolError("provider response did not contain a chat choice")
-        message = choices[0].get("message")
-        if not isinstance(message, dict) or not isinstance(message.get("content"), str):
-            raise ProviderProtocolError("provider response did not contain text content")
+        choice = (
+            choices[0]
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict)
+            else None
+        )
 
         usage = response_data.get("usage")
         if not isinstance(usage, dict):
             usage = {}
-        return DeepSeekReply(
-            text=message["content"],
+        metadata = DeepSeekReply(
+            text="",
             model=_nonempty_string(response_data.get("model")) or "unknown",
             input_tokens=_token_count(usage.get("prompt_tokens")),
             output_tokens=_token_count(usage.get("completion_tokens")),
             usage_source="provider" if _has_usage(usage) else "unknown",
             request_id=_nonempty_string(response_data.get("id")) or "unknown",
-            finish_reason=_nonempty_string(choices[0].get("finish_reason")) or "unknown",
+            finish_reason=_nonempty_string(choice.get("finish_reason")) or "unknown"
+            if choice is not None else "unknown",
         )
+        if choice is None:
+            raise ProviderProtocolError("provider response did not contain a chat choice", reply=metadata)
+        message = choice.get("message")
+        if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+            raise ProviderProtocolError("provider response did not contain text content", reply=metadata)
+        return replace(metadata, text=message["content"])
 
 
 def _decode_response(body: bytes) -> dict[str, Any]:
@@ -297,7 +308,7 @@ def _nonempty_string(value: object) -> str | None:
 def _token_count(value: object) -> int | str:
     """Preserve recognized token-count values and mark absent data unknown."""
 
-    return value if isinstance(value, (int, str)) and not isinstance(value, bool) else "unknown"
+    return value if type(value) is int and value >= 0 else "unknown"
 
 
 def _has_usage(usage: dict[str, Any]) -> bool:
