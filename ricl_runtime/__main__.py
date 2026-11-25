@@ -37,13 +37,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--model-request-limit", type=int, default=1)
     parser.add_argument("--tool-call-limit", type=int, default=0)
-    parser.add_argument("--token-limit", type=int, default=20)
-    parser.add_argument("--elapsed-limit-ms", type=int, default=100)
-    parser.add_argument("--cost-limit-usd", type=float, default=0.0)
+    parser.add_argument("--token-limit", type=int, help="total token limit for --population (default: 20)")
+    parser.add_argument("--elapsed-limit-ms", type=int, help="time limit for --population (default: 100)")
+    parser.add_argument("--cost-limit-usd", type=float, help="cost limit for --population (default: 0)")
     args = parser.parse_args(argv)
 
     if args.population and args.provider != "offline":
         parser.error("--population requires the offline provider")
+    if not args.population and any(
+        value is not None for value in (args.token_limit, args.elapsed_limit_ms, args.cost_limit_usd)
+    ):
+        parser.error("--token-limit, --elapsed-limit-ms, and --cost-limit-usd require --population")
     if args.provider == "offline":
         if args.offline_answer is None:
             parser.error("--offline-answer is required for the offline provider")
@@ -51,6 +55,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         if args.thinking is None:
             parser.error("--thinking must be explicitly set for DeepSeek")
+        if args.model_request_limit != 1:
+            parser.error("the DeepSeek CLI smoke requires --model-request-limit 1")
         try:
             model_port = DeepSeekModelPort.from_environment(thinking=args.thinking)
         except ProviderConfigurationError as error:
@@ -84,10 +90,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             aprs_enabled=args.aprs,
             budget=PopulationBudget(
                 model_requests=args.model_request_limit,
-                tokens=args.token_limit,
+                tokens=20 if args.token_limit is None else args.token_limit,
                 tools=args.tool_call_limit,
-                elapsed_ms=args.elapsed_limit_ms,
-                cost_usd=args.cost_limit_usd,
+                elapsed_ms=100 if args.elapsed_limit_ms is None else args.elapsed_limit_ms,
+                cost_usd=0.0 if args.cost_limit_usd is None else args.cost_limit_usd,
             ),
         )
     else:

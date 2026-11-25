@@ -36,6 +36,23 @@ class RuntimeOfflineTests(unittest.TestCase):
         self.assertIn("--population requires the offline provider", stderr.getvalue())
         load_provider.assert_not_called()
 
+    def test_single_route_cli_rejects_unavailable_budget_overrides_before_provider_load(self) -> None:
+        for flags in (
+            ["--token-limit", "0"],
+            ["--elapsed-limit-ms", "0"],
+            ["--cost-limit-usd", "0"],
+            ["--model-request-limit", "2"],
+        ):
+            with (
+                self.subTest(flags=flags),
+                redirect_stderr(StringIO()),
+                patch("ricl_runtime.__main__.DeepSeekModelPort.from_environment") as load_provider,
+                self.assertRaises(SystemExit) as raised,
+            ):
+                main(["--provider", "deepseek", "--thinking", "disabled", "--problem", "Compute 2 + 2.", *flags])
+            self.assertEqual(raised.exception.code, 2)
+            load_provider.assert_not_called()
+
     def test_verification_leaves_ambiguous_answer_text_unknown(self) -> None:
         cases = {
             "The answer is not 4.": "unknown",
