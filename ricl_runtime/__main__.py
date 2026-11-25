@@ -20,7 +20,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run one RiCL Runtime problem.")
     parser.add_argument("--provider", choices=("offline", "deepseek", "minimax"), default="offline")
     parser.add_argument("--problem", required=True, help="single text math problem")
-    parser.add_argument("--offline-answer", help="fixed answer returned by the offline test port")
+    parser.add_argument("--offline-answer", help="fixed free-text answer or structured offline reply")
     parser.add_argument("--thinking", choices=("enabled", "disabled"))
     parser.add_argument("--problem-id", help="optional stable problem identifier")
     parser.add_argument("--condition-id", default="offline-single-route")
@@ -37,7 +37,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=True,
         help="use APRS/Pareto selection for --population",
     )
-    parser.add_argument("--model-request-limit", type=int, default=1)
+    parser.add_argument("--model-request-limit", type=int, default=1, help="maximum requests per Run")
     parser.add_argument("--tool-call-limit", type=int, default=0)
     parser.add_argument("--token-limit", type=int, help="total token limit for --population (default: 20)")
     parser.add_argument("--elapsed-limit-ms", type=int, help="time limit for --population (default: 100)")

@@ -18,6 +18,7 @@ from .counterfactual import (
     RepairOptions,
 )
 from .identity import stable_id
+from .math_verification import prepare_math_verification
 from .population import CandidateRoute, PopulationBudget
 from .port import ModelPort, ModelPortFailure, ModelReply, ToolCall, ToolExecutor, ToolReceipt
 from .reasoning_state import Evidence, SharedReasoningState
@@ -513,8 +514,8 @@ class Runtime:
     ) -> dict[str, Any]:
         """Generate, verify, and optionally reuse results within one shared Run budget."""
 
-        if model_request_limit < 1 or tool_call_limit < 0:
-            raise ValueError("model request limit must be positive and tool limit nonnegative")
+        if model_request_limit < 0 or tool_call_limit < 0:
+            raise ValueError("model request and tool limits must be nonnegative")
 
         execution = _scope or _RunScope()
         run_id = execution.run_id
@@ -541,14 +542,27 @@ class Runtime:
         provider_requests: list[dict[str, Any]] = []
         ordinary_tool_results: list[str] = []
         result: dict[str, Any] | None = None
-        verification: dict[str, object] = {}
+        verification: dict[str, Any] = {}
         failure_status: str | None = None
+        math_verification = prepare_math_verification(problem)
+        checked_claims: dict[tuple[str, str | None], dict[str, Any]] = {}
+        if math_verification is not None:
+            trace.append({
+                "event": "verification_goals_frozen",
+                "criterion": math_verification.name,
+                "goals": math_verification.public_goals(),
+            })
         started = time.perf_counter()
 
         while request_count < request_limit:
             evidence = state.valid_evidence() if reasoning_state_enabled else ()
             context = _render_evidence(evidence)
             parts = [problem]
+            prior_checks = tuple(checked_claims.values())
+            if math_verification is not None:
+                parts.append(math_verification.instructions())
+                if prior_checks:
+                    parts.append("Previously verified public claims:\n" + _canonical_json(prior_checks))
             if visible_context:
                 parts.append(f"Problem context:\n{visible_context}")
             if context:
@@ -562,7 +576,7 @@ class Runtime:
             prompt = "\n\n".join(parts)
             referenced_ids = [item.evidence_id for item in evidence]
             request_id = execution.request_id(request_count + 1)
-            if reasoning_state_enabled or request_kind != "solve":
+            if math_verification is not None or reasoning_state_enabled or request_kind != "solve":
                 trace.append(
                     {
                         "event": "model_request_sent",
@@ -570,6 +584,14 @@ class Runtime:
                         "request_kind": request_kind,
                         "referenced_evidence_ids": referenced_ids,
                         "context_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+                        **(
+                            {
+                                "delivered_check_evidence_ids": [
+                                    check["evidence_id"] for check in prior_checks
+                                ],
+                            }
+                            if math_verification is not None else {}
+                        ),
                     }
                 )
             previous_state = (
@@ -584,12 +606,6 @@ class Runtime:
             except ModelPortFailure as error:
                 request_elapsed_ms = round((time.perf_counter() - request_started) * 1000, 3)
                 failure_status = _model_failure_status(error)
-                verification = {
-                    "status": "unknown",
-                    "applicable": False,
-                    "scope": "none",
-                    "reason": failure_status,
-                }
                 request_sent = getattr(error, "request_sent", "unknown")
                 metadata = _failure_reply(error)
                 if request_sent is not False:
@@ -643,17 +659,22 @@ class Runtime:
             provider_request_id = getattr(reply, "request_id", "unknown") or "unknown"
             actual_model = reply.model or "unknown"
             finish_reason = getattr(reply, "finish_reason", "unknown") or "unknown"
+            verification_started = time.perf_counter()
             if finish_reason == "length":
                 failure_status = "budget_exhausted"
             elif not reply.text.strip():
                 failure_status = "invalid_output"
+            elif math_verification is None:
+                answer = reply.text
+                attempt_verification = verify_integer_addition(problem, answer)
+            else:
+                answer, attempt_verification = math_verification.assess(
+                    reply.text, prior_checks=prior_checks,
+                )
+                if not answer:
+                    failure_status = "invalid_output"
+            verification_elapsed_ms = round((time.perf_counter() - verification_started) * 1000, 3)
             if failure_status is not None:
-                verification = {
-                    "status": "unknown",
-                    "applicable": False,
-                    "scope": "none",
-                    "reason": failure_status,
-                }
                 provider_requests.append(
                     {
                         "request_id": request_id,
@@ -704,12 +725,15 @@ class Runtime:
                     },
                 }
             )
-            verification_started = time.perf_counter()
-            verification = verify_integer_addition(problem, reply.text)
-            verification_elapsed_ms = round((time.perf_counter() - verification_started) * 1000, 3)
-            result_scope = f"{problem_sha256}:{verification['scope']}"
-            result_id = stable_id("result", {"content": reply.text, "scope": result_scope})
-            result = {"id": result_id, "answer": reply.text}
+            result_scope = f"{problem_sha256}:{attempt_verification['scope']}"
+            result_id = stable_id("result", {"content": answer, "scope": result_scope})
+            if (
+                math_verification is None or result is None
+                or math_verification.support_rank(attempt_verification)
+                > math_verification.support_rank(verification)
+            ):
+                result = {"id": result_id, "answer": answer}
+                verification = attempt_verification
             trace.append(
                 {
                     "event": "answer_generated",
@@ -717,20 +741,21 @@ class Runtime:
                     "result_id": result_id,
                     "model": reply.model or "unknown",
                     "elapsed_ms": request_elapsed_ms,
-                    "answer_sha256": hashlib.sha256(reply.text.encode("utf-8")).hexdigest(),
+                    "answer_sha256": hashlib.sha256(answer.encode("utf-8")).hexdigest(),
                 }
             )
             trace.append(
                 {
                     "event": "verification_completed",
+                    **({"request_id": request_id} if math_verification is not None else {}),
                     "result_id": result_id,
                     "elapsed_ms": verification_elapsed_ms,
-                    **verification,
+                    **attempt_verification,
                 }
             )
 
-            if reasoning_state_enabled and verification["status"] == "verified":
-                item = state.add_verified_result(reply.text, scope=result_scope)
+            if reasoning_state_enabled and attempt_verification["status"] == "verified":
+                item = state.add_verified_result(answer, scope=result_scope)
                 trace.append(_evidence_event("verified_result_added", item))
 
             previous_tool_results = len(ordinary_tool_results)
@@ -781,6 +806,25 @@ class Runtime:
 
             if failure_status:
                 break
+            if math_verification is not None:
+                for check in attempt_verification["checks"]:
+                    if check["status"] == "verified":
+                        checked_claims.setdefault((check["kind"], check["goal_id"]), check)
+                if attempt_verification["status"] == "verified":
+                    stop_reason = "answer_generated"
+                    break
+                if request_count >= request_limit:
+                    stop_reason = "model_request_budget_exhausted"
+                    break
+                if (
+                    len(checked_claims) > len(prior_checks)
+                    or len(ordinary_tool_results) > previous_tool_results
+                    or (reasoning_state_enabled and _state_fingerprint(state) != previous_state[2])
+                ):
+                    request_kind = "continuation"
+                    continue
+                stop_reason = "no_progress"
+                break
             if not reasoning_state_enabled:
                 if request_count < request_limit:
                     if len(ordinary_tool_results) > previous_tool_results:
@@ -822,10 +866,16 @@ class Runtime:
             stop_reason = "model_request_budget_exhausted"
             break
 
-        if result is None and failure_status is None:
-            raise RuntimeError("Runtime ended without a model response")
         if stop_reason is None:
             stop_reason = "model_request_budget_exhausted"
+        if result is None:
+            verification = math_verification.assess("")[1] if math_verification is not None else {
+                "status": "unknown", "applicable": False, "scope": "none",
+            }
+            verification["reason"] = failure_status or stop_reason
+        run_status = "failed" if failure_status else (
+            "stopped" if stop_reason == "model_request_budget_exhausted" else "completed"
+        )
 
         elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
         provider_config = {
@@ -856,7 +906,7 @@ class Runtime:
                 "elapsed_limit_ms": "unknown",
                 "cost_usd": "unknown",
             },
-            "verifier": "integer_addition_v1",
+            "verifier": math_verification.name if math_verification is not None else "integer_addition_v1",
         }
         config_sha256 = hashlib.sha256(_canonical_json(config).encode("utf-8")).hexdigest()
         revision = _source_revision()
@@ -868,7 +918,7 @@ class Runtime:
         trace.append(
             {
                 "event": "run_stopped",
-                "status": "failed" if failure_status else "completed",
+                "status": run_status,
                 "stop_reason": failure_status or stop_reason,
             }
         )
@@ -922,7 +972,7 @@ class Runtime:
             "verification": verification,
             "evidence": state.public_snapshot(),
             "run": {
-                "status": "failed" if failure_status else "completed",
+                "status": run_status,
                 "stop_reason": failure_status or stop_reason,
                 **({"failure_status": failure_status} if failure_status else {}),
             },

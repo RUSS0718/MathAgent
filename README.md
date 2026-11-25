@@ -12,7 +12,26 @@ From the repository root:
 uv run python -m ricl_runtime --problem "Compute 2 + 2." --offline-answer "4"
 ```
 
-The offline port returns the answer supplied by `--offline-answer`; it does not solve the problem with a model. The independent verifier covers only supported integer-addition prompts. Other prompts have no applicable criterion and are recorded as `unknown`. By default, the CLI writes `run.json` and a redacted `trace.jsonl` under `artifacts/<run_id>/`; use `--output-root <path>` to choose another location.
+The offline port replays the reply supplied by `--offline-answer`. The CLI writes `run.json` and a redacted `trace.jsonl` under `artifacts/<run_id>/` by default. Use `--output-root <path>` to choose another location.
+
+### Check a radical equation
+
+```powershell
+$reply = @'
+{
+  "answer": "Solution set: {3}",
+  "checks": [
+    {"kind":"necessary_conditions","radicand_lower_bound":"-6","rhs_lower_bound":"0"},
+    {"kind":"candidate_constraint","coefficients":["1","-1","-6"],"direction":"forward"},
+    {"kind":"candidate_coverage","candidates":["-2","3"]},
+    {"kind":"original_equation_filter","accepted":["3"],"rejected":["-2"]}
+  ]
+}
+'@
+uv run python -m ricl_runtime --problem "sqrt(x+6)=x" --offline-answer $reply
+```
+
+The single-route verifier covers supported integer addition and equations of the form `sqrt(a*x+b)=c*x+d` with rational coefficients and positive slopes. For these equations, it freezes equal-weight goals before the first request and uses exact rational arithmetic to check the domain, the squared constraint, its rational candidate set, and substitution. A local check can be `verified` while completeness is `unknown`. The Run records certified completeness and whether it matches the final solution set stated in the free-text answer. The independent model review field remains `unknown` in this offline example. Cases outside the exact criterion remain `unknown`. Use `--model-request-limit` to set the Run's request cap.
 
 ## Runtime mechanisms
 

@@ -12,7 +12,9 @@ RiCL Runtime 是仓库中用于数学推理研究的 Python 入口。它运行�
 uv run python -m ricl_runtime --problem "Compute 2 + 2." --offline-answer "4"
 ```
 
-离线端口直接返回 `--offline-answer` 提供的答案，不会调用模型解题。独立验证器仅覆盖受支持形式的整数加法题；其他题目没有适用判据时记为 `unknown`。CLI 默认将 `run.json` 和脱敏后的 `trace.jsonl` 写入 `artifacts/<run_id>/`，也可以用 `--output-root <path>` 指定目录。
+离线端口重放 `--offline-answer` 提供的回复。CLI 默认将 `run.json` 和脱敏后的 `trace.jsonl` 写入 `artifacts/<run_id>/`，也可以用 `--output-root <path>` 指定目录。
+
+单路线独立验证覆盖受支持形式的整数加法，以及斜率为正有理数的 `sqrt(a*x+b)=c*x+d`。运行在首次请求前冻结等权目标，并用精确有理数核查定义域、平方约束、有理候选集和原式代回。Run 分别记录局部核查、解集完备性、自由文本答案与解集的匹配，以及独立模型复核。超出精确判据的情况记为 `unknown`。可用 `--model-request-limit` 设置一次 Run 的请求上限。[根号方程离线示例](README.md#check-a-radical-equation)
 
 ## Runtime 机制
 
