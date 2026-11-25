@@ -89,7 +89,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
 
         with (
             patch(
-                "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+                "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
                 return_value=opener,
             ) as build_opener,
             patch("ricl_runtime.providers.deepseek.DEFAULT_TIMEOUT_SECONDS", 0.25),
@@ -162,7 +162,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
         opener = FakeOpener(error=response_error)
 
         with patch(
-            "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+            "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
             return_value=opener,
         ):
             with self.assertRaises(ProviderHTTPError) as raised:
@@ -190,7 +190,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
         opener = FakeOpener(error=TimeoutError(f"{prompt} {credential}"))
 
         with patch(
-            "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+            "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
             return_value=opener,
         ):
             with self.assertRaises(ProviderTimeoutError) as raised:
@@ -211,7 +211,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
         opener = FakeOpener(error=URLError(f"{prompt} {credential}"))
 
         with patch(
-            "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+            "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
             return_value=opener,
         ):
             with self.assertRaises(ProviderOutcomeUnknownError) as raised:
@@ -232,7 +232,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
 
     def test_request_preflight_allows_only_priced_host_and_models(self) -> None:
         opener_builder = patch(
-            "ricl_runtime.providers.deepseek.urllib.request.build_opener"
+            "ricl_runtime.providers.chat_completions.urllib.request.build_opener"
         )
         with opener_builder as build_opener:
             for base_url, model in (
@@ -268,7 +268,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
         opener = FakeOpener(response=response)
 
         with patch(
-            "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+            "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
             return_value=opener,
         ):
             reply = port.complete("fixture prompt")
@@ -287,7 +287,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
         prompt = "x" * (16 * 1024 + 1)
 
         with patch(
-            "ricl_runtime.providers.deepseek.urllib.request.build_opener"
+            "ricl_runtime.providers.chat_completions.urllib.request.build_opener"
         ) as build_opener:
             with self.assertRaises(ProviderPreflightError) as raised:
                 port.complete(prompt)
@@ -309,7 +309,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
         opener = FakeOpener(response=malformed)
 
         with patch(
-            "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+            "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
             return_value=opener,
         ):
             with self.assertRaises(ProviderProtocolError) as raised:
@@ -333,7 +333,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
 
         with (
             patch(
-                "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+                "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
                 return_value=opener,
             ),
             patch("ricl_runtime.providers.deepseek.MAX_RESPONSE_BYTES", 8),

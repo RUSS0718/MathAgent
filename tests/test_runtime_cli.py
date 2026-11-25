@@ -60,6 +60,8 @@ class RuntimeOfflineTests(unittest.TestCase):
             "2 + 2 ≠ 4": "unknown",
             "7 + 1 = 4": "unknown",
             "2 + 2 = 4": "verified",
+            "**4**": "verified",
+            r"\(\boxed{4}\)": "verified",
             "The answer is 5.": "failed",
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -147,7 +149,7 @@ class RuntimeOfflineTests(unittest.TestCase):
                 {"API_KEY": credential, "BASE_URL": base_url, "MODEL": "deepseek-flash"},
             ),
             patch(
-                "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+                "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
                 return_value=opener,
             ),
             redirect_stdout(output),
@@ -201,7 +203,7 @@ class RuntimeOfflineTests(unittest.TestCase):
         port = DeepSeekModelPort("inert-fixture-key", "https://api.deepseek.com/v1", "deepseek-v4-flash")
         with (
             tempfile.TemporaryDirectory() as directory,
-            patch("ricl_runtime.providers.deepseek.urllib.request.build_opener", return_value=opener),
+            patch("ricl_runtime.providers.chat_completions.urllib.request.build_opener", return_value=opener),
         ):
             run = Runtime(port).run("Compute 2 + 2.", output_root=Path(directory))
             trace = Path(run["artifacts"]["trace"]).read_text(encoding="utf-8")
@@ -239,7 +241,7 @@ class RuntimeOfflineTests(unittest.TestCase):
                 {"API_KEY": credential, "BASE_URL": base_url, "MODEL": "deepseek-v4-flash"},
             ),
             patch(
-                "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+                "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
                 return_value=opener,
             ),
             redirect_stdout(output),
@@ -295,7 +297,7 @@ class RuntimeOfflineTests(unittest.TestCase):
                 {"API_KEY": credential, "BASE_URL": base_url, "MODEL": "deepseek-flash"},
             ),
             patch(
-                "ricl_runtime.providers.deepseek.urllib.request.build_opener",
+                "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
                 return_value=opener,
             ),
             redirect_stdout(output),

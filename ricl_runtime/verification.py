@@ -9,6 +9,7 @@ _ANSWER = re.compile(
     re.I,
 )
 _EQUATION = re.compile(r"(-?\d+)\s*\+\s*(-?\d+)\s*=\s*(-?\d+)[.!]?")
+_BOXED_INTEGER = re.compile(r"\\boxed\{\s*(-?\d+)\s*\}[.!]?")
 
 
 def verify_integer_addition(problem: str, answer: str) -> dict[str, object]:
@@ -25,7 +26,10 @@ def verify_integer_addition(problem: str, answer: str) -> dict[str, object]:
 
     left, right = map(int, match.groups())
     answer_line = answer.strip().rpartition("\n")[2].strip()
-    standalone = _ANSWER.fullmatch(answer_line)
+    for opening, closing in (("**", "**"), ("$", "$"), (r"\(", r"\)")):
+        if answer_line.startswith(opening) and answer_line.endswith(closing):
+            answer_line = answer_line[len(opening):-len(closing)].strip()
+    standalone = _ANSWER.fullmatch(answer_line) or _BOXED_INTEGER.fullmatch(answer_line)
     equation = _EQUATION.fullmatch(answer_line)
     value = standalone.group(1) if standalone else None
     if equation and sorted(map(int, equation.groups()[:2])) == sorted((left, right)):

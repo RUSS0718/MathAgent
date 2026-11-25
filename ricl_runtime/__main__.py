@@ -1,4 +1,4 @@
-"""Explicit command-line entry point for the offline RiCL Runtime."""
+"""Explicit command-line entry point for the RiCL Runtime."""
 
 import argparse
 import json
@@ -8,15 +8,17 @@ from pathlib import Path
 from .aprs import Candidate
 from .population import CandidateRoute, PopulationBudget
 from .port import DeterministicModelPort
-from .providers.deepseek import DeepSeekModelPort, ProviderConfigurationError
+from .providers.chat_completions import ProviderConfigurationError
+from .providers.deepseek import DeepSeekModelPort
+from .providers.minimax import MiniMaxModelPort
 from .runtime import Runtime
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run one offline or explicitly selected DeepSeek Runtime problem."""
+    """Run one offline or explicitly selected Provider problem."""
 
     parser = argparse.ArgumentParser(description="Run one RiCL Runtime problem.")
-    parser.add_argument("--provider", choices=("offline", "deepseek"), default="offline")
+    parser.add_argument("--provider", choices=("offline", "deepseek", "minimax"), default="offline")
     parser.add_argument("--problem", required=True, help="single text math problem")
     parser.add_argument("--offline-answer", help="fixed answer returned by the offline test port")
     parser.add_argument("--thinking", choices=("enabled", "disabled"))
@@ -54,11 +56,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         model_port = DeterministicModelPort(args.offline_answer)
     else:
         if args.thinking is None:
-            parser.error("--thinking must be explicitly set for DeepSeek")
+            parser.error("--thinking must be explicitly set for a live provider")
         if args.model_request_limit != 1:
-            parser.error("the DeepSeek CLI smoke requires --model-request-limit 1")
+            parser.error("the live CLI smoke requires --model-request-limit 1")
+        if args.provider == "minimax" and args.thinking != "enabled":
+            parser.error("MiniMax M3.1 Flash requires --thinking enabled")
         try:
-            model_port = DeepSeekModelPort.from_environment(thinking=args.thinking)
+            model_port = (
+                MiniMaxModelPort.from_environment()
+                if args.provider == "minimax"
+                else DeepSeekModelPort.from_environment(thinking=args.thinking)
+            )
         except ProviderConfigurationError as error:
             parser.error(str(error))
 
