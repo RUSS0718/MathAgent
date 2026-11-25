@@ -37,7 +37,7 @@ from .chat_completions import (
 DEFAULT_TIMEOUT_SECONDS = 60.0
 MAX_RESPONSE_BYTES = 1_048_576
 MAX_OUTPUT_TOKENS = 256
-GATEWAY_MAX_OUTPUT_TOKENS = 8192
+GATEWAY_MAX_OUTPUT_TOKENS = 16384
 ALLOWED_HOST = "api.deepseek.com"
 ALLOWED_GATEWAY_HOST = "code.aigcpro.org"
 ALLOWED_MODELS = (
@@ -49,6 +49,7 @@ GATEWAY_ALLOWED_MODELS = ("deepseek-v4.1-flash",)
 MAX_PROMPT_BYTES = 16 * 1024
 INPUT_FRAMING_MARGIN_TOKENS = 1024
 COST_LIMIT_USD = Decimal("0.05")
+GATEWAY_COST_LIMIT_USD = Decimal("0.07")
 INPUT_PEAK_USD_PER_MILLION = Decimal("0.30")
 OUTPUT_PEAK_USD_PER_MILLION = Decimal("1.20")
 GATEWAY_INPUT_PEAK_USD_PER_MILLION = Decimal("0.80")
@@ -146,7 +147,7 @@ class DeepSeekModelPort:
     def cost_limit_usd(self) -> float:
         """Expose the fixed per-request ceiling used by preflight."""
 
-        return float(COST_LIMIT_USD)
+        return float(GATEWAY_COST_LIMIT_USD if self._is_gateway else COST_LIMIT_USD)
 
     @property
     def preflight_cost_upper_bound_usd(self) -> str:
@@ -206,7 +207,7 @@ class DeepSeekModelPort:
             input_tokens_upper_bound * self._input_peak_usd_per_million
             + max_output_tokens * self._output_peak_usd_per_million
         ) / Decimal(1_000_000)
-        if cost_upper_bound > COST_LIMIT_USD:
+        if cost_upper_bound > (GATEWAY_COST_LIMIT_USD if is_gateway else COST_LIMIT_USD):
             raise ProviderPreflightError("request exceeds the configured cost limit")
 
         return post_chat_completion(

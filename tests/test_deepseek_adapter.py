@@ -321,9 +321,11 @@ class DeepSeekModelPortTests(unittest.TestCase):
         request, _ = opener.calls[0]
         self.assertEqual(request.full_url, f"https://{ALLOWED_GATEWAY_HOST}/v1/chat/completions")
         self.assertEqual(json.loads(request.data)["model"], "deepseek-v4.1-flash")
-        self.assertEqual(json.loads(request.data)["max_tokens"], 8192)
-        self.assertEqual(port.max_output_tokens, 8192)
-        self.assertEqual(port.preflight_cost_upper_bound_usd, "0.0401408")
+        self.assertEqual(json.loads(request.data)["max_tokens"], 16384)
+        self.assertEqual(port.max_output_tokens, 16384)
+        self.assertEqual(port.cost_limit_usd, 0.07)
+        self.assertEqual(port.preflight_cost_upper_bound_usd, "0.0663552")
+        self.assertEqual(port.preflight_config["max_output_tokens"], 16384)
         self.assertEqual(port.preflight_config["selected_endpoint_host"], ALLOWED_GATEWAY_HOST)
 
     def test_request_preflight_rejects_oversized_prompt_without_opening(self) -> None:
