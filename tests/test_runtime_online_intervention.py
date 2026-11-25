@@ -142,6 +142,38 @@ class RuntimeOnlineInterventionTests(unittest.TestCase):
                 self.assertEqual(run["budget"]["model_requests"]["used"], 1)
                 self.assertEqual(len(port.prompts), 1)
 
+    def test_intervention_diagnosis_cannot_overrun_the_root_token_budget(self):
+        port = InterventionPort(increment(*CHECKS[:2], BAD_COVERAGE), DIAGNOSIS)
+        with tempfile.TemporaryDirectory() as directory:
+            run = Runtime(port).run(
+                PROBLEM,
+                output_root=Path(directory),
+                counterfactual_enabled=True,
+                model_request_limit=8,
+                token_limit=20,
+            )
+            trace = [
+                json.loads(line)
+                for line in Path(run["artifacts"]["trace"]).read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual(len(port.prompts), 2)
+        self.assertEqual(run["budget"]["model_requests"]["used"], 2)
+        self.assertEqual(run["budget"]["tokens"]["used"], 30)
+        self.assertEqual(run["verification"]["status"], "unknown")
+        self.assertEqual(run["budget"]["verifications"]["used"], 1)
+        self.assertEqual(run["run"]["status"], "stopped")
+        self.assertEqual(run["run"]["stop_reason"], "token_budget_exhausted")
+        blocked = next(
+            event for event in trace
+            if event["event"] == "counterfactual_budget_blocked"
+        )
+        self.assertEqual(blocked["stage"], "arm_control")
+        self.assertEqual(blocked["reason"], "token_budget_exhausted")
+        merge = next(event for event in trace if event["event"] == "counterfactual_merge")
+        self.assertEqual(merge["status"], "withheld")
+        self.assertEqual(merge["reason"], "budget_arm_control_token_budget_exhausted")
+
     def test_unknown_and_tied_pairs_leave_parent_checkpoint_unchanged(self):
         cases = (
             (increment(answer="No checkable repair."), "independent_comparison_unknown"),

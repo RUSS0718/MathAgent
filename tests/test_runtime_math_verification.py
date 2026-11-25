@@ -203,6 +203,142 @@ class RuntimeMathVerificationTests(unittest.TestCase):
         for check in run["verification"]["supporting_checks"]:
             self.assertIn(check["evidence_id"], port.prompts[1])
 
+    def test_baseline_gets_one_bounded_repair_after_an_unverified_math_attempt(self) -> None:
+        port = ScriptedModelPort(
+            ModelReply(increment(answer="I have not established a checked step.")),
+            ModelReply(increment(*CHECKS)),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            run = Runtime(port).run(
+                PROBLEM, model_request_limit=2, output_root=Path(directory),
+            )
+
+        self.assertEqual(len(port.prompts), 2)
+        self.assertIn("One bounded diagnosis", port.prompts[1])
+        self.assertEqual(
+            [request["request_kind"] for request in run["provider_requests"]],
+            ["solve", "diagnosis"],
+        )
+        self.assertEqual(run["verification"]["status"], "verified")
+        self.assertEqual(run["run"]["stop_reason"], "answer_generated")
+
+    def test_shared_run_budget_settles_tokens_cost_and_local_verification(self) -> None:
+        cases = (
+            (
+                {"token_limit": 9},
+                ModelReply(
+                    increment(*CHECKS), input_tokens=4, output_tokens=6,
+                    usage_source="fixture", cost_usd=0.0,
+                ),
+                "token_budget_exhausted",
+                {"limit": 9, "used": 10},
+                "model_port",
+            ),
+            (
+                {"cost_limit_usd": 0.01},
+                ModelReply(
+                    increment(*CHECKS), input_tokens=4, output_tokens=6,
+                    usage_source="fixture", cost_usd=0.02,
+                ),
+                "cost_budget_exhausted",
+                0.02,
+                "model_port",
+            ),
+            (
+                {"cost_limit_usd": 0.01},
+                ModelReply(
+                    increment(*CHECKS), input_tokens=4, output_tokens=6,
+                    usage_source="fixture",
+                ),
+                "cost_budget_unknown",
+                "unknown",
+                "unknown",
+            ),
+        )
+        for options, reply, expected_reason, expected_usage, expected_source in cases:
+            with self.subTest(expected_reason=expected_reason):
+                port = ScriptedModelPort(reply)
+                with tempfile.TemporaryDirectory() as directory:
+                    run = Runtime(port).run(
+                        PROBLEM, output_root=Path(directory), **options,
+                    )
+
+                self.assertEqual(len(port.prompts), 1)
+                self.assertEqual(run["verification"]["status"], "verified")
+                self.assertEqual(run["run"]["status"], "stopped")
+                self.assertEqual(run["run"]["stop_reason"], expected_reason)
+                self.assertEqual(run["budget"]["verifications"]["used"], 1)
+                self.assertGreaterEqual(
+                    run["budget"]["verifications"]["elapsed_ms"], 0
+                )
+                self.assertEqual(run["cost"]["source"], expected_source)
+                self.assertEqual(
+                    run["provider_requests"][0]["cost"]["source"], expected_source
+                )
+                if expected_reason == "token_budget_exhausted":
+                    self.assertEqual(run["budget"]["tokens"], expected_usage)
+                else:
+                    self.assertEqual(
+                        run["budget"]["cost_usd"]["used"], expected_usage,
+                    )
+
+    def test_unknown_token_usage_and_zero_elapsed_budget_block_followup_requests(self) -> None:
+        unknown = ScriptedModelPort(
+            ModelReply(increment(CHECKS[0]), usage_source="fixture")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            unknown_run = Runtime(unknown).run(
+                PROBLEM,
+                model_request_limit=4,
+                token_limit=100,
+                output_root=Path(directory),
+            )
+        self.assertEqual(len(unknown.prompts), 1)
+        self.assertEqual(unknown_run["run"]["stop_reason"], "token_budget_unknown")
+        self.assertEqual(unknown_run["budget"]["tokens"]["used"], "unknown")
+        self.assertEqual(unknown_run["budget"]["cost_usd"]["used"], "unknown")
+        self.assertEqual(unknown_run["cost"]["source"], "unknown")
+        self.assertEqual(
+            unknown_run["provider_requests"][0]["cost"]["source"], "unknown"
+        )
+        self.assertEqual(unknown_run["budget"]["verifications"]["used"], 1)
+
+        blocked = ScriptedModelPort(ModelReply(increment(*CHECKS)))
+        with tempfile.TemporaryDirectory() as directory:
+            blocked_run = Runtime(blocked).run(
+                PROBLEM,
+                elapsed_limit_ms=0,
+                output_root=Path(directory),
+            )
+        self.assertEqual(blocked.prompts, [])
+        self.assertEqual(blocked_run["run"]["status"], "stopped")
+        self.assertEqual(blocked_run["run"]["stop_reason"], "elapsed_budget_exhausted")
+        self.assertEqual(blocked_run["budget"]["verifications"]["used"], 1)
+
+    def test_failed_math_request_keeps_unknown_usage_and_verification_ledger(self) -> None:
+        failure = ModelPortFailure("inert unavailable provider")
+        failure.request_sent = True
+        port = ScriptedModelPort(failure)
+        with tempfile.TemporaryDirectory() as directory:
+            run = Runtime(port).run(
+                PROBLEM,
+                model_request_limit=3,
+                token_limit=100,
+                cost_limit_usd=0.01,
+                output_root=Path(directory),
+            )
+
+        self.assertEqual(run["run"]["status"], "failed")
+        self.assertEqual(run["run"]["stop_reason"], "unknown_outcome")
+        self.assertEqual(run["budget"]["model_requests"], {"limit": 3, "used": 1})
+        self.assertEqual(run["budget"]["tokens"]["used"], "unknown")
+        self.assertEqual(run["budget"]["cost_usd"]["used"], "unknown")
+        self.assertEqual(run["cost"], {"amount_usd": "unknown", "source": "unknown"})
+        self.assertEqual(run["verification"]["status"], "unknown")
+        self.assertEqual(run["verification"]["reason"], "unknown_outcome")
+        self.assertEqual(run["budget"]["verifications"]["used"], 1)
+        self.assertGreaterEqual(run["budget"]["verifications"]["elapsed_ms"], 0)
+
     def test_later_remote_unknown_stops_without_retry_and_retains_supported_result(self) -> None:
         failure = ModelPortFailure("inert unredacted provider failure")
         failure.request_sent = True

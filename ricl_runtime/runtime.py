@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import subprocess
 import time
 import uuid
@@ -33,6 +34,13 @@ from .reasoning_state import Evidence, SharedReasoningState
 from .verification import addition_operands, verify_integer_addition
 
 _TRACE_SCHEMA_VERSION = 1
+_RESOURCE_BUDGET_STOP_REASONS = {
+    "token_budget_exhausted",
+    "token_budget_unknown",
+    "elapsed_budget_exhausted",
+    "cost_budget_exhausted",
+    "cost_budget_unknown",
+}
 
 
 @dataclass
@@ -117,6 +125,7 @@ class _RunModelRequests:
             "elapsed_ms": elapsed_ms,
             "usage": {"input_tokens": reply.input_tokens, "output_tokens": reply.output_tokens,
                       "source": reply.usage_source},
+            "cost": {"amount_usd": reply.cost_usd, "source": _cost_source([reply])},
             **({"http_status": http_status} if isinstance(http_status, int) else {}),
         }
         self.records.append(record)
@@ -626,6 +635,9 @@ class Runtime:
         counterfactual_enabled: bool = False,
         model_request_limit: int = 1,
         tool_call_limit: int = 0,
+        token_limit: int | None = None,
+        elapsed_limit_ms: int | None = None,
+        cost_limit_usd: float | None = None,
         visible_context: str = "",
         online_search: OnlineSearchMode | None = None,
         _scope: _RunScope | None = None,
@@ -634,6 +646,14 @@ class Runtime:
 
         if model_request_limit < 0 or tool_call_limit < 0:
             raise ValueError("model request and tool limits must be nonnegative")
+        if token_limit is not None and token_limit < 0:
+            raise ValueError("token limit must be nonnegative")
+        if elapsed_limit_ms is not None and elapsed_limit_ms < 0:
+            raise ValueError("elapsed limit must be nonnegative")
+        if cost_limit_usd is not None and (
+            not math.isfinite(cost_limit_usd) or cost_limit_usd < 0
+        ):
+            raise ValueError("cost limit must be finite and nonnegative")
         if online_search not in (None, "aprs", "round_robin"):
             raise ValueError("online search must be aprs or round_robin")
         reasoning_state_enabled = reasoning_state_enabled or online_search is not None or counterfactual_enabled
@@ -645,6 +665,8 @@ class Runtime:
         tool_limit = tool_call_limit
         state = execution.state
         tool_count = 0
+        verification_count = 0
+        verification_accounted_ms = 0.0
         diagnosis_used = False
         request_kind = "solve"
         stop_reason: str | None = None
@@ -669,8 +691,21 @@ class Runtime:
         derivation_scope = DerivationScope()
         math_goals = math_verification.public_goals() if math_verification is not None else []
         search = OnlineSearch(online_search, math_goals) if online_search is not None else None
+
+        def account_verification(elapsed_ms: float) -> None:
+            nonlocal verification_count, verification_accounted_ms
+            verification_count += 1
+            verification_accounted_ms += elapsed_ms
+
         intervention = (
-            OnlineIntervention(math_verification, trace, self._math_evidence_recheck)
+            OnlineIntervention(
+                math_verification,
+                trace,
+                self._math_evidence_recheck,
+                account_verification=account_verification,
+                budget_stop=lambda: budget_admission_reason(),
+                budget_overrun=lambda: budget_overrun_reason(),
+            )
             if math_verification is not None and counterfactual_enabled else None
         )
         continuation: InterventionContinuation | None = None
@@ -682,6 +717,43 @@ class Runtime:
                 "goals": math_goals,
             })
         started = time.perf_counter()
+
+        def current_elapsed_ms() -> float:
+            return round((time.perf_counter() - started) * 1000, 3)
+
+        def budget_admission_reason() -> str | None:
+            if token_limit is not None:
+                tokens_used = _run_token_total(requests.replies)
+                if tokens_used == "unknown":
+                    return "token_budget_unknown"
+                if tokens_used >= token_limit:
+                    return "token_budget_exhausted"
+            if elapsed_limit_ms is not None and current_elapsed_ms() >= elapsed_limit_ms:
+                return "elapsed_budget_exhausted"
+            if cost_limit_usd is not None:
+                cost_used = 0.0 if not requests.replies else _run_cost_total(requests.replies)
+                if cost_used == "unknown":
+                    return "cost_budget_unknown"
+                if cost_used >= cost_limit_usd:
+                    return "cost_budget_exhausted"
+            return None
+
+        def budget_overrun_reason() -> str | None:
+            if token_limit is not None:
+                tokens_used = _run_token_total(requests.replies)
+                if tokens_used == "unknown":
+                    return "token_budget_unknown"
+                if tokens_used > token_limit:
+                    return "token_budget_exhausted"
+            if elapsed_limit_ms is not None and current_elapsed_ms() > elapsed_limit_ms:
+                return "elapsed_budget_exhausted"
+            if cost_limit_usd is not None:
+                cost_used = _run_cost_total(requests.replies)
+                if cost_used == "unknown":
+                    return "cost_budget_unknown"
+                if cost_used > cost_limit_usd:
+                    return "cost_budget_exhausted"
+            return None
 
         def solve_prompt(
             kind: str, route: OnlineRoute | None = None,
@@ -780,11 +852,42 @@ class Runtime:
             return tool_count - before, failure_status
 
         while requests.count < request_limit:
+            if (budget_stop := budget_admission_reason()) is not None:
+                stop_reason = budget_stop
+                break
             route = None
             decision = None
+            resumed = continuation
+            continuation = None
             generating_candidates = search is not None and not search.routes
             if generating_candidates:
                 request_kind = "candidate_generation"
+            elif resumed is not None and search is not None and resumed.parent_route_id is not None:
+                route = next(
+                    (
+                        candidate for candidate in search.routes
+                        if candidate.route_id == resumed.parent_route_id
+                    ),
+                    None,
+                )
+                if route is None:
+                    stop_reason = "counterfactual_parent_route_missing"
+                    break
+                request_kind = "counterfactual_continuation"
+                trace.append({
+                    "event": "route_continuation_selected",
+                    "request_id": requests.next_request_id,
+                    "route_id": route.route_id,
+                    "checkpoint_id": resumed.checkpoint_id,
+                    "merged_evidence_ids": list(resumed.merged_evidence_ids),
+                    "reason": (
+                        "merged_evidence_reserved_for_parent_route"
+                        if resumed.merged_evidence_ids
+                        else "intervention_outcome_reserved_for_parent_route"
+                    ),
+                })
+            elif resumed is not None:
+                request_kind = "counterfactual_continuation"
             elif search is not None:
                 request_kind = "route_expansion"
                 supports = derivations.goal_supports(derivation_scope) if derivations is not None else {}
@@ -792,8 +895,6 @@ class Runtime:
             prompt, evidence, prior_checks, open_goals = solve_prompt(request_kind, route)
             delivered_check_ids = tuple(check["evidence_id"] for check in prior_checks)
             referenced_ids = [item.evidence_id for item in evidence]
-            resumed = continuation
-            continuation = None
             request_event = None
             if math_verification is not None or reasoning_state_enabled or request_kind != "solve":
                 request_event = {
@@ -808,10 +909,8 @@ class Runtime:
                         if derivations is not None else {}
                     ),
                     **(resumed.request_metadata() if resumed is not None else {}),
-                    **(
-                        {"route_id": decision["route_id"], "decision_id": decision["decision_id"]}
-                        if decision is not None else {}
-                    ),
+                    **({"route_id": route.route_id} if route is not None else {}),
+                    **({"decision_id": decision["decision_id"]} if decision is not None else {}),
                 }
             if decision is not None:
                 trace.append({**decision, "model_requests_remaining": request_limit - requests.count})
@@ -887,6 +986,7 @@ class Runtime:
                         **attempt_verification["references"],
                     })
             verification_elapsed_ms = round((time.perf_counter() - verification_started) * 1000, 3)
+            account_verification(verification_elapsed_ms)
             if failure_status is not None:
                 requests.reject(attempt, failure_status)
                 break
@@ -929,6 +1029,10 @@ class Runtime:
                 }
             )
 
+            if (budget_stop := budget_overrun_reason()) is not None:
+                stop_reason = budget_stop
+                break
+
             if reasoning_state_enabled and derivations is None and attempt_verification["status"] == "verified":
                 item = state.add_verified_result(answer, scope=result_scope)
                 trace.append(_evidence_event("verified_result_added", item))
@@ -953,6 +1057,9 @@ class Runtime:
 
             if failure_status:
                 break
+            if (budget_stop := budget_overrun_reason()) is not None:
+                stop_reason = budget_stop
+                break
             if intervention is not None:
                 auxiliary_start = len(requests.records)
                 continuation = intervention.consider(
@@ -970,7 +1077,10 @@ class Runtime:
                     search.settle_auxiliary(route, requests.records[auxiliary_start:])
                 if continuation is not None:
                     if continuation.failure_status is not None:
-                        failure_status = continuation.failure_status
+                        if continuation.failure_status in _RESOURCE_BUDGET_STOP_REASONS:
+                            stop_reason = continuation.failure_status
+                        else:
+                            failure_status = continuation.failure_status
                         break
                     if continuation.merged_evidence_ids:
                         if search is not None and route is not None:
@@ -1007,8 +1117,19 @@ class Runtime:
                 ):
                     request_kind = "continuation"
                     continue
-                stop_reason = "no_progress"
-                break
+                if (
+                    reasoning_state_enabled
+                    or request_kind == "diagnosis"
+                    or diagnosis_used
+                ):
+                    stop_reason = "no_progress"
+                    break
+                if (budget_stop := budget_admission_reason()) is not None:
+                    stop_reason = budget_stop
+                    break
+                diagnosis_used = True
+                request_kind = "diagnosis"
+                continue
             if not reasoning_state_enabled:
                 if requests.count < request_limit:
                     if len(ordinary_tool_results) > previous_tool_results:
@@ -1058,17 +1179,26 @@ class Runtime:
             search_summary = search.summary(supports, failure_status or stop_reason)
             trace.append({"event": "online_search_completed", **search_summary})
         if result is None:
-            verification = math_verification.assess("")[1] if math_verification is not None else {
-                "status": "unknown", "applicable": False, "scope": "none",
-            }
+            if math_verification is not None:
+                verification_started = time.perf_counter()
+                verification = math_verification.assess("")[1]
+                account_verification(
+                    round((time.perf_counter() - verification_started) * 1000, 3)
+                )
+            else:
+                verification = {
+                    "status": "unknown", "applicable": False, "scope": "none",
+                }
             verification["reason"] = failure_status or stop_reason
         run_status = "failed" if failure_status else "completed"
-        if (
-            not failure_status
-            and stop_reason == "model_request_budget_exhausted"
-            and (math_verification is not None or search is not None or requests.count == 0)
-        ):
-            run_status = "stopped"
+        if not failure_status:
+            if stop_reason in _RESOURCE_BUDGET_STOP_REASONS:
+                run_status = "stopped"
+            elif (
+                stop_reason == "model_request_budget_exhausted"
+                and (math_verification is not None or search is not None or requests.count == 0)
+            ):
+                run_status = "stopped"
 
         elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
         provider_config = {
@@ -1102,10 +1232,15 @@ class Runtime:
             "budget": {
                 "scope": "run_shared",
                 "model_requests": request_limit,
-                "tokens": provider_config["max_tokens"],
+                "tokens": token_limit if token_limit is not None else "unknown",
                 "tools": tool_limit,
-                "elapsed_limit_ms": "unknown",
-                "cost_usd": "unknown",
+                "elapsed_limit_ms": (
+                    elapsed_limit_ms if elapsed_limit_ms is not None else "unknown"
+                ),
+                "cost_usd": (
+                    cost_limit_usd if cost_limit_usd is not None
+                    else provider_config.get("cost_limit_usd", "unknown")
+                ),
             },
             "verifier": math_verification.name if math_verification is not None else "integer_addition_v1",
         }
@@ -1116,6 +1251,8 @@ class Runtime:
         run_path = run_dir / "run.json"
         input_tokens = _sum_usage(requests.replies, "input_tokens")
         output_tokens = _sum_usage(requests.replies, "output_tokens")
+        total_tokens = _run_token_total(requests.replies)
+        total_cost = _run_cost_total(requests.replies)
         trace.append(
             {
                 "event": "run_stopped",
@@ -1144,18 +1281,27 @@ class Runtime:
                 "scope": "run_shared",
                 "model_requests": {"limit": request_limit, "used": requests.count},
                 "tokens": {
-                    "limit": provider_config["max_tokens"],
-                    "used": _sum_usage(requests.replies, "tokens"),
+                    "limit": token_limit if token_limit is not None else "unknown",
+                    "used": total_tokens,
                 },
                 "tools": {"limit": tool_limit, "used": tool_count},
                 "elapsed_ms": elapsed_ms,
-                "elapsed_limit_ms": "unknown",
+                "elapsed_limit_ms": (
+                    elapsed_limit_ms if elapsed_limit_ms is not None else "unknown"
+                ),
                 "cost_usd": {
-                    "limit": provider_config.get("cost_limit_usd", "unknown"),
+                    "limit": (
+                        cost_limit_usd if cost_limit_usd is not None
+                        else provider_config.get("cost_limit_usd", "unknown")
+                    ),
                     "preflight_upper_bound": provider_config.get(
                         "preflight_cost_upper_bound_usd", "unknown"
                     ),
-                    "used": "unknown",
+                    "used": total_cost,
+                },
+                "verifications": {
+                    "used": verification_count,
+                    "elapsed_ms": round(verification_accounted_ms, 3),
                 },
             },
             "usage": {
@@ -1168,7 +1314,10 @@ class Runtime:
                 ),
                 "source": _usage_source(requests.replies),
             },
-            "cost": {"amount_usd": "unknown", "source": "unknown"},
+            "cost": {
+                "amount_usd": total_cost,
+                "source": _cost_source(requests.replies),
+            },
             "result": result,
             "verification": verification,
             "evidence": state.public_snapshot(),
@@ -1725,6 +1874,37 @@ def _sum_usage(replies: list[Any], key: str) -> int | str:
     else:
         values = [getattr(reply, key) for reply in replies]
     return sum(values) if all(isinstance(value, int) for value in values) else "unknown"
+
+
+def _run_token_total(replies: list[Any]) -> int | str:
+    """Return zero before the first request and otherwise require exact measurements."""
+
+    return 0 if not replies else _sum_usage(replies, "tokens")
+
+
+def _run_cost_total(replies: list[Any]) -> float | str:
+    """Sum model-reported costs, preserving unknown instead of imputing zero."""
+
+    if not replies:
+        return "unknown"
+    values = [reply.cost_usd for reply in replies]
+    if not all(
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0
+        for value in values
+    ):
+        return "unknown"
+    return round(sum(values), 8)
+
+
+def _cost_source(replies: list[Any]) -> str:
+    return (
+        "model_port"
+        if replies and _run_cost_total(replies) != "unknown"
+        else "unknown"
+    )
 
 
 def _usage_source(replies: list[Any]) -> str:

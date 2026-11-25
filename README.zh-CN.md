@@ -20,7 +20,7 @@ uv run python -m ricl_runtime --problem "Compute 2 + 2." --offline-answer "4"
 
 使用 `--counterfactual` 启用在线干预。离线回放首步遭到独立核查否定的场景，可设置 `--model-request-limit 5` 并按派发顺序提供五个 `--offline-answer`。依次传入失败的求解增量、包含 `hypothesis` 和 `strategy` 的诊断 JSON、对照臂与处理臂的增量，以及父路线续接。Trace 记录干预准入和父路线收到的已验证证据。[#258](https://github.com/RUSS0718/RiCL/issues/258)
 
-集成验收通过同一 `Runtime.run` 入口运行 Baseline、RiCL-State、RiCL-Search、RiCL-Full 和 RiCL w/o Search，并让五组共享核查器与请求预算。测试核对已验证状态更新进入 APRS 输入、当前关键失败只准入一次同源干预，以及合并证据可供下一次实际派发路线读取。实验侧的 `run_mechanism_ablation` 分别写出包含哈希、配置和产物链接的 `public-input.json`，以及包含可重算核查状态、Verified Gain、Token、无新证据扩展数和路线选择的 `evaluation.json`。无新证据扩展数只是离线观察值，不是协议审定的搜索浪费指标。[#259](https://github.com/RUSS0718/RiCL/issues/259)
+集成验收通过同一 `Runtime.run` 入口运行 Baseline、RiCL-State、RiCL-Search、RiCL-Full 和 RiCL w/o Search，并让五组匹配模型、工具、核查器、候选生成能力与请求、Token、时间和费用根上限。测试核对已验证状态更新进入 APRS 输入、当前关键失败只在根预算内准入一次同源干预，以及父路线续接请求收到合并证据并继续绑定该父路线。Run 单独记录本地核查调用次数与实际耗时，不替模型端口补造未报告的 Token 或费用。实验侧的 `run_mechanism_ablation` 分别写出包含哈希、匹配能力和产物链接的 `public-input.json`，以及包含可重算核查状态、Verified Gain、Token、无新证据扩展数和路线选择的 `evaluation.json`。无新证据扩展数只是离线观察值，不是协议审定的搜索浪费指标。[#259](https://github.com/RUSS0718/RiCL/issues/259)
 
 ## Runtime 机制
 

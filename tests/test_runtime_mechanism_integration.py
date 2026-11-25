@@ -27,6 +27,7 @@ def measured(text: str, input_tokens: int, output_tokens: int) -> ModelReply:
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         usage_source="fixture",
+        cost_usd=0.0,
     )
 
 
@@ -52,7 +53,7 @@ class MechanismPort:
         route_id = captured_route(prompt)
         if route_id == "route_01":
             reply = measured(
-                increment(CHECKS[0], answer="The real-domain condition is established."), 80, 20
+                increment(CHECKS[0], answer="The real-domain condition is established."), 1, 1
             )
             return ModelReply(
                 reply.text,
@@ -60,6 +61,7 @@ class MechanismPort:
                 input_tokens=reply.input_tokens,
                 output_tokens=reply.output_tokens,
                 usage_source=reply.usage_source,
+                cost_usd=reply.cost_usd,
                 tool_calls=(ToolCall("addition", "1 + 1"),),
             )
         self.route_expansions[route_id] += 1
@@ -110,6 +112,7 @@ class AblationPort(MechanismPort):
                 input_tokens=reply.input_tokens,
                 output_tokens=reply.output_tokens,
                 usage_source=reply.usage_source,
+                cost_usd=reply.cost_usd,
                 tool_calls=(ToolCall("addition", "1 + 1"),),
             )
         if self.condition_id == "ricl-state":
@@ -119,6 +122,7 @@ class AblationPort(MechanismPort):
                 input_tokens="unknown",
                 output_tokens=5,
                 usage_source="fixture",
+                cost_usd=0.0,
             )
         if "Previously verified public claims:" not in prompt:
             return measured(increment(BAD_CONSTRAINT, answer="The constraint is ready."), 5, 5)
@@ -150,7 +154,7 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
                     output_root=Path(directory),
                 )
 
-    def test_counterfactual_merge_updates_shared_state_and_next_aprs_choice(self) -> None:
+    def test_counterfactual_merge_continues_parent_route_with_merged_evidence(self) -> None:
         port = MechanismPort()
         with tempfile.TemporaryDirectory() as directory:
             run = Runtime(port, tool_executor=MechanismTool()).run(
@@ -170,7 +174,7 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         self.assertEqual(run["verification"]["status"], "verified")
         self.assertEqual(run["budget"]["model_requests"], {"limit": 8, "used": 7})
         self.assertEqual(run["budget"]["tools"], {"limit": 1, "used": 1})
-        self.assertEqual(run["usage"]["tokens"], 132)
+        self.assertEqual(run["usage"]["tokens"], 34)
         self.assertEqual(len(port.prompts), 7)
         self.assertEqual(trace[0]["trace_schema_version"], 1)
         self.assertNotIn(PROBLEM, json.dumps(trace, ensure_ascii=False))
@@ -182,7 +186,6 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         self.assertEqual([(event["route_id"], event["strategy"]) for event in decisions], [
             ("route_01", "cold_start"),
             ("route_02", "cold_start"),
-            ("route_02", "gain"),
         ])
         for decision in decisions:
             sent = next(
@@ -195,26 +198,51 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         self.assertEqual(merge["status"], "merged")
         self.assertEqual(len(merge["merged_evidence_ids"]), 1)
 
-        route_rows = {row["route_id"]: row for row in decisions[-1]["routes"]}
-        merged_evidence_id = merge["merged_evidence_ids"][0]
-        self.assertEqual(
-            [credit["evidence_id"] for credit in route_rows["route_02"]["credit"]],
-            [merged_evidence_id],
+        search_completed = next(
+            event for event in trace if event["event"] == "online_search_completed"
         )
-        self.assertEqual(route_rows["route_02"]["credit"][0]["attribution"], "intervention_merge")
-        self.assertEqual(route_rows["route_02"]["cost"]["tokens"], 17)
+        self.assertEqual(search_completed["selection_counts"], {"cold_start": 2})
+        route_rows = {row["route_id"]: row for row in search_completed["routes"]}
+        merged_evidence_id = merge["merged_evidence_ids"][0]
+        merged_credit = next(
+            credit for credit in route_rows["route_02"]["credit"]
+            if credit["evidence_id"] == merged_evidence_id
+        )
+        self.assertEqual(merged_credit["attribution"], "intervention_merge")
+        self.assertEqual(route_rows["route_02"]["cost"]["tokens"], 27)
         self.assertEqual(route_rows["route_02"]["cost"]["request_ids"], [
             run["provider_requests"][2]["request_id"],
             run["provider_requests"][3]["request_id"],
             run["provider_requests"][4]["request_id"],
             run["provider_requests"][5]["request_id"],
+            run["provider_requests"][6]["request_id"],
         ])
+        continuation = next(
+            event for event in trace
+            if event["event"] == "route_continuation_selected"
+        )
+        self.assertEqual(continuation["route_id"], "route_02")
+        self.assertEqual(continuation["checkpoint_id"], merge["checkpoint_id"])
+        self.assertEqual(
+            continuation["merged_evidence_ids"], merge["merged_evidence_ids"]
+        )
+        self.assertEqual(
+            continuation["reason"], "merged_evidence_reserved_for_parent_route"
+        )
+        self.assertEqual(
+            run["provider_requests"][-1]["request_id"], continuation["request_id"]
+        )
+        self.assertEqual(run["provider_requests"][-1]["route_id"], "route_02")
+        self.assertIn(
+            merged_evidence_id,
+            run["provider_requests"][-1]["delivered_check_evidence_ids"],
+        )
 
         counterfactual_requests = [
             request for request in run["provider_requests"]
             if str(request.get("request_kind", "")).startswith("counterfactual_")
         ]
-        self.assertEqual(len(counterfactual_requests), 3)
+        self.assertEqual(len(counterfactual_requests), 4)
         self.assertTrue(all(request["route_id"] == "route_02" for request in counterfactual_requests))
         self.assertEqual([request["request_kind"] for request in run["provider_requests"]], [
             "candidate_generation",
@@ -223,7 +251,7 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
             "counterfactual_diagnosis",
             "counterfactual_arm",
             "counterfactual_arm",
-            "route_expansion",
+            "counterfactual_continuation",
         ])
         arm_checks = [event for event in trace if event["event"] == "counterfactual_arm_checked"]
         self.assertEqual(
@@ -237,7 +265,7 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
             next(
                 index for index, event in enumerate(trace)
                 if event["event"] == "model_request_sent"
-                and event["request_id"] == decisions[-1]["request_id"]
+                and event["request_id"] == continuation["request_id"]
             ),
         )
 
@@ -249,6 +277,9 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
                 output_root=Path(directory),
                 model_request_limit=8,
                 tool_call_limit=1,
+                token_limit=512,
+                elapsed_limit_ms=30_000,
+                cost_limit_usd=0.1,
                 tool_executor_factory=lambda _: MechanismTool(),
             )
             public_path = Path(manifest["public_input_path"])
@@ -271,8 +302,17 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         ])
         self.assertEqual(public["trace_schema_version"], 1)
         self.assertEqual(public["budget"]["model_requests"], 8)
+        self.assertEqual(public["budget"]["tools"], 1)
+        self.assertEqual(public["budget"]["tokens"], 512)
+        self.assertEqual(public["budget"]["elapsed_limit_ms"], 30_000)
+        self.assertEqual(public["budget"]["cost_limit_usd"], 0.1)
         self.assertEqual(public["capabilities"]["max_candidates"], 3)
         self.assertTrue(public["capabilities"]["tools"])
+        self.assertTrue(public["capabilities"]["capability_checks"]["model_port"])
+        self.assertTrue(public["capabilities"]["capability_checks"]["candidate_generation"])
+        self.assertTrue(public["capabilities"]["capability_checks"]["independent_verification"])
+        self.assertTrue(public["capabilities"]["capability_checks"]["tools"])
+        self.assertTrue(public["capabilities"]["capability_checks"]["budget"])
         self.assertEqual(
             {run["config"]["verifier"] for run, _ in runs.values()},
             {"real_radical_equation_v1"},
@@ -311,14 +351,19 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         self.assertEqual([(event["route_id"], event["strategy"]) for event in decisions], [
             ("route_01", "cold_start"),
             ("route_02", "cold_start"),
-            ("route_02", "gain"),
         ])
         merge = next(event for event in full_trace if event["event"] == "counterfactual_merge")
+        continuation = next(
+            event for event in full_trace
+            if event["event"] == "route_continuation_selected"
+        )
         continued = next(
             event for event in full_trace
             if event["event"] == "model_request_sent"
-            and event["request_id"] == decisions[-1]["request_id"]
+            and event["request_id"] == continuation["request_id"]
         )
+        self.assertEqual(continuation["route_id"], "route_02")
+        self.assertEqual(continuation["checkpoint_id"], merge["checkpoint_id"])
         self.assertIn(merge["merged_evidence_ids"][0], continued["delivered_check_evidence_ids"])
         evaluated = {item["condition"]: item for item in evaluation["runs"]}
         self.assertEqual(evaluated["RiCL-Full"]["verified_gain"], 4)
@@ -340,6 +385,68 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         self.assertEqual(summarize_mechanism_run(full_run, full_trace), evaluated["RiCL-Full"])
         self.assertEqual(evaluated["RiCL-State"]["verification"]["status"], "unknown")
         self.assertGreater(full_run["budget"]["model_requests"]["used"], 1)
+
+    def test_ablation_rejects_mismatched_model_and_tool_capabilities(self) -> None:
+        class AlternatePort(AblationPort):
+            pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "matched ModelPort capability"):
+                run_mechanism_ablation(
+                    lambda condition_id: (
+                        AlternatePort(condition_id)
+                        if condition_id == "ricl-full"
+                        else AblationPort(condition_id)
+                    ),
+                    PROBLEM,
+                    output_root=Path(directory),
+                )
+
+        class AlternateTool(MechanismTool):
+            pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "matched tool capabilities"):
+                run_mechanism_ablation(
+                    AblationPort,
+                    PROBLEM,
+                    output_root=Path(directory),
+                    tool_call_limit=1,
+                    tool_executor_factory=lambda condition_id: (
+                        AlternateTool()
+                        if condition_id == "ricl-full"
+                        else MechanismTool()
+                    ),
+                )
+
+    def test_ablation_checks_candidate_generation_and_tool_execution(self) -> None:
+        class NoCandidateGeneration:
+            name = "mechanism-fixture"
+            provider = "offline"
+            thinking = "none"
+            max_output_tokens = 100
+            complete = None
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "candidate generation capability"):
+                run_mechanism_ablation(
+                    lambda _: NoCandidateGeneration(),
+                    PROBLEM,
+                    output_root=Path(directory),
+                )
+
+        class BrokenTool:
+            execute = None
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "executable tool capability"):
+                run_mechanism_ablation(
+                    AblationPort,
+                    PROBLEM,
+                    output_root=Path(directory),
+                    tool_call_limit=1,
+                    tool_executor_factory=lambda _: BrokenTool(),
+                )
 
 
 if __name__ == "__main__":

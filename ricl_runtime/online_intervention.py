@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from itertools import combinations
@@ -104,6 +105,7 @@ class InterventionContinuation:
     checkpoint_id: str
     merged_evidence_ids: tuple[str, ...] = ()
     failure_status: str | None = None
+    parent_route_id: str | None = None
 
     def request_metadata(self) -> dict[str, Any]:
         return {
@@ -116,11 +118,21 @@ class OnlineIntervention:
     """Admit at most one pair per Run, using the caller's root request and tool ledger."""
 
     def __init__(
-        self, verifier: MathVerification, trace: list[dict[str, Any]], recheck: EvidenceRecheck | None,
+        self,
+        verifier: MathVerification,
+        trace: list[dict[str, Any]],
+        recheck: EvidenceRecheck | None,
+        *,
+        account_verification: Callable[[float], None] | None = None,
+        budget_stop: Callable[[], str | None] | None = None,
+        budget_overrun: Callable[[], str | None] | None = None,
     ) -> None:
         self._verifier = verifier
         self._trace = trace
         self._recheck = recheck
+        self._account_verification = account_verification or (lambda _: None)
+        self._budget_stop = budget_stop or (lambda: None)
+        self._budget_overrun = budget_overrun or (lambda: None)
         self._started = False
 
     def consider(
@@ -198,21 +210,6 @@ class OnlineIntervention:
             "arm_budget": budget,
         })
 
-        # Use exactly the same problem, checkpoint claims and failure report on both arms.
-        prompt = build_prompt()
-        failure_report = _json({
-            "failed_evidence": failure.evidence,
-            "affected_goal_ids": list(failure.targets),
-            "related_dependencies": [support.check for support in failure.dependencies],
-        })
-        local_context = f"Independently checked failure and its related dependencies:\n{failure_report}"
-        diagnostic = dispatch(
-            prompt + "\n\n" + local_context
-            + '\n\nFor this local failure, return only JSON with two short strings, '
-              '"hypothesis" and "strategy". Propose one targeted repair, citing the failure and dependencies.',
-            {"request_kind": "counterfactual_diagnosis", **context, **delivery},
-        )
-
         def conclude(
             reason: str, *, merged: tuple[ScopedDerivation, ...] = (), failure_status: str | None = None,
             **fields: Any,
@@ -223,7 +220,41 @@ class OnlineIntervention:
                 "status": "merged" if merged else "withheld",
                 "reason": reason, "merged_evidence_ids": list(identifiers),
             })
-            return InterventionContinuation(checkpoint_id, identifiers, failure_status)
+            return InterventionContinuation(
+                checkpoint_id,
+                identifiers,
+                failure_status,
+                parent_route_id=route_id,
+            )
+
+        def admit(stage: str) -> InterventionContinuation | None:
+            reason = self._budget_stop()
+            if reason is None:
+                return None
+            self._trace.append({
+                "event": "counterfactual_budget_blocked",
+                **context,
+                "stage": stage,
+                "reason": reason,
+            })
+            return conclude(f"budget_{stage}_{reason}", failure_status=reason)
+
+        # Use exactly the same problem, checkpoint claims and failure report on both arms.
+        prompt = build_prompt()
+        failure_report = _json({
+            "failed_evidence": failure.evidence,
+            "affected_goal_ids": list(failure.targets),
+            "related_dependencies": [support.check for support in failure.dependencies],
+        })
+        local_context = f"Independently checked failure and its related dependencies:\n{failure_report}"
+        if (budget_block := admit("diagnosis")) is not None:
+            return budget_block
+        diagnostic = dispatch(
+            prompt + "\n\n" + local_context
+            + '\n\nFor this local failure, return only JSON with two short strings, '
+              '"hypothesis" and "strategy". Propose one targeted repair, citing the failure and dependencies.',
+            {"request_kind": "counterfactual_diagnosis", **context, **delivery},
+        )
 
         if diagnostic.failure_status is not None:
             return conclude("diagnosis_" + diagnostic.failure_status, failure_status=diagnostic.failure_status)
@@ -250,6 +281,8 @@ class OnlineIntervention:
         )
         arms = {}
         for name in ("control", "treatment"):
+            if (budget_block := admit(f"arm_{name}")) is not None:
+                return budget_block
             treatment = name == "treatment"
             metadata = {
                 **context, "arm": name,
@@ -267,9 +300,21 @@ class OnlineIntervention:
                 })
                 return conclude("arm_" + attempt.failure_status, failure_status=attempt.failure_status)
             branch = frozen.fork()
+            verification_started = time.perf_counter()
             arm = self._verify_arm(
                 attempt, branch.derivations, scope, failure, evidence_ids, checkpoint_supports,
             )
+            self._account_verification(
+                round((time.perf_counter() - verification_started) * 1000, 3)
+            )
+            if (reason := self._budget_overrun()) is not None:
+                self._trace.append({
+                    "event": "counterfactual_budget_blocked",
+                    **context,
+                    "stage": f"arm_{name}_tools",
+                    "reason": reason,
+                })
+                return conclude(f"budget_arm_{name}_tools_{reason}", failure_status=reason)
             used_tools, tool_failure = execute_tools(attempt, branch, budget["tool_calls"])
             arms[name] = arm
             self._trace.append({
@@ -289,6 +334,14 @@ class OnlineIntervention:
             })
             if tool_failure is not None:
                 return conclude("arm_" + tool_failure, failure_status=tool_failure)
+            if (reason := self._budget_overrun()) is not None:
+                self._trace.append({
+                    "event": "counterfactual_budget_blocked",
+                    **context,
+                    "stage": f"arm_{name}_completion",
+                    "reason": reason,
+                })
+                return conclude(f"budget_arm_{name}_completion_{reason}", failure_status=reason)
 
         control, treatment = arms["control"], arms["treatment"]
         comparison = {f"{name}_request_id": arm.attempt.request_id for name, arm in arms.items()}
@@ -301,8 +354,12 @@ class OnlineIntervention:
         wanted, benefit = self._winning_delta(graph, scope, control, treatment)
         if not wanted:
             return conclude(benefit, **comparison)
+        verification_started = time.perf_counter()
         merged = self._recheck_merge(
             graph, scope, treatment, wanted, checkpoint_supports,
+        )
+        self._account_verification(
+            round((time.perf_counter() - verification_started) * 1000, 3)
         )
         if not merged:
             return conclude("parent_recheck_failed", **comparison)
