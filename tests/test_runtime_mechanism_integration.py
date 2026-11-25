@@ -169,7 +169,7 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
                 PROBLEM,
                 online_search="aprs",
                 counterfactual_enabled=True,
-                tool_call_limit=1,
+                tool_call_limit=4,
                 model_request_limit=8,
                 output_root=Path(directory),
             )
@@ -181,7 +181,7 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         self.assertEqual(run["result"]["answer"], ANSWER)
         self.assertEqual(run["verification"]["status"], "verified")
         self.assertEqual(run["budget"]["model_requests"], {"limit": 8, "used": 7})
-        self.assertEqual(run["budget"]["tools"], {"limit": 1, "used": 1})
+        self.assertEqual(run["budget"]["tools"], {"limit": 4, "used": 1})
         self.assertEqual(run["usage"]["tokens"], 34)
         self.assertEqual(len(port.prompts), 7)
         self.assertEqual(trace[0]["trace_schema_version"], 1)
@@ -232,10 +232,9 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(continuation["route_id"], decisions[-1]["route_id"])
         self.assertEqual(continuation["parent_route_id"], "route_02")
-        self.assertFalse(continuation["aprs_selection_overridden"])
         self.assertEqual(continuation["selection_strategy"], "gain")
-        self.assertEqual(continuation["aprs_selected_route_id"], decisions[-1]["route_id"])
-        self.assertFalse(continuation["aprs_selection_overridden"])
+        self.assertNotIn("aprs_selected_route_id", continuation)
+        self.assertNotIn("aprs_selection_overridden", continuation)
         self.assertEqual(continuation["decision_id"], decisions[-1]["decision_id"])
         self.assertEqual(continuation["checkpoint_id"], merge["checkpoint_id"])
         self.assertEqual(
