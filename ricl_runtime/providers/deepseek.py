@@ -38,10 +38,12 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_RESPONSE_BYTES = 1_048_576
 MAX_OUTPUT_TOKENS = 256
 ALLOWED_HOST = "api.deepseek.com"
+ALLOWED_GATEWAY_HOST = "code.aigcpro.org"
 ALLOWED_MODELS = (
     "deepseek-flash",
     "deepseek-v4-flash",
     "deepseek-v4-flash-vision-exp",
+    "deepseek-v4.1-flash",
 )
 MAX_PROMPT_BYTES = 16 * 1024
 INPUT_FRAMING_MARGIN_TOKENS = 1024
@@ -121,6 +123,7 @@ class DeepSeekModelPort:
 
         return {
             "endpoint_host": ALLOWED_HOST,
+            "gateway_host": ALLOWED_GATEWAY_HOST,
             "model_allowlist": list(ALLOWED_MODELS),
             "transport_timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
             "max_prompt_bytes": MAX_PROMPT_BYTES,
@@ -138,7 +141,11 @@ class DeepSeekModelPort:
     def complete(self, problem: str) -> DeepSeekReply:
         """Return one validated completion or a sanitized, non-retryable transport error."""
 
-        if not validate_base_url(self.base_url, ALLOWED_HOST) or self.model not in ALLOWED_MODELS:
+        approved_host = any(
+            validate_base_url(self.base_url, host)
+            for host in (ALLOWED_HOST, ALLOWED_GATEWAY_HOST)
+        )
+        if not approved_host or self.model not in ALLOWED_MODELS:
             raise ProviderPreflightError("provider host or model is not allowlisted")
 
         prompt_bytes = len(problem.encode("utf-8"))

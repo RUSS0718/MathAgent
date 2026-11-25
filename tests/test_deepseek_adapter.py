@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 
 from ricl_runtime.port import ModelReply
 from ricl_runtime.providers.deepseek import (
+    ALLOWED_GATEWAY_HOST,
     DeepSeekModelPort,
     DeepSeekReply,
     ProviderConfigurationError,
@@ -277,6 +278,35 @@ class DeepSeekModelPortTests(unittest.TestCase):
         self.assertEqual(len(opener.calls), 1)
         request, _ = opener.calls[0]
         self.assertEqual(json.loads(request.data)["model"], "deepseek-v4-flash-vision-exp")
+
+    def test_request_preflight_accepts_configured_gateway_and_model(self) -> None:
+        port = DeepSeekModelPort(
+            api_key="inert-test-credential",
+            base_url=f"https://{ALLOWED_GATEWAY_HOST}/v1",
+            model="deepseek-v4.1-flash",
+        )
+        response = FakeResponse(
+            json.dumps(
+                {
+                    "id": "gateway-request",
+                    "model": "deepseek-v4.1-flash",
+                    "choices": [{"message": {"content": "4"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                }
+            ).encode()
+        )
+        opener = FakeOpener(response=response)
+
+        with patch(
+            "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            reply = port.complete("fixture prompt")
+
+        self.assertEqual(reply.request_id, "gateway-request")
+        request, _ = opener.calls[0]
+        self.assertEqual(request.full_url, f"https://{ALLOWED_GATEWAY_HOST}/v1/chat/completions")
+        self.assertEqual(json.loads(request.data)["model"], "deepseek-v4.1-flash")
 
     def test_request_preflight_rejects_oversized_prompt_without_opening(self) -> None:
         port = DeepSeekModelPort(
