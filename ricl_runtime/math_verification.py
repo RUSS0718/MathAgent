@@ -21,7 +21,7 @@ _RADICAL_PROBLEM = re.compile(
     re.I,
 )
 _SOLUTION_ANSWER = re.compile(
-    rf"(?:final answer:\s*)?(?:(?:the complete solution set is|solution set:)\s*)?"
+    rf"(?:final answer:\s*)?(?:(?:the complete solution set is|solution set:)\s+)"
     rf"(?:x\s*=\s*({_RATIONAL})|\{{([^{{}}]*)\}})\s*[.!]?",
     re.I,
 )
