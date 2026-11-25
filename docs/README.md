@@ -26,7 +26,7 @@ uv run python -m ricl_runtime --population --problem "Compute 2 + 2." --offline-
 uv run python -m unittest discover -s tests -p "test_runtime_mechanism_integration.py"
 ```
 
-该验收让 Baseline、RiCL-State、RiCL-Search、RiCL-Full 和 RiCL w/o Search 都经过 `Runtime.run`，并匹配问题、候选上限、模型、工具、候选生成与独立核查能力，以及请求、Token、时间和费用根上限。RiCL-Full 的 Trace 记录从关键失败触发的诊断、对照/处理臂、父状态合并，以及父路线续接请求实际收到的合并证据；根预算在诊断和两臂派发之间持续生效。实验代码可通过 `run_mechanism_ablation` 写出版本化 Run 和脱敏 Trace；`public-input.json` 只保留输入哈希、匹配配置、产物路径与文件哈希，独立的 `evaluation.json` 提供可由 `summarize_mechanism_run` 重算的核查状态、Verified Gain、Token、无新证据扩展数与路线选择。Run 单独结算本地核查调用和实测耗时，不从模型未报告的用量推算 Token 或费用。无新证据扩展数不是正式指标定义。[集成规格 #259](https://github.com/RUSS0718/RiCL/issues/259)、[聚焦测试](../tests/test_runtime_mechanism_integration.py)
+该验收让 Baseline、RiCL-State、RiCL-Search、RiCL-Full 和 RiCL w/o Search 都经过 `Runtime.run`，并匹配问题、候选上限、模型、工具、候选生成与独立核查能力，以及请求、Token、时间和费用根上限。RiCL-Full 的 Trace 记录从关键失败触发的诊断、对照/处理臂、父状态合并，以及 APRS 本次选中的路线实际收到的合并证据与原父 Checkpoint；根预算在诊断和两臂派发之间持续生效。实验代码可通过 `run_mechanism_ablation` 写出版本化 Run 和脱敏 Trace；`public-input.json` 只保留输入哈希、匹配配置、产物路径与文件哈希，独立的 `evaluation.json` 提供可由 `summarize_mechanism_run` 重算的核查状态、Verified Gain、Token、无新证据扩展数与路线选择。Run 单独结算本地核查调用和实测耗时，不从模型未报告的用量推算 Token 或费用。无新证据扩展数不是正式指标定义。[集成规格 #259](https://github.com/RUSS0718/RiCL/issues/259)、[聚焦测试](../tests/test_runtime_mechanism_integration.py)
 
 ## 离线配对先导
 
