@@ -3,12 +3,15 @@
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 from test_runtime_math_verification import ANSWER, CHECKS, PROBLEM, increment
 from test_runtime_scoped_derivations import delivered
 
 from ricl_runtime import Runtime
+from ricl_runtime.__main__ import main
 from ricl_runtime.port import ModelReply, ToolCall, ToolReceipt
 from ricl_runtime.providers.chat_completions import (
     ProviderOutcomeUnknownError,
@@ -53,6 +56,23 @@ class RuntimeOnlineInterventionTests(unittest.TestCase):
                 for line in Path(run["artifacts"]["trace"]).read_text(encoding="utf-8").splitlines()
             ]
         return run, trace
+
+    def test_cli_can_replay_diagnosis_arms_and_parent_in_dispatch_order(self):
+        replies = [
+            increment(*CHECKS[:2], BAD_COVERAGE), DIAGNOSIS, increment(BAD_COVERAGE),
+            increment(CHECKS[2]), increment(CHECKS[3]),
+        ]
+        stdout = StringIO()
+        with tempfile.TemporaryDirectory() as directory, redirect_stdout(stdout):
+            exit_code = main([
+                "--problem", PROBLEM, "--output-root", directory,
+                "--counterfactual", "--model-request-limit", "5",
+                *(item for reply in replies for item in ("--offline-answer", reply)),
+            ])
+            run = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(run["verification"]["status"], "verified")
+        self.assertEqual(run["budget"]["model_requests"], {"limit": 5, "used": 5})
 
     def test_online_diagnosis_delivers_evidence_and_only_minimal_repair_to_parent(self):
         def diagnose(prompt):

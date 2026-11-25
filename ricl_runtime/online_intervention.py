@@ -241,8 +241,8 @@ class OnlineIntervention:
         })
         arm_prompt = (
             prompt + "\n\n" + local_context
-            + "\n\nSubmit only one bounded repair increment in the requested answer/checks format. "
-              "Preserve the already verified claims."
+            + "\n\nSubmit only one bounded repair increment. Preserve the already verified claims."
+            + "\n\n" + self._verifier.instructions(scoped_derivations=True)
         )
         arms = {}
         for name in ("control", "treatment"):

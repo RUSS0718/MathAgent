@@ -26,6 +26,7 @@ from .online_intervention import (
     Revocation,
     recheck_derivations,
 )
+from .online_search import CANDIDATE_INSTRUCTIONS, OnlineRoute, OnlineSearch, OnlineSearchMode
 from .population import CandidateRoute, PopulationBudget
 from .port import ModelPort, ModelPortFailure, ModelReply, ToolCall, ToolExecutor, ToolReceipt
 from .reasoning_state import Evidence, SharedReasoningState
@@ -51,6 +52,7 @@ class _ModelAttempt:
     reply: ModelReply
     elapsed_ms: float
     record: dict[str, Any]
+    rejected_before_send: bool
     failure_status: str | None = None
 
 
@@ -65,9 +67,15 @@ class _RunModelRequests:
     replies: list[ModelReply] = field(default_factory=list)
     records: list[dict[str, Any]] = field(default_factory=list)
 
-    def dispatch(self, prompt: str, event: dict[str, Any] | None = None) -> _ModelAttempt:
+    @property
+    def next_request_id(self) -> str:
+        return self.execution.request_id(self.count + 1)
+
+    def dispatch(
+        self, prompt: str, event: dict[str, Any] | None = None, *, empty_reply_status: str = "invalid_output",
+    ) -> _ModelAttempt:
+        request_id = self.next_request_id
         self.count += 1
-        request_id = self.execution.request_id(self.count)
         if event is not None:
             self.trace.append({
                 "event": "model_request_sent", "request_id": request_id, **event,
@@ -93,7 +101,7 @@ class _RunModelRequests:
             if getattr(reply, "finish_reason", "unknown") == "length":
                 failure_status = "budget_exhausted"
             elif not reply.text.strip():
-                failure_status = "invalid_output"
+                failure_status = empty_reply_status
         elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
         record = {
             **(event or {}),
@@ -110,14 +118,12 @@ class _RunModelRequests:
             **({"http_status": http_status} if isinstance(http_status, int) else {}),
         }
         self.records.append(record)
-        attempt = _ModelAttempt(request_id, reply, elapsed_ms, record)
+        attempt = _ModelAttempt(request_id, reply, elapsed_ms, record, rejected_before_send)
         if failure_status is not None:
-            self.reject(attempt, failure_status, rejected_before_send=rejected_before_send)
+            self.reject(attempt, failure_status)
         return attempt
 
-    def reject(
-        self, attempt: _ModelAttempt, status: str, *, rejected_before_send: bool = False,
-    ) -> None:
+    def reject(self, attempt: _ModelAttempt, status: str) -> None:
         """Classify a transport or reply-contract failure on the existing request."""
         attempt.failure_status = status
         record = attempt.record
@@ -125,13 +131,15 @@ class _RunModelRequests:
         self.trace.append({
             "event": (
                 "model_request_rejected_before_send"
-                if rejected_before_send else "model_request_failed"
+                if attempt.rejected_before_send else "model_request_failed"
             ),
             **{key: record[key] for key in (
                 "request_id", "provider_request_id", "actual_model", "finish_reason",
                 "request_sent", "status", "failure_status", "elapsed_ms",
             )},
             "usage_source": attempt.reply.usage_source,
+            **{key: record[key] for key in ("request_kind", "route_id", "decision_id", "checkpoint_id")
+               if key in record},
             **({"http_status": record["http_status"]} if "http_status" in record else {}),
         })
 
@@ -616,14 +624,16 @@ class Runtime:
         model_request_limit: int = 1,
         tool_call_limit: int = 0,
         visible_context: str = "",
+        online_search: OnlineSearchMode | None = None,
         _scope: _RunScope | None = None,
     ) -> dict[str, Any]:
         """Generate, verify, and optionally reuse results within one shared Run budget."""
 
         if model_request_limit < 0 or tool_call_limit < 0:
             raise ValueError("model request and tool limits must be nonnegative")
-
-        reasoning_state_enabled = reasoning_state_enabled or counterfactual_enabled
+        if online_search not in (None, "aprs", "round_robin"):
+            raise ValueError("online search must be aprs or round_robin")
+        reasoning_state_enabled = reasoning_state_enabled or online_search is not None or counterfactual_enabled
         execution = _scope or _RunScope()
         run_id = execution.run_id
         problem_sha256 = hashlib.sha256(problem.encode("utf-8")).hexdigest()
@@ -654,6 +664,7 @@ class Runtime:
         derivations = state.derivations if math_verification is not None and reasoning_state_enabled else None
         derivation_scope = DerivationScope()
         math_goals = math_verification.public_goals() if math_verification is not None else []
+        search = OnlineSearch(online_search, math_goals) if online_search is not None else None
         intervention = (
             OnlineIntervention(math_verification, trace, self._math_evidence_recheck)
             if math_verification is not None and counterfactual_enabled else None
@@ -668,7 +679,9 @@ class Runtime:
             })
         started = time.perf_counter()
 
-        def solve_prompt(kind: str) -> tuple[str, tuple[Evidence, ...], tuple[dict[str, Any], ...], list[dict[str, Any]]]:
+        def solve_prompt(
+            kind: str, route: OnlineRoute | None = None,
+        ) -> tuple[str, tuple[Evidence, ...], tuple[dict[str, Any], ...], list[dict[str, Any]]]:
             evidence = state.valid_evidence() if reasoning_state_enabled else ()
             context = _render_evidence(evidence)
             parts = [problem]
@@ -678,7 +691,8 @@ class Runtime:
             )
             open_goals = []
             if math_verification is not None:
-                parts.append(math_verification.instructions(scoped_derivations=derivations is not None))
+                if kind not in ("candidate_generation", "counterfactual_checkpoint"):
+                    parts.append(math_verification.instructions(scoped_derivations=derivations is not None))
                 if prior_checks:
                     parts.append("Previously verified public claims:\n" + _canonical_json(prior_checks))
                 if derivations is not None:
@@ -691,6 +705,15 @@ class Runtime:
                 parts.append(f"Verified context:\n{context}")
             if ordinary_tool_results:
                 parts.append("Tool results:\n" + "\n".join(ordinary_tool_results))
+            if kind == "candidate_generation":
+                parts.append(CANDIDATE_INSTRUCTIONS)
+            if route is not None:
+                if kind == "route_expansion":
+                    parts.append(
+                        "Expand the selected route by one bounded step. "
+                        "You may use independently checked shared claims."
+                    )
+                parts.append("Route expansion:\n" + _canonical_json(route.prompt()))
             if kind == "diagnosis":
                 parts.append("One bounded diagnosis: make a substantive correction or stop.")
                 if not reasoning_state_enabled and result is not None:
@@ -753,7 +776,16 @@ class Runtime:
             return tool_count - before, failure_status
 
         while requests.count < request_limit:
-            prompt, evidence, prior_checks, open_goals = solve_prompt(request_kind)
+            route = None
+            decision = None
+            generating_candidates = search is not None and not search.routes
+            if generating_candidates:
+                request_kind = "candidate_generation"
+            elif search is not None:
+                request_kind = "route_expansion"
+                supports = derivations.goal_supports(derivation_scope) if derivations is not None else {}
+                route, decision = search.select(requests.next_request_id, supports)
+            prompt, evidence, prior_checks, open_goals = solve_prompt(request_kind, route)
             delivered_check_ids = tuple(check["evidence_id"] for check in prior_checks)
             referenced_ids = [item.evidence_id for item in evidence]
             resumed = continuation
@@ -772,17 +804,38 @@ class Runtime:
                         if derivations is not None else {}
                     ),
                     **(resumed.request_metadata() if resumed is not None else {}),
+                    **(
+                        {"route_id": decision["route_id"], "decision_id": decision["decision_id"]}
+                        if decision is not None else {}
+                    ),
                 }
+            if decision is not None:
+                trace.append({**decision, "model_requests_remaining": request_limit - requests.count})
             previous_state = (
                 verification.get("status"),
                 result["id"] if result else None,
                 _state_fingerprint(state),
             )
-            attempt = requests.dispatch(prompt, request_event)
+            attempt = requests.dispatch(
+                prompt, request_event,
+                empty_reply_status="protocol_failed" if generating_candidates else "invalid_output",
+            )
             request_id, reply, request_elapsed_ms = attempt.request_id, attempt.reply, attempt.elapsed_ms
+            if route is not None and not attempt.rejected_before_send:
+                search.settle(route, request_id, requests.count, reply)
             if attempt.failure_status is not None:
                 failure_status = attempt.failure_status
                 break
+            if generating_candidates:
+                if not search.register_candidates(reply.text):
+                    failure_status = "protocol_failed"
+                    requests.reject(attempt, failure_status)
+                    break
+                trace.append({
+                    "event": "route_candidates_generated", "request_id": request_id,
+                    "candidates": search.candidate_records(),
+                })
+                continue
             verification_started = time.perf_counter()
             derivations_changed = False
             revocations: tuple[Revocation, ...] = ()
@@ -837,9 +890,13 @@ class Runtime:
             result_scope = f"{problem_sha256}:{attempt_verification['scope']}"
             result_id = stable_id("result", {"content": answer, "scope": result_scope})
             if (
-                math_verification is None or result is None
-                or math_verification.support_rank(attempt_verification)
-                > math_verification.support_rank(verification)
+                result is None
+                or (math_verification is None and (
+                    search is None or verification["status"] != "verified"
+                    or attempt_verification["status"] == "verified"
+                ))
+                or (math_verification is not None and math_verification.support_rank(attempt_verification)
+                    > math_verification.support_rank(verification))
             ):
                 result = {"id": result_id, "answer": answer}
                 result_request_id = request_id
@@ -857,7 +914,11 @@ class Runtime:
             trace.append(
                 {
                     "event": "verification_completed",
-                    **({"request_id": request_id} if math_verification is not None else {}),
+                    **({"request_id": request_id} if math_verification is not None or route is not None else {}),
+                    **(
+                        {"route_id": route.route_id, "usage": search.record_verification(route, answer, attempt_verification)}
+                        if route is not None else {}
+                    ),
                     "result_id": result_id,
                     "elapsed_ms": verification_elapsed_ms,
                     **attempt_verification,
@@ -888,28 +949,33 @@ class Runtime:
 
             if failure_status:
                 break
+            if intervention is not None:
+                continuation = intervention.consider(
+                    request_id=request_id, build_prompt=lambda: solve_prompt("counterfactual_checkpoint", route)[0],
+                    checks=attempt_verification["checks"], revocations=revocations,
+                    state=state, scope=derivation_scope,
+                    remaining_requests=request_limit - requests.count,
+                    remaining_tools=tool_limit - tool_count if self._tool_executor is not None else 0,
+                    max_output_tokens=getattr(self._model_port, "max_output_tokens", "unknown"),
+                    dispatch=requests.dispatch, execute_tools=execute_tools,
+                )
+                if continuation is not None:
+                    if continuation.failure_status is not None:
+                        failure_status = continuation.failure_status
+                        break
+                    if continuation.merged_evidence_ids:
+                        math_verification.bind_derivations(
+                            result["answer"], verification, derivations.goal_supports(derivation_scope),
+                            request_id=result_request_id,
+                        )
+                    request_kind = "counterfactual_continuation"
+                    continue
+            if search is not None:
+                if verification["status"] == "verified" and search.cold_start_complete:
+                    stop_reason = "answer_generated"
+                    break
+                continue
             if math_verification is not None:
-                if intervention is not None:
-                    continuation = intervention.consider(
-                        request_id=request_id, build_prompt=lambda: solve_prompt("continuation")[0],
-                        checks=attempt_verification["checks"], revocations=revocations,
-                        state=state, scope=derivation_scope,
-                        remaining_requests=request_limit - requests.count,
-                        remaining_tools=tool_limit - tool_count if self._tool_executor is not None else 0,
-                        max_output_tokens=getattr(self._model_port, "max_output_tokens", "unknown"),
-                        dispatch=requests.dispatch, execute_tools=execute_tools,
-                    )
-                    if continuation is not None:
-                        if continuation.failure_status is not None:
-                            failure_status = continuation.failure_status
-                            break
-                        if continuation.merged_evidence_ids:
-                            math_verification.bind_derivations(
-                                result["answer"], verification, derivations.goal_supports(derivation_scope),
-                                request_id=result_request_id,
-                            )
-                        request_kind = "counterfactual_continuation"
-                        continue
                 if derivations is None:
                     for check in attempt_verification["checks"]:
                         if check["status"] == "verified":
@@ -972,6 +1038,11 @@ class Runtime:
 
         if stop_reason is None:
             stop_reason = "model_request_budget_exhausted"
+        search_summary = None
+        if search is not None:
+            supports = derivations.goal_supports(derivation_scope) if derivations is not None else {}
+            search_summary = search.summary(supports, failure_status or stop_reason)
+            trace.append({"event": "online_search_completed", **search_summary})
         if result is None:
             verification = math_verification.assess("")[1] if math_verification is not None else {
                 "status": "unknown", "applicable": False, "scope": "none",
@@ -981,7 +1052,7 @@ class Runtime:
         if (
             not failure_status
             and stop_reason == "model_request_budget_exhausted"
-            and (math_verification is not None or requests.count == 0)
+            and (math_verification is not None or search is not None or requests.count == 0)
         ):
             run_status = "stopped"
 
@@ -997,7 +1068,7 @@ class Runtime:
         provider_config.update(getattr(self._model_port, "preflight_config", {}))
         config = {
             "mode": "provider" if provider_config["provider"] != "offline" else "offline",
-            "route": "single",
+            "route": "online_search" if search is not None else "single",
             "model_port": self._model_port.name,
             "provider_config": provider_config,
             "reasoning_config": provider_config["thinking"],
@@ -1008,6 +1079,7 @@ class Runtime:
             "mechanisms": {
                 "shared_reasoning_state": reasoning_state_enabled,
                 **({"counterfactual_intervention": True} if counterfactual_enabled else {}),
+                **({"online_search": search.config()} if search is not None else {}),
             },
             **(
                 {"math_evidence_recheck": "controlled"}
@@ -1087,6 +1159,7 @@ class Runtime:
             "verification": verification,
             "evidence": state.public_snapshot(),
             **({"derivations": derivations.public_snapshot(derivation_scope)} if derivations is not None else {}),
+            **({"online_search": search_summary} if search_summary is not None else {}),
             "run": {
                 "status": run_status,
                 "stop_reason": failure_status or stop_reason,

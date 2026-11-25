@@ -16,6 +16,10 @@ uv run python -m ricl_runtime --problem "Compute 2 + 2." --offline-answer "4"
 
 单路线独立验证覆盖受支持形式的整数加法，以及斜率为正有理数的 `sqrt(a*x+b)=c*x+d`。运行在首次请求前冻结等权目标，并用精确有理数核查定义域、平方约束、有理候选集和原式代回。Run 分别记录局部核查、解集完备性、自由文本答案与解集的匹配，以及独立模型复核。超出精确判据的情况记为 `unknown`。可用 `--model-request-limit` 设置一次 Run 的请求上限。[根号方程离线示例](README.md#check-a-radical-equation)
 
+使用 `--online-search aprs` 或 `--online-search round_robin` 运行在线选路。重复传入 `--offline-answer`，依次提供候选提议和每次扩展的回复。候选提议与扩展共用请求上限。Trace 记录候选机会、有效目标归因、用量和实际扩展请求。[在线选路离线示例](README.md#replay-online-route-search)
+
+使用 `--counterfactual` 启用在线干预。离线回放首步遭到独立核查否定的场景，可设置 `--model-request-limit 5` 并按派发顺序提供五个 `--offline-answer`。依次传入失败的求解增量、包含 `hypothesis` 和 `strategy` 的诊断 JSON、对照臂与处理臂的增量，以及父路线续接。Trace 记录干预准入和父路线收到的已验证证据。[#258](https://github.com/RUSS0718/RiCL/issues/258)
+
 ## Runtime 机制
 
 | 机制 | 离线入口 | 范围 |
