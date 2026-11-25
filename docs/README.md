@@ -26,6 +26,8 @@ uv run python -m ricl_runtime.experiments --order-seed 17
 
 输出目录 `artifacts/paired-pilot/pilot_*/` 包含 `pilot.json` 和每个 Run 的记录。两个算术夹具各运行五个主要条件和四个专项对照条件，共 18 个 Run。清单记录每题的条件顺序、共享预算、运行和验证状态、停止原因及产物路径。夹具用量用于检查账本，真实先导需要单独批准。[配对消融规格 #243](https://github.com/RUSS0718/RiCL/issues/243)、[离线矩阵实现](../ricl_runtime/experiments.py)
 
+`pilot.json` 的 `rollback_pair` 指向另两个 Run。两个条件读取同一失败 Checkpoint，分别重推后缀和撤销失效的 AND/OR 依赖。配对记录以依赖状态核对回复中明确引用的依据，并记录夹具报告的返工输出 Token。[回退对照实现](../ricl_runtime/rollback_experiment.py)
+
 ## 首轮真实 Provider 证据
 
 一次获批的 DeepSeek 请求完成了整数加法校验。记录包含请求与返回模型、供应商用量、分阶段耗时和复跑参数。[DeepSeek smoke 记录](evals/runtime-deepseek-smoke.md)

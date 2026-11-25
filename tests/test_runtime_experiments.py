@@ -87,6 +87,18 @@ class RuntimeExperimentTests(unittest.TestCase):
             )
             self.assertEqual(manifest["counts"]["planned"], 18)
             self.assertEqual(sum(manifest["counts"]["verification"].values()), 18)
+            self.assertEqual(manifest["rollback_pair"]["status"], "completed")
+            rollback = json.loads(
+                Path(manifest["rollback_pair"]["run"]).read_text(encoding="utf-8")
+            )
+            baseline_repair = rollback["arms"]["baseline"]
+            state_repair = rollback["arms"]["ricl_state"]
+            self.assertEqual(
+                baseline_repair["checkpoint_sha256"], state_repair["checkpoint_sha256"]
+            )
+            self.assertTrue(baseline_repair["evidence_use"]["continued_using_invalidated_evidence"])
+            self.assertFalse(state_repair["evidence_use"]["continued_using_invalidated_evidence"])
+            self.assertGreater(baseline_repair["rework_tokens"], state_repair["rework_tokens"])
 
     def test_budget_stops_remain_in_the_paired_denominator(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -105,23 +117,26 @@ class RuntimeExperimentTests(unittest.TestCase):
                 self.assertEqual(record["budget"]["tokens"]["used"], 0)
 
     def test_timeout_preserves_prior_trace_and_failed_run(self) -> None:
-        complete = _FixtureResources.complete
+        generate = _FixtureResources._generate
 
-        def timed_out_on_second_candidate(fixture, prompt):
+        def timed_out_on_second_candidate(fixture, prompt, input_tokens):
             if fixture.case_id == "ordinary" and "Check the arithmetic by grouping." in prompt:
                 raise ProviderTimeoutError("offline timeout fixture")
-            return complete(fixture, prompt)
+            return generate(fixture, prompt, input_tokens)
 
         with (
             tempfile.TemporaryDirectory() as directory,
-            patch.object(_FixtureResources, "complete", timed_out_on_second_candidate),
+            patch.object(_FixtureResources, "_generate", timed_out_on_second_candidate),
         ):
             manifest = run_offline_pilot(output_root=Path(directory))
             run, trace = self._read_case(manifest, "ordinary")["ricl-search"]
             self.assertEqual(run["run"]["status"], "failed")
             self.assertEqual(run["run"]["stop_reason"], "timeout")
             self.assertEqual(run["verification"]["status"], "verified")
-            self.assertEqual(run["budget"]["model_requests"]["used"], 1)
+            self.assertFalse(run["state_reused"])
+            self.assertEqual(run["budget"]["model_requests"]["used"], 2)
+            self.assertEqual(run["budget"]["tokens"]["used"], "unknown")
+            self.assertEqual(run["provider_requests"][1]["status"], "timeout")
             self.assertEqual(manifest["counts"]["stop_reason"]["timeout"], 4)
             self.assertEqual(sum(event["event"] == "candidate_expanded" for event in trace), 1)
             self.assertTrue(any(event["event"] == "model_request_failed" for event in trace))

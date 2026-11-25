@@ -15,6 +15,7 @@ from .aprs import Candidate
 from .counterfactual import CounterfactualCheckpoint, InterventionAudit, RepairOptions
 from .population import CandidateRoute, PopulationBudget
 from .port import ModelPortFailure, ModelReply, ToolCall, ToolReceipt
+from .reasoning_state import SharedReasoningState
 from .runtime import Runtime, _canonical_json, _RunScope, _source_revision, _write_run
 
 
@@ -76,11 +77,7 @@ class _FixtureResources:
         return round((time.perf_counter() - self.started) * 1000, 3)
 
     def complete(self, prompt: str) -> ModelReply:
-        diagnostic = "Recalculate each sum." in prompt
-        reused = f": {self.answer}" in prompt and "Verified context:" in prompt
-        correct = self.case_id == "ordinary" or diagnostic or reused
-        text = self.answer if correct else "6"
-        input_tokens, output_tokens = len(prompt.split()), len(text.split())
+        input_tokens, output_tokens = len(prompt.split()), 1
         request_id = f"{self.scope.run_id}_request_{len(self.requests) + 1:03d}"
         if (
             len(self.requests) >= self.budget.model_requests
@@ -98,31 +95,48 @@ class _FixtureResources:
             )
             raise _FixtureBudgetExhausted("paired Run resource budget exhausted")
 
-        self.requests.append(
+        request = {
+            "request_id": request_id,
+            "requested_model": self.name,
+            "actual_model": "unknown",
+            "request_sent": False,
+            "status": "started",
+            "context_sha256": _digest(prompt),
+            "usage": {"input_tokens": "unknown", "output_tokens": "unknown", "source": "unknown"},
+        }
+        self.requests.append(request)
+        try:
+            reply = self._generate(prompt, input_tokens)
+        except ModelPortFailure as error:
+            request["status"] = error.failure_status
+            raise
+        request.update(
             {
-                "request_id": request_id,
-                "requested_model": self.name,
-                "actual_model": self.name,
-                "request_sent": False,
+                "actual_model": reply.model,
                 "status": "completed",
-                "context_sha256": _digest(prompt),
                 "usage": {
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "source": "fixture",
+                    "input_tokens": reply.input_tokens,
+                    "output_tokens": reply.output_tokens,
+                    "source": reply.usage_source,
                 },
             }
         )
         self.input_tokens += input_tokens
         self.output_tokens += output_tokens
+        return reply
+
+    def _generate(self, prompt: str, input_tokens: int) -> ModelReply:
+        diagnostic = "Recalculate each sum." in prompt
+        reused = f": {self.answer}" in prompt and "Verified context:" in prompt
+        correct = self.case_id == "ordinary" or diagnostic or reused
         tool_calls = ()
         if self.case_id == "ordinary" and len(self.requests) == 1 and self.budget.tools:
             tool_calls = (ToolCall("addition", "2 + 2"),)
         return ModelReply(
-            text,
+            self.answer if correct else "6",
             model=self.name,
             input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            output_tokens=1,
             usage_source="fixture",
             tool_calls=tool_calls,
             action="recalculate" if diagnostic or reused else "solve",
@@ -274,6 +288,23 @@ def _run_case(
         ],
     }
     run_dir = output_root / scope.run_id
+    completed_request_ids = {
+        entry["request_id"] for entry in fixture.requests if entry["status"] == "completed"
+    }
+    known_token_use = fixture.input_tokens + fixture.output_tokens
+    usage = {
+        "input_tokens": fixture.input_tokens,
+        "output_tokens": fixture.output_tokens,
+        "tokens": known_token_use,
+        "source": "fixture",
+    }
+    if len(completed_request_ids) != len(fixture.requests):
+        usage = {
+            "input_tokens": "unknown",
+            "output_tokens": "unknown",
+            "tokens": "unknown",
+            "source": "mixed_or_unknown" if completed_request_ids else "unknown",
+        }
     result = {
         "schema_version": 1,
         "run_id": scope.run_id,
@@ -284,7 +315,7 @@ def _run_case(
         "config_sha256": _digest(_canonical_json(config)),
         "model": {
             "requested": fixture.name,
-            "actual": fixture.name if fixture.requests else "unknown",
+            "actual": fixture.requests[-1]["actual_model"] if fixture.requests else "unknown",
         },
         "provider_requests": fixture.requests,
         "budget": {
@@ -292,20 +323,20 @@ def _run_case(
             "model_requests": {"limit": budget.model_requests, "used": len(fixture.requests)},
             "tokens": {
                 "limit": budget.tokens,
-                "used": fixture.input_tokens + fixture.output_tokens,
+                "used": usage["tokens"],
+                "known_used": known_token_use,
             },
             "tools": {"limit": budget.tools, "used": fixture.tools},
             "elapsed_ms": {"limit": budget.elapsed_ms, "used": fixture.elapsed_ms},
             "cost_usd": {"limit": budget.cost_usd, "used": 0},
         },
-        "usage": {
-            "input_tokens": fixture.input_tokens,
-            "output_tokens": fixture.output_tokens,
-            "tokens": fixture.input_tokens + fixture.output_tokens,
-            "source": "fixture",
-        },
+        "usage": usage,
         "cost": {"amount_usd": 0, "source": "no_provider_request"},
-        "state_reused": any(event.get("referenced_evidence_ids") for event in scope.trace),
+        "state_reused": any(
+            event.get("referenced_evidence_ids")
+            and event.get("request_id") in completed_request_ids
+            for event in scope.trace
+        ),
         "evidence": scope.state.public_snapshot(),
         "result": final.get("result"),
         "verification": final.get(
@@ -340,13 +371,79 @@ def _run_case(
     return result
 
 
+@dataclass(frozen=True)
+class _RollbackFixturePort:
+    invalidated_id: str
+    surviving_id: str
+    name = _FixtureResources.name
+    max_output_tokens = 128
+
+    def complete(self, prompt: str) -> ModelReply:
+        if "Condition: Baseline" in prompt:
+            work = "Replay the suffix, interpret the operands again, and check each calculation."
+            evidence_id = self.invalidated_id
+        else:
+            work = "Recompute with the independently supported operands."
+            evidence_id = self.surviving_id
+        answer = f"{work}\nEvidence used: {evidence_id}\nFinal answer: 4"
+        return ModelReply(
+            answer,
+            model=self.name,
+            input_tokens=len(prompt.split()),
+            output_tokens=len(answer.split()),
+            usage_source="fixture",
+        )
+
+
+def _run_fixture_rollback(output_root: Path, order_seed: int) -> dict[str, Any]:
+    from .rollback_experiment import RollbackCheckpoint, RollbackStep, run_rollback_pair
+
+    state = SharedReasoningState()
+    mistaken_reading = state.add_verified_result(
+        "The second addend is 3.", scope="rollback-fixture"
+    )
+    independent_reading = state.add_verified_result(
+        "The original prompt contains two 2s.", scope="rollback-fixture"
+    )
+    known_operands = state.add_verified_result(
+        "The addends can be read from the problem.",
+        scope="rollback-fixture",
+        depends_on_any=(mistaken_reading.evidence_id, independent_reading.evidence_id),
+    )
+    bad_sum = state.add_verified_result(
+        "The sum is 5.",
+        scope="rollback-fixture",
+        depends_on_all=(mistaken_reading.evidence_id,),
+    )
+    checkpoint = RollbackCheckpoint(
+        problem="Compute 2 + 2.",
+        problem_id="rollback-addition",
+        original_trace=("Read the addends.", "Record the operand evidence.", "Compute the sum."),
+        steps=(
+            RollbackStep("misread", mistaken_reading.evidence_id),
+            RollbackStep("known-operands", known_operands.evidence_id),
+            RollbackStep("sum", bad_sum.evidence_id),
+        ),
+        failed_step_id="misread",
+        diagnosis="The first derivation misread the second addend.",
+        reasoning_state=state,
+    )
+    return run_rollback_pair(
+        _RollbackFixturePort(mistaken_reading.evidence_id, known_operands.evidence_id),
+        checkpoint,
+        output_root=output_root / "rollback",
+        model_request_limit=1,
+        order_seed=order_seed,
+    )
+
+
 def run_offline_pilot(
     *,
     output_root: Path = Path("artifacts/paired-pilot"),
     order_seed: int = 17,
     budget: PopulationBudget = _BUDGET,
 ) -> dict[str, Any]:
-    """Run each fixture against all conditions in a reproducible, shuffled order."""
+    """Run the shuffled matrix and a separate matched rollback fixture."""
     root = output_root.resolve() / f"pilot_{uuid.uuid4().hex}"
     revision = _source_revision()
     rng = Random(order_seed)
@@ -360,12 +457,14 @@ def run_offline_pilot(
         for case_id, conditions in order.items()
         for condition_id in conditions
     ]
+    rollback = _run_fixture_rollback(root, order_seed)
     manifest = {
         "source_revision": revision,
         "order_seed": order_seed,
         "model_seed": "unavailable",
         "condition_order": order,
         "budget": asdict(budget),
+        "rollback_pair": {"status": rollback["pair_status"], **rollback["artifacts"]},
         "runs": [
             {
                 "problem_id": run["problem"]["id"],
