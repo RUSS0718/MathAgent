@@ -6,6 +6,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -16,6 +17,50 @@ from .population import CandidateRoute, PopulationBudget
 from .port import ModelPort, ModelPortFailure, ModelReply, ToolExecutor
 from .reasoning_state import Evidence, SharedReasoningState
 from .verification import verify_integer_addition
+
+
+@dataclass
+class _RunScope:
+    """Correlate Runtime phases that execute within one configured Run."""
+
+    run_id: str = field(default_factory=lambda: f"run_{uuid.uuid4().hex}")
+    trace: list[dict[str, Any]] = field(default_factory=list)
+    request_offset: int = 0
+    state: SharedReasoningState = field(default_factory=SharedReasoningState)
+
+    def request_id(self, index: int) -> str:
+        return f"{self.run_id}_request_{self.request_offset + index:03d}"
+
+
+def _write_run(result: dict[str, Any], trace: list[dict[str, Any]]) -> None:
+    run_path = Path(result["artifacts"]["run"])
+    trace_path = Path(result["artifacts"]["trace"])
+    run_path.parent.mkdir(parents=True, exist_ok=False)
+    trace_path.write_text(
+        "".join(f"{_canonical_json(event)}\n" for event in trace), encoding="utf-8"
+    )
+    run_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _finish_phase(
+    result: dict[str, Any],
+    trace: list[dict[str, Any]],
+    scope: _RunScope | None,
+    state: SharedReasoningState,
+) -> dict[str, Any]:
+    if scope is None:
+        _write_run(result, trace)
+    else:
+        scope.state = state
+        scope.request_offset += result["budget"]["model_requests"]["used"]
+        scope.trace.extend(trace[1:-1])
+        scope.trace.append({
+            "event": "phase_stopped",
+            "phase": "counterfactual" if "intervention" in result else result["config"]["route"],
+            "status": result["run"]["status"],
+            "stop_reason": result["run"]["stop_reason"],
+        })
+    return result
 
 
 class Runtime:
@@ -41,12 +86,16 @@ class Runtime:
         condition_id: str = "offline-counterfactual",
         output_root: Path = Path("artifacts"),
         model_request_limit: int = 3,
+        _scope: _RunScope | None = None,
     ) -> dict[str, Any]:
         """Run isolated branches and, when budget permits, a parent continuation."""
 
         eligible = checkpoint.failure_count > 0 and checkpoint.trigger_count < checkpoint.max_trigger_count
         if not enabled or not eligible:
-            return self.run(problem, problem_id=problem_id, condition_id=condition_id, output_root=output_root)
+            return self.run(
+                problem, problem_id=problem_id, condition_id=condition_id,
+                output_root=output_root, _scope=_scope,
+            )
         if model_request_limit < 2:
             raise ValueError("counterfactual branches require two shared model requests")
         if feedback_kind not in ("random", "diagnostic"):
@@ -63,7 +112,8 @@ class Runtime:
 
         checkpoint_trigger_count = checkpoint.trigger_count
         checkpoint.trigger_count += 1
-        run_id = f"run_{uuid.uuid4().hex}"
+        execution = _scope or _RunScope()
+        run_id = execution.run_id
         problem_sha256 = hashlib.sha256(problem.encode("utf-8")).hexdigest()
         problem_id = problem_id or problem_sha256
         parent_state = checkpoint.reasoning_state.fork()
@@ -110,7 +160,7 @@ class Runtime:
             prompt = common_prompt
             if arm == "treatment":
                 prompt += f"\n\nIntervention feedback:\n{intervention_feedback}"
-            request_id = f"{run_id}_request_{index:03d}"
+            request_id = execution.request_id(index)
             trace.append(
                 {
                     "event": "model_request_sent",
@@ -182,7 +232,7 @@ class Runtime:
                 treatment["answer"],
                 scope=f"{problem_sha256}:{treatment['verification']['scope']}",
             )
-            parent_request_id = f"{run_id}_request_{len(replies) + 1:03d}"
+            parent_request_id = execution.request_id(len(replies) + 1)
             parent_referenced_ids = [
                 item.evidence_id for item in parent_state.valid_evidence()
             ]
@@ -290,7 +340,6 @@ class Runtime:
         }
         config_sha256 = hashlib.sha256(_canonical_json(config).encode("utf-8")).hexdigest()
         run_dir = output_root / run_id
-        run_dir.mkdir(parents=True, exist_ok=False)
         trace_path = run_dir / "trace.jsonl"
         run_path = run_dir / "run.json"
         trace.append({"event": "run_stopped", "status": "completed", "stop_reason": stop_reason})
@@ -346,11 +395,7 @@ class Runtime:
             "run": {"status": "completed", "stop_reason": stop_reason},
             "artifacts": {"run": str(run_path), "trace": str(trace_path)},
         }
-        trace_path.write_text(
-            "".join(f"{_canonical_json(event)}\n" for event in trace), encoding="utf-8"
-        )
-        run_path.write_text(json.dumps(result_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        return result_record
+        return _finish_phase(result_record, trace, _scope, parent_state)
 
     def run(
         self,
@@ -362,18 +407,21 @@ class Runtime:
         reasoning_state_enabled: bool = False,
         model_request_limit: int = 1,
         tool_call_limit: int = 0,
+        visible_context: str = "",
+        _scope: _RunScope | None = None,
     ) -> dict[str, Any]:
         """Generate, verify, and optionally reuse results within one shared Run budget."""
 
         if model_request_limit < 1 or tool_call_limit < 0:
             raise ValueError("model request limit must be positive and tool limit nonnegative")
 
-        run_id = f"run_{uuid.uuid4().hex}"
+        execution = _scope or _RunScope()
+        run_id = execution.run_id
         problem_sha256 = hashlib.sha256(problem.encode("utf-8")).hexdigest()
         problem_id = problem_id or problem_sha256
         request_limit = model_request_limit if reasoning_state_enabled else 1
-        tool_limit = tool_call_limit if reasoning_state_enabled else 0
-        state = SharedReasoningState()
+        tool_limit = tool_call_limit
+        state = execution.state
         request_count = 0
         tool_count = 0
         diagnosis_used = False
@@ -399,13 +447,15 @@ class Runtime:
             evidence = state.valid_evidence() if reasoning_state_enabled else ()
             context = _render_evidence(evidence)
             parts = [problem]
+            if visible_context:
+                parts.append(f"Problem context:\n{visible_context}")
             if context:
                 parts.append(f"Verified context:\n{context}")
             if request_kind == "diagnosis":
                 parts.append("One bounded diagnosis: make a substantive correction or stop.")
             prompt = "\n\n".join(parts)
             referenced_ids = [item.evidence_id for item in evidence]
-            request_id = f"{run_id}_request_{request_count + 1:03d}"
+            request_id = execution.request_id(request_count + 1)
             if reasoning_state_enabled:
                 trace.append(
                     {
@@ -575,7 +625,7 @@ class Runtime:
                 item = state.add_verified_result(reply.text, scope=result_scope)
                 trace.append(_evidence_event("verified_result_added", item))
 
-            for call in reply.tool_calls if reasoning_state_enabled else ():
+            for call in reply.tool_calls:
                 if self._tool_executor is None:
                     trace.append(
                         {"event": "tool_call_not_executed", "request_id": request_id, "reason": "no_executor"}
@@ -663,6 +713,10 @@ class Runtime:
             "model_port": self._model_port.name,
             "provider_config": provider_config,
             "reasoning_config": provider_config["thinking"],
+            **(
+                {"visible_context_sha256": hashlib.sha256(visible_context.encode()).hexdigest()}
+                if visible_context else {}
+            ),
             "mechanisms": {"shared_reasoning_state": reasoning_state_enabled},
             "budget": {
                 "scope": "run_shared",
@@ -677,7 +731,6 @@ class Runtime:
         config_sha256 = hashlib.sha256(_canonical_json(config).encode("utf-8")).hexdigest()
         revision = _source_revision()
         run_dir = output_root / run_id
-        run_dir.mkdir(parents=True, exist_ok=False)
         trace_path = run_dir / "trace.jsonl"
         run_path = run_dir / "run.json"
         input_tokens = _sum_usage(replies, "input_tokens")
@@ -745,13 +798,7 @@ class Runtime:
             },
             "artifacts": {"run": str(run_path), "trace": str(trace_path)},
         }
-        trace_path.write_text(
-            "".join(f"{_canonical_json(event)}\n" for event in trace), encoding="utf-8"
-        )
-        run_path.write_text(
-            json.dumps(result_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
-        return result_record
+        return _finish_phase(result_record, trace, _scope, state)
 
 
     def run_population(
@@ -765,6 +812,8 @@ class Runtime:
         output_root: Path = Path("artifacts"),
         aprs_enabled: bool = True,
         max_candidates: int | None = None,
+        visible_context: str = "",
+        _scope: _RunScope | None = None,
     ) -> dict[str, Any]:
         """Expand supplied route opportunities serially under one Run budget."""
 
@@ -774,7 +823,8 @@ class Runtime:
         if max_candidates is not None and max_candidates < 1:
             raise ValueError("candidate limit must be positive")
 
-        run_id = f"run_{uuid.uuid4().hex}"
+        execution = _scope or _RunScope()
+        run_id = execution.run_id
         problem_sha256 = hashlib.sha256(problem.encode("utf-8")).hexdigest()
         problem_id = problem_id or problem_sha256
         candidate_set_sha256 = hashlib.sha256(
@@ -803,7 +853,7 @@ class Runtime:
                 "candidate_set_sha256": candidate_set_sha256,
             }
         ]
-        state = SharedReasoningState()
+        state = execution.state
         expanded: list[CandidateRoute] = []
         scored_candidates: list[Candidate] = []
         replies: list[Any] = []
@@ -860,11 +910,14 @@ class Runtime:
                 break
 
             evidence = state.valid_evidence()
-            prompt_parts = [problem, f"Candidate route:\n{route.prompt}"]
+            prompt_parts = [problem]
+            if visible_context:
+                prompt_parts.append(f"Problem context:\n{visible_context}")
+            prompt_parts.append(f"Candidate route:\n{route.prompt}")
             if evidence:
                 prompt_parts.append(f"Verified context:\n{_render_evidence(evidence)}")
             prompt = "\n\n".join(prompt_parts)
-            request_id = f"{run_id}_request_{request_count + 1:03d}"
+            request_id = execution.request_id(request_count + 1)
             trace.append(
                 {
                     **_route_event(route, "candidate_expansion_started"),
@@ -1082,6 +1135,10 @@ class Runtime:
             "route": "serial_population",
             "model_port": self._model_port.name,
             "reasoning_config": "none",
+            **(
+                {"visible_context_sha256": hashlib.sha256(visible_context.encode()).hexdigest()}
+                if visible_context else {}
+            ),
             "mechanisms": {"population": True, "aprs": aprs_enabled},
             "ranking_mode": ranking["ranking_mode"],
             "candidate_set_sha256": candidate_set_sha256,
@@ -1098,7 +1155,6 @@ class Runtime:
         }
         config_sha256 = hashlib.sha256(_canonical_json(config).encode("utf-8")).hexdigest()
         run_dir = output_root / run_id
-        run_dir.mkdir(parents=True, exist_ok=False)
         trace_path, run_path = run_dir / "trace.jsonl", run_dir / "run.json"
         status = "completed" if selected is not None and not budget_blocked else "stopped"
         verification = selected["verification"] if selected else {
@@ -1141,13 +1197,7 @@ class Runtime:
             "artifacts": {"run": str(run_path), "trace": str(trace_path)},
         }
         trace.append({"event": "run_stopped", "status": status, "stop_reason": stop_reason})
-        trace_path.write_text(
-            "".join(f"{_canonical_json(event)}\n" for event in trace), encoding="utf-8"
-        )
-        run_path.write_text(
-            json.dumps(result_record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
-        return result_record
+        return _finish_phase(result_record, trace, _scope, state)
 
 
 
