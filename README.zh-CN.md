@@ -6,7 +6,7 @@
 
 # RiCL Runtime
 
-本仓库正转向面向研究的数学推理运行时。当前可运行的 Runtime 是一个确定性、离线、单路线 CLI 样例。它不代表模型 Provider 已就绪、研究机制已完成、已有真实模型运行证据或数学效果提升。
+RiCL Runtime 是用于数学推理研究的 Python 入口。它能运行单题，并记录独立验证、资源用量和脱敏 Trace，供后续复核。
 
 <p align="center">
   <img alt="技术栈：Python、Flask、SQLite、Vue、TypeScript、Vite、Node.js、Docker" src="https://skillicons.dev/icons?i=py,flask,sqlite,vue,ts,vite,nodejs,docker&amp;theme=dark" />
@@ -26,17 +26,18 @@ uv run python -m ricl_runtime --problem "Compute 2 + 2." --offline-answer "4"
 
 ## 三项 Runtime 机制
 
-以下机制是分别定义范围的研究工作，不是当前单路线 CLI 已具备的能力。关联 Issue 描述各自的工作范围与验收证据。
+离线配对先导用受控算术夹具运行三项机制。
 
 | 机制 | 当前 Runtime 状态与范围 |
 | --- | --- |
-| **Shared Reasoning State（共享推理状态）** | 当前 CLI 尚未实现。[Issue #239](https://github.com/RUSS0718/RiCL/issues/239)定义已验证成果、依赖有效性及后续请求消费的工作范围。 |
-| **Causal Search Loop（因果搜索循环）** | 当前 CLI 尚未实现。[Issue #240](https://github.com/RUSS0718/RiCL/issues/240)定义固定候选集上的 APRS 排序；[Issue #241](https://github.com/RUSS0718/RiCL/issues/241)另行定义候选路线的串行扩展与选择。 |
-| **Counterfactual Control（反事实调控）** | 当前 CLI 尚未实现。[Issue #242](https://github.com/RUSS0718/RiCL/issues/242)定义同一检查点派生的隔离分支及经验证反馈进入主循环的工作范围。 |
+| **Shared Reasoning State（共享推理状态）** | 使用 `--reasoning-state --model-request-limit 2` 核对后续请求引用的证据。[Issue #239](https://github.com/RUSS0718/RiCL/issues/239) |
+| **Causal Search Loop（因果搜索循环）** | 使用 `--population --model-request-limit 2` 运行串行扩展和 APRS 排序。添加 `--no-aprs` 可运行普通搜索。[Issue #240](https://github.com/RUSS0718/RiCL/issues/240)、[Issue #241](https://github.com/RUSS0718/RiCL/issues/241) |
+| **Counterfactual Control（反事实调控）** | 运行离线配对先导，核对同源分支及进入父路线后续请求的已验证反馈。[Issue #242](https://github.com/RUSS0718/RiCL/issues/242) |
 
 ## 接下来阅读
 
 - [文档索引](docs/README.md)：当前 CLI 入口、独立机制范围、决策与证据状态。
+- [离线配对先导命令](docs/README.md#离线配对先导)和[首轮 DeepSeek smoke 证据](docs/evals/runtime-deepseek-smoke.md)。
 - [开发门禁](docs/engineering/development-gates.md)：文档检查与 Runtime 聚焦验证。
 - [仓库指引](AGENTS.md)、[Runtime 规格 #236](https://github.com/RUSS0718/RiCL/issues/236)、[离线 CLI Issue #237](https://github.com/RUSS0718/RiCL/issues/237)及[机制证据顺序 #232](https://github.com/RUSS0718/RiCL/issues/232)：研究边界和验收条件。
 

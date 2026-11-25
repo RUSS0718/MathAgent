@@ -6,7 +6,7 @@
 
 # RiCL Runtime
 
-This repository is moving toward a research-focused mathematics reasoning runtime. The current runnable Runtime is a deterministic, offline, single-route CLI example. It is not evidence of a ready model provider, completed research mechanisms, real-model runs, or improved mathematical performance.
+RiCL Runtime is a Python entry point for research on mathematical reasoning. It runs single problems and writes a reproducible Run record with independent verification, resource usage, and a redacted trace.
 
 <p align="center">
   <img alt="Technology stack: Python, Flask, SQLite, Vue, TypeScript, Vite, Node.js, and Docker" src="https://skillicons.dev/icons?i=py,flask,sqlite,vue,ts,vite,nodejs,docker&amp;theme=dark" />
@@ -26,17 +26,18 @@ The offline port returns the answer supplied by `--offline-answer`; it does not 
 
 ## Three Runtime mechanisms
 
-These are separately scoped research mechanisms, not capabilities of the current single-route CLI. Their linked issues define the work and acceptance evidence.
+The offline paired pilot exercises all three mechanisms with controlled arithmetic fixtures.
 
 | Mechanism | Current Runtime status and scope |
 | --- | --- |
-| **Shared Reasoning State** | Not in the current CLI. [Issue #239](https://github.com/RUSS0718/RiCL/issues/239) scopes verified-result storage, dependency validity, and consumption by later requests. |
-| **Causal Search Loop** | Not in the current CLI. [Issue #240](https://github.com/RUSS0718/RiCL/issues/240) scopes APRS ranking on a fixed candidate set; [issue #241](https://github.com/RUSS0718/RiCL/issues/241) separately scopes serial candidate expansion and selection. |
-| **Counterfactual Control** | Not in the current CLI. [Issue #242](https://github.com/RUSS0718/RiCL/issues/242) scopes isolated branches from one checkpoint and verified feedback into the main loop. |
+| **Shared Reasoning State** | Use `--reasoning-state --model-request-limit 2` to inspect evidence references in later requests. [Issue #239](https://github.com/RUSS0718/RiCL/issues/239) |
+| **Causal Search Loop** | Use `--population --model-request-limit 2` for serial expansion and APRS ranking. Add `--no-aprs` for plain search. [Issues #240](https://github.com/RUSS0718/RiCL/issues/240) and [#241](https://github.com/RUSS0718/RiCL/issues/241) |
+| **Counterfactual Control** | Run the offline paired pilot to inspect isolated branches from one checkpoint and verified feedback in the parent continuation. [Issue #242](https://github.com/RUSS0718/RiCL/issues/242) |
 
 ## Read next
 
 - [Documentation index](docs/README.md) for the current CLI entry, scoped work, decisions, and evidence status.
+- [Paired pilot commands](docs/README.md#离线配对先导) and [DeepSeek smoke record](docs/evals/runtime-deepseek-smoke.md) for reproducible fixture runs and the first real API result.
 - [Development gates](docs/engineering/development-gates.md) for documentation checks and focused Runtime validation.
 - [Repository instructions](AGENTS.md), [Runtime specification #236](https://github.com/RUSS0718/RiCL/issues/236), [offline CLI issue #237](https://github.com/RUSS0718/RiCL/issues/237), and [mechanism evidence order #232](https://github.com/RUSS0718/RiCL/issues/232) for constraints and acceptance boundaries.
 
