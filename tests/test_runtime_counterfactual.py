@@ -198,6 +198,7 @@ class CounterfactualRuntimeTests(unittest.TestCase):
         self.assertEqual(len(port.prompts), 2)
         self.assertTrue(result["intervention"]["feedback_eligible"])
         self.assertFalse(result["intervention"]["feedback_available_to_parent"])
+        self.assertFalse(result["intervention"]["feedback_consumed"])
         self.assertFalse(result["intervention"]["feedback_consumed_by_parent"])
         self.assertEqual(result["run"]["stop_reason"], "parent_feedback_budget_exhausted")
         self.assertEqual(result["parent_evidence"], result["checkpoint"]["evidence"])
@@ -227,6 +228,7 @@ class CounterfactualRuntimeTests(unittest.TestCase):
     def test_feedback_requires_an_effective_change_and_verified_treatment_outcome(self) -> None:
         cases = (
             (ModelReply("4", action="continue"), ModelReply("4", action="continue")),
+            (ModelReply("4", action="continue", route="initial"), ModelReply("4")),
             (ModelReply("4", action="continue"), ModelReply("5", action="diagnose")),
         )
         for control_reply, treatment_reply in cases:

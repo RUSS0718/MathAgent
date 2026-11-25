@@ -204,8 +204,8 @@ class Runtime:
 
         control = branches["control"]
         treatment = branches["treatment"]
-        action_changed = treatment["action"] != control["action"]
-        route_changed = treatment["route"] != control["route"]
+        action_changed = treatment["action"] is not None and treatment["action"] != control["action"]
+        route_changed = treatment["route"] is not None and treatment["route"] != control["route"]
         audit: InterventionAudit | None = None
         if intervention_auditor is not None:
             proposed_audit = intervention_auditor(intervention_feedback, replies[1])
@@ -379,7 +379,7 @@ class Runtime:
                 "selected_repair_id": selected_repair_id,
                 "audit_status": audit.status if audit else "unknown",
                 "audit_source": audit.source if audit else "",
-                "feedback_consumed": feedback_available,
+                "feedback_consumed": bool(parent_request_id),
                 "feedback_consumed_by_parent": bool(parent_request_id),
                 "treatment_reported_feedback_consumed": bool(
                     audit and audit.feedback_consumed is True
