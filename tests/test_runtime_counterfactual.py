@@ -1,6 +1,7 @@
 """Offline acceptance tests for paired Runtime counterfactual execution."""
 
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,7 @@ from ricl_runtime import (
     Runtime,
     SharedReasoningState,
 )
+from ricl_runtime.counterfactual import AdditionRepairEvidence, RepairOptions
 from ricl_runtime.providers.deepseek import ProviderTimeoutError
 
 
@@ -33,6 +35,52 @@ class ScriptedModelPort:
 
 class CounterfactualRuntimeTests(unittest.TestCase):
     """Exercise paired branches only through the Runtime's public interface."""
+
+    def test_arithmetic_witness_and_parent_citation_are_independently_checked(self) -> None:
+        repair = RepairOptions((("regroup", "Try regrouping."), ("recalculate", "Add directly.")), "regroup", 1)
+        direct = "Repair step: 2 + 2 = 4\nFinal answer: 4"
+        regroup = "Repair step: 2 + 2 = 1 + 1 + 2 = 4\nFinal answer: 4"
+        invalid = "Repair step: 2 + 2 = 1 + 2 + 2 = 4\nFinal answer: 4"
+
+        for treatment, parent_answer, cite, expected in (
+            (regroup, regroup, True, True),
+            (regroup, regroup, False, False),
+            (regroup, direct, True, False),
+            (invalid, regroup, True, False),
+            (direct, regroup, True, False),
+        ):
+            with self.subTest(treatment=treatment, parent_answer=parent_answer, cite=cite):
+                prompts = []
+
+                def complete(prompt):
+                    prompts.append(prompt)
+                    if len(prompts) == 1:
+                        return ModelReply(direct)
+                    if len(prompts) == 2:
+                        return ModelReply(treatment)
+                    evidence_id = re.search(r"evidence_[0-9a-f]+", prompt).group()
+                    return ModelReply((f"Evidence used: {evidence_id}\n" if cite else "") + parent_answer)
+
+                with tempfile.TemporaryDirectory() as directory:
+                    port = ScriptedModelPort([])
+                    with patch.object(port, "complete", side_effect=complete):
+                        run = Runtime(port).run_counterfactual(
+                            "Compute 2 + 2.",
+                            checkpoint=CounterfactualCheckpoint("Previous answer: 5", 1, current_route="direct"),
+                            repair_options=repair,
+                            arithmetic_evidence=AdditionRepairEvidence(2, 2),
+                            output_root=Path(directory),
+                        )
+                    trace = [
+                        json.loads(line)
+                        for line in Path(run["artifacts"]["trace"]).read_text(encoding="utf-8").splitlines()
+                    ]
+                self.assertEqual(run["intervention"]["feedback_consumed_by_parent"], expected)
+                self.assertEqual(len(prompts), 3 if treatment == regroup else 2)
+                if expected:
+                    observed = next(event for event in trace if event["event"] == "parent_continuation_recorded")
+                    self.assertTrue(observed["route_changed_from_checkpoint"])
+                    self.assertEqual(run["intervention"]["audit_status"], "approved")
 
     def test_parent_timeout_preserves_arms_without_claiming_consumption(self) -> None:
         port = ScriptedModelPort([])

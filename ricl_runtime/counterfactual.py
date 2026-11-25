@@ -1,5 +1,6 @@
-"""Public contracts for bounded, offline Runtime counterfactual branches."""
+"""Contracts and independent evidence checks for counterfactual branches."""
 
+import re
 from dataclasses import dataclass, field
 from random import Random
 from typing import Literal
@@ -19,7 +20,9 @@ class RepairOptions:
         ids = {option_id for option_id, _ in self.options}
         if len(ids) < 2 or len(ids) != len(self.options) or self.diagnosed_id not in ids:
             raise ValueError("repair options need distinct IDs and a diagnosis in the same pool")
-        if any(not option_id.strip() or not feedback.strip() for option_id, feedback in self.options):
+        if any(
+            not option_id.strip() or not feedback.strip() for option_id, feedback in self.options
+        ):
             raise ValueError("repair options require a nonempty ID and feedback")
 
     def select(self, kind: Literal["random", "diagnostic"]) -> tuple[str, str]:
@@ -70,3 +73,74 @@ class InterventionAudit:
             raise ValueError("intervention audits require a source")
         if type(self.feedback_consumed) is not bool:
             raise TypeError("feedback consumption must be an explicit boolean")
+
+
+@dataclass(frozen=True)
+class AdditionRepairEvidence:
+    """Distinguish repair routes by checking a public arithmetic witness."""
+
+    left: int
+    right: int
+
+    @property
+    def instructions(self) -> str:
+        return (
+            "Report one public Repair step line and a separate Final answer line. "
+            "A direct step has the form Repair step: a + b = result. "
+            "A regrouping step has the form Repair step: a + b = x + y + b = result, "
+            "where x and y are both nonzero and sum to a. "
+            "Use the original addends in their original order. Apply the suggested method if given. "
+            "If citing verified evidence, give its ID on a separate Evidence used: line. "
+            "Keep the response to these public, checkable fields."
+        )
+
+    def route(self, answer: str) -> str | None:
+        lines = _labeled_lines(answer, "Repair step:")
+        if len(lines) != 1:
+            return None
+        pieces = [part.strip() for part in lines[0].removesuffix(".").split("=")]
+        if len(pieces) not in (2, 3):
+            return None
+        original = _integers_in_sum(pieces[0])
+        result = _integers_in_sum(pieces[-1])
+        if original != [self.left, self.right] or result != [self.left + self.right]:
+            return None
+        if len(pieces) == 2:
+            return "direct"
+        regrouping = _integers_in_sum(pieces[1])
+        if regrouping is not None and len(regrouping) == 3:
+            first, second, right = regrouping
+            if first and second and first + second == self.left and right == self.right:
+                return "regroup"
+        return None
+
+    def audit(
+        self, selected_repair: str | None, control: str | None, treatment: str | None
+    ) -> InterventionAudit:
+        expected_route = {"recalculate": "direct", "regroup": "regroup"}.get(selected_repair)
+        if expected_route is None or control is None or treatment is None:
+            return InterventionAudit("unknown", "independent_arithmetic_witness", False)
+        matched = treatment == expected_route
+        return InterventionAudit(
+            "approved" if matched and control != treatment else "rejected",
+            "independent_arithmetic_witness",
+            matched,
+        )
+
+    def parent_reference(self, answer: str, evidence_id: str) -> bool:
+        return _labeled_lines(answer, "Evidence used:") == [evidence_id]
+
+
+def _labeled_lines(text: str, prefix: str) -> list[str]:
+    return [
+        line[len(prefix) :].strip()
+        for raw in text.splitlines()
+        if (line := raw.strip()).startswith(prefix)
+    ]
+
+
+def _integers_in_sum(text: str) -> list[int] | None:
+    pieces = [piece.strip() for piece in text.split("+")]
+    if all(re.fullmatch(r"-?[0-9]{1,18}", piece) for piece in pieces):
+        return [int(piece) for piece in pieces]
+    return None

@@ -12,11 +12,17 @@ from random import Random
 from typing import Any, Literal
 
 from .aprs import Candidate
-from .counterfactual import CounterfactualCheckpoint, InterventionAudit, RepairOptions
+from .counterfactual import (
+    AdditionRepairEvidence,
+    CounterfactualCheckpoint,
+    InterventionAudit,
+    RepairOptions,
+)
 from .population import CandidateRoute, PopulationBudget
 from .port import ModelPort, ModelPortFailure, ModelReply, ToolCall, ToolReceipt
 from .reasoning_state import SharedReasoningState
 from .runtime import Runtime, _canonical_json, _RunScope, _source_revision, _write_run
+from .verification import addition_operands
 
 
 @dataclass(frozen=True)
@@ -282,6 +288,7 @@ def _run_case(
                     visible_prefix=f"{_CONTEXT}\nPrevious answer: {('5' if frozen_repair else main['result']['answer'])}",
                     failure_count=1,
                     current_action="solve",
+                    current_route="direct" if frozen_repair else None,
                     reasoning_state=SharedReasoningState() if frozen_repair else scope.state,
                 )
                 if frozen_repair:
@@ -291,6 +298,11 @@ def _run_case(
                     checkpoint=checkpoint,
                     repair_options=_REPAIR,
                     intervention_auditor=_fixture_audit if model_port is None else None,
+                    arithmetic_evidence=(
+                        AdditionRepairEvidence(*operands)
+                        if model_port is not None and (operands := addition_operands(problem)) is not None
+                        else None
+                    ),
                     feedback_kind=condition.repair,
                     model_request_limit=remaining,
                     **arguments,

@@ -2,9 +2,11 @@
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -29,16 +31,32 @@ class LivePilotTests(unittest.TestCase):
             request_id="fixture-request",
             finish_reason="stop",
         )
+
+        def complete(prompt):
+            if "Report one public Repair step line" not in prompt:
+                return reply
+            if "If you use an applicable verified result" in prompt:
+                evidence_id = re.search(r"evidence_[0-9a-f]+", prompt).group()
+                return replace(
+                    reply,
+                    text=f"Evidence used: {evidence_id}\n"
+                    "Repair step: 2 + 2 = 1 + 1 + 2 = 4\nFinal answer: 4",
+                )
+            if "Intervention feedback:\nTry regrouping." in prompt:
+                return replace(reply, text="Repair step: 2 + 2 = 1 + 1 + 2 = 4\nFinal answer: 4")
+            return replace(reply, text="Repair step: 2 + 2 = 4\nFinal answer: 4")
+
         with (
             tempfile.TemporaryDirectory() as directory,
             patch.dict(os.environ, ENVIRONMENT),
-            patch("ricl_runtime.live_pilot._call_with_deadline", return_value=reply) as call,
+            patch("ricl_runtime.live_pilot._call_with_deadline", side_effect=complete) as call,
         ):
             root = Path(directory) / "pilot"
             manifest = run_live_pilot(root)
             self.assertEqual(manifest["counts"]["planned"], 9)
             self.assertEqual(manifest["counts"]["status"], {"completed": 9})
             self.assertEqual(manifest["rollback_pair"]["status"], "completed")
+            self.assertEqual(manifest["counts"]["intervention_consumed"], 1)
             self.assertGreater(call.call_count, 11)
             self.assertLessEqual(call.call_count, 47)
             self.assertEqual(call.call_count, manifest["provider_attempts"])

@@ -11,12 +11,17 @@ from pathlib import Path
 from typing import Any, Literal
 
 from .aprs import Candidate, VerifierEvidence, evaluate_fixed_candidates
-from .counterfactual import CounterfactualCheckpoint, InterventionAudit, RepairOptions
+from .counterfactual import (
+    AdditionRepairEvidence,
+    CounterfactualCheckpoint,
+    InterventionAudit,
+    RepairOptions,
+)
 from .identity import stable_id
 from .population import CandidateRoute, PopulationBudget
 from .port import ModelPort, ModelPortFailure, ModelReply, ToolCall, ToolExecutor, ToolReceipt
 from .reasoning_state import Evidence, SharedReasoningState
-from .verification import verify_integer_addition
+from .verification import addition_operands, verify_integer_addition
 
 
 @dataclass
@@ -83,6 +88,7 @@ class Runtime:
         intervention_feedback: str | None = None,
         repair_options: RepairOptions | None = None,
         intervention_auditor: Callable[[str, ModelReply], InterventionAudit] | None = None,
+        arithmetic_evidence: AdditionRepairEvidence | None = None,
         feedback_kind: Literal["random", "diagnostic"] = "diagnostic",
         enabled: bool = True,
         problem_id: str | None = None,
@@ -101,6 +107,12 @@ class Runtime:
             )
         if model_request_limit < 2:
             raise ValueError("counterfactual branches require two shared model requests")
+        if arithmetic_evidence is not None and (repair_options is None or intervention_auditor is not None):
+            raise ValueError("arithmetic repair evidence requires the option pool and owns the intervention audit")
+        if arithmetic_evidence is not None and addition_operands(problem) != (
+            arithmetic_evidence.left, arithmetic_evidence.right,
+        ):
+            raise ValueError("arithmetic repair evidence must describe the original problem")
         if feedback_kind not in ("random", "diagnostic"):
             raise ValueError("feedback kind must be random or diagnostic")
         if repair_options is not None and intervention_feedback is not None:
@@ -136,6 +148,8 @@ class Runtime:
         context = _render_evidence(evidence)
         if context:
             common_parts.append(f"Verified context:\n{context}")
+        if arithmetic_evidence is not None:
+            common_parts.append(arithmetic_evidence.instructions)
         common_prompt = "\n\n".join(common_parts)
         branch_states = {"control": parent_state.fork(), "treatment": parent_state.fork()}
         replies: list[ModelReply] = []
@@ -206,6 +220,7 @@ class Runtime:
             verification = verify_integer_addition(problem, reply.text)
             scope = f"{problem_sha256}:{verification['scope']}"
             branch_result_id = stable_id("result", {"content": reply.text, "scope": scope})
+            route = arithmetic_evidence.route(reply.text) if arithmetic_evidence is not None else reply.route
             trace.append(
                 {
                     "event": "branch_outcome_recorded",
@@ -223,8 +238,8 @@ class Runtime:
                 "checkpoint_sha256": checkpoint_sha256,
                 "result_id": branch_result_id,
                 "answer": reply.text,
-                "action": reply.action,
-                "route": reply.route,
+                "action": reply.action if arithmetic_evidence is None else None,
+                "route": route,
                 "verification": verification,
                 "evidence": branch_states[arm].public_snapshot(),
             }
@@ -237,11 +252,14 @@ class Runtime:
         )
         route_changed = bool(
             control and treatment and treatment["route"] is not None
+            and (arithmetic_evidence is None or control["route"] is not None)
             and treatment["route"] != control["route"]
         )
         treatment_verified = bool(treatment and treatment["verification"]["status"] == "verified")
         audit: InterventionAudit | None = None
-        if intervention_auditor is not None and treatment is not None:
+        if arithmetic_evidence is not None and control is not None and treatment is not None:
+            audit = arithmetic_evidence.audit(selected_repair_id, control["route"], treatment["route"])
+        elif intervention_auditor is not None and treatment is not None:
             proposed_audit = intervention_auditor(intervention_feedback, replies[1])
             if isinstance(proposed_audit, InterventionAudit):
                 audit = proposed_audit
@@ -257,6 +275,8 @@ class Runtime:
         parent_feedback_evidence_id: str | None = None
         parent_referenced_ids: list[str] = []
         parent_continuation: dict[str, Any] | None = None
+        parent_reference_reported: bool | None = None
+        parent_route_matches_treatment: bool | None = None
         parent_budget_available = feedback_available and request_count < model_request_limit
         stop_reason = (
             "parent_feedback_budget_exhausted"
@@ -277,6 +297,11 @@ class Runtime:
             parent_context = _render_evidence(parent_state.valid_evidence())
             if parent_context:
                 parent_prompt_parts.append(f"Verified context:\n{parent_context}")
+            if arithmetic_evidence is not None:
+                parent_prompt_parts.append(
+                    f"{arithmetic_evidence.instructions}\n"
+                    "If you use an applicable verified result, show its repair method and cite its ID."
+                )
             parent_prompt = "\n\n".join(parent_prompt_parts)
             parent_reply = complete(
                 parent_prompt,
@@ -297,12 +322,21 @@ class Runtime:
                 parent_result_id = stable_id(
                     "result", {"content": parent_reply.text, "scope": parent_scope}
                 )
+                parent_route = (
+                    arithmetic_evidence.route(parent_reply.text)
+                    if arithmetic_evidence is not None else parent_reply.route
+                )
+                if arithmetic_evidence is not None:
+                    parent_reference_reported = arithmetic_evidence.parent_reference(
+                        parent_reply.text, parent_feedback_evidence.evidence_id,
+                    )
+                    parent_route_matches_treatment = parent_route == treatment["route"]
                 parent_continuation = {
                     "request_id": parent_request_id,
                     "result_id": parent_result_id,
                     "answer": parent_reply.text,
                     "action": parent_reply.action,
-                    "route": parent_reply.route,
+                    "route": parent_route,
                     "verification": parent_verification,
                 }
                 if parent_verification["status"] == "verified":
@@ -320,19 +354,28 @@ class Runtime:
                             else "unknown"
                         ),
                         "route_changed_from_checkpoint": (
-                            parent_reply.route != checkpoint.current_route
-                            if parent_reply.route is not None and checkpoint.current_route is not None
+                            parent_route != checkpoint.current_route
+                            if parent_route is not None and checkpoint.current_route is not None
                             else "unknown"
                         ),
                     }
                 )
-        parent_consumed = (
+        parent_evidence_in_completed_request = (
             parent_continuation is not None and parent_feedback_evidence_id in parent_referenced_ids
+        )
+        parent_consumed = parent_evidence_in_completed_request and (
+            arithmetic_evidence is None
+            or bool(parent_reference_reported and parent_route_matches_treatment
+                    and parent_continuation["verification"]["status"] == "verified")
         )
         consumption_basis = "not_qualified"
         if feedback_available:
             if parent_consumed:
-                consumption_basis = "present_in_parent_request"
+                consumption_basis = (
+                    "verified_citation_and_route" if arithmetic_evidence is not None else "present_in_parent_request"
+                )
+            elif parent_evidence_in_completed_request:
+                consumption_basis = "parent_use_unconfirmed"
             elif parent_request_id is not None:
                 consumption_basis = "parent_request_failed"
             else:
@@ -345,8 +388,11 @@ class Runtime:
                     "consumption_basis": consumption_basis,
                     "parent_request_id": parent_request_id,
                     "referenced_evidence_ids": parent_referenced_ids,
+                    "parent_evidence_in_completed_request": parent_evidence_in_completed_request,
+                    "parent_reference_reported": parent_reference_reported,
+                    "parent_route_matches_treatment": parent_route_matches_treatment,
                     "treatment_reported_feedback_consumed": bool(
-                        audit and audit.feedback_consumed is True
+                        arithmetic_evidence is None and audit and audit.feedback_consumed is True
                     ),
                     "audit_status": audit.status if audit else "unknown",
                     "audit_source": audit.source if audit else "",
@@ -365,11 +411,12 @@ class Runtime:
         )
         elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
         config = {
-            "mode": "offline",
+            "mode": "offline" if getattr(self._model_port, "provider", "offline") == "offline" else "live",
             "route": "single",
             "model_port": self._model_port.name,
             "mechanisms": {"counterfactual_intervention": True},
             "feedback_kind": feedback_kind,
+            **({"intervention_audit": "independent_arithmetic_witness"} if arithmetic_evidence is not None else {}),
             "feedback_sha256": hashlib.sha256(intervention_feedback.encode()).hexdigest(),
             **(
                 {
@@ -428,8 +475,11 @@ class Runtime:
                 "audit_source": audit.source if audit else "",
                 "feedback_consumed": parent_consumed,
                 "feedback_consumed_by_parent": parent_consumed,
+                "parent_evidence_in_completed_request": parent_evidence_in_completed_request,
+                "parent_reference_reported": parent_reference_reported,
+                "parent_route_matches_treatment": parent_route_matches_treatment,
                 "treatment_reported_feedback_consumed": bool(
-                    audit and audit.feedback_consumed is True
+                    arithmetic_evidence is None and audit and audit.feedback_consumed is True
                 ),
                 "action_changed": action_changed,
                 "route_changed": route_changed,

@@ -12,11 +12,17 @@ _EQUATION = re.compile(r"(-?\d+)\s*\+\s*(-?\d+)\s*=\s*(-?\d+)[.!]?")
 _BOXED_INTEGER = re.compile(r"\\boxed\{\s*(-?\d+)\s*\}[.!]?")
 
 
+def addition_operands(problem: str) -> tuple[int, int] | None:
+    """Return operands for the Runtime's supported addition problems."""
+    match = _PROBLEM.fullmatch(problem)
+    return (int(match[1]), int(match[2])) if match else None
+
+
 def verify_integer_addition(problem: str, answer: str) -> dict[str, object]:
     """Check a supported addition prompt against integer arithmetic, else return unknown."""
 
-    match = _PROBLEM.fullmatch(problem)
-    if match is None:
+    operands = addition_operands(problem)
+    if operands is None:
         return {
             "status": "unknown",
             "applicable": False,
@@ -24,7 +30,7 @@ def verify_integer_addition(problem: str, answer: str) -> dict[str, object]:
             "reason": "no_applicable_criterion",
         }
 
-    left, right = map(int, match.groups())
+    left, right = operands
     answer_line = answer.strip().rpartition("\n")[2].strip()
     for opening, closing in (("**", "**"), ("$", "$"), (r"\(", r"\)")):
         if answer_line.startswith(opening) and answer_line.endswith(closing):
