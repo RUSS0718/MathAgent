@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 
 from ricl_runtime.port import ModelReply
 from ricl_runtime.providers.deepseek import (
+    ALLOWED_GATEWAY_HOST,
     DeepSeekModelPort,
     DeepSeekReply,
     ProviderConfigurationError,
@@ -136,6 +137,20 @@ class DeepSeekModelPortTests(unittest.TestCase):
             port = DeepSeekModelPort.from_environment()
 
         self.assertEqual(port.name, "deepseek-flash")
+
+    def test_default_transport_timeout_allows_longer_gateway_replies(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "API_KEY": "inert-environment-credential",
+                "BASE_URL": f"https://{ALLOWED_GATEWAY_HOST}/v1",
+                "MODEL": "deepseek-v4.1-flash",
+            },
+        ):
+            port = DeepSeekModelPort.from_environment()
+
+        self.assertEqual(port.transport_timeout_seconds, 60.0)
+        self.assertEqual(port.preflight_config["transport_timeout_seconds"], 60.0)
 
     def test_missing_environment_configuration_is_sanitized(self) -> None:
         with patch.dict(os.environ, {"API_KEY": "", "BASE_URL": "", "MODEL": ""}):
@@ -278,6 +293,39 @@ class DeepSeekModelPortTests(unittest.TestCase):
         request, _ = opener.calls[0]
         self.assertEqual(json.loads(request.data)["model"], "deepseek-v4-flash-vision-exp")
 
+    def test_request_preflight_accepts_configured_gateway_and_model(self) -> None:
+        port = DeepSeekModelPort(
+            api_key="inert-test-credential",
+            base_url=f"https://{ALLOWED_GATEWAY_HOST}/v1",
+            model="deepseek-v4.1-flash",
+        )
+        response = FakeResponse(
+            json.dumps(
+                {
+                    "id": "gateway-request",
+                    "model": "deepseek-v4.1-flash",
+                    "choices": [{"message": {"content": "4"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                }
+            ).encode()
+        )
+        opener = FakeOpener(response=response)
+
+        with patch(
+            "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
+            return_value=opener,
+        ):
+            reply = port.complete("fixture prompt")
+
+        self.assertEqual(reply.request_id, "gateway-request")
+        request, _ = opener.calls[0]
+        self.assertEqual(request.full_url, f"https://{ALLOWED_GATEWAY_HOST}/v1/chat/completions")
+        self.assertEqual(json.loads(request.data)["model"], "deepseek-v4.1-flash")
+        self.assertEqual(json.loads(request.data)["max_tokens"], 8192)
+        self.assertEqual(port.max_output_tokens, 8192)
+        self.assertEqual(port.preflight_cost_upper_bound_usd, "0.0401408")
+        self.assertEqual(port.preflight_config["selected_endpoint_host"], ALLOWED_GATEWAY_HOST)
+
     def test_request_preflight_rejects_oversized_prompt_without_opening(self) -> None:
         port = DeepSeekModelPort(
             api_key="inert-test-credential",
@@ -296,6 +344,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
         build_opener.assert_not_called()
         self.assertEqual(port.cost_limit_usd, 0.05)
         self.assertEqual(port.preflight_cost_upper_bound_usd, "0.0055296")
+        self.assertEqual(port.preflight_config["selected_endpoint_host"], "api.deepseek.com")
 
     def test_malformed_json_is_a_redacted_protocol_error(self) -> None:
         prompt = "fixture prompt malformed response sentinel"

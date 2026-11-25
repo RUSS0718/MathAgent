@@ -2,6 +2,8 @@
 
 import http.client
 import json
+import os
+import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace
@@ -103,7 +105,7 @@ def validate_base_url(url: str, host: str) -> bool:
 def read_json(request: urllib.request.Request, *, timeout: float, max_bytes: int) -> dict[str, Any]:
     """Read one bounded JSON response and classify transport failures."""
     try:
-        opener = urllib.request.build_opener(_RejectRedirects)
+        opener = urllib.request.build_opener(_RejectRedirects, *_proxy_handlers())
         with opener.open(request, timeout=timeout) as response:
             body = response.read(max_bytes + 1)
     except urllib.error.HTTPError as error:
@@ -129,6 +131,44 @@ def read_json(request: urllib.request.Request, *, timeout: float, max_bytes: int
         raise ProviderProtocolError("provider response exceeded the configured size limit")
 
     return _decode_response(body)
+
+
+def _proxy_handlers() -> tuple[urllib.request.ProxyHandler, ...]:
+    """Use the environment's proxy settings and fall back to Windows settings."""
+
+    proxies = urllib.request.getproxies()
+    if not any(name in proxies for name in ("http", "https")):
+        proxies = _windows_ie_proxies()
+    return (urllib.request.ProxyHandler(proxies),)
+
+
+def _windows_ie_proxies() -> dict[str, str]:
+    """Read the enabled Windows system proxy without persisting its value."""
+
+    if sys.platform != "win32" or os.environ.get("HTTPS_PROXY"):
+        return {}
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class ProxyConfig(ctypes.Structure):
+            _fields_ = [
+                ("auto_detect", wintypes.BOOL),
+                ("auto_config_url", wintypes.LPWSTR),
+                ("proxy", wintypes.LPWSTR),
+                ("proxy_bypass", wintypes.LPWSTR),
+            ]
+
+        config = ProxyConfig()
+        if not ctypes.windll.winhttp.WinHttpGetIEProxyConfigForCurrentUser(ctypes.byref(config)):
+            return {}
+        if not config.proxy:
+            return {}
+        proxy_url = config.proxy if "://" in config.proxy else f"http://{config.proxy}"
+        bypass = os.environ.get("no_proxy") or config.proxy_bypass or ""
+        return {"http": proxy_url, "https": proxy_url, "no": bypass}
+    except (AttributeError, OSError, TypeError, ValueError):
+        return {}
 
 
 def post_chat_completion(

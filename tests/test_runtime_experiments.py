@@ -42,6 +42,7 @@ class RuntimeExperimentTests(unittest.TestCase):
                 self.assertEqual(run["model"]["requested"], "paired-offline-fixture")
                 self.assertTrue(run["source"]["revision"])
                 self.assertEqual(trace[0]["run_id"], run["run_id"])
+                self.assertEqual(trace[0]["trace_schema_version"], 1)
                 self.assertEqual(sum(item["event"] == "run_started" for item in trace), 1)
                 self.assertEqual(sum(item["event"] == "run_stopped" for item in trace), 1)
                 self.assertEqual(

@@ -30,6 +30,7 @@ class ModelReply:
     tool_calls: tuple[ToolCall, ...] = ()
     action: str | None = None
     route: str | None = None
+    cost_usd: float | str = "unknown"
 
 
 @dataclass(frozen=True)

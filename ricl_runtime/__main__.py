@@ -7,11 +7,22 @@ from pathlib import Path
 
 from .aprs import Candidate
 from .population import CandidateRoute, PopulationBudget
-from .port import DeterministicModelPort
+from .port import DeterministicModelPort, ModelReply
 from .providers.chat_completions import ProviderConfigurationError
 from .providers.deepseek import DeepSeekModelPort
 from .providers.minimax import MiniMaxModelPort
 from .runtime import Runtime
+
+
+class _OfflineReplySequence:
+    name = "deterministic-offline"
+
+    def __init__(self, answers: Sequence[str]) -> None:
+        self._answers = iter(answers)
+
+    def complete(self, problem: str) -> ModelReply:
+        del problem
+        return ModelReply(next(self._answers, ""), model=self.name)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -20,7 +31,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run one RiCL Runtime problem.")
     parser.add_argument("--provider", choices=("offline", "deepseek", "minimax"), default="offline")
     parser.add_argument("--problem", required=True, help="single text math problem")
-    parser.add_argument("--offline-answer", help="fixed answer returned by the offline test port")
+    parser.add_argument(
+        "--offline-answer", action="append",
+        help="offline reply (repeat in dispatch order for online search or counterfactual intervention)",
+    )
     parser.add_argument("--thinking", choices=("enabled", "disabled"))
     parser.add_argument("--problem-id", help="optional stable problem identifier")
     parser.add_argument("--condition-id", default="offline-single-route")
@@ -29,7 +43,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--reasoning-state", action="store_true", help="enable shared reasoning state"
     )
     parser.add_argument(
+        "--counterfactual", action="store_true", help="enable bounded online intervention on a checked failure"
+    )
+    route = parser.add_mutually_exclusive_group()
+    route.add_argument(
         "--population", action="store_true", help="run the offline serial population example"
+    )
+    route.add_argument(
+        "--online-search", choices=("aprs", "round_robin"), help="schedule model-proposed routes online"
     )
     parser.add_argument(
         "--aprs",
@@ -37,7 +58,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=True,
         help="use APRS/Pareto selection for --population",
     )
-    parser.add_argument("--model-request-limit", type=int, default=1)
+    parser.add_argument("--model-request-limit", type=int, default=1, help="maximum requests per Run")
     parser.add_argument("--tool-call-limit", type=int, default=0)
     parser.add_argument("--token-limit", type=int, help="total token limit for --population (default: 20)")
     parser.add_argument("--elapsed-limit-ms", type=int, help="time limit for --population (default: 100)")
@@ -46,19 +67,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.population and args.provider != "offline":
         parser.error("--population requires the offline provider")
-    if not args.population and any(
-        value is not None for value in (args.token_limit, args.elapsed_limit_ms, args.cost_limit_usd)
-    ):
-        parser.error("--token-limit, --elapsed-limit-ms, and --cost-limit-usd require --population")
+    if args.population and args.counterfactual:
+        parser.error("--counterfactual requires the single-route Runtime")
     if args.provider == "offline":
         if args.offline_answer is None:
             parser.error("--offline-answer is required for the offline provider")
-        model_port = DeterministicModelPort(args.offline_answer)
+        model_port = (
+            _OfflineReplySequence(args.offline_answer) if args.online_search or args.counterfactual
+            else DeterministicModelPort(args.offline_answer[-1])
+        )
     else:
         if args.thinking is None:
             parser.error("--thinking must be explicitly set for a live provider")
-        if args.model_request_limit != 1:
-            parser.error("the live CLI smoke requires --model-request-limit 1")
+        if args.model_request_limit < 1:
+            parser.error("--model-request-limit must be positive for a live provider")
         if args.provider == "minimax" and args.thinking != "enabled":
             parser.error("MiniMax M3.1 Flash requires --thinking enabled")
         try:
@@ -111,8 +133,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             condition_id=args.condition_id,
             output_root=args.output_root,
             reasoning_state_enabled=args.reasoning_state,
+            counterfactual_enabled=args.counterfactual,
             model_request_limit=args.model_request_limit,
             tool_call_limit=args.tool_call_limit,
+            token_limit=args.token_limit,
+            elapsed_limit_ms=args.elapsed_limit_ms,
+            cost_limit_usd=args.cost_limit_usd,
+            online_search=args.online_search,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 1 if result["run"]["status"] == "failed" else 0
