@@ -71,7 +71,7 @@ class RuntimeOfflineTests(unittest.TestCase):
         provider = DeepSeekModelPort("test-key", "https://code.aigcpro.org/v1", "deepseek-v4.1-flash")
         candidates = '{"candidates":[{"strategy":"Check the domain."},{"strategy":"Inspect roots."}]}'
         for policy in ("aprs", "round_robin"):
-            for limit, expected_requests in (("0.04", 0), ("0.10", 2), ("0.13", 3)):
+            for limit, expected_requests in (("0.04", 0), ("0.14", 2), ("0.20", 3)):
                 with (
                     self.subTest(policy=policy, limit=limit),
                     tempfile.TemporaryDirectory() as directory,
