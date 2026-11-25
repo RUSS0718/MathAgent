@@ -242,9 +242,11 @@ def _run_case(
                 )
     except ModelPortFailure as error:
         failure = error.failure_status
+        scope.trace.append({"event": "phase_interrupted", "status": failure})
 
     final = repair if repair.get("parent_continuation") else main
-    run_status = final.get("run", {"status": "failed", "stop_reason": failure})
+    last_phase = repair or main
+    run_status = last_phase.get("run", {"status": "failed", "stop_reason": failure})
     if (
         run_status.get("failure_status") == "budget_exhausted"
         or fixture.elapsed_ms > budget.elapsed_ms
@@ -303,6 +305,7 @@ def _run_case(
             "source": "fixture",
         },
         "cost": {"amount_usd": 0, "source": "no_provider_request"},
+        "state_reused": any(event.get("referenced_evidence_ids") for event in scope.trace),
         "evidence": scope.state.public_snapshot(),
         "result": final.get("result"),
         "verification": final.get(
@@ -382,6 +385,7 @@ def run_offline_pilot(
             "search_executed": sum(
                 bool(run.get("population", {}).get("expanded_candidate_ids")) for run in records
             ),
+            "state_reused": sum(run["state_reused"] for run in records),
             "intervention_consumed": sum(
                 bool(run.get("intervention", {}).get("feedback_consumed_by_parent"))
                 for run in records

@@ -42,6 +42,14 @@ def _write_run(result: dict[str, Any], trace: list[dict[str, Any]]) -> None:
     run_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _phase_trace(events: list[dict[str, Any]], scope: _RunScope | None) -> list[dict[str, Any]]:
+    if scope is None:
+        return events
+    events[0]["event"] = "phase_started"
+    scope.trace.extend(events)
+    return scope.trace
+
+
 def _finish_phase(
     result: dict[str, Any],
     trace: list[dict[str, Any]],
@@ -53,13 +61,8 @@ def _finish_phase(
     else:
         scope.state = state
         scope.request_offset += result["budget"]["model_requests"]["used"]
-        scope.trace.extend(trace[1:-1])
-        scope.trace.append({
-            "event": "phase_stopped",
-            "phase": "counterfactual" if "intervention" in result else result["config"]["route"],
-            "status": result["run"]["status"],
-            "stop_reason": result["run"]["stop_reason"],
-        })
+        trace[-1]["event"] = "phase_stopped"
+        trace[-1]["phase"] = "counterfactual" if "intervention" in result else result["config"]["route"]
     return result
 
 
@@ -137,7 +140,7 @@ class Runtime:
         branch_states = {"control": parent_state.fork(), "treatment": parent_state.fork()}
         replies: list[ModelReply] = []
         branches: dict[str, dict[str, Any]] = {}
-        trace: list[dict[str, Any]] = [
+        trace = _phase_trace([
             {
                 "event": "run_started",
                 "run_id": run_id,
@@ -154,7 +157,7 @@ class Runtime:
                 "maximum_trigger_count": checkpoint.max_trigger_count,
                 "checkpoint_sha256": checkpoint_sha256,
             },
-        ]
+        ], _scope)
         started = time.perf_counter()
         for index, arm in enumerate(("control", "treatment"), start=1):
             prompt = common_prompt
@@ -427,7 +430,7 @@ class Runtime:
         diagnosis_used = False
         request_kind = "solve"
         stop_reason: str | None = None
-        trace: list[dict[str, Any]] = [
+        trace = _phase_trace([
             {
                 "event": "run_started",
                 "run_id": run_id,
@@ -435,7 +438,7 @@ class Runtime:
                 "problem_sha256": problem_sha256,
                 "condition_id": condition_id,
             }
-        ]
+        ], _scope)
         replies = []
         provider_requests: list[dict[str, Any]] = []
         result: dict[str, Any] | None = None
@@ -840,7 +843,7 @@ class Runtime:
                 ]
             ).encode("utf-8")
         ).hexdigest()
-        trace: list[dict[str, Any]] = [
+        trace = _phase_trace([
             {
                 "event": "run_started",
                 "run_id": run_id,
@@ -852,7 +855,7 @@ class Runtime:
                 "candidate_ids": route_ids,
                 "candidate_set_sha256": candidate_set_sha256,
             }
-        ]
+        ], _scope)
         state = execution.state
         expanded: list[CandidateRoute] = []
         scored_candidates: list[Candidate] = []

@@ -4,9 +4,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from ricl_runtime.experiments import run_offline_pilot
+from ricl_runtime.experiments import _FixtureResources, run_offline_pilot
 from ricl_runtime.population import PopulationBudget
+from ricl_runtime.providers.deepseek import ProviderTimeoutError
 
 
 class RuntimeExperimentTests(unittest.TestCase):
@@ -73,6 +75,10 @@ class RuntimeExperimentTests(unittest.TestCase):
                 self.assertEqual(
                     plain["budget"]["model_requests"], aprs["budget"]["model_requests"]
                 )
+            self.assertEqual(
+                ordinary["plain-search"][0]["population"]["selected_candidate_id"], "direct"
+            )
+            self.assertEqual(ordinary["aprs"][0]["population"]["selected_candidate_id"], "regroup")
             random_run, diagnostic = repair["random-repair"][0], repair["diagnostic-repair"][0]
             self.assertEqual(random_run["checkpoint"], diagnostic["checkpoint"])
             self.assertNotEqual(
@@ -97,6 +103,28 @@ class RuntimeExperimentTests(unittest.TestCase):
                 record = json.loads(Path(entry["run"]).read_text(encoding="utf-8"))
                 self.assertEqual(record["budget"]["model_requests"]["used"], 0)
                 self.assertEqual(record["budget"]["tokens"]["used"], 0)
+
+    def test_timeout_preserves_prior_trace_and_failed_run(self) -> None:
+        complete = _FixtureResources.complete
+
+        def timed_out_on_second_candidate(fixture, prompt):
+            if fixture.case_id == "ordinary" and "Check the arithmetic by grouping." in prompt:
+                raise ProviderTimeoutError("offline timeout fixture")
+            return complete(fixture, prompt)
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(_FixtureResources, "complete", timed_out_on_second_candidate),
+        ):
+            manifest = run_offline_pilot(output_root=Path(directory))
+            run, trace = self._read_case(manifest, "ordinary")["ricl-search"]
+            self.assertEqual(run["run"], {"status": "failed", "stop_reason": "timeout"})
+            self.assertEqual(run["verification"]["status"], "unknown")
+            self.assertEqual(run["budget"]["model_requests"]["used"], 1)
+            self.assertEqual(manifest["counts"]["stop_reason"]["timeout"], 4)
+            self.assertEqual(manifest["counts"]["verification"]["unknown"], 4)
+            self.assertEqual(sum(event["event"] == "candidate_expanded" for event in trace), 1)
+            self.assertTrue(any(event["event"] == "phase_interrupted" for event in trace))
 
     @staticmethod
     def _read_case(manifest, case_id):
