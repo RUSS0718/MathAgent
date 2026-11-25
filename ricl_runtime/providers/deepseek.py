@@ -36,7 +36,8 @@ from .chat_completions import (
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_RESPONSE_BYTES = 1_048_576
-MAX_OUTPUT_TOKENS = 8192
+MAX_OUTPUT_TOKENS = 256
+GATEWAY_MAX_OUTPUT_TOKENS = 8192
 ALLOWED_HOST = "api.deepseek.com"
 ALLOWED_GATEWAY_HOST = "code.aigcpro.org"
 ALLOWED_MODELS = (
@@ -48,14 +49,21 @@ ALLOWED_MODELS = (
 MAX_PROMPT_BYTES = 16 * 1024
 INPUT_FRAMING_MARGIN_TOKENS = 1024
 COST_LIMIT_USD = Decimal("0.05")
-INPUT_PEAK_USD_PER_MILLION = Decimal("0.80")
-OUTPUT_PEAK_USD_PER_MILLION = Decimal("3.20")
-PRICING_SOURCE = "https://code.aigcpro.org/api/pricing"
-PRICING_UNIT_SOURCE = "https://code.aigcpro.org/api/status"
+INPUT_PEAK_USD_PER_MILLION = Decimal("0.30")
+OUTPUT_PEAK_USD_PER_MILLION = Decimal("1.20")
+GATEWAY_INPUT_PEAK_USD_PER_MILLION = Decimal("0.80")
+GATEWAY_OUTPUT_PEAK_USD_PER_MILLION = Decimal("3.20")
+PRICING_SOURCE = "https://api-docs.deepseek.com/quick_start/pricing/"
+GATEWAY_PRICING_SOURCE = "https://code.aigcpro.org/api/pricing"
+GATEWAY_PRICING_UNIT_SOURCE = "https://code.aigcpro.org/api/status"
 MAX_PREFLIGHT_INPUT_TOKENS = MAX_PROMPT_BYTES + INPUT_FRAMING_MARGIN_TOKENS
 MAX_PREFLIGHT_COST_USD = (
     MAX_PREFLIGHT_INPUT_TOKENS * INPUT_PEAK_USD_PER_MILLION
     + MAX_OUTPUT_TOKENS * OUTPUT_PEAK_USD_PER_MILLION
+) / Decimal(1_000_000)
+GATEWAY_MAX_PREFLIGHT_COST_USD = (
+    MAX_PREFLIGHT_INPUT_TOKENS * GATEWAY_INPUT_PEAK_USD_PER_MILLION
+    + GATEWAY_MAX_OUTPUT_TOKENS * GATEWAY_OUTPUT_PEAK_USD_PER_MILLION
 ) / Decimal(1_000_000)
 
 
@@ -104,7 +112,27 @@ class DeepSeekModelPort:
     def max_output_tokens(self) -> int:
         """Expose the fixed completion-token ceiling for the Run config digest."""
 
-        return MAX_OUTPUT_TOKENS
+        return GATEWAY_MAX_OUTPUT_TOKENS if self._is_gateway else MAX_OUTPUT_TOKENS
+
+    @property
+    def _is_gateway(self) -> bool:
+        return validate_base_url(self.base_url, ALLOWED_GATEWAY_HOST)
+
+    @property
+    def _input_peak_usd_per_million(self) -> Decimal:
+        return (
+            GATEWAY_INPUT_PEAK_USD_PER_MILLION
+            if self._is_gateway
+            else INPUT_PEAK_USD_PER_MILLION
+        )
+
+    @property
+    def _output_peak_usd_per_million(self) -> Decimal:
+        return (
+            GATEWAY_OUTPUT_PEAK_USD_PER_MILLION
+            if self._is_gateway
+            else OUTPUT_PEAK_USD_PER_MILLION
+        )
 
     @property
     def cost_limit_usd(self) -> float:
@@ -116,7 +144,10 @@ class DeepSeekModelPort:
     def preflight_cost_upper_bound_usd(self) -> str:
         """Expose the fixed worst-case input and output bound."""
 
-        return format(MAX_PREFLIGHT_COST_USD, "f")
+        return format(
+            GATEWAY_MAX_PREFLIGHT_COST_USD if self._is_gateway else MAX_PREFLIGHT_COST_USD,
+            "f",
+        )
 
     @property
     def preflight_config(self) -> dict[str, object]:
@@ -131,21 +162,23 @@ class DeepSeekModelPort:
             "input_token_framing_margin": INPUT_FRAMING_MARGIN_TOKENS,
             "max_input_tokens_upper_bound": MAX_PREFLIGHT_INPUT_TOKENS,
             "peak_price_usd_per_million_tokens": {
-                "input": str(INPUT_PEAK_USD_PER_MILLION),
-                "output": str(OUTPUT_PEAK_USD_PER_MILLION),
+                "input": str(self._input_peak_usd_per_million),
+                "output": str(self._output_peak_usd_per_million),
             },
+            "max_output_tokens": self.max_output_tokens,
             "cost_limit_usd": self.cost_limit_usd,
             "preflight_cost_upper_bound_usd": self.preflight_cost_upper_bound_usd,
             "pricing_source": PRICING_SOURCE,
-            "pricing_unit_source": PRICING_UNIT_SOURCE,
+            "gateway_pricing_source": GATEWAY_PRICING_SOURCE,
+            "gateway_pricing_unit_source": GATEWAY_PRICING_UNIT_SOURCE,
         }
 
     def complete(self, problem: str) -> DeepSeekReply:
         """Return one validated completion or a sanitized, non-retryable transport error."""
 
-        approved_host = any(
-            validate_base_url(self.base_url, host)
-            for host in (ALLOWED_HOST, ALLOWED_GATEWAY_HOST)
+        is_gateway = self._is_gateway
+        approved_host = (
+            is_gateway or validate_base_url(self.base_url, ALLOWED_HOST)
         )
         if not approved_host or self.model not in ALLOWED_MODELS:
             raise ProviderPreflightError("provider host or model is not allowlisted")
@@ -154,9 +187,10 @@ class DeepSeekModelPort:
         if prompt_bytes > MAX_PROMPT_BYTES:
             raise ProviderPreflightError("prompt exceeds the configured byte limit")
         input_tokens_upper_bound = prompt_bytes + INPUT_FRAMING_MARGIN_TOKENS
+        max_output_tokens = self.max_output_tokens
         cost_upper_bound = (
-            input_tokens_upper_bound * INPUT_PEAK_USD_PER_MILLION
-            + MAX_OUTPUT_TOKENS * OUTPUT_PEAK_USD_PER_MILLION
+            input_tokens_upper_bound * self._input_peak_usd_per_million
+            + max_output_tokens * self._output_peak_usd_per_million
         ) / Decimal(1_000_000)
         if cost_upper_bound > COST_LIMIT_USD:
             raise ProviderPreflightError("request exceeds the configured cost limit")
@@ -167,7 +201,7 @@ class DeepSeekModelPort:
             payload={
                 "model": self.model,
                 "messages": [{"role": "user", "content": problem}],
-                "max_tokens": MAX_OUTPUT_TOKENS,
+                "max_tokens": max_output_tokens,
                 "thinking": {"type": self.thinking},
             },
             timeout=DEFAULT_TIMEOUT_SECONDS,

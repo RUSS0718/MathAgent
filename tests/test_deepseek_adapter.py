@@ -117,7 +117,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
             {
                 "model": "deepseek-flash",
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 8192,
+                "max_tokens": 256,
                 "thinking": {"type": "enabled"},
             },
         )
@@ -307,6 +307,9 @@ class DeepSeekModelPortTests(unittest.TestCase):
         request, _ = opener.calls[0]
         self.assertEqual(request.full_url, f"https://{ALLOWED_GATEWAY_HOST}/v1/chat/completions")
         self.assertEqual(json.loads(request.data)["model"], "deepseek-v4.1-flash")
+        self.assertEqual(json.loads(request.data)["max_tokens"], 8192)
+        self.assertEqual(port.max_output_tokens, 8192)
+        self.assertEqual(port.preflight_cost_upper_bound_usd, "0.0401408")
 
     def test_request_preflight_rejects_oversized_prompt_without_opening(self) -> None:
         port = DeepSeekModelPort(
@@ -325,7 +328,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
         self.assertNotIn(prompt, str(raised.exception))
         build_opener.assert_not_called()
         self.assertEqual(port.cost_limit_usd, 0.05)
-        self.assertEqual(port.preflight_cost_upper_bound_usd, "0.0401408")
+        self.assertEqual(port.preflight_cost_upper_bound_usd, "0.0055296")
 
     def test_malformed_json_is_a_redacted_protocol_error(self) -> None:
         prompt = "fixture prompt malformed response sentinel"
