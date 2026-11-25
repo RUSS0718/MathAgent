@@ -4,6 +4,7 @@ import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
+from .derivations import ScopedDerivationGraph
 from .identity import stable_id
 from .port import ToolCall, ToolReceipt
 
@@ -27,6 +28,7 @@ class SharedReasoningState:
 
     def __init__(self) -> None:
         self._evidence: dict[str, Evidence] = {}
+        self.derivations = ScopedDerivationGraph()
 
     def add_verified_result(
         self,
@@ -118,6 +120,7 @@ class SharedReasoningState:
 
         branch = SharedReasoningState()
         branch._evidence = self._evidence.copy()
+        branch.derivations = self.derivations.fork()
         return branch
 
     def valid_evidence(self) -> tuple[Evidence, ...]:

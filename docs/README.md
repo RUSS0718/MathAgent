@@ -14,7 +14,9 @@ $populationRoot = Join-Path $env:TEMP "ricl-population-smoke"
 uv run python -m ricl_runtime --population --problem "Compute 2 + 2." --offline-answer "4" --model-request-limit 2 --output-root $populationRoot
 ```
 
-候选扩展样例可用 `--no-aprs` 运行普通搜索对照。两种模式复用相同候选路线与预算参数。命令打印结果 JSON，并在输出目录下写入 `run.json` 与脱敏 `trace.jsonl`。当前验证器只适用于整数加法提示。没有适用判据时返回 `unknown`。[CLI 实现](../ricl_runtime/__main__.py)、[Runtime 记录](../ricl_runtime/runtime.py)、[独立验证器](../ricl_runtime/verification.py)
+候选扩展样例可用 `--no-aprs` 运行普通搜索对照。两种模式复用相同候选路线与预算参数。命令打印结果 JSON，并在输出目录下写入 `run.json` 与脱敏 `trace.jsonl`。单路线独立核查支持整数加法和有限的实数一元根号方程。缺少适用判据时返回 `unknown`。[CLI 实现](../ricl_runtime/__main__.py)、[根号方程核查](../ricl_runtime/math_verification.py)
+
+单路线使用 `--reasoning-state` 时，`run.json` 的 `derivations` 记录命题、推导、核查证据和目标。每条推导要求其全部前提在该作用域下仍有支撑。同一命题可以由多条推导分别支撑，最后一条适用支撑失效才会使下游推导和相应目标重新打开。下一请求携带仍适用的成果和待完成目标。Trace 分别记录实际送达的证据、模型明确报告引用的证据和独立复核导致的撤销。模型省略引用报告时，引用状态为 `unknown`。[共享推理状态规格 #256](https://github.com/RUSS0718/RiCL/issues/256)、[离线撤销与复用验收](../tests/test_runtime_scoped_derivations.py)
 
 ## 离线配对先导
 

@@ -8,6 +8,7 @@ from fractions import Fraction
 from math import isqrt
 from typing import Any
 
+from .derivations import DerivationScope, ScopedDerivation, ScopedDerivationGraph
 from .identity import stable_id
 
 _MAX_CHECKS = 8
@@ -43,6 +44,8 @@ class ScopedCheck:
     direction: str | None = None
     satisfies_goal: bool = False
     solutions: tuple[str, ...] | None = None
+    premise_kinds: tuple[str, ...] = ()
+    assumptions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -54,12 +57,16 @@ class MathVerification:
     claim_shapes: tuple[str, ...]
     check_claim: Callable[[str, dict[str, Any]], ScopedCheck]
 
-    def instructions(self) -> str:
+    def instructions(self, *, scoped_derivations: bool = False) -> str:
         return (
             'Return one JSON object with "answer" (free text) and "checks" (up to 8 public claims). '
             'For solution-set binding, end the answer with "Solution set: {…}" listing exact '
             "rational roots, or {} for an empty set. Choose your own derivation and omit checks "
             "it does not support. Supported check shapes:\n" + "\n".join(self.claim_shapes)
+            + (
+                '\nIf you used previously verified evidence, report its IDs in "used_evidence_ids".'
+                if scoped_derivations else ""
+            )
         )
 
     def public_goals(self) -> list[dict[str, object]]:
@@ -67,8 +74,9 @@ class MathVerification:
 
     def assess(
         self, text: str, *, prior_checks: Sequence[dict[str, Any]] = (),
+        delivered_evidence_ids: tuple[str, ...] | None = None,
     ) -> tuple[str, dict[str, Any]]:
-        answer, claims, structure = _read_increment(text)
+        answer, claims, structure, reported_ids = _read_increment(text)
         checks = []
         for goal in self.goals:
             matching = [claim for claim in claims if claim.get("kind") == goal.kind]
@@ -89,6 +97,10 @@ class MathVerification:
                 "goal_id": goal.id if verdict.satisfies_goal else None,
             }
             if verdict.status == "verified":
+                check["derivation"] = {
+                    "scope": DerivationScope(assumptions=frozenset(verdict.assumptions)).public(),
+                    "premise_kinds": list(verdict.premise_kinds),
+                }
                 check["evidence_id"] = stable_id(
                     "evidence", {"criterion_goal": goal.id, "check": check},
                 )
@@ -101,7 +113,77 @@ class MathVerification:
             check for check in prior_checks
             if check["goal_id"] is not None and check["kind"] not in submitted_kinds
         ]
-        support = {check["goal_id"]: check for check in (*reused_checks, *checks) if check["goal_id"]}
+        verification = {
+            "applicable": True,
+            "scope": "complete solution set over the reals",
+            "goals": self.public_goals(),
+            "checks": checks,
+            **({"supporting_checks": reused_checks} if reused_checks else {}),
+            "structure": structure,
+            "review": {"status": "unknown", "reason": "no_independent_model_review"},
+        }
+        if delivered_evidence_ids is not None:
+            used = [identifier for identifier in delivered_evidence_ids if identifier in (reported_ids or ())]
+            verification["references"] = {
+                "status": "reported" if used or reported_ids == () else "unknown",
+                "used_evidence_ids": used,
+            }
+        self._bind_answer(answer, verification, (*reused_checks, *checks))
+        return answer, verification
+
+    def record_derivations(
+        self,
+        graph: ScopedDerivationGraph,
+        checks: Sequence[dict[str, Any]],
+        *,
+        request_id: str,
+        scope: DerivationScope,
+    ) -> tuple[ScopedDerivation, ...]:
+        """Turn verified submitted claims into derivations when all premises are available."""
+        goals = {goal.kind: goal.id for goal in self.goals}
+        added = []
+        for check in checks:
+            if check["status"] != "verified":
+                continue
+            metadata = check["derivation"]
+            if scope.domain != metadata["scope"]["domain"]:
+                continue
+            check_scope = DerivationScope(
+                metadata["scope"]["domain"], scope.assumptions.union(metadata["scope"]["assumptions"]),
+            )
+            premises = {support.kind: support.proposition_id for support in graph.applicable(check_scope)}
+            required = metadata["premise_kinds"]
+            if not all(kind in premises for kind in required):
+                continue
+            support = graph.add(
+                check, criterion_goal_id=goals[check["kind"]], scope=check_scope,
+                premise_ids=tuple(premises[kind] for kind in required),
+                method=check["reason"], request_id=request_id,
+            )
+            if support is not None:
+                added.append(support)
+        return tuple(added)
+
+    def bind_derivations(
+        self,
+        answer: str,
+        verification: dict[str, Any],
+        supports: dict[str, tuple[ScopedDerivation, ...]],
+        *,
+        request_id: str,
+    ) -> None:
+        """Bind the answer only to applicable surviving supports."""
+        selected = {goal: items[0] for goal, items in supports.items()}
+        verification.pop("supporting_checks", None)
+        reused = [support.check for support in selected.values() if support.request_id != request_id]
+        if reused:
+            verification["supporting_checks"] = reused
+        self._bind_answer(answer, verification, [support.check for support in selected.values()])
+
+    def _bind_answer(
+        self, answer: str, verification: dict[str, Any], checks: Sequence[dict[str, Any]],
+    ) -> None:
+        support = {check["goal_id"]: check for check in checks if check["goal_id"]}
         complete = all(goal.id in support for goal in self.goals)
         solutions = next((check["solutions"] for check in support.values() if "solutions" in check), [])
         answer_set = _answer_set(answer) if complete else None
@@ -113,22 +195,15 @@ class MathVerification:
             binding_status, binding_reason = "verified", "answer_matches_verified_solution_set"
         else:
             binding_status, binding_reason = "failed", "answer_differs_from_verified_solution_set"
-        return answer, {
+        verification.update({
             "status": binding_status,
-            "applicable": True,
-            "scope": "complete solution set over the reals",
             "reason": binding_reason,
-            "goals": self.public_goals(),
-            "checks": checks,
-            **({"supporting_checks": reused_checks} if reused_checks else {}),
-            "structure": structure,
-            "review": {"status": "unknown", "reason": "no_independent_model_review"},
             "completeness": (
                 {"status": "verified", "solutions": solutions,
                  "evidence_ids": [support[goal.id]["evidence_id"] for goal in self.goals]}
                 if complete else {"status": "unknown", "reason": "missing_verified_goals"}
             ),
-        }
+        })
 
     @staticmethod
     def support_rank(verification: dict[str, Any]) -> tuple[bool, bool, int, int]:
@@ -142,27 +217,32 @@ class MathVerification:
         )
 
 
-def _read_increment(text: str) -> tuple[str, list[dict[str, Any]], str]:
+def _read_increment(text: str) -> tuple[str, list[dict[str, Any]], str, tuple[str, ...] | None]:
     """Accept public claims only from the bounded reply envelope."""
     candidate = text.strip()
     if not candidate.startswith("{"):
-        return text, [], "absent"
+        return text, [], "absent", None
     if len(candidate) > _MAX_REPLY_CHARS:
-        return "", [], "invalid"
+        return "", [], "invalid", None
     try:
         payload = json.loads(candidate)
         answer = payload.get("answer")
         if not isinstance(answer, str) or not answer.strip():
-            return "", [], "invalid"
+            return "", [], "invalid", None
         answer.encode("utf-8")
     except (ValueError, RecursionError):
-        return "", [], "invalid"
+        return "", [], "invalid", None
     claims = payload.get("checks")
     if not isinstance(claims, list) or len(claims) > _MAX_CHECKS or any(
         not isinstance(claim, dict) or not isinstance(claim.get("kind"), str) for claim in claims
     ):
-        return answer, [], "invalid"
-    return answer, claims, "valid"
+        return answer, [], "invalid", None
+    raw_ids = payload.get("used_evidence_ids")
+    reported_ids = (
+        tuple(raw_ids) if isinstance(raw_ids, list) and all(isinstance(item, str) for item in raw_ids)
+        else None
+    )
+    return answer, claims, "valid", reported_ids
 
 
 def _rational(value: object) -> Fraction | None:
@@ -270,20 +350,35 @@ def _check_radical(equation: _RadicalEquation, kind: str, claim: dict[str, Any])
             "verified", scope, "exact_squared_constraint",
             {"coefficients": [str(value / squared[0]) for value in squared]},
             premises=premises, direction=direction, satisfies_goal=True,
+            premise_kinds=("necessary_conditions",) if direction == "equivalent" else (),
+            assumptions=premises if direction == "equivalent" else (),
         )
 
     candidates = _rational_quadratic_candidates(squared)
     if kind == "candidate_coverage":
         scope = "all real roots of the squared constraint"
         proposed = _rationals(claim.get("candidates"), limit=2)
-        if candidates is None or proposed is None:
+        if proposed is None:
+            return ScopedCheck("unknown", scope, "unsupported_candidate_set")
+        method = "exact_quadratic_discriminant"
+        if "factor_constants" in claim:
+            constants = _rationals(claim["factor_constants"], limit=2)
+            if constants is None or len(constants) != 2:
+                return ScopedCheck("unknown", scope, "unsupported_factorization")
+            first, second = constants
+            if (first + second, first * second) != (squared[1] / squared[0], squared[2] / squared[0]):
+                return ScopedCheck("failed", scope, "incorrect_factorization")
+            candidates = {-first, -second}
+            method = "exact_quadratic_factorization"
+        if candidates is None:
             return ScopedCheck("unknown", scope, "unsupported_candidate_set")
         if set(proposed) != candidates:
             return ScopedCheck("failed", scope, "candidate_set_incorrect_or_incomplete")
         return ScopedCheck(
-            "verified", scope, "exact_quadratic_discriminant",
+            "verified", scope, method,
             {"candidates": [str(candidate) for candidate in sorted(candidates)]},
             premises=("squared candidate constraint",), satisfies_goal=True,
+            premise_kinds=("candidate_constraint",),
         )
 
     scope = "substitution into the original real equation"
@@ -303,6 +398,7 @@ def _check_radical(equation: _RadicalEquation, kind: str, claim: dict[str, Any])
         {"accepted": list(solutions), "rejected": [str(value) for value in sorted(set(rejected))]},
         premises=("principal square root in the real domain",), satisfies_goal=complete,
         solutions=solutions if complete else None,
+        premise_kinds=("necessary_conditions", "candidate_coverage") if complete else (),
     )
 
 
@@ -325,7 +421,8 @@ def prepare_math_verification(problem: str) -> MathVerification | None:
         "necessary_conditions": "radicand_lower_bound, rhs_lower_bound (rational strings)",
         "candidate_constraint": "coefficients (three rational strings, descending powers), "
                                 "direction (forward, or equivalent with rhs_nonnegative: true)",
-        "candidate_coverage": "candidates (rational strings)",
+        "candidate_coverage": "candidates (rational strings), and optionally factor_constants "
+                              "(two rational strings a, b for (x+a)(x+b))",
         "original_equation_filter": "accepted, rejected (lists of rational strings)",
     }
     return MathVerification(

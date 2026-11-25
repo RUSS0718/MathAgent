@@ -5,7 +5,7 @@ import json
 import subprocess
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -17,6 +17,7 @@ from .counterfactual import (
     InterventionAudit,
     RepairOptions,
 )
+from .derivations import DerivationScope, ScopedDerivation
 from .identity import stable_id
 from .math_verification import prepare_math_verification
 from .population import CandidateRoute, PopulationBudget
@@ -75,11 +76,18 @@ def _finish_phase(
 class Runtime:
     """Run one offline text problem through a ModelPort and an independent check."""
 
-    def __init__(self, model_port: ModelPort, *, tool_executor: ToolExecutor | None = None) -> None:
-        """Bind the model capability and optional controlled tool executor."""
+    def __init__(
+        self,
+        model_port: ModelPort,
+        *,
+        tool_executor: ToolExecutor | None = None,
+        math_evidence_recheck: Callable[[tuple[ScopedDerivation, ...]], Iterable[str]] | None = None,
+    ) -> None:
+        """Bind the model and optional trusted tool or evidence recheck capabilities."""
 
         self._model_port = model_port
         self._tool_executor = tool_executor
+        self._math_evidence_recheck = math_evidence_recheck
 
     def run_counterfactual(
         self,
@@ -542,15 +550,19 @@ class Runtime:
         provider_requests: list[dict[str, Any]] = []
         ordinary_tool_results: list[str] = []
         result: dict[str, Any] | None = None
+        result_request_id = ""
         verification: dict[str, Any] = {}
         failure_status: str | None = None
         math_verification = prepare_math_verification(problem)
+        derivations = state.derivations if math_verification is not None and reasoning_state_enabled else None
+        derivation_scope = DerivationScope()
+        math_goals = math_verification.public_goals() if math_verification is not None else []
         checked_claims: dict[tuple[str, str | None], dict[str, Any]] = {}
         if math_verification is not None:
             trace.append({
                 "event": "verification_goals_frozen",
                 "criterion": math_verification.name,
-                "goals": math_verification.public_goals(),
+                "goals": math_goals,
             })
         started = time.perf_counter()
 
@@ -558,11 +570,20 @@ class Runtime:
             evidence = state.valid_evidence() if reasoning_state_enabled else ()
             context = _render_evidence(evidence)
             parts = [problem]
-            prior_checks = tuple(checked_claims.values())
+            prior_checks = (
+                tuple(support.check for support in derivations.applicable(derivation_scope))
+                if derivations is not None else tuple(checked_claims.values())
+            )
+            delivered_check_ids = tuple(check["evidence_id"] for check in prior_checks)
+            open_goals = []
             if math_verification is not None:
-                parts.append(math_verification.instructions())
+                parts.append(math_verification.instructions(scoped_derivations=derivations is not None))
                 if prior_checks:
                     parts.append("Previously verified public claims:\n" + _canonical_json(prior_checks))
+                if derivations is not None:
+                    supported_goals = derivations.goal_supports(derivation_scope)
+                    open_goals = [goal for goal in math_goals if goal["id"] not in supported_goals]
+                    parts.append("Open verification goals:\n" + _canonical_json(open_goals))
             if visible_context:
                 parts.append(f"Problem context:\n{visible_context}")
             if context:
@@ -586,11 +607,13 @@ class Runtime:
                         "context_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
                         **(
                             {
-                                "delivered_check_evidence_ids": [
-                                    check["evidence_id"] for check in prior_checks
-                                ],
+                                "delivered_check_evidence_ids": list(delivered_check_ids),
                             }
                             if math_verification is not None else {}
+                        ),
+                        **(
+                            {"open_goal_ids": [goal["id"] for goal in open_goals]}
+                            if derivations is not None else {}
                         ),
                     }
                 )
@@ -660,6 +683,7 @@ class Runtime:
             actual_model = reply.model or "unknown"
             finish_reason = getattr(reply, "finish_reason", "unknown") or "unknown"
             verification_started = time.perf_counter()
+            derivations_changed = False
             if finish_reason == "length":
                 failure_status = "budget_exhausted"
             elif not reply.text.strip():
@@ -670,9 +694,46 @@ class Runtime:
             else:
                 answer, attempt_verification = math_verification.assess(
                     reply.text, prior_checks=prior_checks,
+                    delivered_evidence_ids=delivered_check_ids if derivations is not None else None,
                 )
                 if not answer:
                     failure_status = "invalid_output"
+                elif derivations is not None:
+                    added_derivations = math_verification.record_derivations(
+                        derivations, attempt_verification["checks"],
+                        request_id=request_id, scope=derivation_scope,
+                    )
+                    recorded = {support.check["kind"]: support.check for support in added_derivations}
+                    attempt_verification["checks"] = [
+                        recorded.get(check["kind"], check) for check in attempt_verification["checks"]
+                    ]
+                    trace.extend(
+                        {"event": "derivation_added", **support.public()} for support in added_derivations
+                    )
+                    if self._math_evidence_recheck is not None:
+                        for evidence_id in self._math_evidence_recheck(derivations.active()):
+                            change = derivations.revoke(evidence_id, scope=derivation_scope)
+                            if change is not None:
+                                derivations_changed = True
+                                trace.append({
+                                    "event": "derivation_revoked", "request_id": request_id,
+                                    "source": "independent_recheck", **change.public(),
+                                })
+                    surviving = derivations.goal_supports(derivation_scope)
+                    if derivations_changed and result is not None:
+                        math_verification.bind_derivations(
+                            result["answer"], verification, surviving, request_id=result_request_id,
+                        )
+                    math_verification.bind_derivations(
+                        answer, attempt_verification, surviving, request_id=request_id,
+                    )
+                    derivations_changed |= delivered_check_ids != tuple(
+                        support.evidence_id for support in derivations.applicable(derivation_scope)
+                    )
+                    trace.append({
+                        "event": "derivation_references_reported", "request_id": request_id,
+                        **attempt_verification["references"],
+                    })
             verification_elapsed_ms = round((time.perf_counter() - verification_started) * 1000, 3)
             if failure_status is not None:
                 provider_requests.append(
@@ -733,6 +794,7 @@ class Runtime:
                 > math_verification.support_rank(verification)
             ):
                 result = {"id": result_id, "answer": answer}
+                result_request_id = request_id
                 verification = attempt_verification
             trace.append(
                 {
@@ -754,7 +816,7 @@ class Runtime:
                 }
             )
 
-            if reasoning_state_enabled and attempt_verification["status"] == "verified":
+            if reasoning_state_enabled and derivations is None and attempt_verification["status"] == "verified":
                 item = state.add_verified_result(answer, scope=result_scope)
                 trace.append(_evidence_event("verified_result_added", item))
 
@@ -807,9 +869,10 @@ class Runtime:
             if failure_status:
                 break
             if math_verification is not None:
-                for check in attempt_verification["checks"]:
-                    if check["status"] == "verified":
-                        checked_claims.setdefault((check["kind"], check["goal_id"]), check)
+                if derivations is None:
+                    for check in attempt_verification["checks"]:
+                        if check["status"] == "verified":
+                            checked_claims.setdefault((check["kind"], check["goal_id"]), check)
                 if attempt_verification["status"] == "verified":
                     stop_reason = "answer_generated"
                     break
@@ -817,7 +880,7 @@ class Runtime:
                     stop_reason = "model_request_budget_exhausted"
                     break
                 if (
-                    len(checked_claims) > len(prior_checks)
+                    derivations_changed or len(checked_claims) > len(prior_checks)
                     or len(ordinary_tool_results) > previous_tool_results
                     or (reasoning_state_enabled and _state_fingerprint(state) != previous_state[2])
                 ):
@@ -898,6 +961,10 @@ class Runtime:
                 if visible_context else {}
             ),
             "mechanisms": {"shared_reasoning_state": reasoning_state_enabled},
+            **(
+                {"math_evidence_recheck": "controlled"}
+                if derivations is not None and self._math_evidence_recheck is not None else {}
+            ),
             "budget": {
                 "scope": "run_shared",
                 "model_requests": request_limit,
@@ -971,6 +1038,7 @@ class Runtime:
             "result": result,
             "verification": verification,
             "evidence": state.public_snapshot(),
+            **({"derivations": derivations.public_snapshot(derivation_scope)} if derivations is not None else {}),
             "run": {
                 "status": run_status,
                 "stop_reason": failure_status or stop_reason,
