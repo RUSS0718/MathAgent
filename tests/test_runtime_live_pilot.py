@@ -37,10 +37,11 @@ class LivePilotTests(unittest.TestCase):
                 return reply
             if "If you use an applicable verified result" in prompt:
                 evidence_id = re.search(r"evidence_[0-9a-f]+", prompt).group()
+                result_id = re.search(r"result_[0-9a-f]+", prompt).group()
                 return replace(
                     reply,
-                    text=f"Evidence used: {evidence_id}\n"
-                    "Repair step: 2 + 2 = 1 + 1 + 2 = 4\nFinal answer: 4",
+                    text="Repair step: 2 + 2 = 1 + 1 + 2 = 4\nFinal answer: 4\n"
+                    f"Evidence used: {evidence_id}; {result_id}",
                 )
             if "Intervention feedback:\nTry regrouping." in prompt:
                 return replace(reply, text="Repair step: 2 + 2 = 1 + 1 + 2 = 4\nFinal answer: 4")

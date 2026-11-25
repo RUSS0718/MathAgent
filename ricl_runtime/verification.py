@@ -10,6 +10,15 @@ _ANSWER = re.compile(
 )
 _EQUATION = re.compile(r"(-?\d+)\s*\+\s*(-?\d+)\s*=\s*(-?\d+)[.!]?")
 _BOXED_INTEGER = re.compile(r"\\boxed\{\s*(-?\d+)\s*\}[.!]?")
+_EVIDENCE_REFERENCE = re.compile(
+    r"Evidence used:\s*(evidence_[0-9a-f]{24})(?:\s*;\s*(result_[0-9a-f]{24}))?"
+)
+
+
+def evidence_reference(line: str) -> tuple[str, str | None] | None:
+    """Parse a public evidence citation with an optional result ID."""
+    match = _EVIDENCE_REFERENCE.fullmatch(line.strip())
+    return (match[1], match[2]) if match else None
 
 
 def addition_operands(problem: str) -> tuple[int, int] | None:
@@ -31,7 +40,13 @@ def verify_integer_addition(problem: str, answer: str) -> dict[str, object]:
         }
 
     left, right = operands
-    answer_line = answer.strip().rpartition("\n")[2].strip()
+    lines = [line.strip() for line in answer.splitlines() if line.strip()]
+    if len(lines) >= 2 and evidence_reference(lines[-1]) and lines[-2].lower().startswith("final answer:"):
+        lines.pop()
+    if len(lines) >= 3 and (lines[-3], lines[-1]) in {(r"\[", r"\]"), ("$$", "$$")}:
+        answer_line = lines[-2]
+    else:
+        answer_line = lines[-1] if lines else ""
     for opening, closing in (("**", "**"), ("$", "$"), (r"\(", r"\)")):
         if answer_line.startswith(opening) and answer_line.endswith(closing):
             answer_line = answer_line[len(opening):-len(closing)].strip()

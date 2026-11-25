@@ -6,6 +6,7 @@ from random import Random
 from typing import Literal
 
 from .reasoning_state import SharedReasoningState
+from .verification import evidence_reference
 
 
 @dataclass(frozen=True)
@@ -127,8 +128,12 @@ class AdditionRepairEvidence:
             matched,
         )
 
-    def parent_reference(self, answer: str, evidence_id: str) -> bool:
-        return _labeled_lines(answer, "Evidence used:") == [evidence_id]
+    def parent_reference(self, answer: str, evidence_id: str, result_id: str) -> bool:
+        lines = _labeled_lines(answer, "Evidence used:")
+        if len(lines) != 1:
+            return False
+        citation = evidence_reference("Evidence used: " + lines[0])
+        return citation in {(evidence_id, None), (evidence_id, result_id)}
 
 
 def _labeled_lines(text: str, prefix: str) -> list[str]:

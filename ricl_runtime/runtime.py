@@ -329,6 +329,7 @@ class Runtime:
                 if arithmetic_evidence is not None:
                     parent_reference_reported = arithmetic_evidence.parent_reference(
                         parent_reply.text, parent_feedback_evidence.evidence_id,
+                        treatment["result_id"],
                     )
                     parent_route_matches_treatment = parent_route == treatment["route"]
                 parent_continuation = {

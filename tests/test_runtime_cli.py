@@ -62,6 +62,10 @@ class RuntimeOfflineTests(unittest.TestCase):
             "2 + 2 = 4": "verified",
             "**4**": "verified",
             r"\(\boxed{4}\)": "verified",
+            "\\[\n\\boxed{4}\n\\]": "verified",
+            "Final answer: 4\nEvidence used: evidence_" + "1" * 24 + "; result_" + "2" * 24: "verified",
+            "Final answer: 5\nEvidence used: evidence_" + "1" * 24: "failed",
+            "Final answer: 4\nEvidence used: some unsupported text": "unknown",
             "The answer is 5.": "failed",
         }
         with tempfile.TemporaryDirectory() as directory:
