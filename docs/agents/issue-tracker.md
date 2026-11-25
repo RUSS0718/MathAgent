@@ -1,31 +1,11 @@
-# Issue tracker: GitHub
+# Issue tracker
 
-Issues and specs for this project live in GitHub Issues at `RUSS0718/MathAgent`. Pass the repository explicitly with `gh -R RUSS0718/MathAgent` for every issue operation.
+Use GitHub Issues in [RUSS0718/RiCL](https://github.com/RUSS0718/RiCL/issues). Pass `-R RUSS0718/RiCL` when using the GitHub CLI for issue operations.
 
-## Read-only status check
+## Check issue status
 
 ```powershell
-uv run python scripts/check_issues.py --repo RUSS0718/MathAgent 116 117 118 119 120
+uv run python scripts/check_issues.py 236 243 246
 ```
 
-This credential-free entry point uses cache-busted public GET requests and emits one JSON summary. It accepts issue responses with `open` or `closed` state, rejects pull requests, and exits nonzero on invalid input, network errors, or malformed data. It never closes or edits issues. See [development gates](../engineering/development-gates.md) for the validation workflow.
-
-## Conventions
-
-- Create: `gh issue create -R RUSS0718/MathAgent --title "..." --body "..."`.
-- Read: `gh issue view <number> -R RUSS0718/MathAgent`.
-- List: `gh issue list -R RUSS0718/MathAgent --state open`.
-- Comment: `gh issue comment <number> -R RUSS0718/MathAgent --body "..."`.
-- Close: `gh issue close <number> -R RUSS0718/MathAgent`.
-
-Pull requests are not used as an issue-triage surface.
-
-## REST fallback when `gh` is not authenticated
-
-On this machine `gh` is not logged in, but the Git credential manager holds a GitHub token. Use the REST API directly:
-
-- Read operations need no token: `curl -s https://api.github.com/repos/RUSS0718/MathAgent/issues/<n>` (public repo).
-- Get the token without printing it: `TOKEN=$(printf "protocol=https\nhost=github.com\n\n" | git credential fill | sed -n 's/^password=//p')`; never echo or commit it, `unset TOKEN` when done.
-- Comment: write the JSON body to a file first (`{"body":"..."}) and `curl -X POST -H "Authorization: token $TOKEN" --data-binary @file .../issues/<n>/comments`. Inline `-d` with a long Chinese body once failed with 400 (shell escaping); the body file is the verified path.
-- Close: `curl -X PATCH -H "Authorization: token $TOKEN" -d '{"state":"closed"}' .../issues/<n>` (expect 200).
-- Verify the final state through the public no-token GET with a cache-buster (`?_=$(date +%s)`); a plain GET right after PATCH can return a cached `"open"`.
+The script reads public issue status and prints one JSON summary without credentials. Use the GitHub connector or an authenticated GitHub CLI to comment or change issue state.

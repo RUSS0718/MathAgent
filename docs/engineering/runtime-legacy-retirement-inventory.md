@@ -28,8 +28,9 @@
 ## 保留材料与未决权利
 
 - 保留 `BASELINE.json` 作为官方历史基线记录；删除其对应的旧可执行源码不等于改写历史结果。
+- 保留 `requirements.txt` 的原始字节供 `BASELINE.json` 校验。RiCL Runtime 通过 `uv.lock` 安装，当前使用标准库。
 - 保留 `docs/adr/`、Runtime/Provider 设计和当前验证合同。
-- 保留 `docs/evals/`、`docs/replay/`、`docs/experiments/`、`examples/` 中剩余的 JSON 配置、`experiments/campaign.json` 与 `docker/`，作为历史或潜在复现材料。`examples/showcase.ipynb`、旧根级产品文档及环境/门禁模板已退役。现有仓库信息不足以逐项证明题目、答案和旧运行资料的权利/复现必要性，因此其余资料未删除，也不作权利结论。
+- 保留 `docs/evals/`、`docs/replay/`、`docs/experiments/`、`examples/` 中剩余的 JSON 配置、`docs/experiments/archive/intern-s2-campaign.json` 与 `docker/`，作为历史或潜在复现材料。`examples/showcase.ipynb`、旧根级产品文档及环境/门禁模板已退役。现有仓库信息不足以逐项证明题目、答案和旧运行资料的权利/复现必要性，因此其余资料未删除，也不作权利结论。
 - `artifacts/` 是被忽略的本机运行资料，本次不清理；未跟踪用户文件、Git 历史和远端发布均不在本次范围。
 
 ## 回滚与后续核验

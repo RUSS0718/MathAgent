@@ -2,9 +2,9 @@ name: RiCL Runtime quality
 
 on:
   push:
-    branches: [main, develop, runtime-research-loop]
+    branches: [main, develop, research-prototype, runtime-research-loop]
   pull_request:
-    branches: [main, develop, runtime-research-loop]
+    branches: [main, develop, research-prototype, runtime-research-loop]
 
 permissions:
   contents: read
@@ -29,7 +29,8 @@ jobs:
       - name: Check formatting and lint
         run: |
           uv run pre-commit run --all-files
-          uv run ruff check ricl_runtime tests
+          uv run ruff check ricl_runtime tests scripts/check_runtime_docs.py
+          uv run python scripts/check_runtime_docs.py
       - name: Run Runtime and Provider tests
         run: uv run python -m unittest discover -s tests
       - name: Check CLI and paired offline fixtures

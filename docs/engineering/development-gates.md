@@ -6,6 +6,7 @@
 
 - 检查 `git diff --check` 与最终差异。
 - 核对改动涉及的相对文件链接、锚点和命令。
+- 运行 `uv run python scripts/check_runtime_docs.py` 检查活跃 Runtime 文档的相对文件链接。历史导航使用固定版本。
 - 文档中的 Runtime 命令发生变化时，使用临时输出目录运行对应离线命令，确认描述一致。
 
 ## Runtime 与 Provider 切片

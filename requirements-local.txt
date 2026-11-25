@@ -1,2 +1,0 @@
-# Compatibility install path; the Runtime dependencies are defined in pyproject.toml.
--r requirements.txt
