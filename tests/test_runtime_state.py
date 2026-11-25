@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ricl_runtime import ModelReply, Runtime, SharedReasoningState, ToolCall, ToolReceipt
 
@@ -124,6 +125,23 @@ class SharedReasoningStateTests(unittest.TestCase):
         self.assertIn("Tool results:\ncalculator: 4", port.prompts[1])
         self.assertNotIn("Verified context:", port.prompts[1])
         self.assertNotIn("calculator: 4", trace)
+
+    def test_tool_failure_persists_the_run_without_resending(self) -> None:
+        port = ScriptedModelPort([ModelReply("4", tool_calls=(ToolCall("calculator", "2+2"),))])
+        executor = ScriptedToolExecutor()
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(executor, "execute", side_effect=OSError("private tool exception")),
+        ):
+            run = Runtime(port, tool_executor=executor).run(
+                "Compute 2 + 2.", output_root=Path(directory), model_request_limit=2, tool_call_limit=1,
+            )
+            trace = Path(run["artifacts"]["trace"]).read_text(encoding="utf-8")
+        self.assertEqual(run["run"]["stop_reason"], "tool_failed")
+        self.assertEqual(run["budget"]["tools"], {"limit": 1, "used": 1})
+        self.assertEqual(len(port.prompts), 1)
+        self.assertIn("tool_execution_failed", trace)
+        self.assertNotIn("private tool exception", trace + json.dumps(run))
 
     def test_disabled_state_preserves_plain_request_and_independent_verifier(self) -> None:
         port = ScriptedModelPort([ModelReply("4")])

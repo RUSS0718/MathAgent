@@ -14,7 +14,7 @@ from .aprs import Candidate, VerifierEvidence, evaluate_fixed_candidates
 from .counterfactual import CounterfactualCheckpoint, InterventionAudit, RepairOptions
 from .identity import stable_id
 from .population import CandidateRoute, PopulationBudget
-from .port import ModelPort, ModelPortFailure, ModelReply, ToolExecutor
+from .port import ModelPort, ModelPortFailure, ModelReply, ToolCall, ToolExecutor, ToolReceipt
 from .reasoning_state import Evidence, SharedReasoningState
 from .verification import verify_integer_addition
 
@@ -254,6 +254,7 @@ class Runtime:
         effective = action_changed or route_changed
         feedback_available = audit_approved and effective and treatment_verified
         parent_request_id: str | None = None
+        parent_feedback_evidence_id: str | None = None
         parent_referenced_ids: list[str] = []
         parent_continuation: dict[str, Any] | None = None
         parent_budget_available = feedback_available and request_count < model_request_limit
@@ -263,10 +264,11 @@ class Runtime:
             else "counterfactual_pair_completed"
         )
         if parent_budget_available and treatment is not None:
-            parent_state.add_verified_result(
+            parent_feedback_evidence = parent_state.add_verified_result(
                 treatment["answer"],
                 scope=f"{problem_sha256}:{treatment['verification']['scope']}",
             )
+            parent_feedback_evidence_id = parent_feedback_evidence.evidence_id
             parent_request_id = execution.request_id(request_count + 1)
             parent_referenced_ids = [
                 item.evidence_id for item in parent_state.valid_evidence()
@@ -324,7 +326,9 @@ class Runtime:
                         ),
                     }
                 )
-        parent_consumed = parent_continuation is not None
+        parent_consumed = (
+            parent_continuation is not None and parent_feedback_evidence_id in parent_referenced_ids
+        )
         consumption_basis = "not_qualified"
         if feedback_available:
             if parent_consumed:
@@ -697,7 +701,11 @@ class Runtime:
 
                 invocation_id = f"{run_id}_tool_{tool_count + 1:03d}"
                 tool_count += 1
-                receipt = self._tool_executor.execute(invocation_id, call)
+                receipt, failure_status = _execute_tool(
+                    self._tool_executor, call, invocation_id, request_id, trace
+                )
+                if failure_status:
+                    break
                 try:
                     item = state.add_tool_receipt(
                         receipt, invocation_id=invocation_id, call=call
@@ -720,6 +728,8 @@ class Runtime:
                         if ordinary_result not in ordinary_tool_results:
                             ordinary_tool_results.append(ordinary_result)
 
+            if failure_status:
+                break
             if not reasoning_state_enabled:
                 if request_count < request_limit:
                     if len(ordinary_tool_results) > previous_tool_results:
@@ -1098,7 +1108,11 @@ class Runtime:
                 invocation_id = f"{run_id}_tool_{tool_count + 1:03d}"
                 route_tool_count += 1
                 tool_count += 1
-                receipt = self._tool_executor.execute(invocation_id, call)
+                receipt, failure_status = _execute_tool(
+                    self._tool_executor, call, invocation_id, request_id, trace
+                )
+                if failure_status:
+                    break
                 try:
                     item = state.add_tool_receipt(receipt, invocation_id=invocation_id, call=call)
                 except ValueError:
@@ -1113,6 +1127,8 @@ class Runtime:
                         }
                     )
 
+            if failure_status:
+                break
             elapsed = (time.perf_counter() - started) * 1000
             exceeded = []
             if committed_tokens > budget.tokens:
@@ -1413,6 +1429,28 @@ def _usage_source(replies: list[Any]) -> str:
         return "unknown"
     sources = {reply.usage_source for reply in replies}
     return sources.pop() if len(sources) == 1 else "mixed_or_unknown"
+
+
+def _execute_tool(
+    executor: ToolExecutor,
+    call: ToolCall,
+    invocation_id: str,
+    request_id: str,
+    trace: list[dict[str, Any]],
+) -> tuple[ToolReceipt | None, str | None]:
+    try:
+        return executor.execute(invocation_id, call), None
+    except Exception as error:
+        status = (
+            "budget_exhausted"
+            if isinstance(error, ModelPortFailure) and error.failure_status == "budget_exhausted"
+            else "tool_failed"
+        )
+        trace.append({
+            "event": "tool_execution_failed", "invocation_id": invocation_id,
+            "request_id": request_id, "status": status,
+        })
+        return None, status
 
 
 def _failure_reply(error: ModelPortFailure) -> ModelReply:
