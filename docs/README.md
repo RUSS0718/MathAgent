@@ -18,6 +18,16 @@ uv run python -m ricl_runtime --population --problem "Compute 2 + 2." --offline-
 
 单路线使用 `--reasoning-state` 时，`run.json` 的 `derivations` 记录命题、推导、核查证据和目标。每条推导要求其全部前提在该作用域下仍有支撑。同一命题可以由多条推导分别支撑，最后一条适用支撑失效才会使下游推导和相应目标重新打开。下一请求携带仍适用的成果和待完成目标。Trace 分别记录实际送达的证据、模型明确报告引用的证据和独立复核导致的撤销。模型省略引用报告时，引用状态为 `unknown`。[共享推理状态规格 #256](https://github.com/RUSS0718/RiCL/issues/256)、[离线撤销与复用验收](../tests/test_runtime_scoped_derivations.py)
 
+## 集成机制验收
+
+运行聚焦离线验收：
+
+```powershell
+uv run python -m unittest discover -s tests -p "test_runtime_mechanism_integration.py"
+```
+
+该验收让 Baseline、RiCL-State、RiCL-Search、RiCL-Full 和 RiCL w/o Search 都经过 `Runtime.run`，并匹配问题、候选上限、独立核查器、模型能力和根请求预算。RiCL-Full 的 Trace 记录从关键失败触发的诊断、对照/处理臂、父状态合并，以及合并证据在后续路线派发前的实际送达。实验代码可通过 `run_mechanism_ablation` 写出版本化 Run 和脱敏 Trace；`public-input.json` 只保留输入哈希、匹配配置、产物路径与文件哈希，独立的 `evaluation.json` 提供可由 `summarize_mechanism_run` 重算的核查状态、Verified Gain、Token、无新证据扩展数与路线选择。无新证据扩展数不是正式指标定义。[集成规格 #259](https://github.com/RUSS0718/RiCL/issues/259)、[聚焦测试](../tests/test_runtime_mechanism_integration.py)
+
 ## 离线配对先导
 
 在仓库根目录运行以下命令，使用固定的条件顺序种子。

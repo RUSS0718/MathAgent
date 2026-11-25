@@ -32,6 +32,7 @@ class OnlineRoute:
     last_expansion: int = 0
     requests: dict[str, dict[str, Any]] = field(default_factory=dict)
     checks: Counter[str] = field(default_factory=Counter)
+    expansions: int = 0
 
     def prompt(self) -> dict[str, str]:
         return {
@@ -75,6 +76,7 @@ class OnlineSearch:
         self.weights = {goal["id"]: goal["weight"] for goal in goals}
         self.selection_counts: Counter[str] = Counter()
         self._request_routes: dict[str, str] = {}
+        self._evidence_attributions: dict[str, dict[str, str]] = {}
         self._gain_streak = 0
         self._rotation = 0
 
@@ -159,12 +161,35 @@ class OnlineSearch:
         self, route: OnlineRoute, request_id: str, expansion: int, reply: ModelReply,
     ) -> None:
         route.last_expansion = expansion
+        route.expansions += 1
         self._request_routes[request_id] = route.route_id
         route.requests[request_id] = {
             "input_tokens": _actual_tokens(reply.input_tokens),
             "output_tokens": _actual_tokens(reply.output_tokens),
             "source": reply.usage_source,
         }
+
+    def settle_auxiliary(
+        self, route: OnlineRoute, request_records: list[dict[str, Any]],
+    ) -> None:
+        """Attribute auxiliary requests to the route whose failure admitted them."""
+        for record in request_records:
+            usage = record["usage"]
+            route.requests[record["request_id"]] = {
+                "input_tokens": _actual_tokens(usage["input_tokens"]),
+                "output_tokens": _actual_tokens(usage["output_tokens"]),
+                "source": usage["source"],
+            }
+
+    def attribute_evidence(
+        self, route: OnlineRoute, evidence_ids: tuple[str, ...], *, attribution: str,
+    ) -> None:
+        """Credit merged evidence to the parent route that can now use it."""
+        for evidence_id in evidence_ids:
+            self._evidence_attributions[evidence_id] = {
+                "route_id": route.route_id,
+                "attribution": attribution,
+            }
 
     def record_verification(
         self, route: OnlineRoute, answer: str, verification: dict[str, Any],
@@ -203,13 +228,19 @@ class OnlineSearch:
         for goal, weight in self.weights.items():
             for support in supports.get(goal, ()):
                 # A shared goal contributes once, to the earliest surviving producer.
-                route_id = self._request_routes.get(support.request_id)
+                explicit = self._evidence_attributions.get(support.evidence_id)
+                route_id = explicit["route_id"] if explicit is not None else self._request_routes.get(
+                    support.request_id
+                )
                 if route_id is not None:
                     credits[route_id].append({
                         "goal_id": goal, "weight": weight, "evidence_id": support.evidence_id,
                         "request_id": support.request_id,
+                        "attribution": (
+                            explicit["attribution"] if explicit is not None else "route_request"
+                        ),
                     })
-                break
+                    break
 
         records = []
         for route in self.routes:
@@ -228,7 +259,7 @@ class OnlineSearch:
             records.append({
                 "route_id": route.route_id,
                 "last_expansion": route.last_expansion or None,
-                "expansions": len(route.requests),
+                "expansions": route.expansions,
                 "verification_checks": dict(route.checks),
                 "effective_gain": gain,
                 "credit": credit,

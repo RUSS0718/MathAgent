@@ -32,6 +32,8 @@ from .port import ModelPort, ModelPortFailure, ModelReply, ToolCall, ToolExecuto
 from .reasoning_state import Evidence, SharedReasoningState
 from .verification import addition_operands, verify_integer_addition
 
+_TRACE_SCHEMA_VERSION = 1
+
 
 @dataclass
 class _RunScope:
@@ -272,6 +274,7 @@ class Runtime:
             {
                 "event": "run_started",
                 "run_id": run_id,
+                "trace_schema_version": _TRACE_SCHEMA_VERSION,
                 "problem_id": problem_id,
                 "problem_sha256": problem_sha256,
                 "condition_id": condition_id,
@@ -649,6 +652,7 @@ class Runtime:
             {
                 "event": "run_started",
                 "run_id": run_id,
+                "trace_schema_version": _TRACE_SCHEMA_VERSION,
                 "problem_id": problem_id,
                 "problem_sha256": problem_sha256,
                 "condition_id": condition_id,
@@ -950,6 +954,7 @@ class Runtime:
             if failure_status:
                 break
             if intervention is not None:
+                auxiliary_start = len(requests.records)
                 continuation = intervention.consider(
                     request_id=request_id, build_prompt=lambda: solve_prompt("counterfactual_checkpoint", route)[0],
                     checks=attempt_verification["checks"], revocations=revocations,
@@ -957,13 +962,22 @@ class Runtime:
                     remaining_requests=request_limit - requests.count,
                     remaining_tools=tool_limit - tool_count if self._tool_executor is not None else 0,
                     max_output_tokens=getattr(self._model_port, "max_output_tokens", "unknown"),
+                    route_id=route.route_id if route is not None else None,
+                    decision_id=decision["decision_id"] if decision is not None else None,
                     dispatch=requests.dispatch, execute_tools=execute_tools,
                 )
+                if search is not None and route is not None:
+                    search.settle_auxiliary(route, requests.records[auxiliary_start:])
                 if continuation is not None:
                     if continuation.failure_status is not None:
                         failure_status = continuation.failure_status
                         break
                     if continuation.merged_evidence_ids:
+                        if search is not None and route is not None:
+                            search.attribute_evidence(
+                                route, continuation.merged_evidence_ids,
+                                attribution="intervention_merge",
+                            )
                         math_verification.bind_derivations(
                             result["answer"], verification, derivations.goal_supports(derivation_scope),
                             request_id=result_request_id,
@@ -1213,6 +1227,7 @@ class Runtime:
             {
                 "event": "run_started",
                 "run_id": run_id,
+                "trace_schema_version": _TRACE_SCHEMA_VERSION,
                 "problem_id": problem_id,
                 "problem_sha256": problem_sha256,
                 "condition_id": condition_id,

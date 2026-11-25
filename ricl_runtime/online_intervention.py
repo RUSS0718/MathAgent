@@ -135,6 +135,8 @@ class OnlineIntervention:
         remaining_requests: int,
         remaining_tools: int,
         max_output_tokens: int | str,
+        route_id: str | None = None,
+        decision_id: str | None = None,
         dispatch: Callable[[str, dict[str, Any]], "_ModelAttempt"],
         execute_tools: Callable[["_ModelAttempt", SharedReasoningState, int], tuple[int, str | None]],
     ) -> InterventionContinuation | None:
@@ -173,6 +175,8 @@ class OnlineIntervention:
             "checkpoint_id": checkpoint_id,
             "trigger_request_id": request_id,
             "failure_evidence_ids": failure.ids,
+            **({"route_id": route_id} if route_id is not None else {}),
+            **({"decision_id": decision_id} if decision_id is not None else {}),
         }
         delivery = {
             "delivered_check_evidence_ids": list(evidence_ids),

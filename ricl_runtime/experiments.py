@@ -6,6 +6,7 @@ import json
 import time
 import uuid
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from random import Random
@@ -19,9 +20,16 @@ from .counterfactual import (
     RepairOptions,
 )
 from .population import CandidateRoute, PopulationBudget
-from .port import ModelPort, ModelPortFailure, ModelReply, ToolCall, ToolReceipt
+from .port import ModelPort, ModelPortFailure, ModelReply, ToolCall, ToolExecutor, ToolReceipt
 from .reasoning_state import SharedReasoningState
-from .runtime import Runtime, _canonical_json, _RunScope, _source_revision, _write_run
+from .runtime import (
+    _TRACE_SCHEMA_VERSION,
+    Runtime,
+    _canonical_json,
+    _RunScope,
+    _source_revision,
+    _write_run,
+)
 from .verification import addition_operands
 
 
@@ -57,6 +65,22 @@ _REPAIR = RepairOptions(
 )
 
 
+@dataclass(frozen=True)
+class _MechanismAblation:
+    name: str
+    condition_id: str
+    shared_state: bool
+    online_search: Literal["aprs"] | None
+    counterfactual: bool
+
+
+_MECHANISM_ABLATIONS = (
+    _MechanismAblation("Baseline", "baseline", False, None, False),
+    _MechanismAblation("RiCL-State", "ricl-state", True, None, False),
+    _MechanismAblation("RiCL-Search", "ricl-search", True, "aprs", False),
+    _MechanismAblation("RiCL-Full", "ricl-full", True, "aprs", True),
+    _MechanismAblation("RiCL w/o Search", "ricl-without-search", True, None, True),
+)
 class _FixtureBudgetExhausted(ModelPortFailure):
     failure_status = "budget_exhausted"
     request_sent = False
@@ -423,6 +447,7 @@ def _run_case(
             {
                 "event": "run_started",
                 "run_id": scope.run_id,
+                "trace_schema_version": _TRACE_SCHEMA_VERSION,
                 "condition_id": condition_id,
                 "problem_id": case_id,
             },
@@ -503,6 +528,223 @@ def _run_fixture_rollback(
         model_request_limit=1,
         order_seed=order_seed,
     )
+
+
+def run_mechanism_ablation(
+    port_factory: Callable[[str], ModelPort],
+    problem: str,
+    *,
+    problem_id: str | None = None,
+    output_root: Path = Path("artifacts/mechanism-ablation"),
+    model_request_limit: int = 8,
+    tool_call_limit: int = 0,
+    tool_executor_factory: Callable[[str], ToolExecutor] | None = None,
+) -> dict[str, Any]:
+    """Run the five mechanism ablations through the normal single-problem Runtime entry."""
+    if model_request_limit < 1:
+        raise ValueError("mechanism ablation requires at least one model request")
+    if tool_call_limit < 0:
+        raise ValueError("tool call limit cannot be negative")
+
+    ports = [(condition, port_factory(condition.condition_id)) for condition in _MECHANISM_ABLATIONS]
+    signatures = {
+        (
+            getattr(port, "name", type(port).__name__),
+            getattr(port, "provider", "offline"),
+            getattr(port, "thinking", "none"),
+            getattr(port, "max_output_tokens", "unknown"),
+        )
+        for _, port in ports
+    }
+    if len(signatures) != 1:
+        raise ValueError("mechanism ablations require one matched ModelPort capability")
+    model_name, provider, _, _ = signatures.pop()
+    if provider != "offline":
+        raise ValueError("mechanism ablation accepts offline ModelPorts only")
+
+    root = output_root.resolve() / f"mechanism-ablation-{uuid.uuid4().hex}"
+    root.mkdir(parents=True)
+    runs_root = root / "runs"
+    problem_sha256 = _digest(problem)
+    stable_problem_id = problem_id or problem_sha256
+    revision = _source_revision()
+    records = []
+    for condition, port in ports:
+        tool_executor = (
+            tool_executor_factory(condition.condition_id)
+            if tool_executor_factory is not None else None
+        )
+        run = Runtime(port, tool_executor=tool_executor).run(
+            problem,
+            problem_id=stable_problem_id,
+            condition_id=condition.condition_id,
+            output_root=runs_root,
+            reasoning_state_enabled=condition.shared_state,
+            online_search=condition.online_search,
+            counterfactual_enabled=condition.counterfactual,
+            model_request_limit=model_request_limit,
+            tool_call_limit=tool_call_limit,
+        )
+        trace = [
+            json.loads(line)
+            for line in Path(run["artifacts"]["trace"]).read_text(encoding="utf-8").splitlines()
+        ]
+        if trace[0].get("trace_schema_version") != 1 or run.get("schema_version") != 1:
+            raise ValueError("mechanism ablation requires schema-versioned Run artifacts")
+        records.append((condition, run, trace))
+
+    public_runs = []
+    evaluated_runs = []
+    for condition, run, trace in records:
+        run_path = Path(run["artifacts"]["run"])
+        trace_path = Path(run["artifacts"]["trace"])
+        public_runs.append({
+            "condition": condition.name,
+            "condition_id": condition.condition_id,
+            "run_id": run["run_id"],
+            "config_sha256": run["config_sha256"],
+            "run": str(run_path),
+            "trace": str(trace_path),
+            "sha256": {
+                "run": _file_digest(run_path),
+                "trace": _file_digest(trace_path),
+            },
+        })
+        evaluated_runs.append(summarize_mechanism_run(run, trace))
+
+    public_input = {
+        "schema_version": 1,
+        "trace_schema_version": 1,
+        "source_revision": revision,
+        "problem": {"id": stable_problem_id, "sha256": problem_sha256},
+        "budget": {
+            "scope": "run_shared",
+            "model_requests": model_request_limit,
+            "tools": tool_call_limit,
+        },
+        "capabilities": {
+            "model_port": model_name,
+            "candidate_generation": True,
+            "max_candidates": next(
+                run["config"]["mechanisms"]["online_search"]["max_candidates"]
+                for condition, run, _ in records
+                if condition.online_search is not None
+            ),
+            "independent_verification": records[0][1]["config"]["verifier"],
+            "tools": tool_call_limit > 0,
+        },
+        "conditions": [
+            {
+                "condition": condition.name,
+                "condition_id": condition.condition_id,
+                "mechanisms": {
+                    "shared_reasoning_state": condition.shared_state,
+                    "online_search": condition.online_search,
+                    "counterfactual_intervention": condition.counterfactual,
+                },
+            }
+            for condition in _MECHANISM_ABLATIONS
+        ],
+        "runs": public_runs,
+    }
+    evaluation = {
+        "schema_version": 1,
+        "source_revision": revision,
+        "problem_sha256": problem_sha256,
+        "runs": evaluated_runs,
+    }
+    public_path = root / "public-input.json"
+    evaluation_path = root / "evaluation.json"
+    public_path.write_text(json.dumps(public_input, indent=2) + "\n", encoding="utf-8")
+    evaluation_path.write_text(json.dumps(evaluation, indent=2) + "\n", encoding="utf-8")
+    return {
+        "public_input_path": str(public_path),
+        "evaluation_path": str(evaluation_path),
+        "public_input_sha256": _file_digest(public_path),
+        "evaluation_sha256": _file_digest(evaluation_path),
+    }
+
+
+def summarize_mechanism_run(
+    run: dict[str, Any], trace: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Recompute public mechanism evidence without relying on a judge or effect estimate."""
+    goals = {goal["id"]: goal["weight"] for goal in run["verification"].get("goals", ())}
+    supported_goals = set(run.get("derivations", {}).get("goal_supports", {}))
+    if not run.get("derivations"):
+        checks = [
+            *run["verification"].get("checks", ()),
+            *run["verification"].get("supporting_checks", ()),
+        ]
+        supported_goals = {
+            check["goal_id"]
+            for check in checks
+            if check.get("status") == "verified" and check.get("goal_id") is not None
+        }
+    route_requests = {
+        request["request_id"]
+        for request in run.get("provider_requests", ())
+        if request.get("request_kind") == "route_expansion"
+    }
+    productive_requests = {
+        event["request_id"]
+        for event in trace
+        if event["event"] == "derivation_added"
+        and event.get("request_id") in route_requests
+    }
+    selections = [
+        {
+            "decision_id": event["decision_id"],
+            "request_id": event["request_id"],
+            "route_id": event["route_id"],
+            "strategy": event["strategy"],
+        }
+        for event in trace
+        if event["event"] == "route_selection"
+    ]
+    result = run.get("result")
+    return {
+        "run_id": run["run_id"],
+        "condition": next(
+            (
+                condition.name for condition in _MECHANISM_ABLATIONS
+                if condition.condition_id == run["condition_id"]
+            ),
+            run["condition_id"],
+        ),
+        "condition_id": run["condition_id"],
+        "source_revision": run["source"]["revision"],
+        "config_sha256": run["config_sha256"],
+        "problem_sha256": run["problem"]["sha256"],
+        "status": run["run"]["status"],
+        "stop_reason": run["run"]["stop_reason"],
+        "verification": {
+            "status": run["verification"]["status"],
+            "reason": run["verification"].get("reason"),
+            "scope": run["verification"].get("scope"),
+        },
+        "result": {
+            "present": result is not None,
+            "id": result["id"] if result is not None else None,
+            "answer_sha256": _digest(result["answer"]) if result is not None else None,
+        },
+        "usage": run["usage"],
+        "budget": {
+            "model_requests": run["budget"]["model_requests"],
+            "tools": run["budget"]["tools"],
+        },
+        "verified_gain": sum(goals[goal_id] for goal_id in supported_goals if goal_id in goals),
+        "search": {
+            "route_expansions": len(route_requests),
+            "productive_route_expansions": len(productive_requests),
+            "route_expansions_without_new_evidence": len(route_requests - productive_requests),
+        },
+        "route_selections": selections,
+    }
+
+
+def _file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def run_offline_pilot(
