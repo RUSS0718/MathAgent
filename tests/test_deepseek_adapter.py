@@ -310,6 +310,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
         self.assertEqual(json.loads(request.data)["max_tokens"], 8192)
         self.assertEqual(port.max_output_tokens, 8192)
         self.assertEqual(port.preflight_cost_upper_bound_usd, "0.0401408")
+        self.assertEqual(port.preflight_config["selected_endpoint_host"], ALLOWED_GATEWAY_HOST)
 
     def test_request_preflight_rejects_oversized_prompt_without_opening(self) -> None:
         port = DeepSeekModelPort(
@@ -329,6 +330,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
         build_opener.assert_not_called()
         self.assertEqual(port.cost_limit_usd, 0.05)
         self.assertEqual(port.preflight_cost_upper_bound_usd, "0.0055296")
+        self.assertEqual(port.preflight_config["selected_endpoint_host"], "api.deepseek.com")
 
     def test_malformed_json_is_a_redacted_protocol_error(self) -> None:
         prompt = "fixture prompt malformed response sentinel"

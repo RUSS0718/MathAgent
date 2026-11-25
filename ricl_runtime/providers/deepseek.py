@@ -156,6 +156,9 @@ class DeepSeekModelPort:
         return {
             "endpoint_host": ALLOWED_HOST,
             "gateway_host": ALLOWED_GATEWAY_HOST,
+            "selected_endpoint_host": (
+                ALLOWED_GATEWAY_HOST if self._is_gateway else ALLOWED_HOST
+            ),
             "model_allowlist": list(ALLOWED_MODELS),
             "transport_timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
             "max_prompt_bytes": MAX_PROMPT_BYTES,
