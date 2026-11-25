@@ -14,7 +14,7 @@ from typing import Any, Literal
 from .aprs import Candidate
 from .counterfactual import CounterfactualCheckpoint, InterventionAudit, RepairOptions
 from .population import CandidateRoute, PopulationBudget
-from .port import ModelPortFailure, ModelReply, ToolCall, ToolReceipt
+from .port import ModelPort, ModelPortFailure, ModelReply, ToolCall, ToolReceipt
 from .reasoning_state import SharedReasoningState
 from .runtime import Runtime, _canonical_json, _RunScope, _source_revision, _write_run
 
@@ -61,7 +61,14 @@ class _FixtureResources:
 
     name = "paired-offline-fixture"
 
-    def __init__(self, case_id: str, answer: str, scope: _RunScope, budget: PopulationBudget):
+    def __init__(
+        self,
+        case_id: str,
+        answer: str,
+        scope: _RunScope,
+        budget: PopulationBudget,
+        model_port: ModelPort | None = None,
+    ):
         self.case_id = case_id
         self.answer = answer
         self.scope = scope
@@ -71,6 +78,21 @@ class _FixtureResources:
         self.input_tokens = 0
         self.output_tokens = 0
         self.tools = 0
+        self.model_port = model_port
+        if model_port is not None:
+            self.name = model_port.name
+            self.provider = getattr(model_port, "provider", "unknown")
+            self.thinking = getattr(model_port, "thinking", "unknown")
+            self.max_output_tokens = getattr(model_port, "max_output_tokens", "unknown")
+
+    def route_limits(self) -> tuple[int, int, float]:
+        if self.model_port is None:
+            return 48, 1, 0
+        return (
+            self.budget.tokens // self.budget.model_requests,
+            30_000,
+            self.budget.cost_usd / self.budget.model_requests,
+        )
 
     @property
     def elapsed_ms(self) -> float:
@@ -78,11 +100,13 @@ class _FixtureResources:
 
     def complete(self, prompt: str) -> ModelReply:
         input_tokens, output_tokens = len(prompt.split()), 1
+        admission_tokens = (
+            self.route_limits()[0] if self.model_port is not None else input_tokens + output_tokens
+        )
         request_id = f"{self.scope.run_id}_request_{len(self.requests) + 1:03d}"
         if (
             len(self.requests) >= self.budget.model_requests
-            or self.input_tokens + self.output_tokens + input_tokens + output_tokens
-            > self.budget.tokens
+            or self.input_tokens + self.output_tokens + admission_tokens > self.budget.tokens
             or self.elapsed_ms >= self.budget.elapsed_ms
         ):
             self.scope.trace.append(
@@ -106,13 +130,22 @@ class _FixtureResources:
         }
         self.requests.append(request)
         try:
-            reply = self._generate(prompt, input_tokens)
+            reply = (
+                self._generate(prompt, input_tokens)
+                if self.model_port is None
+                else self.model_port.complete(prompt)
+            )
         except ModelPortFailure as error:
             request["status"] = error.failure_status
+            if self.model_port is not None:
+                request["request_sent"] = getattr(error, "request_sent", "unknown")
             raise
         request.update(
             {
                 "actual_model": reply.model,
+                "request_sent": self.model_port is not None,
+                "provider_request_id": getattr(reply, "request_id", "unknown"),
+                "finish_reason": getattr(reply, "finish_reason", "unknown"),
                 "status": "completed",
                 "usage": {
                     "input_tokens": reply.input_tokens,
@@ -121,8 +154,8 @@ class _FixtureResources:
                 },
             }
         )
-        self.input_tokens += input_tokens
-        self.output_tokens += output_tokens
+        self.input_tokens += reply.input_tokens if isinstance(reply.input_tokens, int) else 0
+        self.output_tokens += reply.output_tokens if isinstance(reply.output_tokens, int) else 0
         return reply
 
     def _generate(self, prompt: str, input_tokens: int) -> ModelReply:
@@ -172,11 +205,12 @@ def _run_case(
     budget: PopulationBudget,
     output_root: Path,
     revision: str,
+    model_port: ModelPort | None = None,
 ) -> dict[str, Any]:
     problem, answer = _CASES[case_id]
     scope = _RunScope()
-    fixture = _FixtureResources(case_id, answer, scope, budget)
-    runtime = Runtime(fixture, tool_executor=fixture)
+    fixture = _FixtureResources(case_id, answer, scope, budget, model_port)
+    runtime = Runtime(fixture, tool_executor=fixture if model_port is None else None)
     arguments = {
         "problem_id": case_id,
         "condition_id": condition_id,
@@ -188,15 +222,16 @@ def _run_case(
     failure: str | None = None
     try:
         if condition.search:
+            route_tokens, route_time, route_cost = fixture.route_limits()
             routes = tuple(
                 CandidateRoute(
-                    Candidate(candidate_id, novelty=novelty, known_token_cost=48),
+                    Candidate(candidate_id, novelty=novelty, known_token_cost=route_tokens),
                     prompt=prompt,
-                    source="paired_fixture",
+                    source="paired_fixture" if model_port is None else "paired_protocol",
                     parent_route_id="root",
                     tool_calls_reserved=min(budget.tools, 1) if novelty == 0 else 0,
-                    elapsed_ms_reserved=1,
-                    cost_usd_reserved=0,
+                    elapsed_ms_reserved=route_time,
+                    cost_usd_reserved=route_cost,
                 )
                 for candidate_id, novelty, prompt in (
                     ("direct", 0, "Add from left to right."),
@@ -223,10 +258,14 @@ def _run_case(
                 visible_context=_CONTEXT,
                 **arguments,
             )
+        frozen_repair = model_port is not None and condition_id in {
+            "random-repair",
+            "diagnostic-repair",
+        }
         if (
             condition.repair
             and main["run"]["status"] == "completed"
-            and main["verification"]["status"] == "failed"
+            and (frozen_repair or main["verification"]["status"] == "failed")
         ):
             remaining = budget.model_requests - len(fixture.requests)
             if remaining < 2:
@@ -240,16 +279,18 @@ def _run_case(
                 failure = "budget_exhausted"
             else:
                 checkpoint = CounterfactualCheckpoint(
-                    visible_prefix=f"{_CONTEXT}\nPrevious answer: {main['result']['answer']}",
+                    visible_prefix=f"{_CONTEXT}\nPrevious answer: {('5' if frozen_repair else main['result']['answer'])}",
                     failure_count=1,
                     current_action="solve",
-                    reasoning_state=scope.state,
+                    reasoning_state=SharedReasoningState() if frozen_repair else scope.state,
                 )
+                if frozen_repair:
+                    scope.trace.append({"event": "frozen_failure_checkpoint_selected"})
                 repair = runtime.run_counterfactual(
                     problem,
                     checkpoint=checkpoint,
                     repair_options=_REPAIR,
-                    intervention_auditor=_fixture_audit,
+                    intervention_auditor=_fixture_audit if model_port is None else None,
                     feedback_kind=condition.repair,
                     model_request_limit=remaining,
                     **arguments,
@@ -274,11 +315,12 @@ def _run_case(
     elif repair and repair["run"]["stop_reason"] == "parent_feedback_budget_exhausted":
         run_status = {"status": "stopped", "stop_reason": "parent_feedback_budget_exhausted"}
     config = {
-        "mode": "offline_paired_pilot",
+        "mode": "offline_paired_pilot" if model_port is None else "live_paired_pilot",
         "mechanisms": asdict(condition),
         "budget": asdict(budget),
         "model_port": fixture.name,
-        "tool": "addition",
+        "tool": "addition" if model_port is None else "disabled",
+        "provider_config": getattr(model_port, "preflight_config", {}),
         "verifier": "integer_addition_v1",
         "model_seed": "unavailable",
         "phases": [
@@ -296,9 +338,13 @@ def _run_case(
         "input_tokens": fixture.input_tokens,
         "output_tokens": fixture.output_tokens,
         "tokens": known_token_use,
-        "source": "fixture",
+        "source": "fixture" if model_port is None else "provider_reported",
     }
-    if len(completed_request_ids) != len(fixture.requests):
+    if len(completed_request_ids) != len(fixture.requests) or any(
+        not isinstance(entry["usage"][field], int)
+        for entry in fixture.requests
+        for field in ("input_tokens", "output_tokens")
+    ):
         usage = {
             "input_tokens": "unknown",
             "output_tokens": "unknown",
@@ -328,10 +374,14 @@ def _run_case(
             },
             "tools": {"limit": budget.tools, "used": fixture.tools},
             "elapsed_ms": {"limit": budget.elapsed_ms, "used": fixture.elapsed_ms},
-            "cost_usd": {"limit": budget.cost_usd, "used": 0},
+            "cost_usd": {"limit": budget.cost_usd, "used": 0 if model_port is None else "unknown"},
         },
         "usage": usage,
-        "cost": {"amount_usd": 0, "source": "no_provider_request"},
+        "cost": (
+            {"amount_usd": 0, "source": "no_provider_request"}
+            if model_port is None
+            else {"amount_usd": "unknown", "source": "unknown"}
+        ),
         "state_reused": any(
             event.get("referenced_evidence_ids")
             and event.get("request_id") in completed_request_ids
@@ -395,8 +445,12 @@ class _RollbackFixturePort:
         )
 
 
-def _run_fixture_rollback(output_root: Path, order_seed: int) -> dict[str, Any]:
-    from .rollback_experiment import RollbackCheckpoint, RollbackStep, run_rollback_pair
+def _run_fixture_rollback(
+    output_root: Path,
+    order_seed: int,
+    model_port: ModelPort | None = None,
+) -> dict[str, Any]:
+    from .rollback_experiment import RollbackCheckpoint, RollbackStep, _run_rollback_pair
 
     state = SharedReasoningState()
     mistaken_reading = state.add_verified_result(
@@ -428,8 +482,10 @@ def _run_fixture_rollback(output_root: Path, order_seed: int) -> dict[str, Any]:
         diagnosis="The first derivation misread the second addend.",
         reasoning_state=state,
     )
-    return run_rollback_pair(
-        _RollbackFixturePort(mistaken_reading.evidence_id, known_operands.evidence_id),
+    return _run_rollback_pair(
+        model_port
+        if model_port is not None
+        else _RollbackFixturePort(mistaken_reading.evidence_id, known_operands.evidence_id),
         checkpoint,
         output_root=output_root / "rollback",
         model_request_limit=1,
@@ -458,7 +514,12 @@ def run_offline_pilot(
         for condition_id in conditions
     ]
     rollback = _run_fixture_rollback(root, order_seed)
+    return _write_manifest(root, revision, order_seed, order, budget, records, rollback)
+
+
+def _write_manifest(root, revision, order_seed, order, budget, records, rollback, **metadata):
     manifest = {
+        **metadata,
         "source_revision": revision,
         "order_seed": order_seed,
         "model_seed": "unavailable",
@@ -477,7 +538,7 @@ def run_offline_pilot(
             for run in records
         ],
         "counts": {
-            "planned": len(_CASES) * len(_CONDITIONS),
+            "planned": sum(map(len, order.values())),
             "status": dict(Counter(run["run"]["status"] for run in records)),
             "stop_reason": dict(Counter(run["run"]["stop_reason"] for run in records)),
             "verification": dict(Counter(run["verification"]["status"] for run in records)),

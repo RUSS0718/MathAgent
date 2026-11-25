@@ -78,6 +78,17 @@ class RollbackCheckpoint:
 def run_rollback_pair(
     model_port: ModelPort,
     checkpoint: RollbackCheckpoint,
+    **options: Any,
+) -> dict[str, Any]:
+    """Run the offline rollback comparison through an offline ModelPort."""
+    if getattr(model_port, "provider", "offline") != "offline":
+        raise ValueError("rollback pair is restricted to offline ModelPort implementations")
+    return _run_rollback_pair(model_port, checkpoint, **options)
+
+
+def _run_rollback_pair(
+    model_port: ModelPort,
+    checkpoint: RollbackCheckpoint,
     *,
     problem_id: str | None = None,
     output_root: Path = Path("artifacts/rollback"),
@@ -106,8 +117,6 @@ def run_rollback_pair(
     Runtime separately records input/output tokens, calls, tool uses and unknowns.
     """
 
-    if getattr(model_port, "provider", "offline") != "offline":
-        raise ValueError("rollback pair is restricted to offline ModelPort implementations")
     if model_request_limit < 1:
         raise ValueError("model request limit must be positive")
     if tool_call_limit < 0:
@@ -264,7 +273,7 @@ def run_rollback_pair(
         "order_seed": order_seed,
         "capabilities": {
             "requested_model": model_port.name,
-            "provider": "offline",
+            "provider": getattr(model_port, "provider", "offline"),
             "model_seed": "unavailable",
             "thinking": getattr(model_port, "thinking", "none"),
             "max_output_tokens": getattr(model_port, "max_output_tokens", "unknown"),
