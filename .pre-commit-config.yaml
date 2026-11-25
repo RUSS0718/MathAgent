@@ -3,18 +3,6 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        files: ^(AGENTS\.md|README\.md|DEMO_SCRIPT\.md|GAP\.md|GLOSSARY\.md|docs/|examples/|scripts/|showcase/|\.devcontainer/|\.github/|pyproject\.toml|pytest\.ini|\.pre-commit-config\.yaml|\.python-version|demo_server\.py|showcase_server\.py|llm_client\.py|tests/)$
+        files: ^(AGENTS\.md|README(\.zh-CN)?\.md|GLOSSARY\.md|docs/README\.md|docs/engineering/(development-gates|runtime-legacy-retirement-inventory)\.md|docs/evals/runtime-.*\.md|tests/test_(runtime.*|deepseek_adapter|minimax_adapter)\.py|scripts/bootstrap\.(ps1|sh)|scripts/check_issues\.py|pyproject\.toml|requirements(-local)?\.txt|uv\.lock|\.pre-commit-config\.yaml|\.github/workflows/quality\.yml)$
       - id: end-of-file-fixer
-        files: ^(AGENTS\.md|README\.md|DEMO_SCRIPT\.md|GAP\.md|GLOSSARY\.md|docs/|examples/|scripts/|showcase/|\.devcontainer/|\.github/|pyproject\.toml|pytest\.ini|\.pre-commit-config\.yaml|\.python-version|demo_server\.py|showcase_server\.py|llm_client\.py|tests/)$
-      - id: check-yaml
-        files: ^(\.devcontainer/|\.github/|\.pre-commit-config\.yaml)$
-      - id: check-json
-        files: ^(\.devcontainer/|\.github/)$
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.10
-    hooks:
-      - id: ruff-check
-        files: ^(demo_server\.py|showcase_server\.py|llm_client\.py|showcase/|scripts/|tests/)$
-        args: [--fix]
-      - id: ruff-format
-        files: ^(demo_server\.py|showcase_server\.py|llm_client\.py|showcase/|scripts/|tests/)$
+        files: ^(AGENTS\.md|README(\.zh-CN)?\.md|GLOSSARY\.md|docs/README\.md|docs/engineering/(development-gates|runtime-legacy-retirement-inventory)\.md|docs/evals/runtime-.*\.md|tests/test_(runtime.*|deepseek_adapter|minimax_adapter)\.py|scripts/bootstrap\.(ps1|sh)|scripts/check_issues\.py|pyproject\.toml|requirements(-local)?\.txt|uv\.lock|\.pre-commit-config\.yaml|\.github/workflows/quality\.yml)$

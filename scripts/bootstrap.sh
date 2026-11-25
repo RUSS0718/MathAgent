@@ -2,11 +2,8 @@
 set -euo pipefail
 
 command -v uv >/dev/null 2>&1 || { echo "uv is required: https://docs.astral.sh/uv/" >&2; exit 1; }
-uv sync --all-groups
+uv sync --locked --all-groups
 uv run pre-commit install --install-hooks
-if [[ "${1:-}" == "--offline" ]]; then
-  uv run python scripts/check.py --offline
-else
-  uv run python scripts/check.py
-fi
-printf '%s\n' "MathAgent development environment is ready."
+uv run ruff check ricl_runtime tests
+uv run python -m unittest discover -s tests
+printf '%s\n' "RiCL Runtime development environment is ready."

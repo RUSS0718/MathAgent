@@ -1,6 +1,6 @@
 # RiCL Runtime 文档索引
 
-本索引先介绍当前可运行的研究入口，再将旧 Showcase 与竞赛记录明确分开。Issue 是 Runtime 的规格、机制范围和决策追溯入口；只有仓库内实际存在的材料才作为证据链接。
+本索引先介绍当前可运行的研究入口，再将旧 Showcase 与竞赛记录明确标为归档。旧版可执行实现已从当前分支退役；归档材料用于历史追溯，不是当前运行指南。Issue 是 Runtime 的规格、机制范围和决策追溯入口。
 
 ## 当前 Runtime 入口
 
@@ -52,7 +52,9 @@ DeepSeek 真实配对先导完成九个矩阵条件和两个回退条件。证�
 - [第二模型系列 #244](https://github.com/RUSS0718/RiCL/issues/244)记录 ModelPort 通用性验收要求。[旧资产退役 #246](https://github.com/RUSS0718/RiCL/issues/246)记录退役证据和人工决策要求。
 - [开发门禁](engineering/development-gates.md)说明日常 Runtime 工作的差异、链接和聚焦命令检查。当前根目录 [AGENTS.md](../AGENTS.md) 是仓库工作约束入口。
 
-## 旧版 Showcase 与竞赛历史
+## 归档：旧版 Showcase 与竞赛历史
+
+本节仅供历史追溯。旧执行入口及归档中的相对源码链接见[退役前的源码与文档](https://github.com/RUSS0718/RiCL/tree/8318be2a22122ebf9e33e6eef66691461c7c5255)。旧命令和验收记录不能作为当前可运行能力证据。
 
 以下既有记录保留为历史和后续退役盘点线索。它们不描述当前 RiCL Runtime CLI，也不作为其 Provider 或数学能力证据。
 
@@ -330,7 +332,7 @@ SP-11 的[候选与零调用选择合同](engineering/star-product-sp11-contract
 | 规划或评审 v1.1 Solver Harness | [v1.1 实现规格](https://github.com/RUSS0718/MathAgent/issues/32) → [STAR Core 实施规格](prd/STAR_CORE/STAR_Core_v1_2/STAR_CORE_SPEC_AGENT_v1_2.md) → [ADR-0013](adr/0013-solver-harness-boundary-and-shared-transaction.md) | v1.1 seam、v1.2 延期项、ticket 依赖和验收边界 |
 | 规划或评审 v0.2 | [v0.2 PRD Lite](prd/subjective-agent-platform-prd-v0.2.md) → [v0.2 实现规格](specs/subjective-agent-platform-v0.2-spec.md) → [现状与前端接口调研](research/v0.2-planning-baseline.md) → [accepted ADR](#架构决策) | 范围、实现决策、测试 seam、验收条件和待验证假设 |
 | 修改官方入口或讨论合并 | [BASELINE.json](../BASELINE.json) → [官方架构](architecture/pre-v0.1-official-agent-architecture.md) → [合并边界](release-boundary.md) | 冻结文件、调用预算、输出合同及重新验收要求 |
-| 运行或演示 | [Demo 说明](demo.md) → [演示脚本](../DEMO_SCRIPT.md) → [验收门禁](ACCEPTANCE.md) | 入口、运行模式、回放和发布检查方式 |
+| 运行或演示 | [Demo 说明](demo.md) → 演示脚本（已退役） → [Runtime 开发门禁](engineering/development-gates.md) | 入口、运行模式、回放和发布检查方式 |
 
 [Solver Harness 结果导出与离线重放](evals/showcase-solver-result-replay-sh20.md) 说明 SH20 的公开函数、字段白名单与快照审计边界。
 
@@ -350,8 +352,8 @@ SP-11 的[候选与零调用选择合同](engineering/star-product-sp11-contract
 | Vision / Evidence | [#7 图文 Adapter](https://github.com/RUSS0718/MathAgent/issues/7)、[#8 Verification / Evidence](https://github.com/RUSS0718/MathAgent/issues/8) | 资产引用、轻量检查与导出合同 |
 | Browser Vertical Slice | [#9 API 与浏览器切片](https://github.com/RUSS0718/MathAgent/issues/9) | v0.1 最小页面；不代表完整工作台或实时 SSE |
 | Eval / Regression | [v0.1 能力基线](evals/v0.1-capability-baseline.md) | 当前能力结论；具体 live probes 优先于未同步的 pending 表格 |
-| Demo Hardening / Release | [#10 回放与发布闸门](https://github.com/RUSS0718/MathAgent/issues/10)、[Demo](demo.md)、[脚本](../DEMO_SCRIPT.md)、[回放样例](replay/showcase-replay-v0.1.json) | 区分 live / fake / replay，检查脱敏与故障展示 |
-| Quality / Release Gate | [验收门禁](ACCEPTANCE.md)、[合并边界](release-boundary.md)、[质量 CI](../.github/workflows/quality.yml)、[发布检查](../scripts/check_showcase_release.py) | 工程与官方隔离门禁；不能推导数学正确率 |
+| Demo Hardening / Release | [#10 回放与发布闸门](https://github.com/RUSS0718/MathAgent/issues/10)、[Demo](demo.md)、旧版脚本（已退役）、[回放样例](replay/showcase-replay-v0.1.json) | 区分 live / fake / replay，检查脱敏与故障展示 |
+| Quality / Release Gate | [Runtime 开发门禁](engineering/development-gates.md)、[合并边界](release-boundary.md)、[质量 CI](../.github/workflows/quality.yml)、旧发布检查（已退役） | 工程与官方隔离门禁；不能推导数学正确率 |
 | Scoring / Delivery | [评分证据矩阵](JUDGE_SCORECARD.md)、[评分材料清单](subjective-score-checklist.md) | 视频、技术报告、结果包的交付要求；清单勾选不是成绩证明 |
 
 [Solver v1.2 发布验收与 AC/SC 归属](evals/showcase-solver-v1.2-release.md) 区分离线工程门禁与受阻的完整 live 发布。
@@ -409,12 +411,12 @@ v0.2 文档已归档为历史合同；v1.1 规格不覆盖这些 accepted ADR，
 
 ## 工程环境与 agent 约定
 
-- [DeepTutor 工作台源码复用规格](specs/deeptutor-workbench-ui.md)的阶段一已交付[本地交互预览](../showcase/frontend/deeptutor-preview/UPSTREAM.md)，文档说明六个组件区域、并排预览和主入口切换的验收条件。
+- [DeepTutor 工作台源码复用规格](specs/deeptutor-workbench-ui.md)的阶段一已交付本地交互预览（对应旧前端源码已从当前分支删除），文档说明六个组件区域、并排预览和主入口切换的验收条件。
 - [UI 复现指导](frontend/ui-reproduction-guide.md)：后续 agent 的执行入口，包含环境、页面矩阵、组件、状态与像素回归步骤。
-- [设计系统](../DESIGN.md)、[产品边界](../PRODUCT.md)：当前统一视觉语言与产品事实。
+- 旧产品设计系统与边界（已退役）：当前统一视觉语言与产品事实。
 - [前端统一验收合同](frontend/ui-unification-contract.md)、[验证记录](frontend/ui-verification.md)：实施范围、实际检查结果和证据限制。
 
-- [初始化蓝图](engineering-bootstrap-plan.md)、[Codespace 调研](research/codespace-bootstrap-landscape.md)
+- 旧环境初始化蓝图（已退役）、[Codespace 调研](research/codespace-bootstrap-landscape.md)
 - [工程门禁](engineering/development-gates.md)、[身份链导航](engineering/identity-navigation.md)：开发检查入口与身份、恢复、交付绑定的源码/测试导航。
 - [提交与分支规范](engineering/commit-convention.md)
 - [Issue tracker](agents/issue-tracker.md)、[状态标签](agents/triage-labels.md)、[领域文档约定](agents/domain.md)
@@ -435,7 +437,7 @@ v0.2 文档已归档为历史合同；v1.1 规格不覆盖这些 accepted ADR，
 | 文档 | 阅读方式 |
 | --- | --- |
 | [未版本化 PRD](prd/subjective-agent-platform-prd.md)、[未版本化技术架构](architecture/subjective-agent-platform-technical-design.md) | 早期 DRAFT / 长期设想；React、FastAPI、搜索、记忆等描述不代表 v0.1 已实现或 v0.2 已批准 |
-| [GAP.md](../GAP.md) | 早期路线图，包含已过期的 In progress / Planned 项；当前状态查能力基线与对应实现 |
+| 早期路线图（已退役） | 早期路线图，包含已过期的 In progress / Planned 项；当前状态查能力基线与对应实现 |
 | [原架构说明](architecture.md)、[评分材料清单](subjective-score-checklist.md) | 早期演示叙事与交付提醒；官方实现以 baseline 和版本化官方架构为准 |
 
 能力报告中的文本、图文 pending 行与后续成功 probe 并存；读取“已完成的 live probes”小节和限制说明。当前仍未证明产品真实工具选择稳定，也没有独立数学正确率提升证据。详细核对依据见 [v0.2 规划调研](research/v0.2-planning-baseline.md)。

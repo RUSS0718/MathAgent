@@ -16,7 +16,7 @@ import urllib.request
 import uuid
 from typing import Any
 
-DEFAULT_REPOSITORY = "RUSS0718/MathAgent"
+DEFAULT_REPOSITORY = "RUSS0718/RiCL"
 GITHUB_API_ROOT = "https://api.github.com"
 REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 VALID_STATES = {"open", "closed"}
@@ -102,7 +102,7 @@ def _read_issue(repository: str, issue: int, timeout: float) -> dict[str, Any]:
         _request_url(repository, issue),
         headers={
             "Accept": "application/vnd.github+json",
-            "User-Agent": "MathAgent-issue-status-checker",
+            "User-Agent": "RiCL-issue-status-checker",
         },
         method="GET",
     )

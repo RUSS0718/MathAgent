@@ -3,7 +3,7 @@
 ## Research boundary
 
 - Use one Python-owned core for the main solve loop and a distinct, separately controlled auxiliary verification/intervention loop; both share the Run budget. Python controls state, scheduling, and termination, while the model supplies mathematical reasoning and strategy proposals. This first slice stays single-route and adds no model-driven auxiliary call.
-- Keep legacy official-scoring and Showcase paths isolated. Do not route Runtime work through `user_agent.py`, Flask, browser/frontend, LangGraph, SQLite, or Intern-specific code unless a later issue explicitly authorizes that boundary change.
+- The former official-scoring and Showcase implementations are retired from this branch. Keep their archived evidence separate, and do not reintroduce dependencies on those paths into Runtime.
 - Treat a generated answer as free text. Record independent verification status and scope separately; use `unknown` when no applicable independent criterion exists. A successful run, valid JSON, or model self-review is not mathematical verification.
 - Persist only research Run data needed for reproduction: source revision, config snapshot/hash, problem and condition IDs, result, status/stop reason, model/reasoning settings, shared budget/use and measurement sources, and a redacted trace. Never store credentials, complete prompts, or private reasoning. Keep generated data under ignored `artifacts/`.
 - `tests/test.md` is user-managed: never read, modify, stage, or delete it.
