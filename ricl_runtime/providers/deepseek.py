@@ -36,7 +36,7 @@ from .chat_completions import (
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_RESPONSE_BYTES = 1_048_576
-MAX_OUTPUT_TOKENS = 256
+MAX_OUTPUT_TOKENS = 2048
 ALLOWED_HOST = "api.deepseek.com"
 ALLOWED_GATEWAY_HOST = "code.aigcpro.org"
 ALLOWED_MODELS = (

@@ -117,7 +117,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
             {
                 "model": "deepseek-flash",
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 256,
+                "max_tokens": 2048,
                 "thinking": {"type": "enabled"},
             },
         )
@@ -325,7 +325,7 @@ class DeepSeekModelPortTests(unittest.TestCase):
         self.assertNotIn(prompt, str(raised.exception))
         build_opener.assert_not_called()
         self.assertEqual(port.cost_limit_usd, 0.05)
-        self.assertEqual(port.preflight_cost_upper_bound_usd, "0.0147456")
+        self.assertEqual(port.preflight_cost_upper_bound_usd, "0.02048")
 
     def test_malformed_json_is_a_redacted_protocol_error(self) -> None:
         prompt = "fixture prompt malformed response sentinel"
