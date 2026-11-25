@@ -48,9 +48,10 @@ ALLOWED_MODELS = (
 MAX_PROMPT_BYTES = 16 * 1024
 INPUT_FRAMING_MARGIN_TOKENS = 1024
 COST_LIMIT_USD = Decimal("0.05")
-INPUT_PEAK_USD_PER_MILLION = Decimal("0.30")
-OUTPUT_PEAK_USD_PER_MILLION = Decimal("1.20")
-PRICING_SOURCE = "https://api-docs.deepseek.com/quick_start/pricing/"
+INPUT_PEAK_USD_PER_MILLION = Decimal("0.80")
+OUTPUT_PEAK_USD_PER_MILLION = Decimal("3.20")
+PRICING_SOURCE = "https://code.aigcpro.org/api/pricing"
+PRICING_UNIT_SOURCE = "https://code.aigcpro.org/api/status"
 MAX_PREFLIGHT_INPUT_TOKENS = MAX_PROMPT_BYTES + INPUT_FRAMING_MARGIN_TOKENS
 MAX_PREFLIGHT_COST_USD = (
     MAX_PREFLIGHT_INPUT_TOKENS * INPUT_PEAK_USD_PER_MILLION
@@ -136,6 +137,7 @@ class DeepSeekModelPort:
             "cost_limit_usd": self.cost_limit_usd,
             "preflight_cost_upper_bound_usd": self.preflight_cost_upper_bound_usd,
             "pricing_source": PRICING_SOURCE,
+            "pricing_unit_source": PRICING_UNIT_SOURCE,
         }
 
     def complete(self, problem: str) -> DeepSeekReply:

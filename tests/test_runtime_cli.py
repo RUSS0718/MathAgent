@@ -333,12 +333,12 @@ class RuntimeOfflineTests(unittest.TestCase):
         self.assertIs(result["provider_requests"][0]["request_sent"], False)
         self.assertEqual(result["budget"]["cost_usd"]["limit"], 0.05)
         self.assertEqual(
-            result["budget"]["cost_usd"]["preflight_upper_bound"], "0.0055296"
+            result["budget"]["cost_usd"]["preflight_upper_bound"], "0.0147456"
         )
         self.assertEqual(result["budget"]["cost_usd"]["used"], "unknown")
         self.assertEqual(result["config"]["provider_config"]["cost_limit_usd"], 0.05)
         self.assertEqual(
-            result["config"]["provider_config"]["preflight_cost_upper_bound_usd"], "0.0055296"
+            result["config"]["provider_config"]["preflight_cost_upper_bound_usd"], "0.0147456"
         )
         opener.open.assert_not_called()
         for secret in (problem, credential, base_url):
