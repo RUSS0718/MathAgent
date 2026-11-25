@@ -35,6 +35,7 @@ from .chat_completions import (
 )
 
 DEFAULT_TIMEOUT_SECONDS = 60.0
+GATEWAY_TIMEOUT_SECONDS = 180.0
 MAX_RESPONSE_BYTES = 1_048_576
 MAX_OUTPUT_TOKENS = 256
 GATEWAY_MAX_OUTPUT_TOKENS = 16384
@@ -125,7 +126,7 @@ class DeepSeekModelPort:
 
     @property
     def transport_timeout_seconds(self) -> float:
-        return DEFAULT_TIMEOUT_SECONDS
+        return GATEWAY_TIMEOUT_SECONDS if self._is_gateway else DEFAULT_TIMEOUT_SECONDS
 
     @property
     def _input_peak_usd_per_million(self) -> Decimal:
@@ -171,7 +172,7 @@ class DeepSeekModelPort:
             "model_allowlist": list(
                 GATEWAY_ALLOWED_MODELS if self._is_gateway else ALLOWED_MODELS
             ),
-            "transport_timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
+            "transport_timeout_seconds": self.transport_timeout_seconds,
             "max_prompt_bytes": MAX_PROMPT_BYTES,
             "input_token_framing_margin": INPUT_FRAMING_MARGIN_TOKENS,
             "max_input_tokens_upper_bound": MAX_PREFLIGHT_INPUT_TOKENS,
@@ -203,6 +204,7 @@ class DeepSeekModelPort:
             raise ProviderPreflightError("prompt exceeds the configured byte limit")
         input_tokens_upper_bound = prompt_bytes + INPUT_FRAMING_MARGIN_TOKENS
         max_output_tokens = self.max_output_tokens
+        transport_timeout = self.transport_timeout_seconds
         cost_upper_bound = (
             input_tokens_upper_bound * self._input_peak_usd_per_million
             + max_output_tokens * self._output_peak_usd_per_million
@@ -219,6 +221,6 @@ class DeepSeekModelPort:
                 "max_tokens": max_output_tokens,
                 "thinking": {"type": self.thinking},
             },
-            timeout=DEFAULT_TIMEOUT_SECONDS,
+            timeout=transport_timeout,
             max_bytes=MAX_RESPONSE_BYTES,
         )
