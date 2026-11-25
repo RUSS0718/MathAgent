@@ -51,6 +51,14 @@ class MechanismPort:
             check = CHECKS[1] if targeted else BAD_CONSTRAINT
             return measured(increment(check, answer="One bounded repair increment."), 1, 1)
         route_id = captured_route(prompt)
+        if "Previously verified public claims:" in prompt and (
+            route_id == "route_01" or "Independently checked failure" in prompt
+        ):
+            _, _, context = prompt.partition("Previously verified public claims:\n")
+            prior = json.loads(context.split("\n\n", 1)[0])
+            response = json.loads(increment(*CHECKS[2:], answer=ANSWER))
+            response["used_evidence_ids"] = [item["evidence_id"] for item in prior]
+            return measured(json.dumps(response), 5, 5)
         if route_id == "route_01":
             reply = measured(
                 increment(CHECKS[0], answer="The real-domain condition is established."), 1, 1
@@ -210,22 +218,24 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
             if credit["evidence_id"] == merged_evidence_id
         )
         self.assertEqual(merged_credit["attribution"], "intervention_merge")
-        self.assertEqual(route_rows["route_02"]["cost"]["tokens"], 27)
+        self.assertEqual(route_rows["route_02"]["cost"]["tokens"], 17)
+        self.assertEqual(route_rows["route_01"]["cost"]["tokens"], 12)
         self.assertEqual(route_rows["route_02"]["cost"]["request_ids"], [
             run["provider_requests"][2]["request_id"],
             run["provider_requests"][3]["request_id"],
             run["provider_requests"][4]["request_id"],
             run["provider_requests"][5]["request_id"],
-            run["provider_requests"][6]["request_id"],
         ])
         continuation = next(
             event for event in trace
             if event["event"] == "route_continuation_selected"
         )
-        self.assertEqual(continuation["route_id"], "route_02")
+        self.assertEqual(continuation["route_id"], decisions[-1]["route_id"])
+        self.assertEqual(continuation["parent_route_id"], "route_02")
+        self.assertFalse(continuation["aprs_selection_overridden"])
         self.assertEqual(continuation["selection_strategy"], "gain")
         self.assertEqual(continuation["aprs_selected_route_id"], decisions[-1]["route_id"])
-        self.assertEqual(continuation["aprs_selection_overridden"], decisions[-1]["route_id"] != "route_02")
+        self.assertFalse(continuation["aprs_selection_overridden"])
         self.assertEqual(continuation["decision_id"], decisions[-1]["decision_id"])
         self.assertEqual(continuation["checkpoint_id"], merge["checkpoint_id"])
         self.assertEqual(
@@ -237,7 +247,7 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         self.assertEqual(
             run["provider_requests"][-1]["request_id"], continuation["request_id"]
         )
-        self.assertEqual(run["provider_requests"][-1]["route_id"], "route_02")
+        self.assertEqual(run["provider_requests"][-1]["route_id"], decisions[-1]["route_id"])
         self.assertIn(
             merged_evidence_id,
             run["provider_requests"][-1]["delivered_check_evidence_ids"],
@@ -248,7 +258,8 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
             if str(request.get("request_kind", "")).startswith("counterfactual_")
         ]
         self.assertEqual(len(counterfactual_requests), 4)
-        self.assertTrue(all(request["route_id"] == "route_02" for request in counterfactual_requests))
+        self.assertTrue(all(request["route_id"] == "route_02" for request in counterfactual_requests[:3]))
+        self.assertEqual(counterfactual_requests[-1]["route_id"], decisions[-1]["route_id"])
         self.assertEqual([request["request_kind"] for request in run["provider_requests"]], [
             "candidate_generation",
             "route_expansion",

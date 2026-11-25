@@ -938,17 +938,7 @@ class Runtime:
                 request_kind = "candidate_generation"
             elif resumed is not None and search is not None and resumed.parent_route_id is not None:
                 supports = derivations.goal_supports(derivation_scope) if derivations is not None else {}
-                selected_route, decision = search.select(requests.next_request_id, supports)
-                route = next(
-                    (
-                        candidate for candidate in search.routes
-                        if candidate.route_id == resumed.parent_route_id
-                    ),
-                    None,
-                )
-                if route is None:
-                    stop_reason = "counterfactual_parent_route_missing"
-                    break
+                route, decision = search.select(requests.next_request_id, supports)
                 request_kind = "counterfactual_continuation"
                 trace.append({
                     "event": "route_continuation_selected",
@@ -956,8 +946,8 @@ class Runtime:
                     "route_id": route.route_id,
                     "decision_id": decision["decision_id"],
                     "selection_strategy": decision["strategy"],
-                    "aprs_selected_route_id": selected_route.route_id,
-                    "aprs_selection_overridden": selected_route.route_id != route.route_id,
+                    "aprs_selected_route_id": route.route_id,
+                    "aprs_selection_overridden": False,
                     "parent_route_id": resumed.parent_route_id,
                     "checkpoint_id": resumed.checkpoint_id,
                     "merged_evidence_ids": list(resumed.merged_evidence_ids),
