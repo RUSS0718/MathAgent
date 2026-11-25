@@ -35,6 +35,24 @@ class RuntimeOfflineTests(unittest.TestCase):
         self.assertIn("--population requires the offline provider", stderr.getvalue())
         load_provider.assert_not_called()
 
+    def test_verification_leaves_ambiguous_answer_text_unknown(self) -> None:
+        cases = {
+            "The answer is not 4.": "unknown",
+            "0.4": "unknown",
+            "2 + 2 ≠ 4": "unknown",
+            "7 + 1 = 4": "unknown",
+            "2 + 2 = 4": "verified",
+            "The answer is 5.": "failed",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            for answer, expected in cases.items():
+                with self.subTest(answer=answer):
+                    run = Runtime(DeterministicModelPort(answer)).run(
+                        "Compute 2 + 2.", output_root=Path(directory)
+                    )
+                    self.assertEqual(run["result"]["answer"], answer)
+                    self.assertEqual(run["verification"]["status"], expected)
+
     def test_run_persists_answer_verification_budget_and_redacted_trace(self) -> None:
         answer = "Adding the two numbers gives 4."
         with tempfile.TemporaryDirectory() as directory:
