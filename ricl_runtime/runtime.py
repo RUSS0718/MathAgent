@@ -728,7 +728,8 @@ class Runtime:
             return result is not None and verification.get("status") == "verified"
 
         def request_cost_upper_bound() -> float | None:
-            value = getattr(self._model_port, "preflight_config", {}).get("preflight_cost_upper_bound_usd")
+            # Only a request-independent ceiling can reserve past and future requests.
+            value = getattr(self._model_port, "preflight_cost_upper_bound_usd", None)
             try:
                 ceiling = float(value)
             except (TypeError, ValueError):
