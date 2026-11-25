@@ -1,58 +1,26 @@
-# 运行工程门禁
+# RiCL Runtime 开发检查
 
-本文件统一规定开发检查与阶段最终验收的执行频率和证据复用方式。检查结果只证明所覆盖的合同，不自动升级数学能力结论。
+检查范围匹配本次改动。当前分支的默认验证只覆盖 Runtime 与 Provider 适配器；历史 Showcase 全仓、前端和官方评分门禁已退役。检查通过只说明命令覆盖的行为，不代表 Provider 普遍可用、机制自然参与或数学收益。
 
-## 按修改范围检查
+## 纯文档改动
 
-- 纯文档修改：检查差异格式、相对链接和规则一致性。仅因新增文档提交，不重跑产品全仓测试或前端安装。
-- 代码切片：先运行聚焦检查及受影响模块的回归。涉及身份、预算、恢复、交付绑定或默认路径时，补齐对应公共合同检查。
-- 阶段退出：集中完成双轴差异审查，处理阻塞项并通过聚焦回归后，冻结源码运行一次最终门禁；浏览器及专项合同仍按阶段要求验收。门禁前逐项映射阶段合同到公共入口、状态/断言、测试与证据位置；未覆盖项须保持未完成或明确列为未验证，不得由全仓通过替代。
-- 门禁后有代码、测试、依赖、配置或检查脚本变化：复核影响，阶段退出前对最终源码重新运行门禁。仅有文档变化时，检查文档并保留原门禁源码 SHA，另记最终交接 SHA。
+- 检查 `git diff --check` 与最终差异。
+- 核对改动涉及的相对文件链接、锚点和命令。
+- 运行 `uv run python scripts/check_runtime_docs.py` 检查活跃 Runtime 文档的相对文件链接。历史导航使用固定版本。
+- 文档中的 Runtime 命令发生变化时，使用临时输出目录运行对应离线命令，确认描述一致。
 
-同一冻结源码已有成功门禁且环境与验收条件未变化时，交接引用原证据。失败时修复最小责任范围，先通过聚焦检查再重跑；保留原失败记录。CI 按其工作流独立执行，不以本地证据跳过。
-
-阶段验收映射可使用以下最小列项；保留合同原编号，并将未运行或不适用与通过项区分记录：
-
-| 合同 | 公共入口 | 状态/断言 | 测试与证据 | 结果 |
-| --- | --- | --- | --- | --- |
-| 例：C1 | API 或命令 | 可观察的持久状态 | 测试名、报告路径 | pass / fail / not_run |
-
-## 快速检查与完整检查
+## Runtime 与 Provider 切片
 
 ```powershell
-uv run python scripts/check_fast.py
-uv run python scripts/check.py --offline
-uv run python scripts/check_showcase_release.py
+uv run ruff check ricl_runtime tests
+uv run python -m unittest discover -s tests
+uv run python -m ricl_runtime --help
+uv run python -m ricl_runtime --problem "Compute 2 + 2." --offline-answer "4"
+uv run python -m ricl_runtime.experiments --order-seed 17
 ```
 
-快速检查验证 baseline 字节、官方导入边界、Demo HTTP 合同、测试接缝和两个服务的 CLI。它不替代完整测试、mutation probes、发布检查或前端检查。
+将运行产物写到仓库外的临时目录，或确认 `artifacts/` 保持被忽略。机制改动还应覆盖对应聚焦合同；离线替身只证明确定性路径。
 
-CI 在 pre-commit 后先运行快速检查；完整测试只通过 `check.py` 执行一次。发布检查仍执行其聚焦验收，属于有意保留的独立发布条件。Python quality job 上限调整为 60 分钟，前端仍为 15 分钟。
+## 真实运行与实验边界
 
-完整测试写入 `artifacts/repository-check/tests.json` 和 `diagnostics.log`；CI 在成功或失败后均尝试上传该目录，目录缺失时告警。摘要保留失败、错误、跳过和 expected failures。诊断文件接收测试及其继承标准句柄的子进程输出；失败保持非零，不把未知诊断认定为预期噪声。
-
-手工重跑命名用例或补跑隔离测试时，使用报告入口并声明预期用例数；入口会先验证选择器可加载且实际数量相符，再执行测试：
-
-```powershell
-uv run python scripts/run_unittest_report.py --expect-count 1 tests.test_module.Test.test_case
-```
-
-## 最终验收
-
-```powershell
-uv run python scripts/run_final_gate.py --root . --output-dir artifacts/final-gates --run-id review-01
-```
-
-每次使用新的 run ID，避免覆盖已有证据。该入口统一执行快速检查、完整仓库检查、发布检查及前端安装、审计与检查；失败后不继续下一阶段。`--require-reference` 额外要求指定 Reference 用例实际执行，需要先配置仓库既有的 Docker 测试环境。默认离线门禁不代表真实 provider 或数学效果验收。
-
-启动长测试时只保留一个运行进程。读取独立 run 目录的 `status.json` 查看 PID、开始时间、当前阶段、完成阶段数与日志位置；每 30 分钟的定时检查在状态无变化时静默，完成或失败后移除。
-
-## 只读 Issue 核验
-
-```powershell
-uv run python scripts/check_issues.py --repo RUSS0718/MathAgent 116 117 118 119 120
-```
-
-该入口只发 GET，返回机器可读状态；网络或数据错误以非零退出，不根据本地历史文档推断 GitHub 当前状态。它不关闭 Issue，也不代替逐项验收。
-
-身份与恢复相关修改先读 [身份链导航](identity-navigation.md)。历史 `final-validate-04/05` 等脚本保留为旧实验资料；后续使用仓库参数化入口，不再复制硬编码路径版本。
+本检查流程不授权 Provider 请求或付费实验。按 [Runtime 规格，#236](https://github.com/RUSS0718/RiCL/issues/236) 和根 [AGENTS.md](../../AGENTS.md) 的人工停点，先取得模型选择、本机凭证、非敏感样例、明确预算和明确批准。真实运行、机制参与、数学正确性与研究效果分别记录。缺失的用量、成本或运行结果保持 `unknown`，不从离线验证推断。

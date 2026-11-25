@@ -6,7 +6,7 @@
 2. [develop 审计](develop-inspection.md)：固定源码基线与待修缺口。
 3. [Intern S2 合同](intern-s2-api-contract.md)：官方来源、待探测能力、计量与公开字段。
 4. [本轮设置状态](setup-status.md)：实际运行的检查与尚未完成的事项。
-5. [机器可读实验配置](../../experiments/campaign.json)：默认 offline，各研究策略关闭；不是在线调度器。
+5. [机器可读实验配置](archive/intern-s2-campaign.json)：默认 offline，各研究策略关闭；不是在线调度器。
 6. [研究近邻来源](research-prior-sources.md)：正式论文与预印本状态分开记录。
 7. [审查与交接](review-and-handoff.md)：两条审查轴的发现、修复和下一切片。
 8. [setup PR 正文草案](setup-pr-draft.md)：面向 develop 的可审查说明，尚未创建远端 PR。

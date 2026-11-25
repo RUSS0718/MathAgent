@@ -1,77 +1,37 @@
-# 主观评测工程分支说明
+# RiCL Research Repository
 
-本文件把《基于 Intern-S1 的数学智能体设计与推理创新》比赛方案中与主观评测有关的要求，转换为本分支的开发边界。比赛方案是评分依据；本文件才是本分支的执行说明。
+## Research boundary
 
-理解版本状态、查找开发阶段 / 能力验收材料或规划下一版本时，先读 [文档索引](docs/README.md)。索引区分 accepted 设计、开发完成记录、能力证据和早期路线图；当前能力不能仅从旧 PRD 或 GAP 推断。
+- Use one Python-owned core for the main solve loop and a distinct, separately controlled auxiliary verification/intervention loop; both share the Run budget. Python controls state, scheduling, and termination, while the model supplies mathematical reasoning and strategy proposals.
+- The former official-scoring and Showcase implementations are retired from this branch. Keep their archived evidence separate, and do not reintroduce dependencies on those paths into Runtime.
+- Treat a generated answer as free text. Record independent verification status and scope separately; use `unknown` when no applicable independent criterion exists. A successful run, valid JSON, or model self-review is not mathematical verification.
+- Persist only research Run data needed for reproduction: source revision, config snapshot/hash, problem and condition IDs, result, status/stop reason, model/reasoning settings, shared budget/use and measurement sources, and a redacted trace. Never store credentials, complete prompts, or private reasoning. Keep generated data under ignored `artifacts/`.
+- `tests/test.md` is user-managed: never read, modify, stage, or delete it.
 
-身份、恢复或交付绑定相关修改先读 [身份链导航](docs/engineering/identity-navigation.md)；运行快速、完整或发布检查先读 [工程门禁](docs/engineering/development-gates.md)。
+## Working and validation
 
-## 评分目标
+- Use `uv run` for Python. Read `GLOSSARY.md` and only the ADRs/contracts relevant to the changed boundary; keep detailed policy in its source document and link to it rather than duplicating it here.
+- Run the narrowest tests that cover the changed Runtime seam, then the applicable offline CLI acceptance command below. Expand validation only when the change crosses another boundary; frontend, browser, release, and full-repository gates are not defaults for Runtime work.
+- Offline fixtures prove only the behavior they exercise. Never issue a live Provider request without the human approval gates below.
+- Follow the repository's [commit convention](docs/engineering/commit-convention.md); preserve unrelated work and inspect the final diff.
 
-客观评测的答案正确性占 60%。本分支的新增工程模块默认关闭，不能改变根目录 `user_agent.ReasoningAgent` 的官方评测路径。主观评测占 40%，分为：
+## Human approval gates
 
-- **推理策略与系统设计（10 分）**：考察系统架构完整性、任务拆解、推理规划、过程校验或模块协同、策略与数学问题的匹配度，以及稳定性、可复现性和工程完成度。A 档为 8–10 分，B 档为 5–7 分，C 档为 0–4 分。
-- **展示质量（20 分）**：考察 Demo 是否稳定运行且交互完整，视频与技术报告是否清晰完整，结果文件是否规范、可复现。A 档为 16–20 分，B 档为 10–15 分，C 档为 0–9 分。
-- **创新性与可扩展性（10 分）**：考察数学智能体机制、推理范式、协作方式、验证机制、应用场景延展的创新价值，以及迁移和持续扩展潜力。A 档为 8–10 分，B 档为 5–7 分，C 档为 0–4 分。
+- First Provider/model and local credential selection, plus bounded real-request data and budget approval: [#238](https://github.com/RUSS0718/RiCL/issues/238). No secret values in chat or Git.
+- A second model family and its credentials after the first bounded validation: [#244](https://github.com/RUSS0718/RiCL/issues/244).
+- Formal paper protocol (data rights, baselines, sample/repetition plan, metrics, statistics, and fair budget): [#243](https://github.com/RUSS0718/RiCL/issues/243).
+- Retirement of legacy assets only after an itemized impact/rollback inventory and explicit approval: [#246](https://github.com/RUSS0718/RiCL/issues/246).
 
-总分相同先比较客观正确性，再比较推理策略与系统设计，最后比较创新性与可扩展性。系统仍需输出可解析的 JSON 结果；接口或格式错误会导致客观题无法判分。
+## Read by task
 
-## 本分支边界
+- Terms: [GLOSSARY.md](GLOSSARY.md). Research scope and accepted decisions: [#236 runtime specification](https://github.com/RUSS0718/RiCL/issues/236), [#231 single-route contract](https://github.com/RUSS0718/RiCL/issues/231), and [#232 mechanism evidence order](https://github.com/RUSS0718/RiCL/issues/232).
+- Profile isolation: [ADR-0001](docs/adr/0001-profile-separation.md). Lightweight independent verification: [ADR-0003](docs/adr/0003-experimental-python-tool-and-lightweight-verifier.md) and [ADR-0010](docs/adr/0010-r3-typed-verification-unknown.md). Provider transport: [ADR-0015](docs/adr/0015-provider-transport-business-boundary.md).
+- Agent-instruction guidance: [OpenAI Codex](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra), [Claude Code](https://code.claude.com/docs/en/best-practices), and [GitHub Copilot](https://docs.github.com/en/copilot/concepts/prompting-and-context/custom-instructions).
 
-1. 根目录 `user_agent.py`、`implementations/` 和其默认请求预算是官方评分骨架。没有经过独立验收的改动不得接入默认路径。
-2. 主观评测功能必须通过显式入口运行；任何新路由、校验器、工具、记忆或协作模块都以关闭为默认值，且未启用时不增加官方模型调用。
-3. `demo_server.py` 只服务本地展示，不会被 `user_agent.py` 导入。Demo 的 trace 只能包含脱敏的步骤、状态和摘要，不得包含凭证、完整 prompt、隐藏答案或个人信息。
-4. 本分支不携带实验题集、答案库、运行 raw、废弃 solver 和旧脚本；脱敏且用于版本或能力追溯的记录保留在 `docs/`。运行产物写入被忽略的 `artifacts/<run_id>/`，不进入提交分支。
-5. 根目录 `tests/test.md` 是用户保留的未跟踪文件：保持原样，不读取、不修改、不提交、不删除。
-6. 任何声称“能力提升”的结论都必须有独立、可复现的评测证据；Demo 可运行或结构测试通过只能证明工程可达性。
+## Offline acceptance
 
-## 验收最低线
-
-- `user_agent.py` 可导入；`ReasoningAgent(client=...).solve(problem, metadata)` 返回带非空 `final_response` 的可 JSON 序列化字典。
-- 默认官方路径的调用预算、输出边界和失败回退保持可追踪。
-- `uv run python -m unittest discover -s tests -p "test_*.py"` 通过；若环境未安装 pytest，不以此为理由改变运行时依赖。
-- `uv run python demo_server.py --help` 成功；本地 Demo 的 `/health` 和 `/solve` 合同有测试覆盖。
-
-## 合并纪律
-
-本分支的目标是工程化和创新性展示，不是用主观功能换取客观分数。合入 `RUSS0718/MathAgent` `main` 前必须单独审查官方路径差异、默认开关、调用/令牌预算、依赖安装和干净环境入口；没有这组证据时只保留在本分支。
-
-## Agent skills
-
-### Issue tracker
-
-Issues and specs live in GitHub Issues at `RUSS0718/MathAgent`. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Use the five canonical state labels `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: read the root `GLOSSARY.md` and relevant records in `docs/adr/` when present. Add them when domain terms or consequential decisions need recording. See `docs/agents/domain.md`.
-
-## Development workflow
-
-执行用户授权的 #168 无人值守 ticket 接续循环时，先读 [接续合同](docs/engineering/unattended-ticket-loop.md)，完成当前票后把同一合同传给新 session。
-
-产品实现前先确保 PRD、技术设计、任务合同与验收案例可审阅。对会影响设计、验收或交接的阶段，保留可审阅产物和退出条件；纯文档、诊断及小范围维护按任务范围处理，不为流程本身创建材料。
-
-每个代码切片先运行并留存能稳定失败的测试或可执行验收案例，再实施最小改动，运行聚焦检查与相关回归，审阅 diff。跨模块并行前先确认共享 schema/API 和文件所有权；依赖方在生产者的最小接口检查通过后再启动集成测试。双轴审查集中在可独立验收的纵切或阶段退出时，修复后复查受影响部分；验收编号不等于独立审查或提交单位。每次提交保持一个逻辑变更，阶段最终检查按工程门禁执行。
-
-新窗口先核对工作树、HEAD、未提交改动和任务依赖。材料未变化时复用交接中的已读结论及证据位置；身份、恢复、发布等专项材料按本次修改范围读取。交接必须强调继续使用当前选择的同一模型；无法确认具体型号或继承结果时如实说明，不猜测型号。
-
-文档按职责维护：任务合同保存要求与退出条件，验收记录保存结果、源码 SHA、命令及证据位置，索引提供当前阶段与阅读入口。通用规则在 AGENTS 和工程门禁维护，任务文档引用规则；已有设计可与任务合同合并，不要求每个流程阶段另建文档。历史快照注明日期和适用源码，阶段推进后更新当前入口。
-
-官方 baseline 保持字节稳定，除非发布决定明确授权。初始化约定见 `docs/engineering-bootstrap-plan.md`；baseline 与 sidecar 边界见 `BASELINE.json`、`docs/release-boundary.md` 和 `GAP.md`。
-
-## 搜索与检查入口
-
-搜索代码使用 `rg` 或 `rg --files`，排除 `.venv/`、`__pycache__/`、`.pytest_cache/`、`.ruff_cache/`、`artifacts/` 和构建产物；不要递归读取虚拟环境。查看长文件或日志时先定位命中，再读取有限上下文或日志尾部，避免整文件输出被截断。检查命令见 [工程门禁](docs/engineering/development-gates.md)。
-
-## 运行环境入口
-
-Python 命令使用 `uv run`；Python、前端检查及长测试观察入口见 [工程门禁](docs/engineering/development-gates.md)。
-
-## Git 分支与提交规范
-
-创建或重命名分支、提交、合并或记录发布时，遵循[提交与分支规范](docs/engineering/commit-convention.md)；已有历史不主动重写。
+```powershell
+uv run python -m unittest discover -s tests -p "test_runtime_cli.py"
+uv run python -m ricl_runtime --help
+uv run python -m ricl_runtime --problem "Compute 2 + 2." --offline-answer "4"
+```

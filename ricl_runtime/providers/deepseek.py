@@ -1,0 +1,166 @@
+"""Single-request DeepSeek chat-completion adapter for the Runtime ModelPort."""
+
+import os
+from dataclasses import dataclass, field
+from decimal import Decimal
+
+from .chat_completions import (
+    ChatCompletionReply as DeepSeekReply,
+)
+from .chat_completions import (
+    ProviderConfigurationError as ProviderConfigurationError,
+)
+from .chat_completions import (
+    ProviderHTTPError as ProviderHTTPError,
+)
+from .chat_completions import (
+    ProviderOutcomeUnknownError as ProviderOutcomeUnknownError,
+)
+from .chat_completions import (
+    ProviderPreflightError as ProviderPreflightError,
+)
+from .chat_completions import (
+    ProviderProtocolError as ProviderProtocolError,
+)
+from .chat_completions import (
+    ProviderTimeoutError as ProviderTimeoutError,
+)
+from .chat_completions import (
+    _RejectRedirects as _RejectRedirects,
+)
+from .chat_completions import (
+    post_chat_completion,
+    validate_api_key,
+    validate_base_url,
+)
+
+DEFAULT_TIMEOUT_SECONDS = 30.0
+MAX_RESPONSE_BYTES = 1_048_576
+MAX_OUTPUT_TOKENS = 256
+ALLOWED_HOST = "api.deepseek.com"
+ALLOWED_MODELS = (
+    "deepseek-flash",
+    "deepseek-v4-flash",
+    "deepseek-v4-flash-vision-exp",
+)
+MAX_PROMPT_BYTES = 16 * 1024
+INPUT_FRAMING_MARGIN_TOKENS = 1024
+COST_LIMIT_USD = Decimal("0.05")
+INPUT_PEAK_USD_PER_MILLION = Decimal("0.30")
+OUTPUT_PEAK_USD_PER_MILLION = Decimal("1.20")
+PRICING_SOURCE = "https://api-docs.deepseek.com/quick_start/pricing/"
+MAX_PREFLIGHT_INPUT_TOKENS = MAX_PROMPT_BYTES + INPUT_FRAMING_MARGIN_TOKENS
+MAX_PREFLIGHT_COST_USD = (
+    MAX_PREFLIGHT_INPUT_TOKENS * INPUT_PEAK_USD_PER_MILLION
+    + MAX_OUTPUT_TOKENS * OUTPUT_PEAK_USD_PER_MILLION
+) / Decimal(1_000_000)
+
+
+@dataclass(frozen=True)
+class DeepSeekModelPort:
+    """Send one bounded, non-streaming chat completion through urllib."""
+
+    api_key: str = field(repr=False)
+    base_url: str
+    model: str
+    thinking: str = "disabled"
+
+    def __post_init__(self) -> None:
+        """Reject incomplete values without echoing credentials or URLs in errors."""
+
+        validate_api_key(self.api_key)
+        if not self.model or not self.model.strip():
+            raise ProviderConfigurationError("MODEL must be non-empty")
+        if self.thinking not in {"enabled", "disabled"}:
+            raise ProviderConfigurationError("thinking must be enabled or disabled")
+
+    @classmethod
+    def from_environment(cls, *, thinking: str = "disabled") -> "DeepSeekModelPort":
+        """Read only the three explicitly selected, non-persisted environment values."""
+
+        api_key = os.environ.get("API_KEY")
+        base_url = os.environ.get("BASE_URL")
+        model = os.environ.get("MODEL")
+        if not api_key or not base_url or not model:
+            raise ProviderConfigurationError("API_KEY, BASE_URL, and MODEL must be configured")
+        return cls(api_key=api_key, base_url=base_url, model=model, thinking=thinking)
+
+    @property
+    def name(self) -> str:
+        """Expose the configured requested model through the existing ModelPort field."""
+
+        return self.model
+
+    @property
+    def provider(self) -> str:
+        """Identify this adapter without including endpoint or credential data."""
+
+        return "deepseek"
+
+    @property
+    def max_output_tokens(self) -> int:
+        """Expose the fixed completion-token ceiling for the Run config digest."""
+
+        return MAX_OUTPUT_TOKENS
+
+    @property
+    def cost_limit_usd(self) -> float:
+        """Expose the fixed per-request ceiling used by preflight."""
+
+        return float(COST_LIMIT_USD)
+
+    @property
+    def preflight_cost_upper_bound_usd(self) -> str:
+        """Expose the fixed worst-case input and output bound."""
+
+        return format(MAX_PREFLIGHT_COST_USD, "f")
+
+    @property
+    def preflight_config(self) -> dict[str, object]:
+        """Expose only non-secret request bounds and pricing inputs for the Run digest."""
+
+        return {
+            "endpoint_host": ALLOWED_HOST,
+            "model_allowlist": list(ALLOWED_MODELS),
+            "transport_timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
+            "max_prompt_bytes": MAX_PROMPT_BYTES,
+            "input_token_framing_margin": INPUT_FRAMING_MARGIN_TOKENS,
+            "max_input_tokens_upper_bound": MAX_PREFLIGHT_INPUT_TOKENS,
+            "peak_price_usd_per_million_tokens": {
+                "input": str(INPUT_PEAK_USD_PER_MILLION),
+                "output": str(OUTPUT_PEAK_USD_PER_MILLION),
+            },
+            "cost_limit_usd": self.cost_limit_usd,
+            "preflight_cost_upper_bound_usd": self.preflight_cost_upper_bound_usd,
+            "pricing_source": PRICING_SOURCE,
+        }
+
+    def complete(self, problem: str) -> DeepSeekReply:
+        """Return one validated completion or a sanitized, non-retryable transport error."""
+
+        if not validate_base_url(self.base_url, ALLOWED_HOST) or self.model not in ALLOWED_MODELS:
+            raise ProviderPreflightError("provider host or model is not allowlisted")
+
+        prompt_bytes = len(problem.encode("utf-8"))
+        if prompt_bytes > MAX_PROMPT_BYTES:
+            raise ProviderPreflightError("prompt exceeds the configured byte limit")
+        input_tokens_upper_bound = prompt_bytes + INPUT_FRAMING_MARGIN_TOKENS
+        cost_upper_bound = (
+            input_tokens_upper_bound * INPUT_PEAK_USD_PER_MILLION
+            + MAX_OUTPUT_TOKENS * OUTPUT_PEAK_USD_PER_MILLION
+        ) / Decimal(1_000_000)
+        if cost_upper_bound > COST_LIMIT_USD:
+            raise ProviderPreflightError("request exceeds the configured cost limit")
+
+        return post_chat_completion(
+            f"{self.base_url.rstrip('/')}/chat/completions",
+            api_key=self.api_key,
+            payload={
+                "model": self.model,
+                "messages": [{"role": "user", "content": problem}],
+                "max_tokens": MAX_OUTPUT_TOKENS,
+                "thinking": {"type": self.thinking},
+            },
+            timeout=DEFAULT_TIMEOUT_SECONDS,
+            max_bytes=MAX_RESPONSE_BYTES,
+        )

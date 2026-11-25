@@ -1,31 +1,15 @@
 [project]
 name = "mathagent"
 version = "0.1.0"
-description = "Challenge Cup 2026 MathAgent official baseline and product-side development workspace"
+description = "RiCL Runtime for mathematical reasoning research"
 requires-python = ">=3.11,<3.13"
-dependencies = [
-  "mpmath==1.3.0",
-  "sympy==1.13.3",
-]
-
-[project.optional-dependencies]
-showcase = [
-  "flask>=3.1,<4",
-  "langgraph==1.2.15",
-  "deepagents==0.7.25",
-  "python-dotenv>=1.0,<2",
-]
+dependencies = []
 
 [dependency-groups]
 dev = [
   "pre-commit>=3.7,<5",
   "pytest>=8,<9",
-  "requests>=2.31,<3",
-  "flask>=3.1,<4",
-  "python-dotenv>=1.0,<2",
   "ruff>=0.11,<1",
-  "langgraph==1.2.15",
-  "deepagents==0.7.25",
 ]
 
 [tool.uv]
@@ -39,10 +23,6 @@ exclude = [
   ".venv",
   "build",
   "dist",
-  "user_agent.py",
-  "implementations",
-  "tests/test_baseline_snapshot.py",
-  "tests/test_boundary_check_path.py",
 ]
 
 [tool.ruff.lint]

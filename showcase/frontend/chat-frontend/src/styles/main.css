@@ -1,6 +1,0 @@
-@import './primitives.css';
-@import './workspace.css';
-@import './conversation.css';
-@import './inspector.css';
-
-#app { min-height: 100dvh; }

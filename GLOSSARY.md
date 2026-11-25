@@ -1,35 +1,20 @@
 # Glossary
 
-- **official profile**：只运行根 `user_agent.py` 和当前官方 baseline 的模式。
-- **showcase profile**：面向主观评审的产品模式，允许持久化、事件流、搜索、工具和回放。
-- **research profile**：实验性多 Agent、长期记忆、沙箱或 RSI 模式。
-- **AuthSession**：把一次请求绑定到本地身份的认证会话；它决定请求能否进入工作区。
-- **ChatSession**：用户可见的一段数学对话容器，包含问题、答案和它们对应的运行记录。
-- **Run**：一次隔离的数学任务执行，拥有唯一 ID、状态和产物。
-- **Request Attempt**：一次向模型服务发出的实际 HTTP 请求，属于一个逻辑模型调用并关联一个 Run；失败和重试也分别计数。
-- **Job**：用户可观察、可恢复的一次运行控制对象；它表示任务当前是否排队、执行、等待输入或已经结束。
-- **Stage**：Run 内可恢复的阶段，例如 intake、planning、solving、verifying。
-- **Evidence Pack**：答案、解释、验证、来源、工具调用和事件摘要的导出包。
-- **Baseline**：官方 88/12/0 评测对应的字节和行为基线，不等同于普遍能力保证。
-- **研究基础设施阶段（S1–S6）**：Intern S2 实验与 Showcase 的有序工程准备阶段；区别于 R1–R5 算法方向，以及 v0.2 Workbench 文档中含义不同的 S1–S4 阶段。
-- **Solver Harness**：`showcase` 内显式启用的数学求解控制面；它组织探索、规划、审查和恢复，但不属于 `official` Profile。
-- **完整 STAR 参考模式（STAR Reference）**：按完整 STAR Core 行为合同组织数学任务的求解模式，各机制按适用条件参与执行并保留可审查结果；项目的 Best-Effort 扩展独立验收。该名称不代表复现论文成绩或证明数学正确性。
-- **Solver Run**：Solver Harness 的一次隔离执行，拥有独立的 `run_id`、状态版本和事件记录；与产品 Run 共用数据库，但状态存在独立表中。
-- **Plan Attempt**：同一 Solver Run 内一次可被回退或重规划替换的计划尝试；它也是 Reasoner 会话的隔离边界。
-- **ReplanDecision**：`Guidance.action_type=replan` 之后进入的独立审批裁决；只有当前转换的有效 `APPROVE_REPLAN` 才归档换计划并传入本次禁止方向与救援成果，Guidance 请求本身不取得执行权（ALIGN-03）。
-- **Candidate / AnswerCandidate（答案候选）**：可被最终选择的完整答案版本；候选不是已证定理，必须保留来源、证据和失效状态。
-- **CandidateRoute（搜索路线）**：带父子谱系、搜索前沿及停止原因的求解方向，区别于可交付的答案候选；路线被选中不代表其答案取得交付资格。
-- **PresentationArtifact（表达产物）**：绑定原答案及其来源版本的独立表达内容；表达整理成功不改变原答案的验证等级。
-- **Best-Effort Finalization**：预算耗尽后仅根据已持久化候选和证据选择答案的过程；它不新增模型或工具调用。
-- **State Revision**：Solver Run 状态快照的单调版本号，用于拒绝基于过期快照的写入。
-- **STAR AC**：STAR Core 实施规格中的验收编号；引用时写作 `STAR AC-06`，不得与 v0.2 或 Solver Harness 的同号用例混用。
-- **v0.2 AC**：v0.2 Release Evidence 中的验收编号；引用时写作 `v0.2 AC-06`，例如真实 Intern 工具闭环。
-- **已知协议失败（Known Protocol Failure）**：提供方完整返回（finish_reason 与用量已知）但 JSON/schema 校验失败的响应；调用审计记录为 `protocol_failed` 并保留 finish_reason、已知用量与脱敏响应引用，可在剩余预算内以独立新调用身份有界修复或明确终止，不属于未知远端结果。
-- **未知远端结果（Unknown Outcome）**：网络中断、未完成流或在途进程退出导致请求结果不可证实的状态；调用保持 `unknown_outcome` 并进入 needs_review，零自动重发，只有用户显式选择后才以新调用身份重试，且保留未知预留与原 deadline。
-- **Verifier 计算续接（Verifier Compute Continuation）**：审查者通过回复协议提出 `tool_request`、运行时经既有 Registry 与隔离执行器实际执行、真实回执进入相同审查会话续接的机制；未完成或被拒绝的请求不得解析为接受裁决或证据升级，请求次数有界且全部计入原 Run 账本。
-- **探索计算续接（Explore Compute Continuation）**：Explore 通过回复协议提出受控 `tool_request`、运行时经既有 Registry 与隔离执行器实际执行、真实回执以 `explore-tool:` 身份进入相同探索会话续接的机制；计算产出与来源随探索发现进入后续探索与 Planner 实际请求，探索发现始终保持 `unverified_exploration` 身份、不得进入已证引理账本，未完成或重复的请求不得解析为探索结论，请求次数有界且全部计入原 Run 账本。
-- **分类成果（Classified Outcome）**：Verifier 在步骤裁决回复中明确裁定的 Lemma、Conjecture、Computation、Definition 或 Answer；控制器核验分类、报告来源、真实工具回执与依赖后原子追加权威账本（`verified_results_ledger`）。部分成果的成立与整步是否推进无关；Conjecture 的证据等级为 `conjecture`，永不进入已证前提；失效按来源与依赖闭包就地标记，救援由当前裁决控制。
-- **ContextPack**：一次角色调用所用上下文的版本化视图及其来源和容量审计记录。历史摘录与摘要只提供参考，不取得数学证明的权威地位。
-- **Run 能力范围**：一次数学任务开始时获准自主选择的能力集合；它界定选择边界，不是必须逐项执行的清单。
-- **能力准入**：某项能力在当前任务、当前状态和既定授权内获得执行资格；取得资格不代表已被选择、已执行或数学结论已验证。
-- **实验性能力**：已有工程证据但尚缺相应真实求解验收的能力；实验性说明证据成熟度，不等同于运行时不可用。
+- **Run**：一次隔离的研究任务执行，包含输入标识、配置快照、结果、独立验证状态、预算账本和脱敏轨迹。
+- **ModelPort**：Runtime 调用模型的窄接口；Provider 差异由 `ricl_runtime/providers/` 中的适配器处理，不进入求解机制。
+- **Request Attempt**：一次实际发往 Provider 的 HTTP 请求；请求失败、远端结果未知和有界修复分别保留其状态与账本记录。
+- **独立验证**：不依赖模型自评的适用判据。验证状态与结果文本分开记录；没有适用判据时使用 `unknown`。
+- **Evidence / Result ID**：可在运行轨迹中引用的证据及结果标识；存储存在本身不证明其已进入后续模型请求。
+- **Verified Result**：通过适用独立检查的结果；其适用范围和依赖必须与内容一同记录。
+- **Candidate**：同一 Run 中可被选择或淘汰的一份解题提案；不是已证定理。
+- **CandidateRoute**：带有父子谱系和停止原因的求解方向；路线被选择不代表其答案已验证。
+- **APRS**：依据验证证据及当前 Run 状态为固定候选排序的机制；排序证据不证明生成候选或提升数学正确率。
+- **Population**：在同一 Run 和共享预算下串行扩展、评价并选择候选路线的过程。
+- **Counterfactual Control**：从同一 Checkpoint 派生相互隔离的对照/处理分支；只有通过适用验证的反馈才可供父路线使用。
+- **Checkpoint**：保存一次求解阶段及其可复核证据的状态快照；同源分支应明确关联共同 Checkpoint。
+- **共享预算**：主求解、验证及已启用干预共同消耗的 Run 级请求、Token、工具、时间和费用限额。
+- **配置快照与哈希**：复现 Run 所需的配置内容及其摘要；不包含凭证、完整 prompt 或私有推理。
+- **Unknown Outcome**：请求已发出但响应结果无法证实。不得将其当作成功、自动重发或静默切换 Provider。
+- **Known Protocol Failure**：Provider 已返回响应，但响应不符合 Runtime 所需协议；失败与已知用量按原请求记录。
+- **BASELINE.json**：保留的官方历史基线清单。对应的官方可执行入口已从当前分支退役；此文件不代表 Runtime 的当前质量门禁。
+- **legacy archive**：旧 Showcase、产品、比赛或 Provider 记录的文档和材料。当前索引明确标为归档；它们不代表当前代码仍可运行。
