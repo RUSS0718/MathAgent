@@ -67,6 +67,41 @@ class RuntimeOfflineTests(unittest.TestCase):
         self.assertEqual(result["budget"]["cost_usd"]["limit"], 0.05)
         load_provider.assert_called_once()
 
+    def test_live_cli_reserves_cost_for_online_dispatches_without_a_bill(self) -> None:
+        provider = DeepSeekModelPort("test-key", "https://code.aigcpro.org/v1", "deepseek-v4.1-flash")
+        candidates = '{"candidates":[{"strategy":"Check the domain."},{"strategy":"Inspect roots."}]}'
+        for policy in ("aprs", "round_robin"):
+            for limit, expected_requests in (("0.04", 0), ("0.10", 2), ("0.13", 3)):
+                with (
+                    self.subTest(policy=policy, limit=limit),
+                    tempfile.TemporaryDirectory() as directory,
+                    redirect_stdout(output := StringIO()),
+                    patch("ricl_runtime.__main__.DeepSeekModelPort.from_environment", return_value=provider),
+                    patch("ricl_runtime.providers.deepseek.post_chat_completion") as send,
+                ):
+                    send.side_effect = [
+                        ModelReply(reply, input_tokens=12, output_tokens=7, usage_source="provider")
+                        for reply in (candidates, '{"answer":"Partial."}', '{"answer":"Still partial."}')
+                    ]
+                    main([
+                        "--provider", "deepseek", "--thinking", "disabled",
+                        "--problem", "sqrt(x+6)=x", "--output-root", directory,
+                        "--online-search", policy, "--model-request-limit", "3",
+                        "--token-limit", "262144", "--elapsed-limit-ms", "600000",
+                        "--cost-limit-usd", limit,
+                    ])
+                    run = json.loads(output.getvalue())
+                    self.assertEqual(send.call_count, expected_requests)
+                    self.assertEqual(run["budget"]["model_requests"]["used"], expected_requests)
+                    self.assertEqual(run["cost"]["amount_usd"], "unknown")
+                    self.assertEqual(run["budget"]["cost_usd"]["used"], "unknown")
+                    self.assertAlmostEqual(
+                        run["budget"]["cost_usd"]["admission_used_upper_bound"],
+                        expected_requests * float(provider.preflight_cost_upper_bound_usd),
+                    )
+                    if expected_requests < 3:
+                        self.assertEqual(run["run"]["stop_reason"], "cost_budget_exhausted")
+
     def test_verification_leaves_ambiguous_answer_text_unknown(self) -> None:
         cases = {
             "The answer is not 4.": "unknown",

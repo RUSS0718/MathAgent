@@ -45,11 +45,12 @@ class InterventionPort:
 
 
 class RuntimeOnlineInterventionTests(unittest.TestCase):
-    def run_script(self, port, *, limit=5, tools=0, **runtime_options):
+    def run_script(self, port, *, limit=5, tools=0, cost_limit_usd=None, **runtime_options):
         with tempfile.TemporaryDirectory() as directory:
             run = Runtime(port, **runtime_options).run(
                 PROBLEM, output_root=Path(directory),
                 counterfactual_enabled=True, model_request_limit=limit, tool_call_limit=tools,
+                cost_limit_usd=cost_limit_usd,
             )
             trace = [
                 json.loads(line)
@@ -186,6 +187,26 @@ class RuntimeOnlineInterventionTests(unittest.TestCase):
         self.assertFalse(any(
             event["event"] == "counterfactual_merge" for event in trace
         ))
+
+    def test_cost_admission_reserves_both_arms_and_continuation_without_billing(self):
+        for cap, expected_requests in ((0.049, 1), (0.05, 5)):
+            with self.subTest(cap=cap):
+                port = InterventionPort(
+                    increment(*CHECKS[:2], BAD_COVERAGE), DIAGNOSIS,
+                    increment(BAD_COVERAGE), increment(*CHECKS[2:]), increment(answer=ANSWER),
+                )
+                port.preflight_config = {"preflight_cost_upper_bound_usd": "0.01"}
+                run, trace = self.run_script(port, limit=8, cost_limit_usd=cap)
+                self.assertEqual(len(port.prompts), expected_requests)
+                self.assertEqual(run["cost"]["amount_usd"], "unknown")
+                self.assertAlmostEqual(
+                    run["budget"]["cost_usd"]["admission_used_upper_bound"], expected_requests * 0.01,
+                )
+                if expected_requests == 1:
+                    blocked = next(e for e in trace if e["event"] == "counterfactual_budget_blocked")
+                    self.assertEqual((blocked["stage"], blocked["reason"]), ("admission", "cost_budget_exhausted"))
+                else:
+                    self.assertTrue(any(e["event"] == "counterfactual_parent_action" for e in trace))
 
     def test_unknown_and_tied_pairs_leave_parent_checkpoint_unchanged(self):
         cases = (

@@ -727,6 +727,17 @@ class Runtime:
         def verified_answer_available() -> bool:
             return result is not None and verification.get("status") == "verified"
 
+        def request_cost_upper_bound() -> float | None:
+            value = getattr(self._model_port, "preflight_config", {}).get("preflight_cost_upper_bound_usd")
+            try:
+                ceiling = float(value)
+            except (TypeError, ValueError):
+                return None
+            return ceiling if math.isfinite(ceiling) and ceiling > 0 else None
+
+        def budget_cost_used(upper_bound: float | None) -> float | str:
+            return _run_cost_total(requests.replies, unknown_upper_bound=upper_bound) if requests.replies else 0.0
+
         def budget_admission_reason() -> str | None:
             if token_limit is not None:
                 tokens_used = _run_token_total(requests.replies)
@@ -737,12 +748,16 @@ class Runtime:
             if elapsed_limit_ms is not None and current_elapsed_ms() >= elapsed_limit_ms:
                 return "elapsed_budget_exhausted"
             if cost_limit_usd is not None:
-                cost_used = 0.0 if not requests.replies else _run_cost_total(requests.replies)
+                upper_bound = request_cost_upper_bound()
+                cost_used = budget_cost_used(upper_bound)
                 if cost_used == "unknown":
                     if verified_answer_available():
                         return None
                     return "cost_budget_unknown"
-                if cost_used >= cost_limit_usd:
+                if upper_bound is not None:
+                    if round(cost_used + upper_bound, 8) > cost_limit_usd:
+                        return "cost_budget_exhausted"
+                elif cost_used >= cost_limit_usd:
                     return "cost_budget_exhausted"
             return None
 
@@ -797,13 +812,11 @@ class Runtime:
                 if current_elapsed_ms() + reserve > elapsed_limit_ms:
                     return "elapsed_budget_exhausted"
             if cost_limit_usd is not None:
-                upper_bound = getattr(
-                    self._model_port, "preflight_config", {}
-                ).get("preflight_cost_upper_bound_usd", "unknown")
-                cost_used = _run_cost_total(requests.replies)
-                try:
-                    reserve = _INTERVENTION_REQUESTS * float(upper_bound)
-                except (TypeError, ValueError):
+                upper_bound = request_cost_upper_bound()
+                cost_used = budget_cost_used(upper_bound)
+                if upper_bound is not None:
+                    reserve = _INTERVENTION_REQUESTS * upper_bound
+                else:
                     known_costs = [
                         reply.cost_usd for reply in requests.replies
                         if isinstance(reply.cost_usd, (int, float))
@@ -819,7 +832,7 @@ class Runtime:
                     return "cost_budget_unknown"
                 if cost_used == "unknown":
                     cost_used = 0.0
-                if cost_used + reserve > cost_limit_usd:
+                if round(cost_used + reserve, 8) > cost_limit_usd:
                     return "cost_budget_exhausted"
             return None
 
@@ -833,7 +846,7 @@ class Runtime:
             if elapsed_limit_ms is not None and current_elapsed_ms() > elapsed_limit_ms:
                 return "elapsed_budget_exhausted"
             if cost_limit_usd is not None:
-                cost_used = _run_cost_total(requests.replies)
+                cost_used = budget_cost_used(request_cost_upper_bound())
                 if cost_used == "unknown":
                     if verified_answer_available():
                         return None
@@ -1348,6 +1361,7 @@ class Runtime:
         output_tokens = _sum_usage(requests.replies, "output_tokens")
         total_tokens = _run_token_total(requests.replies)
         total_cost = _run_cost_total(requests.replies)
+        cost_upper_bound = request_cost_upper_bound() if cost_limit_usd is not None else None
         trace.append(
             {
                 "event": "run_stopped",
@@ -1393,6 +1407,10 @@ class Runtime:
                         "preflight_cost_upper_bound_usd", "unknown"
                     ),
                     "used": total_cost,
+                    **(
+                        {"admission_used_upper_bound": budget_cost_used(cost_upper_bound)}
+                        if cost_upper_bound is not None else {}
+                    ),
                 },
                 "verifications": {
                     "used": verification_count,
@@ -1977,12 +1995,15 @@ def _run_token_total(replies: list[Any]) -> int | str:
     return 0 if not replies else _sum_usage(replies, "tokens")
 
 
-def _run_cost_total(replies: list[Any]) -> float | str:
-    """Sum model-reported costs, preserving unknown instead of imputing zero."""
+def _run_cost_total(replies: list[Any], *, unknown_upper_bound: float | None = None) -> float | str:
+    """Sum reported costs, with an optional upper bound for budget admission."""
 
     if not replies:
         return "unknown"
-    values = [reply.cost_usd for reply in replies]
+    values = [
+        unknown_upper_bound if unknown_upper_bound is not None and reply.cost_usd == "unknown" else reply.cost_usd
+        for reply in replies
+    ]
     if not all(
         isinstance(value, (int, float))
         and not isinstance(value, bool)
