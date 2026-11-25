@@ -105,6 +105,26 @@ class SharedReasoningStateTests(unittest.TestCase):
         self.assertNotIn('"content": "4"', trace)
         self.assertEqual(result["budget"]["model_requests"], {"limit": 2, "used": 2})
 
+    def test_baseline_uses_tool_receipts_in_ordinary_context(self) -> None:
+        port = ScriptedModelPort([
+            ModelReply("5", tool_calls=(ToolCall("calculator", "2+2"),)),
+            ModelReply("4"),
+        ])
+        executor = ScriptedToolExecutor()
+        with tempfile.TemporaryDirectory() as directory:
+            run = Runtime(port, tool_executor=executor).run(
+                "Compute 2 + 2.", output_root=Path(directory),
+                visible_context="Use exact arithmetic.", model_request_limit=2, tool_call_limit=1,
+            )
+            trace = Path(run["artifacts"]["trace"]).read_text(encoding="utf-8")
+
+        self.assertEqual(run["budget"]["model_requests"], {"limit": 2, "used": 2})
+        self.assertEqual(run["verification"]["status"], "verified")
+        self.assertIn("Use exact arithmetic.", port.prompts[1])
+        self.assertIn("Tool results:\ncalculator: 4", port.prompts[1])
+        self.assertNotIn("Verified context:", port.prompts[1])
+        self.assertNotIn("calculator: 4", trace)
+
     def test_disabled_state_preserves_plain_request_and_independent_verifier(self) -> None:
         port = ScriptedModelPort([ModelReply("4")])
         with tempfile.TemporaryDirectory() as directory:

@@ -422,7 +422,7 @@ class Runtime:
         run_id = execution.run_id
         problem_sha256 = hashlib.sha256(problem.encode("utf-8")).hexdigest()
         problem_id = problem_id or problem_sha256
-        request_limit = model_request_limit if reasoning_state_enabled else 1
+        request_limit = model_request_limit
         tool_limit = tool_call_limit
         state = execution.state
         request_count = 0
@@ -441,6 +441,7 @@ class Runtime:
         ], _scope)
         replies = []
         provider_requests: list[dict[str, Any]] = []
+        ordinary_tool_results: list[str] = []
         result: dict[str, Any] | None = None
         verification: dict[str, object] = {}
         failure_status: str | None = None
@@ -454,12 +455,16 @@ class Runtime:
                 parts.append(f"Problem context:\n{visible_context}")
             if context:
                 parts.append(f"Verified context:\n{context}")
+            if ordinary_tool_results:
+                parts.append("Tool results:\n" + "\n".join(ordinary_tool_results))
             if request_kind == "diagnosis":
                 parts.append("One bounded diagnosis: make a substantive correction or stop.")
+                if not reasoning_state_enabled and result is not None:
+                    parts.append(f"Previous answer failed the reference check:\n{result['answer']}")
             prompt = "\n\n".join(parts)
             referenced_ids = [item.evidence_id for item in evidence]
             request_id = execution.request_id(request_count + 1)
-            if reasoning_state_enabled:
+            if reasoning_state_enabled or request_kind != "solve":
                 trace.append(
                     {
                         "event": "model_request_sent",
@@ -628,6 +633,7 @@ class Runtime:
                 item = state.add_verified_result(reply.text, scope=result_scope)
                 trace.append(_evidence_event("verified_result_added", item))
 
+            previous_tool_results = len(ordinary_tool_results)
             for call in reply.tool_calls:
                 if self._tool_executor is None:
                     trace.append(
@@ -664,8 +670,23 @@ class Runtime:
                             ).hexdigest(),
                         }
                     )
+                    if not reasoning_state_enabled:
+                        ordinary_result = f"{receipt.tool_name}: {receipt.output}"
+                        if ordinary_result not in ordinary_tool_results:
+                            ordinary_tool_results.append(ordinary_result)
 
             if not reasoning_state_enabled:
+                if request_count < request_limit:
+                    if len(ordinary_tool_results) > previous_tool_results:
+                        request_kind = "tool_continuation"
+                        continue
+                    if verification["status"] == "failed" and not diagnosis_used:
+                        diagnosis_used = True
+                        request_kind = "diagnosis"
+                        continue
+                if diagnosis_used and (verification["status"], result_id) == previous_state[:2]:
+                    stop_reason = "no_progress"
+                    break
                 stop_reason = "answer_generated"
                 break
 
@@ -707,7 +728,7 @@ class Runtime:
             if hasattr(self._model_port, "thinking")
             else "none",
             "max_tokens": getattr(self._model_port, "max_output_tokens", "unknown"),
-            "tools_enabled": False,
+            "tools_enabled": self._tool_executor is not None and tool_limit > 0,
         }
         provider_config.update(getattr(self._model_port, "preflight_config", {}))
         config = {
