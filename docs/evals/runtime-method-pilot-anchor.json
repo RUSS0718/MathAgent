@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "source_revision": "588b2da388a6d850af7886c26f362716632d99d6",
+  "archives": [
+    {
+      "archive": "pilot-20261125",
+      "index_sha256": "bcf69157ec2be58755be9215f909cff282456ae1183c2d98df1b00d572731fc4",
+      "phase": "stopped",
+      "files": 40,
+      "runs": 15
+    },
+    {
+      "archive": "pilot-20261125-continuation",
+      "index_sha256": "d1bbda6aaf5c42f038c649376522b6dcdf66119f6ca0fcbeb355ebc29d197779",
+      "phase": "complete",
+      "files": 31,
+      "runs": 9
+    }
+  ]
+}

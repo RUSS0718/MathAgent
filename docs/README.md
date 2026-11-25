@@ -48,6 +48,20 @@ DeepSeek 真实配对先导完成九个矩阵条件和两个回退条件。证�
 
 校验索引包含四个批次的源码版本、可用的配置哈希，以及 Run、Trace 和批次清单的 SHA-256。文件路径相对于对应批次产物目录。拿到获准访问的产物后，按索引核对文件字节。仓库只发布校验信息。
 
+### 研究方法 Pilot：原批与续批
+
+2026-11-25 的 M2 与双循环 Pilot 共享源码版本 `588b2da388a6d850af7886c26f362716632d99d6`。原批因传输失败停止；续批以独立归档保存，没有覆盖原批。两批合计 24 个 Run（19 个完成、5 个失败）；按独立评价记录，22 个答案正确且完备，2 个未知。实付账单仍为 `unknown`，授权用量按预检上界计入 US$3.6929536。[实施地图及票据证据](https://github.com/RUSS0718/RiCL/issues/248#issuecomment-7165824444)
+
+把获准访问的 `pilot-20261125` 和 `pilot-20261125-continuation` 两个目录放在同一父目录下。将下例中的 `./approved-archives` 换成该父目录：
+
+```powershell
+uv run python scripts/verify_runtime_pilot.py ./approved-archives
+```
+
+[固定校验锚点](evals/runtime-method-pilot-anchor.json)记录各归档的索引哈希、状态及预期文件数和 Run 数。核验器离线检查原批 40 个文件／15 个 Run 和续批 31 个文件／9 个 Run 的索引、文件字节、Run 身份、源码版本、配置哈希与对应 Trace，不读取受限答案键，也不调用 Provider。校验通过仅说明产物与锚点一致，不重判数学答案，也不把未触发的机制算作成功。
+
+M2 的 6 对运行没有冷启动后的调度机会；真实双循环中可评估的 Run 没有自然关键失败；状态复用有真实送达与明确引用，但没有真实撤销。详见 [#256](https://github.com/RUSS0718/RiCL/issues/256)、[#257](https://github.com/RUSS0718/RiCL/issues/257)、[#258](https://github.com/RUSS0718/RiCL/issues/258)、[#259](https://github.com/RUSS0718/RiCL/issues/259)。
+
 ## 三项研究机制及当前状态
 
 | 机制 | 范围入口 | Runtime CLI 状态 |
