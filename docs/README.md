@@ -32,6 +32,8 @@ uv run python -m ricl_runtime.experiments --order-seed 17
 
 DeepSeek 与 MiniMax 分别用一次获批的真实请求完成了同一道整数加法校验。两次运行共用 CLI、ModelPort、独立验证和 Run 账本。记录包含请求与返回模型、供应商用量、阶段耗时和复跑参数。[DeepSeek smoke 记录](evals/runtime-deepseek-smoke.md)、[MiniMax smoke 记录](evals/runtime-minimax-smoke.md)
 
+DeepSeek 真实配对先导完成九个矩阵条件和两个回退条件。证据记录列出共享预算、分支行为和剩余验证缺口。[配对先导记录](evals/runtime-deepseek-paired-pilot.md)、[旧资产退役预审](engineering/runtime-legacy-retirement-inventory.md)
+
 ## 三项研究机制及当前状态
 
 | 机制 | 范围入口 | Runtime CLI 状态 |
