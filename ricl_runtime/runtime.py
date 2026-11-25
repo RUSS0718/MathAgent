@@ -1293,7 +1293,7 @@ class Runtime:
         )
         elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
         config = {
-            "mode": "offline",
+            "mode": "offline" if getattr(self._model_port, "provider", "offline") == "offline" else "live",
             "route": "serial_population",
             "model_port": self._model_port.name,
             "reasoning_config": "none",

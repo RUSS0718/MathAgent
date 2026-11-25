@@ -69,6 +69,18 @@ def replies() -> list[ModelReply]:
 
 
 class SerialPopulationTests(unittest.TestCase):
+    def test_provider_backed_port_is_recorded_as_live_in_run_artifact(self) -> None:
+        port = ScriptedModelPort(replies())
+        port.provider = "deepseek"
+        budget = PopulationBudget(model_requests=2, tokens=30, tools=0, elapsed_ms=100, cost_usd=0)
+        with tempfile.TemporaryDirectory() as directory:
+            run = Runtime(port).run_population(
+                "Compute 2 + 2.", opportunities(), budget=budget, output_root=Path(directory),
+            )
+            artifact = json.loads(Path(run["artifacts"]["run"]).read_text(encoding="utf-8"))
+
+        self.assertEqual(artifact["config"]["mode"], "live")
+
     def test_route_timeout_keeps_the_run_and_stops_the_population(self) -> None:
         port = ScriptedModelPort([])
         budget = PopulationBudget(model_requests=2, tokens=30, tools=0, elapsed_ms=100, cost_usd=0)
