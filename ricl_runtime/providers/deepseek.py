@@ -44,8 +44,8 @@ ALLOWED_MODELS = (
     "deepseek-flash",
     "deepseek-v4-flash",
     "deepseek-v4-flash-vision-exp",
-    "deepseek-v4.1-flash",
 )
+GATEWAY_ALLOWED_MODELS = ("deepseek-v4.1-flash",)
 MAX_PROMPT_BYTES = 16 * 1024
 INPUT_FRAMING_MARGIN_TOKENS = 1024
 COST_LIMIT_USD = Decimal("0.05")
@@ -119,6 +119,14 @@ class DeepSeekModelPort:
         return validate_base_url(self.base_url, ALLOWED_GATEWAY_HOST)
 
     @property
+    def max_prompt_bytes(self) -> int:
+        return MAX_PROMPT_BYTES
+
+    @property
+    def transport_timeout_seconds(self) -> float:
+        return DEFAULT_TIMEOUT_SECONDS
+
+    @property
     def _input_peak_usd_per_million(self) -> Decimal:
         return (
             GATEWAY_INPUT_PEAK_USD_PER_MILLION
@@ -159,7 +167,9 @@ class DeepSeekModelPort:
             "selected_endpoint_host": (
                 ALLOWED_GATEWAY_HOST if self._is_gateway else ALLOWED_HOST
             ),
-            "model_allowlist": list(ALLOWED_MODELS),
+            "model_allowlist": list(
+                GATEWAY_ALLOWED_MODELS if self._is_gateway else ALLOWED_MODELS
+            ),
             "transport_timeout_seconds": DEFAULT_TIMEOUT_SECONDS,
             "max_prompt_bytes": MAX_PROMPT_BYTES,
             "input_token_framing_margin": INPUT_FRAMING_MARGIN_TOKENS,
@@ -183,7 +193,8 @@ class DeepSeekModelPort:
         approved_host = (
             is_gateway or validate_base_url(self.base_url, ALLOWED_HOST)
         )
-        if not approved_host or self.model not in ALLOWED_MODELS:
+        allowed_models = GATEWAY_ALLOWED_MODELS if is_gateway else ALLOWED_MODELS
+        if not approved_host or self.model not in allowed_models:
             raise ProviderPreflightError("provider host or model is not allowlisted")
 
         prompt_bytes = len(problem.encode("utf-8"))

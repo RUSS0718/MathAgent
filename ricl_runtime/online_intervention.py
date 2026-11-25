@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 EvidenceRecheck = Callable[[tuple[ScopedDerivation, ...]], Iterable[str]]
 Revocation = tuple[ScopedDerivation, DerivationChange]
 _INTERVENTION_REQUESTS = 4  # Diagnosis, two single-step arms, and a parent continuation.
+_INTERVENTION_VERIFICATIONS = 3  # One independent check per arm and one parent merge recheck.
 
 
 def recheck_derivations(
@@ -124,6 +125,7 @@ class OnlineIntervention:
         recheck: EvidenceRecheck | None,
         *,
         account_verification: Callable[[float], None] | None = None,
+        budget_reserve: Callable[[], str | None] | None = None,
         budget_stop: Callable[[], str | None] | None = None,
         budget_overrun: Callable[[], str | None] | None = None,
     ) -> None:
@@ -131,6 +133,7 @@ class OnlineIntervention:
         self._trace = trace
         self._recheck = recheck
         self._account_verification = account_verification or (lambda _: None)
+        self._budget_reserve = budget_reserve or (lambda: None)
         self._budget_stop = budget_stop or (lambda: None)
         self._budget_overrun = budget_overrun or (lambda: None)
         self._started = False
@@ -155,10 +158,12 @@ class OnlineIntervention:
         """Try a pair on a critical independently established failure with continuation reserved."""
         graph = state.derivations
         failure = _critical_failure(self._verifier, graph, scope, checks, revocations)
+        reserve_reason = self._budget_reserve() if failure.targets and not self._started else None
         reason = (
             "no_critical_failure" if not failure.targets else
             "already_triggered" if self._started else
             "insufficient_model_requests" if remaining_requests < _INTERVENTION_REQUESTS else
+            "insufficient_full_budget" if reserve_reason is not None else
             "admitted"
         )
         self._trace.append({
@@ -170,8 +175,19 @@ class OnlineIntervention:
             "affected_goal_ids": list(failure.targets),
             "remaining_model_requests": remaining_requests,
             "required_model_requests": _INTERVENTION_REQUESTS,
+            "required_local_verifications": _INTERVENTION_VERIFICATIONS
+            if reason == "admitted" else "unknown",
+            "budget_reserve_reason": reserve_reason,
         })
         if reason != "admitted":
+            if reserve_reason is not None:
+                self._trace.append({
+                    "event": "counterfactual_budget_blocked",
+                    "request_id": request_id,
+                    "stage": "admission",
+                    "reason": reserve_reason,
+                    "failure_evidence_ids": failure.ids,
+                })
             return None
         self._started = True
         frozen = state.fork()
@@ -207,6 +223,7 @@ class OnlineIntervention:
             "shared_evidence_ids": shared_evidence_ids,
             "dependency_evidence_ids": dependency_ids,
             "reserved_model_requests": _INTERVENTION_REQUESTS,
+            "reserved_local_verifications": _INTERVENTION_VERIFICATIONS,
             "arm_budget": budget,
         })
 

@@ -157,22 +157,35 @@ class RuntimeOnlineInterventionTests(unittest.TestCase):
                 for line in Path(run["artifacts"]["trace"]).read_text(encoding="utf-8").splitlines()
             ]
 
-        self.assertEqual(len(port.prompts), 2)
-        self.assertEqual(run["budget"]["model_requests"]["used"], 2)
-        self.assertEqual(run["budget"]["tokens"]["used"], 30)
+        self.assertEqual(len(port.prompts), 1)
+        self.assertEqual(run["budget"]["model_requests"]["used"], 1)
+        self.assertEqual(run["budget"]["tokens"]["used"], 15)
         self.assertEqual(run["verification"]["status"], "unknown")
         self.assertEqual(run["budget"]["verifications"]["used"], 1)
         self.assertEqual(run["run"]["status"], "stopped")
         self.assertEqual(run["run"]["stop_reason"], "token_budget_exhausted")
+        trigger = next(
+            event for event in trace
+            if event["event"] == "counterfactual_trigger_evaluated"
+        )
+        self.assertEqual(trigger["reason"], "insufficient_full_budget")
+        self.assertEqual(trigger["budget_reserve_reason"], "token_budget_exhausted")
+        self.assertFalse(any(
+            event["event"] == "counterfactual_started" for event in trace
+        ))
+        self.assertFalse(any(
+            str(event.get("request_kind", "")).startswith("counterfactual_")
+            for event in trace if event["event"] == "model_request_sent"
+        ))
         blocked = next(
             event for event in trace
             if event["event"] == "counterfactual_budget_blocked"
         )
-        self.assertEqual(blocked["stage"], "arm_control")
+        self.assertEqual(blocked["stage"], "admission")
         self.assertEqual(blocked["reason"], "token_budget_exhausted")
-        merge = next(event for event in trace if event["event"] == "counterfactual_merge")
-        self.assertEqual(merge["status"], "withheld")
-        self.assertEqual(merge["reason"], "budget_arm_control_token_budget_exhausted")
+        self.assertFalse(any(
+            event["event"] == "counterfactual_merge" for event in trace
+        ))
 
     def test_unknown_and_tied_pairs_leave_parent_checkpoint_unchanged(self):
         cases = (

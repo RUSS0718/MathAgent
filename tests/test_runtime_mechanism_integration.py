@@ -186,6 +186,7 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         self.assertEqual([(event["route_id"], event["strategy"]) for event in decisions], [
             ("route_01", "cold_start"),
             ("route_02", "cold_start"),
+            ("route_01", "gain"),
         ])
         for decision in decisions:
             sent = next(
@@ -201,7 +202,7 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         search_completed = next(
             event for event in trace if event["event"] == "online_search_completed"
         )
-        self.assertEqual(search_completed["selection_counts"], {"cold_start": 2})
+        self.assertEqual(search_completed["selection_counts"], {"cold_start": 2, "gain": 1})
         route_rows = {row["route_id"]: row for row in search_completed["routes"]}
         merged_evidence_id = merge["merged_evidence_ids"][0]
         merged_credit = next(
@@ -222,6 +223,10 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
             if event["event"] == "route_continuation_selected"
         )
         self.assertEqual(continuation["route_id"], "route_02")
+        self.assertEqual(continuation["selection_strategy"], "gain")
+        self.assertEqual(continuation["aprs_selected_route_id"], decisions[-1]["route_id"])
+        self.assertEqual(continuation["aprs_selection_overridden"], decisions[-1]["route_id"] != "route_02")
+        self.assertEqual(continuation["decision_id"], decisions[-1]["decision_id"])
         self.assertEqual(continuation["checkpoint_id"], merge["checkpoint_id"])
         self.assertEqual(
             continuation["merged_evidence_ids"], merge["merged_evidence_ids"]
@@ -276,8 +281,8 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
                 PROBLEM,
                 output_root=Path(directory),
                 model_request_limit=8,
-                tool_call_limit=1,
-                token_limit=512,
+                tool_call_limit=3,
+                token_limit=262_144,
                 elapsed_limit_ms=30_000,
                 cost_limit_usd=0.1,
                 tool_executor_factory=lambda _: MechanismTool(),
@@ -302,8 +307,8 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         ])
         self.assertEqual(public["trace_schema_version"], 1)
         self.assertEqual(public["budget"]["model_requests"], 8)
-        self.assertEqual(public["budget"]["tools"], 1)
-        self.assertEqual(public["budget"]["tokens"], 512)
+        self.assertEqual(public["budget"]["tools"], 3)
+        self.assertEqual(public["budget"]["tokens"], 262_144)
         self.assertEqual(public["budget"]["elapsed_limit_ms"], 30_000)
         self.assertEqual(public["budget"]["cost_limit_usd"], 0.1)
         self.assertEqual(public["capabilities"]["max_candidates"], 3)
@@ -330,7 +335,7 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         self.assertNotIn("Study the domain first.", json.dumps(public))
 
         self.assertEqual(runs["Baseline"][0]["verification"]["status"], "verified")
-        self.assertEqual(runs["Baseline"][0]["budget"]["tools"], {"limit": 1, "used": 1})
+        self.assertEqual(runs["Baseline"][0]["budget"]["tools"], {"limit": 3, "used": 1})
         self.assertEqual(runs["RiCL-State"][0]["verification"]["status"], "unknown")
         self.assertEqual(runs["RiCL-State"][0]["usage"]["tokens"], "unknown")
         self.assertEqual(runs["RiCL-Search"][0]["run"]["status"], "failed")
@@ -351,6 +356,7 @@ class RuntimeMechanismIntegrationTests(unittest.TestCase):
         self.assertEqual([(event["route_id"], event["strategy"]) for event in decisions], [
             ("route_01", "cold_start"),
             ("route_02", "cold_start"),
+            ("route_02", "gain"),
         ])
         merge = next(event for event in full_trace if event["event"] == "counterfactual_merge")
         continuation = next(

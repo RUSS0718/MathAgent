@@ -22,6 +22,7 @@ from .derivations import DerivationScope, ScopedDerivation
 from .identity import stable_id
 from .math_verification import prepare_math_verification
 from .online_intervention import (
+    _INTERVENTION_REQUESTS,
     InterventionContinuation,
     OnlineIntervention,
     Revocation,
@@ -703,6 +704,7 @@ class Runtime:
                 trace,
                 self._math_evidence_recheck,
                 account_verification=account_verification,
+                budget_reserve=lambda: intervention_budget_reserve_reason(),
                 budget_stop=lambda: budget_admission_reason(),
                 budget_overrun=lambda: budget_overrun_reason(),
             )
@@ -735,6 +737,78 @@ class Runtime:
                 if cost_used == "unknown":
                     return "cost_budget_unknown"
                 if cost_used >= cost_limit_usd:
+                    return "cost_budget_exhausted"
+            return None
+
+        def intervention_budget_reserve_reason() -> str | None:
+            if request_limit - requests.count < _INTERVENTION_REQUESTS:
+                return "insufficient_model_requests"
+            if token_limit is not None:
+                tokens_used = _run_token_total(requests.replies)
+                provider_bounded = isinstance(
+                    getattr(self._model_port, "max_output_tokens", "unknown"), int
+                ) and isinstance(
+                    getattr(self._model_port, "max_prompt_bytes", "unknown"), int
+                )
+                if tokens_used == "unknown":
+                    return "token_budget_unknown"
+                if provider_bounded:
+                    reserve = _INTERVENTION_REQUESTS * (
+                        self._model_port.max_prompt_bytes + 1024
+                        + self._model_port.max_output_tokens
+                    )
+                else:
+                    known = [
+                        (reply.input_tokens, reply.output_tokens)
+                        for reply in requests.replies
+                        if isinstance(reply.input_tokens, int)
+                        and isinstance(reply.output_tokens, int)
+                    ]
+                    if not known:
+                        return "token_budget_unknown"
+                    reserve = _INTERVENTION_REQUESTS * max(
+                        input_tokens + 1024 + output_tokens
+                        for input_tokens, output_tokens in known
+                    )
+                if tokens_used + reserve > token_limit:
+                    return "token_budget_exhausted"
+            if elapsed_limit_ms is not None:
+                timeout_seconds = getattr(
+                    self._model_port, "transport_timeout_seconds", "unknown"
+                )
+                reserve = _INTERVENTION_REQUESTS * (
+                    float(timeout_seconds) * 1000
+                    if isinstance(timeout_seconds, (int, float))
+                    else max(
+                        (record["elapsed_ms"] for record in requests.records), default=0.0
+                    )
+                )
+                if current_elapsed_ms() + reserve > elapsed_limit_ms:
+                    return "elapsed_budget_exhausted"
+            if cost_limit_usd is not None:
+                upper_bound = getattr(
+                    self._model_port, "preflight_config", {}
+                ).get("preflight_cost_upper_bound_usd", "unknown")
+                cost_used = _run_cost_total(requests.replies)
+                try:
+                    reserve = _INTERVENTION_REQUESTS * float(upper_bound)
+                except (TypeError, ValueError):
+                    known_costs = [
+                        reply.cost_usd for reply in requests.replies
+                        if isinstance(reply.cost_usd, (int, float))
+                    ]
+                    if not known_costs:
+                        return "cost_budget_unknown"
+                    reserve = _INTERVENTION_REQUESTS * max(
+                        float(value) for value in known_costs
+                    )
+                if cost_used == "unknown" and isinstance(
+                    getattr(self._model_port, "cost_limit_usd", "unknown"), (int, float)
+                ):
+                    return "cost_budget_unknown"
+                if cost_used == "unknown":
+                    cost_used = 0.0
+                if cost_used + reserve > cost_limit_usd:
                     return "cost_budget_exhausted"
             return None
 
@@ -863,6 +937,8 @@ class Runtime:
             if generating_candidates:
                 request_kind = "candidate_generation"
             elif resumed is not None and search is not None and resumed.parent_route_id is not None:
+                supports = derivations.goal_supports(derivation_scope) if derivations is not None else {}
+                selected_route, decision = search.select(requests.next_request_id, supports)
                 route = next(
                     (
                         candidate for candidate in search.routes
@@ -878,6 +954,11 @@ class Runtime:
                     "event": "route_continuation_selected",
                     "request_id": requests.next_request_id,
                     "route_id": route.route_id,
+                    "decision_id": decision["decision_id"],
+                    "selection_strategy": decision["strategy"],
+                    "aprs_selected_route_id": selected_route.route_id,
+                    "aprs_selection_overridden": selected_route.route_id != route.route_id,
+                    "parent_route_id": resumed.parent_route_id,
                     "checkpoint_id": resumed.checkpoint_id,
                     "merged_evidence_ids": list(resumed.merged_evidence_ids),
                     "reason": (
@@ -1094,6 +1175,18 @@ class Runtime:
                         )
                     request_kind = "counterfactual_continuation"
                     continue
+                trigger = next(
+                    (
+                        event for event in reversed(trace)
+                        if event["event"] == "counterfactual_budget_blocked"
+                        and event["stage"] == "admission"
+                        and event["request_id"] == request_id
+                    ),
+                    None,
+                )
+                if trigger is not None:
+                    stop_reason = trigger["reason"]
+                    break
             if search is not None:
                 if verification["status"] == "verified" and search.cold_start_complete:
                     stop_reason = "answer_generated"
