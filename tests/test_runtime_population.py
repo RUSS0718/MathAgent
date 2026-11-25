@@ -17,6 +17,7 @@ from ricl_runtime import (
     ToolCall,
     ToolReceipt,
 )
+from ricl_runtime.providers.deepseek import ProviderTimeoutError
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
@@ -68,6 +69,25 @@ def replies() -> list[ModelReply]:
 
 
 class SerialPopulationTests(unittest.TestCase):
+    def test_route_timeout_keeps_the_run_and_stops_the_population(self) -> None:
+        port = ScriptedModelPort([])
+        budget = PopulationBudget(model_requests=2, tokens=30, tools=0, elapsed_ms=100, cost_usd=0)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(port, "complete", side_effect=ProviderTimeoutError("private detail")) as complete,
+        ):
+            run = Runtime(port).run_population(
+                "Compute 2 + 2.", opportunities(), budget=budget, output_root=Path(directory),
+            )
+            trace = Path(run["artifacts"]["trace"]).read_text(encoding="utf-8")
+        self.assertEqual(run["run"]["status"], "failed")
+        self.assertEqual(run["run"]["stop_reason"], "timeout")
+        self.assertEqual(run["budget"]["model_requests"], {"limit": 2, "used": 1})
+        self.assertEqual(run["verification"]["status"], "unknown")
+        self.assertIn("model_request_failed", trace)
+        self.assertNotIn("private detail", trace + json.dumps(run))
+        complete.assert_called_once()
+
     def test_plain_and_aprs_expand_same_opportunities_and_budget_then_select_with_evidence(self) -> None:
         routes = opportunities()
         budget = PopulationBudget(model_requests=2, tokens=30, tools=0, elapsed_ms=100, cost_usd=0)

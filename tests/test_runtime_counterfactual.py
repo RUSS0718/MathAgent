@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ricl_runtime import (
     CounterfactualCheckpoint,
@@ -13,6 +14,7 @@ from ricl_runtime import (
     Runtime,
     SharedReasoningState,
 )
+from ricl_runtime.providers.deepseek import ProviderTimeoutError
 
 
 class ScriptedModelPort:
@@ -31,6 +33,31 @@ class ScriptedModelPort:
 
 class CounterfactualRuntimeTests(unittest.TestCase):
     """Exercise paired branches only through the Runtime's public interface."""
+
+    def test_parent_timeout_preserves_arms_without_claiming_consumption(self) -> None:
+        port = ScriptedModelPort([])
+        checkpoint = CounterfactualCheckpoint(visible_prefix="failed verification", failure_count=1)
+        replies = [
+            ModelReply("5", action="continue"), ModelReply("4", action="repair"),
+            ProviderTimeoutError("private parent failure"),
+        ]
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(port, "complete", side_effect=replies) as complete,
+        ):
+            run = Runtime(port).run_counterfactual(
+                "Compute 2 + 2.", checkpoint=checkpoint, intervention_feedback="Recheck the arithmetic.",
+                intervention_auditor=lambda feedback, reply: InterventionAudit("approved", "fixture", True),
+                output_root=Path(directory),
+            )
+            trace = Path(run["artifacts"]["trace"]).read_text(encoding="utf-8")
+        self.assertEqual(run["run"], {"status": "failed", "stop_reason": "timeout"})
+        self.assertEqual(run["budget"]["model_requests"], {"limit": 3, "used": 3})
+        self.assertEqual(set(run["branches"]), {"control", "treatment"})
+        self.assertFalse(run["intervention"]["feedback_consumed_by_parent"])
+        self.assertEqual(run["parent_evidence"], run["checkpoint"]["evidence"])
+        self.assertNotIn("private parent failure", trace + json.dumps(run))
+        self.assertEqual(complete.call_count, 3)
 
     def _run(
         self,

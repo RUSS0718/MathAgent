@@ -248,7 +248,7 @@ def _run_case(
     last_phase = repair or main
     run_status = last_phase.get("run", {"status": "failed", "stop_reason": failure})
     if (
-        run_status.get("failure_status") == "budget_exhausted"
+        run_status.get("stop_reason") == "budget_exhausted"
         or fixture.elapsed_ms > budget.elapsed_ms
     ):
         failure = "budget_exhausted"

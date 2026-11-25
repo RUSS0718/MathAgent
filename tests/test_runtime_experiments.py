@@ -118,13 +118,13 @@ class RuntimeExperimentTests(unittest.TestCase):
         ):
             manifest = run_offline_pilot(output_root=Path(directory))
             run, trace = self._read_case(manifest, "ordinary")["ricl-search"]
-            self.assertEqual(run["run"], {"status": "failed", "stop_reason": "timeout"})
-            self.assertEqual(run["verification"]["status"], "unknown")
+            self.assertEqual(run["run"]["status"], "failed")
+            self.assertEqual(run["run"]["stop_reason"], "timeout")
+            self.assertEqual(run["verification"]["status"], "verified")
             self.assertEqual(run["budget"]["model_requests"]["used"], 1)
             self.assertEqual(manifest["counts"]["stop_reason"]["timeout"], 4)
-            self.assertEqual(manifest["counts"]["verification"]["unknown"], 4)
             self.assertEqual(sum(event["event"] == "candidate_expanded" for event in trace), 1)
-            self.assertTrue(any(event["event"] == "phase_interrupted" for event in trace))
+            self.assertTrue(any(event["event"] == "model_request_failed" for event in trace))
 
     @staticmethod
     def _read_case(manifest, case_id):

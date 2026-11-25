@@ -159,14 +159,41 @@ class Runtime:
             },
         ], _scope)
         started = time.perf_counter()
+        request_count = 0
+        failure_status: str | None = None
+
+        def complete(prompt: str, request_event: dict[str, Any]) -> ModelReply | None:
+            nonlocal request_count, failure_status
+            request_count += 1
+            trace.append(request_event)
+            try:
+                reply = self._model_port.complete(prompt)
+            except ModelPortFailure as error:
+                failure_status = _model_failure_status(error)
+                request_sent = getattr(error, "request_sent", "unknown")
+                if request_sent is not False:
+                    replies.append(_failure_reply(error))
+                trace.append({
+                    "event": "model_request_failed",
+                    "request_id": request_event["request_id"],
+                    "arm": request_event["arm"],
+                    "status": failure_status,
+                    "request_sent": request_sent,
+                })
+                return None
+            request_event["event"] = "model_request_sent"
+            replies.append(reply)
+            return reply
+
         for index, arm in enumerate(("control", "treatment"), start=1):
             prompt = common_prompt
             if arm == "treatment":
                 prompt += f"\n\nIntervention feedback:\n{intervention_feedback}"
             request_id = execution.request_id(index)
-            trace.append(
+            reply = complete(
+                prompt,
                 {
-                    "event": "model_request_sent",
+                    "event": "model_request_started",
                     "request_id": request_id,
                     "arm": arm,
                     "checkpoint_sha256": checkpoint_sha256,
@@ -174,8 +201,8 @@ class Runtime:
                     "context_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
                 }
             )
-            reply = self._model_port.complete(prompt)
-            replies.append(reply)
+            if reply is None:
+                break
             verification = verify_integer_addition(problem, reply.text)
             scope = f"{problem_sha256}:{verification['scope']}"
             branch_result_id = stable_id("result", {"content": reply.text, "scope": scope})
@@ -202,12 +229,19 @@ class Runtime:
                 "evidence": branch_states[arm].public_snapshot(),
             }
 
-        control = branches["control"]
-        treatment = branches["treatment"]
-        action_changed = treatment["action"] is not None and treatment["action"] != control["action"]
-        route_changed = treatment["route"] is not None and treatment["route"] != control["route"]
+        control = branches.get("control")
+        treatment = branches.get("treatment")
+        action_changed = bool(
+            control and treatment and treatment["action"] is not None
+            and treatment["action"] != control["action"]
+        )
+        route_changed = bool(
+            control and treatment and treatment["route"] is not None
+            and treatment["route"] != control["route"]
+        )
+        treatment_verified = bool(treatment and treatment["verification"]["status"] == "verified")
         audit: InterventionAudit | None = None
-        if intervention_auditor is not None:
+        if intervention_auditor is not None and treatment is not None:
             proposed_audit = intervention_auditor(intervention_feedback, replies[1])
             if isinstance(proposed_audit, InterventionAudit):
                 audit = proposed_audit
@@ -218,24 +252,22 @@ class Runtime:
             and audit.feedback_consumed is True
         )
         effective = action_changed or route_changed
-        feedback_available = bool(
-            audit_approved and effective and treatment["verification"]["status"] == "verified"
-        )
+        feedback_available = audit_approved and effective and treatment_verified
         parent_request_id: str | None = None
         parent_referenced_ids: list[str] = []
         parent_continuation: dict[str, Any] | None = None
-        parent_budget_available = feedback_available and len(replies) < model_request_limit
+        parent_budget_available = feedback_available and request_count < model_request_limit
         stop_reason = (
             "parent_feedback_budget_exhausted"
             if feedback_available and not parent_budget_available
             else "counterfactual_pair_completed"
         )
-        if parent_budget_available:
-            intervention_evidence = parent_state.add_verified_result(
+        if parent_budget_available and treatment is not None:
+            parent_state.add_verified_result(
                 treatment["answer"],
                 scope=f"{problem_sha256}:{treatment['verification']['scope']}",
             )
-            parent_request_id = execution.request_id(len(replies) + 1)
+            parent_request_id = execution.request_id(request_count + 1)
             parent_referenced_ids = [
                 item.evidence_id for item in parent_state.valid_evidence()
             ]
@@ -244,9 +276,10 @@ class Runtime:
             if parent_context:
                 parent_prompt_parts.append(f"Verified context:\n{parent_context}")
             parent_prompt = "\n\n".join(parent_prompt_parts)
-            trace.append(
+            parent_reply = complete(
+                parent_prompt,
                 {
-                    "event": "model_request_sent",
+                    "event": "model_request_started",
                     "request_id": parent_request_id,
                     "arm": "parent",
                     "checkpoint_sha256": checkpoint_sha256,
@@ -254,52 +287,58 @@ class Runtime:
                     "context_sha256": hashlib.sha256(parent_prompt.encode("utf-8")).hexdigest(),
                 }
             )
-            parent_reply = self._model_port.complete(parent_prompt)
-            replies.append(parent_reply)
-            parent_verification = verify_integer_addition(problem, parent_reply.text)
-            parent_scope = f"{problem_sha256}:{parent_verification['scope']}"
-            parent_result_id = stable_id(
-                "result", {"content": parent_reply.text, "scope": parent_scope}
-            )
-            parent_continuation = {
-                "request_id": parent_request_id,
-                "result_id": parent_result_id,
-                "answer": parent_reply.text,
-                "action": parent_reply.action,
-                "route": parent_reply.route,
-                "verification": parent_verification,
-            }
-            if parent_verification["status"] == "verified":
-                parent_state.add_verified_result(parent_reply.text, scope=parent_scope)
-            trace.append(
-                {
-                    "event": "parent_continuation_recorded",
+            if parent_reply is None:
+                parent_state = checkpoint.reasoning_state.fork()
+            else:
+                parent_verification = verify_integer_addition(problem, parent_reply.text)
+                parent_scope = f"{problem_sha256}:{parent_verification['scope']}"
+                parent_result_id = stable_id(
+                    "result", {"content": parent_reply.text, "scope": parent_scope}
+                )
+                parent_continuation = {
                     "request_id": parent_request_id,
                     "result_id": parent_result_id,
-                    "answer_sha256": hashlib.sha256(parent_reply.text.encode("utf-8")).hexdigest(),
-                    "verification_status": parent_verification["status"],
-                    "action_changed_from_checkpoint": (
-                        parent_reply.action != checkpoint.current_action
-                        if parent_reply.action is not None and checkpoint.current_action is not None
-                        else "unknown"
-                    ),
-                    "route_changed_from_checkpoint": (
-                        parent_reply.route != checkpoint.current_route
-                        if parent_reply.route is not None and checkpoint.current_route is not None
-                        else "unknown"
-                    ),
+                    "answer": parent_reply.text,
+                    "action": parent_reply.action,
+                    "route": parent_reply.route,
+                    "verification": parent_verification,
                 }
-            )
+                if parent_verification["status"] == "verified":
+                    parent_state.add_verified_result(parent_reply.text, scope=parent_scope)
+                trace.append(
+                    {
+                        "event": "parent_continuation_recorded",
+                        "request_id": parent_request_id,
+                        "result_id": parent_result_id,
+                        "answer_sha256": hashlib.sha256(parent_reply.text.encode("utf-8")).hexdigest(),
+                        "verification_status": parent_verification["status"],
+                        "action_changed_from_checkpoint": (
+                            parent_reply.action != checkpoint.current_action
+                            if parent_reply.action is not None and checkpoint.current_action is not None
+                            else "unknown"
+                        ),
+                        "route_changed_from_checkpoint": (
+                            parent_reply.route != checkpoint.current_route
+                            if parent_reply.route is not None and checkpoint.current_route is not None
+                            else "unknown"
+                        ),
+                    }
+                )
+        parent_consumed = parent_continuation is not None
+        consumption_basis = "not_qualified"
+        if feedback_available:
+            if parent_consumed:
+                consumption_basis = "present_in_parent_request"
+            elif parent_request_id is not None:
+                consumption_basis = "parent_request_failed"
+            else:
+                consumption_basis = "budget_exhausted"
         trace.extend(
             [
                 {
                     "event": "intervention_feedback_consumed",
-                    "feedback_consumed": bool(
-                        intervention_evidence.evidence_id in parent_referenced_ids
-                    ) if parent_budget_available else False,
-                    "consumption_basis": "present_in_parent_request" if parent_budget_available else (
-                        "budget_exhausted" if feedback_available else "not_qualified"
-                    ),
+                    "feedback_consumed": parent_consumed,
+                    "consumption_basis": consumption_basis,
                     "parent_request_id": parent_request_id,
                     "referenced_evidence_ids": parent_referenced_ids,
                     "treatment_reported_feedback_consumed": bool(
@@ -313,10 +352,10 @@ class Runtime:
                 {
                     "event": "intervention_adjudicated",
                     "effective": effective,
-                    "treatment_verified": treatment["verification"]["status"] == "verified",
+                    "treatment_verified": treatment_verified,
                     "feedback_available_to_parent": parent_budget_available,
                     "feedback_eligible": feedback_available,
-                    "feedback_consumed_by_parent": bool(parent_request_id),
+                    "feedback_consumed_by_parent": parent_consumed,
                 },
             ]
         )
@@ -345,7 +384,9 @@ class Runtime:
         run_dir = output_root / run_id
         trace_path = run_dir / "trace.jsonl"
         run_path = run_dir / "run.json"
-        trace.append({"event": "run_stopped", "status": "completed", "stop_reason": stop_reason})
+        status = "failed" if failure_status else "completed"
+        stop_reason = failure_status or stop_reason
+        trace.append({"event": "run_stopped", "status": status, "stop_reason": stop_reason})
         final = parent_continuation or control
         result_record = {
             "schema_version": 1,
@@ -355,10 +396,10 @@ class Runtime:
             "config_sha256": config_sha256,
             "problem": {"id": problem_id, "sha256": problem_sha256},
             "condition_id": condition_id,
-            "model": {"requested": self._model_port.name, "actual": replies[-1].model or "unknown"},
+            "model": {"requested": self._model_port.name, "actual": replies[-1].model if replies else "unknown"},
             "budget": {
                 "scope": "run_shared",
-                "model_requests": {"limit": model_request_limit, "used": len(replies)},
+                "model_requests": {"limit": model_request_limit, "used": request_count},
                 "tokens": {"limit": "unknown", "used": _sum_usage(replies, "tokens")},
                 "tools": {"limit": 0, "used": 0},
                 "elapsed_ms": elapsed_ms,
@@ -369,8 +410,10 @@ class Runtime:
                 "source": _usage_source(replies),
             },
             "cost": {"amount_usd": "unknown", "source": "unknown"},
-            "result": {"id": final["result_id"], "answer": final["answer"]},
-            "verification": final["verification"],
+            "result": {"id": final["result_id"], "answer": final["answer"]} if final else None,
+            "verification": final["verification"] if final else {
+                "status": "unknown", "scope": "none", "reason": stop_reason,
+            },
             "checkpoint": checkpoint_record,
             "branches": branches,
             "intervention": {
@@ -379,8 +422,8 @@ class Runtime:
                 "selected_repair_id": selected_repair_id,
                 "audit_status": audit.status if audit else "unknown",
                 "audit_source": audit.source if audit else "",
-                "feedback_consumed": bool(parent_request_id),
-                "feedback_consumed_by_parent": bool(parent_request_id),
+                "feedback_consumed": parent_consumed,
+                "feedback_consumed_by_parent": parent_consumed,
                 "treatment_reported_feedback_consumed": bool(
                     audit and audit.feedback_consumed is True
                 ),
@@ -389,13 +432,13 @@ class Runtime:
                 "effective": effective,
                 "feedback_available_to_parent": parent_budget_available,
                 "feedback_eligible": feedback_available,
-                "parent_feedback": treatment["answer"] if parent_request_id else None,
+                "parent_feedback": treatment["answer"] if parent_consumed and treatment else None,
                 "parent_request_id": parent_request_id,
                 "trigger_count_after": checkpoint.trigger_count,
             },
             "parent_continuation": parent_continuation,
             "parent_evidence": parent_state.public_snapshot(),
-            "run": {"status": "completed", "stop_reason": stop_reason},
+            "run": {"status": status, "stop_reason": stop_reason},
             "artifacts": {"run": str(run_path), "trace": str(trace_path)},
         }
         return _finish_phase(result_record, trace, _scope, parent_state)
@@ -485,16 +528,7 @@ class Runtime:
                 reply = self._model_port.complete(prompt)
             except ModelPortFailure as error:
                 request_elapsed_ms = round((time.perf_counter() - request_started) * 1000, 3)
-                failure_status = error.failure_status
-                if failure_status not in {
-                    "protocol_failed",
-                    "unknown_outcome",
-                    "timeout",
-                    "budget_exhausted",
-                    "invalid_output",
-                    "preflight_rejected",
-                }:
-                    failure_status = "unknown_outcome"
+                failure_status = _model_failure_status(error)
                 verification = {
                     "status": "unknown",
                     "applicable": False,
@@ -502,9 +536,7 @@ class Runtime:
                     "reason": failure_status,
                 }
                 request_sent = getattr(error, "request_sent", "unknown")
-                metadata = getattr(error, "reply", None)
-                if not isinstance(metadata, ModelReply):
-                    metadata = ModelReply("")
+                metadata = _failure_reply(error)
                 if request_sent is not False:
                     replies.append(metadata)
                 request_record = {
@@ -904,6 +936,7 @@ class Runtime:
         reserved_cost = 0.0
         budget_blocked = False
         candidate_limit_reached = False
+        failure_status: str | None = None
         processed: set[str] = set()
         route_records = {
             route.candidate.candidate_id: _route_record(route, "pending", None)
@@ -969,8 +1002,31 @@ class Runtime:
                     },
                 }
             )
-            reply = self._model_port.complete(prompt)
             request_count += 1
+            try:
+                reply = self._model_port.complete(prompt)
+            except ModelPortFailure as error:
+                failure_status = _model_failure_status(error)
+                request_sent = getattr(error, "request_sent", "unknown")
+                metadata = _failure_reply(error)
+                if request_sent is not False:
+                    replies.append(metadata)
+                    reserved_tokens += route.candidate.known_token_cost or 0
+                    committed_tokens += route.candidate.known_token_cost or 0
+                    reserved_elapsed += route.elapsed_ms_reserved or 0
+                    reserved_cost += route.cost_usd_reserved or 0.0
+                trace.append({
+                    **_route_event(route, "model_request_failed", failure_status),
+                    "request_id": request_id,
+                    "request_sent": request_sent,
+                    "actual_model": metadata.model,
+                    "provider_request_id": getattr(metadata, "request_id", "unknown"),
+                    "usage_source": metadata.usage_source,
+                })
+                route_records[candidate_id]["status"] = "discarded"
+                route_records[candidate_id]["stop_reason"] = failure_status
+                processed.add(candidate_id)
+                break
             replies.append(reply)
             token_reservation = route.candidate.known_token_cost or 0
             reserved_tokens += token_reservation
@@ -1077,8 +1133,10 @@ class Runtime:
                     )
                 break
 
-        if budget_blocked or candidate_limit_reached:
-            reason = "budget_insufficient" if budget_blocked else "candidate_limit_reached"
+        if failure_status or budget_blocked or candidate_limit_reached:
+            reason = failure_status or (
+                "budget_insufficient" if budget_blocked else "candidate_limit_reached"
+            )
             for route in routes:
                 candidate_id = route.candidate.candidate_id
                 if candidate_id not in processed:
@@ -1159,7 +1217,7 @@ class Runtime:
                 route_records[candidate_id]["status"] = "discarded"
                 route_records[candidate_id]["stop_reason"] = "not_selected"
 
-        stop_reason = (
+        stop_reason = failure_status or (
             "budget_insufficient"
             if budget_blocked
             else "candidate_limit_reached"
@@ -1193,9 +1251,11 @@ class Runtime:
         config_sha256 = hashlib.sha256(_canonical_json(config).encode("utf-8")).hexdigest()
         run_dir = output_root / run_id
         trace_path, run_path = run_dir / "trace.jsonl", run_dir / "run.json"
-        status = "completed" if selected is not None and not budget_blocked else "stopped"
+        status = "failed" if failure_status else (
+            "completed" if selected is not None and not budget_blocked else "stopped"
+        )
         verification = selected["verification"] if selected else {
-            "status": "unknown", "scope": "none", "reason": "no_candidate_expanded"
+            "status": "unknown", "scope": "none", "reason": failure_status or "no_candidate_expanded"
         }
         result_record = {
             "schema_version": 1,
@@ -1353,6 +1413,22 @@ def _usage_source(replies: list[Any]) -> str:
         return "unknown"
     sources = {reply.usage_source for reply in replies}
     return sources.pop() if len(sources) == 1 else "mixed_or_unknown"
+
+
+def _failure_reply(error: ModelPortFailure) -> ModelReply:
+    reply = getattr(error, "reply", None)
+    return reply if isinstance(reply, ModelReply) else ModelReply("")
+
+
+def _model_failure_status(error: ModelPortFailure) -> str:
+    return (
+        error.failure_status
+        if error.failure_status in {
+            "protocol_failed", "unknown_outcome", "timeout", "budget_exhausted",
+            "invalid_output", "preflight_rejected",
+        }
+        else "unknown_outcome"
+    )
 
 
 def _canonical_json(value: Any) -> str:
