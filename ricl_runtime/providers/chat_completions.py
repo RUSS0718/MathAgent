@@ -78,6 +78,7 @@ class ChatCompletionReply(ModelReply):
 
     request_id: str = "unknown"
     finish_reason: str = "unknown"
+    warnings: tuple[str, ...] = ()
 
 
 def validate_api_key(value: str) -> None:
@@ -178,6 +179,7 @@ def post_chat_completion(
     payload: dict[str, Any],
     timeout: float,
     max_bytes: int,
+    track1_usage: bool = False,
 ) -> ChatCompletionReply:
     """Submit one chat request without following redirects or retrying."""
     request = urllib.request.Request(
@@ -206,6 +208,13 @@ def post_chat_completion(
     usage = response_data.get("usage")
     if not isinstance(usage, dict):
         usage = {}
+    warnings = ()
+    if track1_usage:
+        details = usage.get("completion_tokens_details")
+        output = _token_count(usage.get("completion_tokens"))
+        reasoning = _token_count(details.get("reasoning_tokens")) if isinstance(details, dict) else "unknown"
+        if isinstance(output, int) and isinstance(reasoning, int) and output < reasoning <= output + 4:
+            warnings = ("usage_subtotal_minor_drift",)
     metadata = ChatCompletionReply(
         text="",
         model=_nonempty_string(response_data.get("model")) or "unknown",
@@ -216,6 +225,7 @@ def post_chat_completion(
         finish_reason=_nonempty_string(choice.get("finish_reason")) or "unknown"
         if choice is not None
         else "unknown",
+        warnings=warnings,
     )
     if choice is None:
         raise ProviderProtocolError(
