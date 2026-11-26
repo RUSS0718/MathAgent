@@ -6,6 +6,8 @@
 
 用 `uv run python -m ricl_runtime.track1_cli --help` 查看入口。向 Runtime 传单题题面文件、题目 ID、条件、源码提交以及请求、Token 和费用限额。参考答案留在实验仓。运行目录保存 `run.json` 与脱敏 `trace.jsonl`。所有出网阶段共享 Token 预算。费用估算按网关公布的最高适用倍率计算，实付状态单列。记录已开始请求、已确认用量、失败分类及未执行项。筛题使用 `--screen --condition B1 --request-limit 1`，只采样首答。批次用 `--reasoning-effort` 固定思考强度。诊断批可指定 `none`，同时发送关闭思考的开关，并用返回的 Token 细分核对行为。
 
+官方 DeepSeek 配置使用 `BASE_URL=https://api.deepseek.com` 与 `MODEL=deepseek-flash`，配合本机匹配的 `API_KEY`。同一 Run 固定端点、模型与价格上界。[官方模型与价表](https://api-docs.deepseek.com/quick_start/pricing/)
+
 `B1` 用独立采样与核查排序选答，`B2` 在同一路线修复，`B3` 用独立完整候选与核查得分管理搜索，`RiCL_v0.2` 根据核查结果继续、剪枝修复或切换路线。初始解答通过后直接交付。待修复时才抽取引理。处理臂经过独立复核，运行轨迹记录请求、剪枝节点与发给下一请求的引理 ID。
 
 ## 核查证据
