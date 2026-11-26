@@ -53,7 +53,7 @@ class SharedBudget:
                    "input_upper": input_upper, "output_limit": output_limit,
                    "cost_upper_usd": str(cost_upper), **context})
         try:
-            reply = self.provider.complete(prompt)
+            reply = self.provider.complete(prompt, json_mode=stage in {"review", "extract"})
         except ModelPortFailure as exc:
             reply = getattr(exc, "reply", None)
             self._settle(reply, cost_upper)

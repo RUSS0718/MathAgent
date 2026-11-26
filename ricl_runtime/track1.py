@@ -16,9 +16,9 @@ from .track1_verification import (
 
 CONDITIONS = ("B1", "B2", "B3", "RiCL_v0.2")
 SOLVE_FORMAT = (
-    "Give a concise, public mathematical derivation, structured as numbered steps starting with "
-    "1. Each step should start on a fresh line. End on a separate line with 'Final answer: ' "
-    "followed by the exact answer. If incomplete say 'Final answer: unknown'."
+    "Give a concise, public mathematical derivation. Label each main step on a new line "
+    "as Step 1:, Step 2:, and so on. End with one plain line in the form "
+    "'Final answer: 123' using your exact answer. If incomplete say 'Final answer: unknown'."
 )
 
 
@@ -43,10 +43,19 @@ class Candidate:
 
 def _public_answer(text: str) -> str | None:
     """Retain only a single bounded final answer line for offline evaluation."""
-    answers = re.findall(r"(?im)^\s*(?:\*\*)?Final answer\s*:(?:\*\*)?[^\S\n]*(.+)$", text)
-    if len(answers) != 1:
+    answers = re.findall(
+        r"(?im)^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:Final answer|Answer)"
+        r"[ \t]*(?:\*\*)?:(?:\*\*)?[ \t]*(\S[^\r\n]*)$",
+        text,
+    )
+    if len(answers) > 1:
         return None
-    answer = answers[0].strip().strip("*").strip()
+    if answers:
+        answer = answers[0].strip(" *")
+    else:
+        last = text.strip().splitlines()[-1].strip(" $*") if text.strip() else ""
+        boxed = re.fullmatch(r"(?:\\\[|\\\()?\\boxed\{([^{}]+)\}(?:\\\]|\\\))?", last)
+        answer = boxed[1].strip() if boxed else ""
     if not 0 < len(answer) <= 120 or answer.casefold() == "unknown":
         return None
     return answer
@@ -54,7 +63,11 @@ def _public_answer(text: str) -> str | None:
 
 def _review(problem: str, solution: str, truncated: bool, budget: SharedBudget) -> Candidate:
     """Ask an independent critic in a fresh request with no solver state or answer key."""
-    steps = re.findall(r"(?m)^\s*(?:\*\*)?(?:Step\s+)?([1-9][0-9]?)\s*[.):]", solution)
+    prefix_pattern = r"(?im)^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?"
+    step_pattern = r"([1-9][0-9]?)[ \t]*(?:\*\*)?[.):]"
+    steps = re.findall(prefix_pattern + r"Step[ \t]+" + step_pattern, solution)
+    if not steps:
+        steps = re.findall(prefix_pattern + step_pattern, solution)
     count = len(steps) if steps == [str(i) for i in range(1, len(steps) + 1)] else 0
     reply = budget.complete(
         "review",
@@ -83,7 +96,7 @@ def _review(problem: str, solution: str, truncated: bool, budget: SharedBudget) 
     check = data.get("check")
     scope = check.get("step") if isinstance(check, dict) else None
     l1 = check_assertion(check) if type(scope) is int and 1 <= scope <= count else "uncheckable"
-    if l1 == "fail" and verdict == "pass":
+    if l1 == "fail" and verdict in ("pass", "incomplete"):
         verdict, error, prefix = "fail", scope, min(scope - 1, prefix)
     answer = _public_answer(solution)
     if verdict == "pass" and (truncated or answer is None):
@@ -128,7 +141,7 @@ def _treatment(
         return ("continue", "Complete this promising route, checking all omitted cases:\n"
                 + candidate.text, {}, repaired)
     graph = ()
-    if candidate.step_count >= 5:
+    if candidate.step_count >= 5 and budget.requests + 3 <= budget.request_limit:
         reply = budget.complete(
             "extract",
             "Extract 5–10 coarse lemmas from this candidate without fixing or solving it. "
@@ -163,7 +176,7 @@ def _treatment(
                 context, True)
     return ("salvage_switch", "Start a mathematically distinct route from the problem's original "
             f"assumptions. {citation}You may reuse these exact globally applicable lemmas:\n{reuse}",
-            context, True)
+            context, False)
 
 
 def solve(problem: str, condition: str, budget: SharedBudget, *, screen: bool = False) -> dict:
@@ -180,6 +193,8 @@ def solve(problem: str, condition: str, budget: SharedBudget, *, screen: bool = 
     status, reason = "completed", "review_passed"
     try:
         while True:
+            if not screen and budget.requests + 2 > budget.request_limit:
+                raise RunStop("stopped", "request_limit")
             text, truncated = _draft(problem, instruction, action, budget, **context)
             if screen:
                 point = {"tokens": budget.tokens,
