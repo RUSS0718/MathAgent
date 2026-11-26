@@ -15,6 +15,7 @@ from ricl_runtime.providers.chat_completions import (
 from ricl_runtime.providers.track1 import Track1Provider
 from ricl_runtime.track1 import (
     Candidate,
+    _answers_equivalent,
     _parse_review_payload,
     _public_answer,
     _selection,
@@ -593,3 +594,18 @@ class Track1Tests(unittest.TestCase):
             '{"verdict":"pass","first_error":0,"valid_prefix":0}', "stop", sol, steps, False,
         )
         self.assertEqual((verdict_p, err_p, pref_p), ("pass", 0, 4))
+
+    def test_boxed_unwrap_with_trailing_period_and_siliconflow_deepseek_allowlist(self):
+        self.assertEqual(_public_answer("Final answer: \\boxed{\\dfrac{2}{1005}}."), "\\dfrac{2}{1005}")
+        self.assertEqual(_public_answer("Final answer: $\\boxed{\\boxed{\\dfrac{2}{1005}}}$."), "\\dfrac{2}{1005}")
+        self.assertTrue(_answers_equivalent("\\dfrac{2}{1005}", "\\tfrac{2}{1005}"))
+
+        for model_name in ("deepseek-ai/DeepSeek-V4.1-Flash", "deepseek-ai/DeepSeek-V3.2"):
+            with patch.dict(os.environ, {
+                "BASE_URL": "https://api.siliconflow.cn/v1",
+                "MODEL": model_name,
+                "API_KEY": "fixture",
+            }):
+                provider = Track1Provider.from_environment(16384, "low")
+            self.assertEqual(provider.name, model_name)
+            self.assertTrue(provider.supports_thinking)

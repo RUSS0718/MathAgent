@@ -28,7 +28,7 @@ SOLVE_FORMAT = (
 _STEP_START = r"(?im)^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?"
 _STEP_NUMBER = r"([1-9][0-9]?)[ \t]*(?:\*\*)?[.):][ \t]*(?:\*\*)?"
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
-_FRAC_RE = re.compile(r"\\d?frac\{([^{}]+)\}\{([^{}]+)\}")
+_FRAC_RE = re.compile(r"\\[dt]?frac\{([^{}]+)\}\{([^{}]+)\}")
 _SQRT_RE = re.compile(r"\\sqrt\{([^{}]+)\}")
 
 
@@ -75,18 +75,38 @@ def _last_boxed(text: str) -> str | None:
     return text[start : pos - 1].strip() if depth == 0 else None
 
 
+def _unwrap_outer_boxed(text: str) -> str | None:
+    """Extract inner content only when text is one complete balanced \\boxed{...} wrapper."""
+    if not text.startswith("\\boxed{"):
+        return None
+    start = len("\\boxed{")
+    depth = 1
+    pos = start
+    while pos < len(text) and depth > 0:
+        if text[pos] == "{":
+            depth += 1
+        elif text[pos] == "}":
+            depth -= 1
+        pos += 1
+    return text[start : pos - 1].strip() if depth == 0 and pos == len(text) else None
+
+
 def _normalize_candidate_answer(raw: str) -> str:
     """Strip outer math/markdown wrappers while preserving inner expression structure."""
-    ans = raw.strip(" *$\t\r\n")
-    if ans.startswith("\\(") and ans.endswith("\\)"):
-        ans = ans[2:-2].strip()
-    if ans.startswith("\\[") and ans.endswith("\\]"):
-        ans = ans[2:-2].strip()
-    ans = ans.strip(" *$\t\r\n")
-    if ans.startswith("\\boxed{"):
-        inner = _last_boxed(ans)
-        if inner is not None and ans == f"\\boxed{{{inner}}}":
+    ans = raw
+    for _ in range(3):
+        prev = ans
+        ans = ans.strip(" *$\t\r\n").rstrip(".").strip(" *$\t\r\n")
+        if ans.startswith("\\(") and ans.endswith("\\)"):
+            ans = ans[2:-2].strip()
+        if ans.startswith("\\[") and ans.endswith("\\]"):
+            ans = ans[2:-2].strip()
+        ans = ans.strip(" *$\t\r\n").rstrip(".").strip(" *$\t\r\n")
+        inner = _unwrap_outer_boxed(ans)
+        if inner is not None:
             ans = inner
+        if ans == prev:
+            break
     return ans.rstrip(".").strip(" *$\t\r\n")
 
 

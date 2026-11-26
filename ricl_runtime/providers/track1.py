@@ -24,6 +24,10 @@ SILICONFLOW_MODELS = {
     "Qwen/Qwen3-14B": (Decimal("0.07"), Decimal("0.28"), True),
     "Qwen/Qwen3-30B-A3B-Instruct-2507": (Decimal("0.09"), Decimal("0.30"), False),
     "Qwen/Qwen3.5-35B-A3B": (Decimal("0.24"), Decimal("1.80"), True),
+    "deepseek-ai/DeepSeek-V3.2": (Decimal("0.28"), Decimal("0.42"), True),
+    "deepseek-ai/DeepSeek-V4-Flash": (Decimal("0.15"), Decimal("0.60"), True),
+    "deepseek-ai/DeepSeek-V4.1-Flash": (Decimal("0.15"), Decimal("0.60"), True),
+    "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B": (Decimal("0.05"), Decimal("0.20"), False),
 }
 HOST_MODELS = {
     HOST: {MODEL: (INPUT_RATE, OUTPUT_RATE, True)},
