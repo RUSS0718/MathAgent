@@ -64,7 +64,7 @@ uv run python scripts/verify_runtime_pilot.py ./approved-archives
 
 [固定校验锚点](evals/runtime-method-pilot-anchor.json)记录各归档的索引哈希、状态及预期文件数和 Run 数。核验器离线检查原批 40 个文件／15 个 Run 和续批 31 个文件／9 个 Run 的索引、文件字节、Run 身份、源码版本、配置哈希与对应 Trace，不读取受限答案键，也不调用 Provider。校验通过仅说明产物与锚点一致，不重判数学答案，也不把未触发的机制算作成功。
 
-M2 v2 的 6 对运行均在冷启动阶段结束。双循环 v3 观察到自然关键失败、自主诊断、同源双臂裁决，以及拒绝回灌后的真实续接。状态复用已有真实送达和明确引用，实际撤销仍待观察。[双循环 v3 证据、费用与复算](evals/dual-loop-real-20261126-v3-evidence.md)。 [双循环 v4](evals/dual-loop-real-20261126-v4-evidence.md) 留有一个完整配对、一次持平裁决以及一次对照臂超时的记录。 [v3–v5 完整核心配对](evals/dual-loop-real-20261126-v3-v5-evidence.md) 记录一次真实回灌。后续冷启动派发读取回灌证据，父回复明确引用。详见 [#256](https://github.com/RUSS0718/RiCL/issues/256)、[#257](https://github.com/RUSS0718/RiCL/issues/257)、[#258](https://github.com/RUSS0718/RiCL/issues/258)、[#259](https://github.com/RUSS0718/RiCL/issues/259)。
+M2 v2 的 6 对运行均在冷启动阶段结束。双循环 v3 观察到自然关键失败、自主诊断、同源双臂裁决，以及拒绝回灌后的真实续接。状态复用已有真实送达和明确引用，实际撤销仍待观察。[双循环 v3 证据、费用与复算](evals/dual-loop-real-20261126-v3-evidence.md)。 [双循环 v4](evals/dual-loop-real-20261126-v4-evidence.md) 留有一个完整配对、一次持平裁决以及一次对照臂超时的记录。 [v3–v5 完整核心配对](evals/dual-loop-real-20261126-v3-v5-evidence.md) 记录一次真实回灌。后续冷启动派发读取回灌证据，父回复明确引用。 [回灌后选路的后续先导](evals/dual-loop-selection-follow-up-evidence.md) 记录匹配配对、扩额、失败与真实派发的复算。详见 [#256](https://github.com/RUSS0718/RiCL/issues/256)、[#257](https://github.com/RUSS0718/RiCL/issues/257)、[#258](https://github.com/RUSS0718/RiCL/issues/258)、[#259](https://github.com/RUSS0718/RiCL/issues/259)。
 
 ## 三项研究机制及当前状态
 
