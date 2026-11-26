@@ -39,6 +39,7 @@ GATEWAY_TIMEOUT_SECONDS = 180.0
 MAX_RESPONSE_BYTES = 1_048_576
 MAX_OUTPUT_TOKENS = 256
 GATEWAY_MAX_OUTPUT_TOKENS = 16384
+GATEWAY_EXPANDED_OUTPUT_TOKENS = 24576
 ALLOWED_HOST = "api.deepseek.com"
 ALLOWED_GATEWAY_HOST = "code.aigcpro.org"
 ALLOWED_MODELS = (
@@ -77,6 +78,7 @@ class DeepSeekModelPort:
     base_url: str
     model: str
     thinking: str = "disabled"
+    gateway_output_tokens: int | None = None
 
     def __post_init__(self) -> None:
         """Reject incomplete values without echoing credentials or URLs in errors."""
@@ -86,9 +88,19 @@ class DeepSeekModelPort:
             raise ProviderConfigurationError("MODEL must be non-empty")
         if self.thinking not in {"enabled", "disabled"}:
             raise ProviderConfigurationError("thinking must be enabled or disabled")
+        if self.gateway_output_tokens is not None:
+            if not self._is_gateway or self.model not in GATEWAY_ALLOWED_MODELS:
+                raise ProviderConfigurationError("gateway output limits require the approved DeepSeek gateway")
+            if (
+                type(self.gateway_output_tokens) is not int
+                or self.gateway_output_tokens != GATEWAY_EXPANDED_OUTPUT_TOKENS
+            ):
+                raise ProviderConfigurationError("unsupported DeepSeek gateway output limit")
 
     @classmethod
-    def from_environment(cls, *, thinking: str = "disabled") -> "DeepSeekModelPort":
+    def from_environment(
+        cls, *, thinking: str = "disabled", gateway_output_tokens: int | None = None,
+    ) -> "DeepSeekModelPort":
         """Read only the three explicitly selected, non-persisted environment values."""
 
         api_key = os.environ.get("API_KEY")
@@ -96,7 +108,10 @@ class DeepSeekModelPort:
         model = os.environ.get("MODEL")
         if not api_key or not base_url or not model:
             raise ProviderConfigurationError("API_KEY, BASE_URL, and MODEL must be configured")
-        return cls(api_key=api_key, base_url=base_url, model=model, thinking=thinking)
+        return cls(
+            api_key=api_key, base_url=base_url, model=model, thinking=thinking,
+            gateway_output_tokens=gateway_output_tokens,
+        )
 
     @property
     def name(self) -> str:
@@ -114,6 +129,8 @@ class DeepSeekModelPort:
     def max_output_tokens(self) -> int:
         """Expose the fixed completion-token ceiling for the Run config digest."""
 
+        if self.gateway_output_tokens is not None:
+            return self.gateway_output_tokens
         return GATEWAY_MAX_OUTPUT_TOKENS if self._is_gateway else MAX_OUTPUT_TOKENS
 
     @property
@@ -148,15 +165,30 @@ class DeepSeekModelPort:
     def cost_limit_usd(self) -> float:
         """Expose the fixed per-request ceiling used by preflight."""
 
-        return float(GATEWAY_COST_LIMIT_USD if self._is_gateway else COST_LIMIT_USD)
+        return float(self._request_cost_limit)
+
+    @property
+    def _request_cost_limit(self) -> Decimal:
+        """Set the expanded profile's admission ceiling from its largest request."""
+        if self.gateway_output_tokens is not None:
+            return self._estimated_request_cost(MAX_PREFLIGHT_INPUT_TOKENS)
+        return GATEWAY_COST_LIMIT_USD if self._is_gateway else COST_LIMIT_USD
+
+    def _estimated_request_cost(self, input_tokens: int) -> Decimal:
+        """Use the effective output limit for both preflight and request admission."""
+        return (
+            input_tokens * self._input_peak_usd_per_million
+            + self.max_output_tokens * self._output_peak_usd_per_million
+        ) / Decimal(1_000_000)
 
     @property
     def preflight_cost_upper_bound_usd(self) -> str:
-        """Expose the fixed worst-case input and output bound."""
+        """Expose the worst-case input and output cost for the selected limit."""
 
+        if self.gateway_output_tokens is not None:
+            return format(self._estimated_request_cost(MAX_PREFLIGHT_INPUT_TOKENS), "f")
         return format(
-            GATEWAY_MAX_PREFLIGHT_COST_USD if self._is_gateway else MAX_PREFLIGHT_COST_USD,
-            "f",
+            GATEWAY_MAX_PREFLIGHT_COST_USD if self._is_gateway else MAX_PREFLIGHT_COST_USD, "f",
         )
 
     @property
@@ -205,11 +237,7 @@ class DeepSeekModelPort:
         input_tokens_upper_bound = prompt_bytes + INPUT_FRAMING_MARGIN_TOKENS
         max_output_tokens = self.max_output_tokens
         transport_timeout = self.transport_timeout_seconds
-        cost_upper_bound = (
-            input_tokens_upper_bound * self._input_peak_usd_per_million
-            + max_output_tokens * self._output_peak_usd_per_million
-        ) / Decimal(1_000_000)
-        if cost_upper_bound > (GATEWAY_COST_LIMIT_USD if is_gateway else COST_LIMIT_USD):
+        if self._estimated_request_cost(input_tokens_upper_bound) > self._request_cost_limit:
             raise ProviderPreflightError("request exceeds the configured cost limit")
 
         return post_chat_completion(

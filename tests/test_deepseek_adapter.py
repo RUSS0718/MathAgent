@@ -357,6 +357,24 @@ class DeepSeekModelPortTests(unittest.TestCase):
         self.assertEqual(port.preflight_cost_upper_bound_usd, "0.0055296")
         self.assertEqual(port.preflight_config["selected_endpoint_host"], "api.deepseek.com")
 
+    def test_expanded_gateway_limit_binds_payload_and_preflight_cost(self) -> None:
+        with self.assertRaises(ProviderConfigurationError):
+            DeepSeekModelPort(
+                "inert-test-credential", "https://api.deepseek.com/v1", "deepseek-flash",
+                gateway_output_tokens=24576,
+            )
+        port = DeepSeekModelPort(
+            "inert-test-credential", f"https://{ALLOWED_GATEWAY_HOST}/v1", "deepseek-v4.1-flash",
+            gateway_output_tokens=24576,
+        )
+        with patch("ricl_runtime.providers.deepseek.post_chat_completion") as post:
+            port.complete("x" * (16 * 1024))
+
+        self.assertEqual(post.call_args.kwargs["payload"]["max_tokens"], 24576)
+        self.assertEqual(port.preflight_config["max_output_tokens"], 24576)
+        self.assertEqual(port.preflight_cost_upper_bound_usd, "0.0925696")
+        self.assertEqual(port.cost_limit_usd, 0.0925696)
+
     def test_malformed_json_is_a_redacted_protocol_error(self) -> None:
         prompt = "fixture prompt malformed response sentinel"
         credential = "inert-test-credential"

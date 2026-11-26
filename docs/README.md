@@ -42,6 +42,8 @@ uv run python -m ricl_runtime.experiments --order-seed 17
 
 ## 真实 Provider 证据
 
+获批的 DeepSeek 网关批次可显式使用 `--gateway-output-tokens 24576`。运行前按每次请求 US$0.0925696 的预检上界冻结共享预算。使用默认配置时，网关单次输出上限为 16,384 Token。
+
 DeepSeek 与 MiniMax 分别用一次获批的真实请求完成了同一道整数加法校验。两次运行共用 CLI、ModelPort、独立验证和 Run 账本。记录包含请求与返回模型、供应商用量、阶段耗时和复跑参数。[DeepSeek smoke 记录](evals/runtime-deepseek-smoke.md)、[MiniMax smoke 记录](evals/runtime-minimax-smoke.md)
 
 DeepSeek 真实配对先导完成九个矩阵条件和两个回退条件。证据记录列出共享预算、分支行为和剩余验证缺口。[配对先导记录](evals/runtime-deepseek-paired-pilot.md)、[批次与 Run 校验索引](evals/runtime-evidence-index.json)
