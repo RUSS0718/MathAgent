@@ -8,9 +8,9 @@ from unittest.mock import patch
 
 from ricl_runtime.providers.chat_completions import ChatCompletionReply, ProviderConfigurationError
 from ricl_runtime.providers.track1 import Track1Provider
-from ricl_runtime.track1 import solve
+from ricl_runtime.track1 import Candidate, _public_answer, _selection, solve
 from ricl_runtime.track1_budget import SharedBudget
-from ricl_runtime.track1_verification import check_assertion, lemma_graph
+from ricl_runtime.track1_verification import check_assertion, lemma_graph, prune_graph
 
 
 class Track1Tests(unittest.TestCase):
@@ -236,3 +236,163 @@ class Track1Tests(unittest.TestCase):
         started = [e for e in events if e["event"] == "request_started"]
         self.assertEqual([e["stage"] for e in started], ["solve", "review", "solve", "review"])
         self.assertFalse(any(e.get("lemmas_supplied") for e in started))
+
+    def test_public_answer_and_selection_preserve_valid_answers_and_consensus(self):
+        nested_inline = "Step 1: Compute.\nTherefore, the exact value is $\\boxed{\\frac{1}{2}}$."
+        self.assertEqual(_public_answer(nested_inline), "\\frac{1}{2}")
+        repeated = "Step 1: x=4.\nFinal answer: 4\nSummary:\nFinal answer: $4$."
+        self.assertEqual(_public_answer(repeated), "4")
+        conflicting = "Final answer: 4\nFinal answer: 5"
+        self.assertIsNone(_public_answer(conflicting))
+
+        c_first = Candidate("s1", "60", "fail", 8, 7, (), "uncheckable", "err1")
+        c_longer_none = Candidate("s2", None, "fail", 18, 17, (), "uncheckable", "err2")
+        c_consensus = Candidate("s3", "60", "fail", 4, 3, (), "uncheckable", "err3")
+        self.assertEqual(_selection([c_first, c_longer_none], "RiCL_v0.2").answer, "60")
+        c_alt = Candidate("s4", "99", "fail", 12, 11, (), "uncheckable", "err4")
+        self.assertEqual(_selection([c_first, c_alt, c_consensus], "RiCL_v0.2").answer, "60")
+
+    def test_sympy_l1_and_normalized_prune_graph_admission(self):
+        for check, expected in (
+            ({"lhs": "sqrt(8)", "rhs": "2*sqrt(2)"}, "pass"),
+            ({"lhs": "sqrt(2)+sqrt(3)", "rhs": "sqrt(5)"}, "fail"),
+            ({"lhs": "(x+y)**2", "rhs": "x**2+2*x*y+y**2", "variables": ["x", "y"]}, "pass"),
+            ({"lhs": "sqrt(x**2)", "rhs": "x", "variable": "x"}, "fail"),
+        ):
+            with self.subTest(check=check):
+                self.assertEqual(check_assertion(check), expected)
+
+        source = ("We find that $a + b = 10$.", "Independent fact: gcd(12, 18) = 6.")
+        nodes = {"lemmas": [
+            {"id": "L1", "step": 1, "claim": "a+b=10", "source_quote": "**$a + b = 10$**",
+             "premises": [], "global_scope": True},
+            {"id": "L2", "step": 2, "claim": "gcd(12, 18) = 6", "premises": [], "global_scope": True,
+             "check": {"step": 2, "lhs": "gcd(12, 18)", "rhs": "6"}},
+        ]}
+        graph = lemma_graph(json.dumps(nodes), source)
+        self.assertTrue(graph.nodes[0].matches_source)
+        self.assertEqual(graph.nodes[1].check, "pass")
+
+        _, retained_unknown = prune_graph(graph.nodes, first_error=0, reviewed_prefix=0)
+        self.assertEqual([(n.id, ev) for n, ev in retained_unknown], [("L2", "L1-Executable-Verified")])
+
+        _, retained_incomplete = prune_graph(graph.nodes, first_error=0, reviewed_prefix=1)
+        self.assertEqual(
+            [(n.id, ev) for n, ev in retained_incomplete],
+            [("L1", "L2-Reviewed"), ("L2", "L1-Executable-Verified")],
+        )
+
+    def test_ricl_v022_retains_prefix_post_error_l1_constraints_and_half_byte_budget(self):
+        long_problem = "Find n. " + ("condition " * 1800)  # ~18 KB prompt
+        initial = (
+            "Step 1: Valid base setup.\n"
+            "Step 2: Bad division.\n"
+            "Step 3: Independent check 3*4 = 12.\n"
+            "Final answer: 10"
+        )
+        review_unknown = "not json"
+        review_fail1 = '{"verdict":"fail","first_error":2,"valid_prefix":1,"error_constraint":"Avoid d=0."}'
+        graph_json = json.dumps({"lemmas": [
+            {"id": "L1", "step": 1, "claim": "Valid base setup.", "premises": [], "global_scope": True},
+            {"id": "L2", "step": 2, "claim": "Bad division.", "premises": [], "global_scope": False},
+            {"id": "L3", "step": 3, "claim": "3*4 = 12", "premises": [], "global_scope": True,
+             "check": {"step": 3, "lhs": "3*4", "rhs": "12"}},
+        ]})
+        repair_sol = "Step 1: Still missing tail.\nFinal answer: 11"
+        review_fail2 = '{"verdict":"fail","first_error":1,"valid_prefix":0,"error_constraint":"Check parity."}'
+        switch_sol = "Step 1: Resolved cleanly.\nFinal answer: 12"
+        review_pass = '{"verdict":"pass","first_error":0,"valid_prefix":1}'
+
+        # 1) Half-byte budget check avoids false token_limit on long prompts + skips continue on l2="unknown"
+        budget_extract = SharedBudget(
+            Track1Provider("fixture", max_output_tokens=8192),
+            32768, 4, Decimal("1.00"), [].append, tokens=14000,
+        )
+        with patch(
+            "ricl_runtime.providers.track1.post_chat_completion",
+            return_value=ChatCompletionReply("{}", input_tokens=5000, output_tokens=100, finish_reason="stop"),
+        ) as direct_post:
+            budget_extract.complete("extract", "x" * 20000)
+        self.assertEqual(direct_post.call_count, 1)
+
+        replies1 = [
+            "Step 1: Setup only.\nFinal answer: 9",
+            review_unknown,
+            graph_json,
+            switch_sol,
+            review_pass,
+        ]
+        events1 = []
+        budget1 = SharedBudget(
+            Track1Provider("fixture", max_output_tokens=8192), 32768, 10, Decimal("1.00"), events1.append,
+        )
+        with patch(
+            "ricl_runtime.providers.track1.post_chat_completion",
+            side_effect=lambda *a, **kw: ChatCompletionReply(
+                replies1.pop(0), input_tokens=1500, output_tokens=300, finish_reason="stop"
+            ),
+        ):
+            result1 = solve(long_problem, "RiCL_v0.2", budget1)
+
+        self.assertEqual(result1["status"], "completed")
+        self.assertEqual(result1["final_answer"], "12")
+        self.assertEqual(result1["action_sequence"], ["initial", "salvage_switch"])
+        self.assertNotIn("continue", result1["action_sequence"])
+
+        # 2) Verified prefix + post-error L1 + accumulated error_constraints across repair -> switch
+        replies2 = [
+            initial,
+            review_fail1,
+            graph_json,
+            repair_sol,
+            review_fail2,
+            switch_sol,
+            review_pass,
+        ]
+        events2 = []
+        budget2 = SharedBudget(
+            Track1Provider("fixture", max_output_tokens=8192), 32768, 12, Decimal("1.00"), events2.append,
+        )
+        with patch(
+            "ricl_runtime.providers.track1.post_chat_completion",
+            side_effect=lambda *a, **kw: ChatCompletionReply(
+                replies2.pop(0), input_tokens=1500, output_tokens=300, finish_reason="stop"
+            ),
+        ) as post2:
+            result2 = solve(long_problem, "RiCL_v0.2", budget2)
+
+        self.assertEqual(result2["status"], "completed")
+        self.assertEqual(result2["final_answer"], "12")
+        self.assertEqual(result2["action_sequence"], ["initial", "pruned_repair", "salvage_switch"])
+        payloads = [c.kwargs["payload"]["messages"][0]["content"] for c in post2.call_args_list]
+        repair_prompt = payloads[3]
+        self.assertIn("Step 1: Valid base setup.", repair_prompt)
+        self.assertIn("[L1-Executable-Verified] 3*4 = 12", repair_prompt)
+        self.assertIn("Avoid d=0.", repair_prompt)
+        switch_prompt = payloads[5]
+        self.assertIn("[L1-Executable-Verified] 3*4 = 12", switch_prompt)
+        self.assertIn("Avoid d=0.", switch_prompt)
+        self.assertIn("Check parity.", switch_prompt)
+
+        # 3) Genuine incomplete with missing final answer dispatches continue at most once
+        replies3 = [
+            "Step 1: Valid start.\nStep 2: Unfinished.",
+            '{"verdict":"incomplete","first_error":0,"valid_prefix":1}',
+            "Step 1: Valid start.\nStep 2: Still unfinished.",
+            '{"verdict":"incomplete","first_error":0,"valid_prefix":1}',
+            graph_json,
+            switch_sol,
+            review_pass,
+        ]
+        events3 = []
+        budget3 = SharedBudget(Track1Provider("fixture"), 32768, 12, Decimal("1.00"), events3.append)
+        with patch(
+            "ricl_runtime.providers.track1.post_chat_completion",
+            side_effect=lambda *a, **kw: ChatCompletionReply(
+                replies3.pop(0), input_tokens=30, output_tokens=40, finish_reason="stop"
+            ),
+        ):
+            result3 = solve("Problem", "RiCL_v0.2", budget3)
+
+        self.assertEqual(result3["status"], "completed")
+        self.assertEqual(result3["action_sequence"], ["initial", "continue", "salvage_switch"])

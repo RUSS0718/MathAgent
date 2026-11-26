@@ -38,7 +38,7 @@ class SharedBudget:
 
     def complete(self, stage: str, prompt: str, **context: object) -> ChatCompletionReply:
         """Reserve before dispatch and settle with provider totals or a preflight bound."""
-        input_upper = len(prompt.encode("utf-8")) + 1024
+        input_upper = (len(prompt.encode("utf-8")) + 1) // 2 + 512
         output_limit = AUX_OUTPUT_LIMITS.get(stage, self.provider.max_output_tokens)
         cost_upper = self.provider.estimated_cost(input_upper, output_limit)
         if self.requests >= self.request_limit:

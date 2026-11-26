@@ -41,26 +41,72 @@ class Candidate:
     error_constraint: str
 
     @property
-    def rank(self) -> tuple[bool, bool, int, bool]:
-        """Prefer a complete review, then a promising prefix without exact refutation."""
-        return self.verdict == "pass", self.l1 != "fail", self.prefix, self.answer is not None
+    def rank(self) -> tuple[bool, bool, bool, int]:
+        """Prefer a complete review with an answer, then any answer-bearing candidate."""
+        return (
+            self.verdict == "pass" and self.answer is not None,
+            self.answer is not None,
+            self.l1 != "fail",
+            self.prefix,
+        )
+
+
+def _last_boxed(text: str) -> str | None:
+    """Extract the inner content of the last balanced \\boxed{...} expression."""
+    marker = "\\boxed{"
+    idx = text.rfind(marker)
+    if idx == -1:
+        return None
+    start = idx + len(marker)
+    depth = 1
+    pos = start
+    while pos < len(text) and depth > 0:
+        ch = text[pos]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        pos += 1
+    return text[start : pos - 1].strip() if depth == 0 else None
+
+
+def _normalize_candidate_answer(raw: str) -> str:
+    """Strip outer math/markdown wrappers while preserving inner expression structure."""
+    ans = raw.strip(" *$\t\r\n")
+    if ans.startswith("\\(") and ans.endswith("\\)"):
+        ans = ans[2:-2].strip()
+    if ans.startswith("\\[") and ans.endswith("\\]"):
+        ans = ans[2:-2].strip()
+    ans = ans.strip(" *$\t\r\n")
+    if ans.startswith("\\boxed{"):
+        inner = _last_boxed(ans)
+        if inner is not None and ans == f"\\boxed{{{inner}}}":
+            ans = inner
+    return ans.rstrip(".").strip(" *$\t\r\n")
 
 
 def _public_answer(text: str) -> str | None:
-    """Retain only a single bounded final answer line for offline evaluation."""
-    answers = re.findall(
-        r"(?im)^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?(?:Final answer|Answer)"
-        r"[ \t]*(?:\*\*)?:(?:\*\*)?[ \t]*(\S[^\r\n]*)$",
-        text,
-    )
-    if len(answers) > 1:
-        return None
-    if answers:
-        answer = answers[0].strip(" *")
-    else:
-        last = text.strip().splitlines()[-1].strip(" $*") if text.strip() else ""
-        boxed = re.fullmatch(r"(?:\\\[|\\\()?\\boxed\{([^{}]+)\}(?:\\\]|\\\))?", last)
-        answer = boxed[1].strip() if boxed else ""
+    """Retain only a consistent bounded final answer for offline evaluation."""
+    answer = ""
+    for label in ("Final answer", "Answer"):
+        matches = re.findall(
+            rf"(?im)^[ \t]*(?:#{{1,6}}[ \t]+)?(?:\*\*)?{label}"
+            r"[ \t]*(?:\*\*)?:(?:\*\*)?[ \t]*(\S[^\r\n]*)$",
+            text,
+        )
+        if matches:
+            normalized = [_normalize_candidate_answer(item) for item in matches]
+            unique = [item for item in dict.fromkeys(normalized) if item]
+            if len(unique) != 1:
+                return None
+            answer = unique[0]
+            break
+    if not answer and text.strip():
+        tail_lines = [line.strip() for line in text.splitlines() if line.strip()][-3:]
+        tail = "\n".join(tail_lines)[-500:]
+        boxed = _last_boxed(tail)
+        if boxed is not None:
+            answer = _normalize_candidate_answer(boxed)
     if not 0 < len(answer) <= 120 or answer.casefold() == "unknown":
         return None
     return answer
@@ -131,11 +177,20 @@ def _draft(
 
 
 def _selection(candidates: list[Candidate], condition: str) -> Candidate:
-    """Choose by isolated reviews, using stable exact-answer voting for B1 ties."""
-    if condition != "B1":
-        return max(candidates, key=lambda item: item.rank)
+    """Choose by isolated reviews, preserving valid answers with exact-answer consensus."""
     votes = [item.answer for item in candidates if item.answer is not None]
-    return max(candidates, key=lambda item: (item.rank[0], votes.count(item.answer), item.rank))
+    if condition == "B1":
+        return max(candidates, key=lambda item: (item.rank[0], votes.count(item.answer), item.rank))
+    return max(
+        candidates,
+        key=lambda item: (
+            item.rank[0],
+            item.answer is not None,
+            item.l1 != "fail",
+            votes.count(item.answer) if item.answer is not None else 0,
+            item.prefix,
+        ),
+    )
 
 
 def _b2_prefix_repair(candidate: Candidate) -> tuple[str, str]:
@@ -276,13 +331,30 @@ def _b3_rse_update(
 
 
 def _treatment(
-    problem: str, candidate: Candidate, budget: SharedBudget, repaired: bool,
+    problem: str,
+    candidate: Candidate,
+    budget: SharedBudget,
+    repaired: bool,
+    continued: bool,
     pool: dict[str, tuple[str, str]],
-) -> tuple:
+    failed_constraints: tuple[str, ...] = (),
+) -> tuple[str, str, dict[str, object], bool, bool]:
     """Compute a single dispatch from a reviewed checkpoint with no online control arm."""
-    if candidate.verdict in ("incomplete", "unknown") and candidate.prefix and not repaired:
-        return ("continue", "Complete this promising route, checking all omitted cases:\n"
-                + candidate.text, {}, repaired)
+    incomplete_tail = candidate.prefix < len(candidate.steps) or candidate.answer is None
+    if (
+        not continued
+        and not repaired
+        and candidate.verdict == "incomplete"
+        and candidate.prefix > 0
+        and incomplete_tail
+    ):
+        return (
+            "continue",
+            "Complete this promising route, checking all omitted cases:\n" + candidate.text,
+            {},
+            repaired,
+            True,
+        )
     extraction = GraphExtraction(outcome="insufficient_numbered_steps")
     if repaired and pool:
         extraction = GraphExtraction(outcome="reuse_verified_pool")
@@ -326,18 +398,36 @@ def _treatment(
                  "verified_pool_ids": list(admitted), "pool_evidence": admitted})
     context = {"lemmas_supplied": list(pool)}
     citation = "Cite the bracketed lemma ID in your numbered derivation if it supports a step. "
-    if not repaired and candidate.first_error and any(
-        node.step == candidate.first_error for node in graph
-    ):
-        return ("pruned_repair",
-                f"Re-derive the solution locally. Earlier Step {candidate.first_error} was invalid. "
-                f"Critic's failed-inference constraint: {candidate.error_constraint}\n"
-                "Do not assume the invalid step or any downstream conclusion. "
-                f"{citation}These globally applicable lemmas were retained:\n{reuse}",
-                context, True)
-    return ("salvage_switch", "Start a mathematically distinct route from the problem's original "
-            f"assumptions. {citation}You may reuse these globally applicable lemmas:\n{reuse}",
-            context, False)
+    can_repair = (
+        not repaired
+        and candidate.first_error > 0
+        and (
+            candidate.prefix > 0
+            or bool(pool)
+            or any(node.step == candidate.first_error for node in graph)
+        )
+    )
+    if can_repair:
+        sections = [
+            f"Re-derive the solution locally. Earlier Step {candidate.first_error} was invalid. "
+            f"Critic's failed-inference constraint: {candidate.error_constraint}\n"
+            "Do not assume the invalid step or any downstream conclusion."
+        ]
+        if candidate.prefix > 0 and candidate.steps:
+            prefix_text = "\n".join(
+                f"Step {i}: {step}" for i, step in enumerate(candidate.steps[: candidate.prefix], 1)
+            )
+            sections.append(f"Verified prefix (Steps 1–{candidate.prefix}):\n{prefix_text}")
+        if reuse:
+            sections.append(f"{citation}These globally applicable lemmas were retained:\n{reuse}")
+        return ("pruned_repair", "\n\n".join(sections), context, True, continued)
+    sections = ["Start a mathematically distinct route from the problem's original assumptions."]
+    if reuse:
+        sections.append(f"{citation}You may reuse these globally applicable lemmas:\n{reuse}")
+    if failed_constraints:
+        lessons_block = "\n".join(f"- {item}" for item in failed_constraints)
+        sections.append(f"Failed-route constraints to avoid:\n{lessons_block}")
+    return ("salvage_switch", "\n\n".join(sections), context, False, continued)
 
 
 def solve(
@@ -355,6 +445,8 @@ def solve(
     rse_lessons: list[str] = []
     action, instruction, context = "initial", "Solve this contest problem.", {}
     repaired = False
+    continued = False
+    failed_constraints: list[str] = []
     advanced = 0
     status, reason = "completed", "review_passed"
     try:
@@ -380,6 +472,10 @@ def solve(
                 break
             current = _review(problem, text, truncated, budget)
             candidates.append(current)
+            if current.verdict == "fail" and current.error_constraint:
+                constraint = current.error_constraint.strip()
+                if constraint and constraint not in failed_constraints and len(failed_constraints) < 4:
+                    failed_constraints.append(constraint)
             best = _selection(candidates, condition)
             point = {"tokens": budget.tokens, "final_answer": best.answer,
                      "l1": best.l1, "l2": best.verdict}
@@ -408,8 +504,8 @@ def solve(
                 status, reason = "stopped", "intervention_limit"
                 break
             else:
-                action, instruction, context, repaired = _treatment(
-                    problem, current, budget, repaired, pool,
+                action, instruction, context, repaired, continued = _treatment(
+                    problem, current, budget, repaired, continued, pool, tuple(failed_constraints),
                 )
                 advanced += 1
     except RunStop as stop:
