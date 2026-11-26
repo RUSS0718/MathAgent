@@ -13,7 +13,11 @@ from typing import Any
 _OPERATORS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
               ast.Div: operator.truediv, ast.Mod: operator.mod}
 _FUNCTIONS = {"choose": comb, "gcd": gcd, "lcm": lcm}
-_MATH_DELIM_RE = re.compile(r"\$\$?|\\\[|\\\]|\\\(|\\\)|\*\*|__")
+_MATH_DELIM_RE = re.compile(
+    r"\$\$?|\\\[|\\\]|\\\(|\\\)|\\displaystyle|\\left|\\right|\\(?:,|;|!|quad|qquad)|`|\*\*|__"
+)
+_FRAC_NORM_RE = re.compile(r"\\[dt]?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}")
+_MATH_TOKEN_RE = re.compile(r"[a-z0-9]+|[=+\-*/<>^]")
 _OP_SPACE_RE = re.compile(r"\s*([=+\-*/<>(),])\s*")
 _WS_RE = re.compile(r"\s+")
 L1_EVIDENCE = "L1-Executable-Verified"
@@ -331,7 +335,9 @@ class GraphExtraction:
 
 def _normalize_math_text(text: str) -> str:
     """Normalize lightweight markdown and LaTeX spacing for source-quote verification."""
-    cleaned = _MATH_DELIM_RE.sub(" ", text).casefold()
+    cleaned = text.replace("\\dfrac", "\\frac").replace("\\tfrac", "\\frac")
+    cleaned = cleaned.replace("\\cdot", "*").replace("\\times", "*")
+    cleaned = _MATH_DELIM_RE.sub(" ", cleaned).casefold()
     cleaned = _OP_SPACE_RE.sub(r"\1", cleaned)
     return _WS_RE.sub(" ", cleaned).strip(" .,:;")
 
@@ -340,7 +346,42 @@ def _matches_source(candidate: str, source: str) -> bool:
     """Verify whether a candidate proposition aligns verbatim or after light math normalization."""
     norm_cand = _normalize_math_text(candidate)
     norm_src = _normalize_math_text(source)
-    return len(norm_cand) >= 3 and norm_cand in norm_src
+    if len(norm_cand) >= 3 and norm_cand in norm_src:
+        return True
+    if len(norm_cand) < 12:
+        return False
+    cand_tokens = _MATH_TOKEN_RE.findall(norm_cand)
+    src_token_set = set(_MATH_TOKEN_RE.findall(norm_src))
+    if len(cand_tokens) < 5:
+        return False
+    src_digits = set(re.findall(r"\d+", norm_src))
+    if not set(re.findall(r"\d+", norm_cand)).issubset(src_digits):
+        return False
+    overlap = sum(1 for tok in cand_tokens if tok in src_token_set)
+    return overlap / len(cand_tokens) >= 0.85
+
+
+def _norm_eq_expr(text: str) -> str:
+    """Canonicalize simple LaTeX and Python equations for claim-to-check grounding."""
+    out = text.replace("**", "^").replace("\\cdot", "*").replace("\\times", "*")
+    out = _MATH_DELIM_RE.sub("", out)
+    for _ in range(2):
+        out, n = _FRAC_NORM_RE.subn(r"(\1)/(\2)", out)
+        if n == 0:
+            break
+    out = out.replace("$", "").replace("*", "")
+    out = re.sub(r"\s+", "", out).casefold()
+    return re.sub(r"\(([a-z0-9]+)\)", r"\1", out)
+
+
+def _check_matches_claim(claim: str, lhs: str, rhs: str) -> bool:
+    """Verify that an executable check matches the lemma claim without allowing spoofed checks."""
+    equality = f"{lhs} = {rhs}"
+    if "".join(claim.split()) == "".join(equality.split()):
+        return True
+    norm_claim = _norm_eq_expr(claim)
+    norm_eq = _norm_eq_expr(equality)
+    return bool(norm_eq) and (norm_eq == norm_claim or (len(norm_eq) >= 5 and norm_eq in norm_claim))
 
 
 def lemma_graph(text: str, steps: tuple[str, ...]) -> GraphExtraction:
@@ -367,9 +408,16 @@ def lemma_graph(text: str, steps: tuple[str, ...]) -> GraphExtraction:
             return GraphExtraction(outcome="premise_shape", node_count=len(raw), rejected_node=index)
         check = item.get("check")
         status = "uncheckable"
-        if isinstance(check, dict) and type(check.get("step")) is int and check["step"] == step:
-            equality = f'{check.get("lhs")} = {check.get("rhs")}'
-            if "".join(claim.split()) == "".join(equality.split()):
+        if isinstance(check, dict):
+            check_step = check.get("step", step)
+            lhs, rhs = check.get("lhs"), check.get("rhs")
+            if (
+                type(check_step) is int
+                and check_step == step
+                and isinstance(lhs, str)
+                and isinstance(rhs, str)
+                and _check_matches_claim(claim, lhs, rhs)
+            ):
                 status = check_assertion(check)
         source = steps[step - 1]
         quote = item.get("source_quote")
