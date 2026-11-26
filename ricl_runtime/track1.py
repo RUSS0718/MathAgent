@@ -225,10 +225,15 @@ def solve(
     status, reason = "completed", "review_passed"
     try:
         while True:
-            if not screen and budget.requests + 2 > budget.request_limit:
+            stop_on_reply = (
+                stop_after_salvage_dispatch and action == "salvage_switch"
+                and bool(context.get("lemmas_supplied"))
+            )
+            reserved_requests = 1 if screen or stop_on_reply else 2
+            if budget.requests + reserved_requests > budget.request_limit:
                 raise RunStop("stopped", "request_limit")
             text, truncated = _draft(problem, instruction, action, budget, **context)
-            if stop_after_salvage_dispatch and action == "salvage_switch" and context.get("lemmas_supplied"):
+            if stop_on_reply:
                 status, reason = "stopped", "nonempty_salvage_dispatched"
                 break
             if screen:

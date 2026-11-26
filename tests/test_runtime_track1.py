@@ -77,7 +77,7 @@ class Track1Tests(unittest.TestCase):
         ]}
         replies = [initial, review, json.dumps(graph), initial, review, ""]
         events = []
-        budget = SharedBudget(Track1Provider("fixture"), 24000, 8, Decimal("0.20"), events.append)
+        budget = SharedBudget(Track1Provider("fixture"), 24000, 6, Decimal("0.20"), events.append)
 
         def respond(url, *, payload, **kwargs):
             text = replies.pop(0)

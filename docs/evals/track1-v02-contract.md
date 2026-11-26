@@ -16,5 +16,6 @@
 - L2 在独立 API 上下文审阅候选。核查和引理抽取使用 JSON 对象模式，输出上限分别为 2,048 和 4,096 Token，预检和费用账本也使用该上限。批次使用同一模型，作用域为独立的步骤审查。离线准确率直接和评价侧参考答案对照。
 - DAG 以拓扑序校验前提，已知失效向下游传播。适用于原题的引理按 `L1-Executable-Verified` 或 `L2-Reviewed` 准入。后者须引用首错之前已审查的原步骤，且在受污染链条之外，依赖也须具备准入证据。轨迹记录准入标签、实际派发的引理 ID 与响应中的显式引用。
 - 抽取优先保留已审查前缀内的独立事实，允许 1 至 10 个节点。Trace 记录抽取状态、节点数和第一个被拒节点的位置。`--stop-after-salvage-dispatch` 在收到非空引理路线切换的 Provider 响应后停止，适用于派发 smoke。该次新路线的解答仍未经过独立复核。
+- 剪枝修复未通过后，已有合格引理池可直接供下一条路线使用。Trace 以 `reuse_verified_pool` 记录已跳过再次抽取。派发 smoke 的非空切换仅预留派发所需的一次请求。
 
 首批题目来自 AIMO3 官方参考集，许可为 CC BY-SA 4.0。本地冻结文件记录题面和答案键的散列。[竞赛数据说明](https://www.kaggle.com/competitions/ai-mathematical-olympiad-progress-prize-3/data) · [真实 smoke 记录](track1-v02-smoke-20261126.md)
