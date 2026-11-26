@@ -9,7 +9,7 @@ from .aprs import Candidate
 from .population import CandidateRoute, PopulationBudget
 from .port import DeterministicModelPort, ModelReply
 from .providers.chat_completions import ProviderConfigurationError
-from .providers.deepseek import DeepSeekModelPort
+from .providers.deepseek import GATEWAY_EXPANDED_OUTPUT_TOKENS, DeepSeekModelPort
 from .providers.minimax import MiniMaxModelPort
 from .runtime import Runtime
 
@@ -36,6 +36,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="offline reply (repeat in dispatch order for online search or counterfactual intervention)",
     )
     parser.add_argument("--thinking", choices=("enabled", "disabled"))
+    parser.add_argument(
+        "--gateway-output-tokens", type=int, choices=(GATEWAY_EXPANDED_OUTPUT_TOKENS,),
+        help="opt in to the expanded DeepSeek gateway output budget",
+    )
     parser.add_argument("--problem-id", help="optional stable problem identifier")
     parser.add_argument("--condition-id", default="offline-single-route")
     parser.add_argument("--output-root", type=Path, default=Path("artifacts"))
@@ -65,6 +69,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--cost-limit-usd", type=float, help="cost limit for --population (default: 0)")
     args = parser.parse_args(argv)
 
+    if args.gateway_output_tokens is not None and args.provider != "deepseek":
+        parser.error("--gateway-output-tokens requires the DeepSeek gateway")
     if args.population and args.provider != "offline":
         parser.error("--population requires the offline provider")
     if args.population and args.counterfactual:
@@ -87,7 +93,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             model_port = (
                 MiniMaxModelPort.from_environment()
                 if args.provider == "minimax"
-                else DeepSeekModelPort.from_environment(thinking=args.thinking)
+                else DeepSeekModelPort.from_environment(
+                    thinking=args.thinking, gateway_output_tokens=args.gateway_output_tokens,
+                )
             )
         except ProviderConfigurationError as error:
             parser.error(str(error))
