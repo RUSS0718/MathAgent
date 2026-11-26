@@ -1,0 +1,22 @@
+# RiCL v0.2 Track 1 单题交接
+
+主仓提供单题控制与用量记账。实验仓负责冻结题目、编排四条件、离线评价和计算对比曲线。当前工作归 [Runtime #272](https://github.com/RUSS0718/RiCL/issues/272) 和 [实验仓 #35](https://github.com/RUSS0718/RiCL-experiemnt/issues/35)。
+
+## 运行与记录
+
+用 `uv run python -m ricl_runtime.track1_cli --help` 查看入口。向 Runtime 传单题题面文件、题目 ID、条件、源码提交以及请求、Token 和费用限额。参考答案留在实验仓。运行目录保存 `run.json` 与脱敏 `trace.jsonl`。所有出网阶段共享 Token 预算。费用估算按网关公布的最高适用倍率计算，实付状态单列。记录已开始请求、已确认用量、失败分类及未执行项。筛题使用 `--screen --condition B1 --request-limit 1`，只采样首答。批次用 `--reasoning-effort` 固定思考强度。诊断批可指定 `none`，同时发送关闭思考的开关，并用返回的 Token 细分核对行为。
+
+官方 DeepSeek 配置使用 `BASE_URL=https://api.deepseek.com` 与 `MODEL=deepseek-flash`，配合本机匹配的 `API_KEY`。同一 Run 固定端点、模型与价格上界。[官方模型与价表](https://api-docs.deepseek.com/quick_start/pricing/)
+
+`B1` 用独立采样与核查排序选答，`B2` 在同一路线修复，`B3` 用独立完整候选与核查得分管理搜索，`RiCL_v0.2` 根据核查结果继续、剪枝修复或切换路线。初始解答通过后直接交付。待修复时才抽取引理。处理臂经过独立复核，运行轨迹记录请求、剪枝节点与发给下一请求的引理 ID。
+
+## 核查证据
+
+- L1 用 Python 有界解释器核查闭合等式、一元多项式恒等式和特值反例。多项式恒等式用次数上界和有理数精确求值核对。语法只含白名单算术，模型文字只作为数据。特值成立仍记为 `uncheckable`。L1 结果的适用范围限于被检查的等式或反例。
+- L2 在独立 API 上下文审阅候选。核查和引理抽取使用 JSON 对象模式，输出上限分别为 2,048 和 4,096 Token，预检和费用账本也使用该上限。批次使用同一模型，作用域为独立的步骤审查。离线准确率直接和评价侧参考答案对照。
+- DAG 以拓扑序校验前提，已知失效向下游传播。适用于原题的引理按 `L1-Executable-Verified` 或 `L2-Reviewed` 准入。后者须引用首错之前已审查的原步骤，且在受污染链条之外，依赖也须具备准入证据。轨迹记录准入标签、实际派发的引理 ID 与响应中的显式引用。
+- 抽取优先保留已审查前缀内的独立事实，允许 1 至 10 个节点。Trace 记录抽取状态、节点数和第一个被拒节点的位置。`--stop-after-salvage-dispatch` 在收到非空引理路线切换的 Provider 响应后停止，适用于派发 smoke。该次新路线的解答仍未经过独立复核。
+- 剪枝修复未通过后，已有合格引理池可直接供下一条路线使用。Trace 以 `reuse_verified_pool` 记录已跳过再次抽取。派发 smoke 的非空切换仅预留派发所需的一次请求。
+- 抽取可为 L2 提供 `source_quote`。Runtime 核对它与编号步骤的原文一致后，用该原文作为入池候选内容，继续执行原有作用域、首错和依赖证据校验。
+
+首批题目来自 AIMO3 官方参考集，许可为 CC BY-SA 4.0。本地冻结文件记录题面和答案键的散列。[竞赛数据说明](https://www.kaggle.com/competitions/ai-mathematical-olympiad-progress-prize-3/data) · [真实 smoke 记录](track1-v02-smoke-20261126.md)
