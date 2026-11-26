@@ -52,12 +52,14 @@ class Track1Provider:
             raise ProviderConfigurationError("Track 1 max_tokens must be between 8192 and 32768")
         return cls(key, max_output_tokens, reasoning_effort)
 
-    def complete(self, prompt: str, *, json_mode: bool = False) -> ChatCompletionReply:
+    def complete(
+        self, prompt: str, *, json_mode: bool = False, max_output_tokens: int | None = None,
+    ) -> ChatCompletionReply:
         """Submit only the public task context for this request."""
         payload = {
             "model": self.name,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": self.max_output_tokens,
+            "max_tokens": self.max_output_tokens if max_output_tokens is None else max_output_tokens,
             "thinking": {"type": self.thinking},
             "reasoning_effort": self.reasoning_effort,
         }

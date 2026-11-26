@@ -8,6 +8,8 @@ from .port import ModelPortFailure
 from .providers.chat_completions import ChatCompletionReply
 from .providers.track1 import Track1Provider, estimated_cost
 
+AUX_OUTPUT_LIMITS = {"review": 2048, "extract": 4096}
+
 
 class RunStop(Exception):
     """Signal a bounded or failed stop using a sanitized classification."""
@@ -37,7 +39,7 @@ class SharedBudget:
     def complete(self, stage: str, prompt: str, **context: object) -> ChatCompletionReply:
         """Reserve before dispatch and settle with provider totals or a preflight bound."""
         input_upper = len(prompt.encode("utf-8")) + 1024
-        output_limit = self.provider.max_output_tokens
+        output_limit = AUX_OUTPUT_LIMITS.get(stage, self.provider.max_output_tokens)
         cost_upper = estimated_cost(input_upper, output_limit)
         if self.requests >= self.request_limit:
             raise RunStop("stopped", "request_limit")
@@ -53,7 +55,9 @@ class SharedBudget:
                    "input_upper": input_upper, "output_limit": output_limit,
                    "cost_upper_usd": str(cost_upper), **context})
         try:
-            reply = self.provider.complete(prompt, json_mode=stage in {"review", "extract"})
+            reply = self.provider.complete(
+                prompt, json_mode=stage in AUX_OUTPUT_LIMITS, max_output_tokens=output_limit,
+            )
         except ModelPortFailure as exc:
             reply = getattr(exc, "reply", None)
             self._settle(reply, cost_upper)

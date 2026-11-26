@@ -5,18 +5,22 @@ import json
 import operator
 from dataclasses import dataclass
 from fractions import Fraction
-from math import comb, gcd
+from math import comb, gcd, lcm
 
 _OPERATORS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
               ast.Div: operator.truediv, ast.Mod: operator.mod}
-_FUNCTIONS = {"choose": comb, "gcd": gcd}
+_FUNCTIONS = {"choose": comb, "gcd": gcd, "lcm": lcm}
+L1_EVIDENCE = "L1-Executable-Verified"
+L2_EVIDENCE = "L2-Reviewed"
 CHECK_FORMAT = (
     'A check is {"step": 1, "lhs": "choose(10, 2)", "rhs": "45", "at": null}. '
     "Use exact integer arithmetic, fractions, %, ** (exponents -12 to 12), choose(n,k), "
-    "and gcd(a,b). For a claimed universal equality, integer samples such as "
+    "gcd(a,b), and lcm(a,b). For a claimed universal equality, integer samples such as "
     '"at":{"x":3} can disprove it but cannot establish it. '
     'Use "variable":"x" (with at null) to verify a one-variable polynomial identity. '
-    "Quote an equality actually asserted in that step, including its erroneous side as written. "
+    "For a value or equation root explicitly claimed in the step, substitute the stated "
+    'values into a closed equality (e.g. "2*3+1 = 7" for x=3 in 2*x+1=7). '
+    "Keep the original equality, including any erroneous side. "
     "Use null when there is no useful exact check."
 )
 
@@ -42,7 +46,7 @@ def _number(node: ast.AST, bindings: dict[str, int]) -> Fraction:
                 result = _OPERATORS[type(op)](a, b)
         case ast.Call(func=ast.Name(id=name), args=[left, right], keywords=[]) if name in _FUNCTIONS:
             a, b = _number(left, bindings), _number(right, bindings)
-            if any(v.denominator != 1 or abs(v) > 256 for v in (a, b)):
+            if any(v.denominator != 1 for v in (a, b)) or (name == "choose" and max(a, b) > 256):
                 raise ValueError("unsupported function argument")
             result = Fraction(_FUNCTIONS[name](int(a), int(b)))
         case _:
@@ -137,9 +141,10 @@ class Lemma:
     premises: tuple[str, ...]
     check: str
     global_scope: bool
+    matches_source: bool
 
 
-def lemma_graph(text: str, step_count: int) -> tuple[Lemma, ...]:
+def lemma_graph(text: str, steps: tuple[str, ...]) -> tuple[Lemma, ...]:
     """Require topological dependencies and evidence tied to a source step."""
     raw = json_object(text).get("lemmas")
     if not isinstance(raw, list) or not 5 <= len(raw) <= 10:
@@ -150,7 +155,7 @@ def lemma_graph(text: str, step_count: int) -> tuple[Lemma, ...]:
             return ()
         step, claim, premises = item.get("step"), item.get("claim"), item.get("premises")
         if (
-            item.get("id") != f"L{index}" or type(step) is not int or not 1 <= step <= step_count
+            item.get("id") != f"L{index}" or type(step) is not int or not 1 <= step <= len(steps)
             or not isinstance(claim, str) or not 0 < len(claim.strip()) <= 400
             or not isinstance(premises, list)
             or any(p not in [node.id for node in graph] for p in premises)
@@ -158,32 +163,39 @@ def lemma_graph(text: str, step_count: int) -> tuple[Lemma, ...]:
         ):
             return ()
         check = item.get("check")
-        if isinstance(check, dict) and check.get("step") == step:
-            # Only a matching closed equality may confer positive reusable evidence.
+        status = "uncheckable"
+        if isinstance(check, dict) and type(check.get("step")) is int and check["step"] == step:
             equality = f'{check.get("lhs")} = {check.get("rhs")}'
-            status = check_assertion(check)
-            if status == "pass" and "".join(claim.split()) != "".join(equality.split()):
-                status = "uncheckable"
-        else:
-            status = "uncheckable"
-        graph.append(Lemma(f"L{index}", step, claim, tuple(premises), status,
-                           item.get("global_scope") is True))
+            if "".join(claim.split()) == "".join(equality.split()):
+                status = check_assertion(check)
+        graph.append(Lemma(
+            f"L{index}", step, claim, tuple(premises), status, item.get("global_scope") is True,
+            " ".join(claim.split()) in " ".join(steps[step - 1].split()),
+        ))
     return tuple(graph)
 
 
 def prune_graph(
     graph: tuple[Lemma, ...], first_error: int, reviewed_prefix: int,
-) -> tuple[set[str], tuple[Lemma, ...]]:
-    """Propagate invalidation down dependency edges and retain global exact lemmas."""
+) -> tuple[set[str], tuple[tuple[Lemma, str], ...]]:
+    """Propagate invalidation and admit independent global lemmas with scoped evidence."""
     invalid: set[str] = set()
     retained = []
     checked: set[str] = set()
     for node in graph:
         if first_error == node.step or node.check == "fail" or invalid.intersection(node.premises):
             invalid.add(node.id)
-        elif node.check == "pass" and node.global_scope and (
-            node.step <= reviewed_prefix or (node.step > first_error > 0 and not node.premises)
-        ) and checked.issuperset(node.premises):
-            retained.append(node)
-            checked.add(node.id)
+            continue
+        if not node.global_scope or not checked.issuperset(node.premises):
+            continue
+        if node.check == "pass" and (
+            node.step <= reviewed_prefix or node.step > first_error > 0 and not node.premises
+        ):
+            evidence = L1_EVIDENCE
+        elif node.matches_source and node.step <= reviewed_prefix and node.step < first_error:
+            evidence = L2_EVIDENCE
+        else:
+            continue
+        retained.append((node, evidence))
+        checked.add(node.id)
     return invalid, tuple(retained)

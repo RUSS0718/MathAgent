@@ -10,7 +10,7 @@ from .identity import stable_id
 from .providers.chat_completions import ProviderConfigurationError
 from .providers.track1 import HOST, INPUT_RATE, MODEL, OUTPUT_LIMIT, OUTPUT_RATE, Track1Provider
 from .track1 import CONDITIONS, solve
-from .track1_budget import SharedBudget
+from .track1_budget import AUX_OUTPUT_LIMITS, SharedBudget
 
 
 def main() -> int:
@@ -51,6 +51,7 @@ def main() -> int:
         "endpoint_host": HOST, "model": MODEL, "thinking": provider.thinking,
         "reasoning_effort": args.reasoning_effort, "screen": args.screen,
         "max_output_tokens": args.max_tokens, "token_limit": args.token_limit,
+        "aux_output_limits": AUX_OUTPUT_LIMITS,
         "request_limit": args.request_limit, "cost_limit_usd": str(cost_limit),
         "input_usd_per_million": str(INPUT_RATE), "output_usd_per_million": str(OUTPUT_RATE),
         "source_revision": args.source_revision, "condition": args.condition,
