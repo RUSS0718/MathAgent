@@ -72,10 +72,12 @@ class Track1Tests(unittest.TestCase):
              "global_scope": True, "check": {"step": 3, "lhs": "2 + 2", "rhs": "5"}},
             {"id": "L8", "step": 4, "claim": "The two counts are equal.",
              "premises": ["L7"], "global_scope": True},
+            {"id": "L9", "step": 5, "claim": "We divide by zero.",
+             "premises": [], "global_scope": False},
         ]}
-        replies = [initial, review, json.dumps(graph), ""]
+        replies = [initial, review, json.dumps(graph), initial, review, ""]
         events = []
-        budget = SharedBudget(Track1Provider("fixture"), 24000, 5, Decimal("0.14"), events.append)
+        budget = SharedBudget(Track1Provider("fixture"), 24000, 8, Decimal("0.20"), events.append)
 
         def respond(url, *, payload, **kwargs):
             text = replies.pop(0)
@@ -91,26 +93,29 @@ class Track1Tests(unittest.TestCase):
         started = [event for event in events if event["event"] == "request_started"]
         payloads = [call.kwargs["payload"] for call in post.call_args_list]
         self.assertEqual(result["stop_reason"], "nonempty_salvage_dispatched")
-        self.assertEqual([p["max_tokens"] for p in payloads], [16384, 2048, 4096, 16384])
+        self.assertEqual([p["max_tokens"] for p in payloads], [16384, 2048, 4096, 16384, 2048, 16384])
         self.assertEqual([p["max_tokens"] for p in payloads], [e["output_limit"] for e in started])
-        self.assertEqual(["response_format" in p for p in payloads], [False, True, True, False])
+        self.assertEqual(["response_format" in p for p in payloads], [False, True, True, False, True, False])
         self.assertEqual(budget.reserved_cost, sum(
             budget.provider.estimated_cost(e["input_upper"], e["output_limit"]) for e in started
         ))
-        graph_event = next(event for event in events if event["event"] == "lemma_graph")
+        graph_event, reused_pool = [event for event in events if event["event"] == "lemma_graph"]
         self.assertEqual(graph_event["eligible"], ["L1", "L2"])
-        self.assertEqual(graph_event["pruned"], ["L7", "L8"])
-        switch = started[3]
+        self.assertEqual(graph_event["pruned"], ["L7", "L8", "L9"])
+        self.assertEqual(reused_pool["extraction_outcome"], "reuse_verified_pool")
+        repair, switch = started[3], started[5]
+        self.assertEqual(repair["action"], "pruned_repair")
         self.assertEqual(switch["action"], "salvage_switch")
+        self.assertEqual(switch["lemmas_supplied"], repair["lemmas_supplied"])
         exact, reviewed = switch["lemmas_supplied"]
-        prompt = payloads[3]["messages"][0]["content"]
+        prompt = payloads[5]["messages"][0]["content"]
         self.assertIn(f"[{exact}] [L1-Executable-Verified] lcm(6, 8) = 24", prompt)
         self.assertIn(f"[{reviewed}] [L2-Reviewed] Every solution lies in a single residue class.", prompt)
         self.assertEqual(graph_event["pool_evidence"], {
             exact: "L1-Executable-Verified", reviewed: "L2-Reviewed",
         })
-        reuse = next(event for event in events if event["event"] == "lemma_reuse")
-        self.assertEqual((reuse["call"], reuse["cited"]), (4, [reviewed]))
+        reuse = next(event for event in events if event["event"] == "lemma_reuse" and event["call"] == 6)
+        self.assertEqual(reuse["cited"], [reviewed])
 
     def test_l1_checks_exact_algebra_number_theory_and_substitution(self):
         for check in (

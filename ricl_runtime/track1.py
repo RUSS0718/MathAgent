@@ -148,7 +148,9 @@ def _treatment(
         return ("continue", "Complete this promising route, checking all omitted cases:\n"
                 + candidate.text, {}, repaired)
     extraction = GraphExtraction(outcome="insufficient_numbered_steps")
-    if candidate.steps and budget.requests + 3 > budget.request_limit:
+    if repaired and pool:
+        extraction = GraphExtraction(outcome="reuse_verified_pool")
+    elif candidate.steps and budget.requests + 3 > budget.request_limit:
         extraction = GraphExtraction(outcome="request_headroom")
     elif candidate.steps:
         reply = budget.complete(
