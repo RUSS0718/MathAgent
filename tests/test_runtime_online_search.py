@@ -121,6 +121,29 @@ class RuntimeOnlineSearchTests(unittest.TestCase):
             "applicable": True, "checks": {"verified": 1},
         })
 
+    def test_route_revisit_omits_oversized_draft_but_delivers_verified_claims(self):
+        """Keep verified state and the selected route when its earlier answer is too large."""
+        port = ScriptedModelPort(
+            measured(CANDIDATES),
+            measured(increment(CHECKS[0], answer="Long draft. " * 1300)),
+            measured(increment(answer="No new checked claim.")),
+            measured(increment(answer="Continue from the domain restriction.")),
+        )
+        port.max_prompt_bytes = 16 * 1024
+        with tempfile.TemporaryDirectory() as directory:
+            run = Runtime(port).run(
+                PROBLEM, online_search="aprs", model_request_limit=4, output_root=Path(directory),
+            )
+            trace = [json.loads(line) for line in Path(run["artifacts"]["trace"]).read_text().splitlines()]
+
+        self.assertEqual(captured_route(port.prompts[-1]), "route_01")
+        self.assertLessEqual(len(port.prompts[-1].encode()), port.max_prompt_bytes)
+        self.assertNotIn("Long draft.", port.prompts[-1])
+        self.assertIn('"kind":"necessary_conditions"', port.prompts[-1])
+        omitted, = [event for event in trace if event["event"] == "route_draft_omitted"]
+        self.assertEqual(omitted["request_id"], run["provider_requests"][-1]["request_id"])
+        self.assertGreater(omitted["prompt_bytes_before"], omitted["prompt_byte_limit"])
+
     def test_two_gain_choices_are_followed_by_least_recently_expanded_route(self):
         quiet = measured(increment(answer="No additional checked step."))
         port, run, trace = self.run_search(

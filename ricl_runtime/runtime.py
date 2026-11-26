@@ -890,7 +890,19 @@ class Runtime:
                         "Expand the selected route by one bounded step. "
                         "You may use independently checked shared claims."
                     )
-                parts.append("Route expansion:\n" + _canonical_json(route.prompt()))
+                route_context = route.prompt()
+                parts.append("Route expansion:\n" + _canonical_json(route_context))
+                prompt_byte_limit = getattr(self._model_port, "max_prompt_bytes", None)
+                if "previous_answer" in route_context and type(prompt_byte_limit) is int:
+                    prompt_bytes = len("\n\n".join(parts).encode("utf-8"))
+                    if prompt_bytes > prompt_byte_limit:
+                        del route_context["previous_answer"]
+                        parts[-1] = "Route expansion:\n" + _canonical_json(route_context)
+                        trace.append({
+                            "event": "route_draft_omitted", "request_id": requests.next_request_id,
+                            "route_id": route.route_id, "prompt_bytes_before": prompt_bytes,
+                            "prompt_byte_limit": prompt_byte_limit,
+                        })
             if kind == "diagnosis":
                 parts.append("One bounded diagnosis: make a substantive correction or stop.")
                 if not reasoning_state_enabled and result is not None:
