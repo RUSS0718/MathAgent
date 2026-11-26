@@ -62,7 +62,7 @@ uv run python scripts/verify_runtime_pilot.py ./approved-archives
 
 [固定校验锚点](evals/runtime-method-pilot-anchor.json)记录各归档的索引哈希、状态及预期文件数和 Run 数。核验器离线检查原批 40 个文件／15 个 Run 和续批 31 个文件／9 个 Run 的索引、文件字节、Run 身份、源码版本、配置哈希与对应 Trace，不读取受限答案键，也不调用 Provider。校验通过仅说明产物与锚点一致，不重判数学答案，也不把未触发的机制算作成功。
 
-M2 的 6 对运行没有冷启动后的调度机会；真实双循环中可评估的 Run 没有自然关键失败；状态复用有真实送达与明确引用，但没有真实撤销。详见 [#256](https://github.com/RUSS0718/RiCL/issues/256)、[#257](https://github.com/RUSS0718/RiCL/issues/257)、[#258](https://github.com/RUSS0718/RiCL/issues/258)、[#259](https://github.com/RUSS0718/RiCL/issues/259)。
+M2 v2 的 6 对运行均在冷启动阶段结束。双循环 v3 观察到自然关键失败、自主诊断、同源双臂裁决，以及拒绝回灌后的真实续接。状态复用已有真实送达和明确引用，实际撤销仍待观察。[双循环 v3 证据、费用与复算](evals/dual-loop-real-20261126-v3-evidence.md)。详见 [#256](https://github.com/RUSS0718/RiCL/issues/256)、[#257](https://github.com/RUSS0718/RiCL/issues/257)、[#258](https://github.com/RUSS0718/RiCL/issues/258)、[#259](https://github.com/RUSS0718/RiCL/issues/259)。
 
 ## 三项研究机制及当前状态
 
