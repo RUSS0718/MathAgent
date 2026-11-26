@@ -8,7 +8,7 @@ from .port import ModelPortFailure
 from .providers.chat_completions import ChatCompletionReply
 from .providers.track1 import Track1Provider
 
-AUX_OUTPUT_LIMITS = {"review": 2048, "extract": 4096}
+AUX_OUTPUT_LIMITS = {"review": 2048, "extract": 4096, "review_extract": 4096}
 
 
 class RunStop(Exception):

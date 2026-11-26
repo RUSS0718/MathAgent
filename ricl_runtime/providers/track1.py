@@ -18,9 +18,12 @@ INPUT_RATE = Decimal("0.80")
 OUTPUT_RATE = Decimal("3.20")
 OUTPUT_LIMIT = 16384
 OFFICIAL_HOST = "api.deepseek.com"
+SILICONFLOW_HOST = "api.siliconflow.cn"
+SILICONFLOW_MODEL = "Qwen/Qwen3.5-35B-A3B"
 PROFILES = {
     HOST: (MODEL, INPUT_RATE, OUTPUT_RATE),
     OFFICIAL_HOST: ("deepseek-flash", Decimal("0.30"), Decimal("1.20")),
+    SILICONFLOW_HOST: (SILICONFLOW_MODEL, Decimal("0.24"), Decimal("1.80")),
 }
 
 
@@ -67,13 +70,27 @@ class Track1Provider:
         self, prompt: str, *, json_mode: bool = False, max_output_tokens: int | None = None,
     ) -> ChatCompletionReply:
         """Submit only the public task context for this request."""
-        payload = {
-            "model": self.name,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": self.max_output_tokens if max_output_tokens is None else max_output_tokens,
-            "thinking": {"type": self.thinking},
-            "reasoning_effort": self.reasoning_effort,
-        }
+        effective_max = self.max_output_tokens if max_output_tokens is None else max_output_tokens
+        if self.host == SILICONFLOW_HOST:
+            enable_thinking = self.reasoning_effort != "none" and not json_mode
+            payload: dict[str, object] = {
+                "model": self.name,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": effective_max,
+                "enable_thinking": enable_thinking,
+            }
+            if enable_thinking:
+                effort_frac = 0.25 if self.reasoning_effort == "low" else 0.5
+                budget = max(1024, min(effective_max - 2048, int(effective_max * effort_frac)))
+                payload["thinking_budget"] = budget
+        else:
+            payload = {
+                "model": self.name,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": effective_max,
+                "thinking": {"type": self.thinking},
+                "reasoning_effort": self.reasoning_effort,
+            }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         path = "/chat/completions" if self.host == OFFICIAL_HOST else "/v1/chat/completions"

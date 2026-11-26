@@ -10,7 +10,8 @@ from ricl_runtime.providers.chat_completions import ChatCompletionReply, Provide
 from ricl_runtime.providers.track1 import Track1Provider
 from ricl_runtime.track1 import Candidate, _public_answer, _selection, solve
 from ricl_runtime.track1_budget import SharedBudget
-from ricl_runtime.track1_verification import check_assertion, lemma_graph, prune_graph
+from ricl_runtime.track1_scheduler import RouteState, Track1SharedState, select_aprs_action
+from ricl_runtime.track1_verification import Lemma, check_assertion, lemma_graph, prune_graph
 
 
 class Track1Tests(unittest.TestCase):
@@ -65,28 +66,32 @@ class Track1Tests(unittest.TestCase):
             "Step 5: We divide by zero.\n"
             "Step 6: There are exactly three solutions.\nFinal answer: 3"
         )
-        review = '{"verdict":"fail","first_error":5,"valid_prefix":4}'
-        graph = {"lemmas": [
-            {"id": "L1", "step": 1, "claim": "lcm(6, 8) = 24", "premises": [],
-             "global_scope": True, "check": {"step": 1, "lhs": "lcm(6, 8)", "rhs": "24"}},
-            {"id": "L2", "step": 2, "claim": "Every solution lies in a single residue class.",
-             "premises": [], "global_scope": True},
-            {"id": "L3", "step": 3, "claim": "The route assumes an odd parameter.",
-             "premises": [], "global_scope": False},
-            {"id": "L4", "step": 4, "claim": "The two counts are equal.",
-             "premises": ["L3"], "global_scope": True},
-            {"id": "L5", "step": 6, "claim": "There are exactly three solutions.",
-             "premises": [], "global_scope": True},
-            {"id": "L6", "step": 2, "claim": "There is exactly one solution.",
-             "premises": [], "global_scope": True},
-            {"id": "L7", "step": 3, "claim": "2 + 2 = 5", "premises": [],
-             "global_scope": True, "check": {"step": 3, "lhs": "2 + 2", "rhs": "5"}},
-            {"id": "L8", "step": 4, "claim": "The two counts are equal.",
-             "premises": ["L7"], "global_scope": True},
-            {"id": "L9", "step": 5, "claim": "We divide by zero.",
-             "premises": [], "global_scope": False},
-        ]}
-        replies = [initial, review, json.dumps(graph), initial, review, ""]
+        fused_review = {
+            "verdict": "fail",
+            "first_error": 5,
+            "valid_prefix": 4,
+            "lemmas": [
+                {"id": "L1", "step": 1, "claim": "lcm(6, 8) = 24", "premises": [],
+                 "global_scope": True, "check": {"step": 1, "lhs": "lcm(6, 8)", "rhs": "24"}},
+                {"id": "L2", "step": 2, "claim": "Every solution lies in a single residue class.",
+                 "premises": [], "global_scope": True},
+                {"id": "L3", "step": 3, "claim": "The route assumes an odd parameter.",
+                 "premises": [], "global_scope": False},
+                {"id": "L4", "step": 4, "claim": "The two counts are equal.",
+                 "premises": ["L3"], "global_scope": True},
+                {"id": "L5", "step": 6, "claim": "There are exactly three solutions.",
+                 "premises": [], "global_scope": True},
+                {"id": "L6", "step": 2, "claim": "There is exactly one solution.",
+                 "premises": [], "global_scope": True},
+                {"id": "L7", "step": 3, "claim": "2 + 2 = 5", "premises": [],
+                 "global_scope": True, "check": {"step": 3, "lhs": "2 + 2", "rhs": "5"}},
+                {"id": "L8", "step": 4, "claim": "The two counts are equal.",
+                 "premises": ["L7"], "global_scope": True},
+                {"id": "L9", "step": 5, "claim": "We divide by zero.",
+                 "premises": [], "global_scope": False},
+            ],
+        }
+        replies = [initial, json.dumps(fused_review), initial, json.dumps(fused_review), ""]
         events = []
         budget = SharedBudget(Track1Provider("fixture"), 24000, 6, Decimal("0.20"), events.append)
 
@@ -104,28 +109,28 @@ class Track1Tests(unittest.TestCase):
         started = [event for event in events if event["event"] == "request_started"]
         payloads = [call.kwargs["payload"] for call in post.call_args_list]
         self.assertEqual(result["stop_reason"], "nonempty_salvage_dispatched")
-        self.assertEqual([p["max_tokens"] for p in payloads], [16384, 2048, 4096, 16384, 2048, 16384])
+        self.assertEqual([p["max_tokens"] for p in payloads], [16384, 4096, 16384, 4096, 16384])
         self.assertEqual([p["max_tokens"] for p in payloads], [e["output_limit"] for e in started])
-        self.assertEqual(["response_format" in p for p in payloads], [False, True, True, False, True, False])
+        self.assertEqual(["response_format" in p for p in payloads], [False, True, False, True, False])
         self.assertEqual(budget.reserved_cost, sum(
             budget.provider.estimated_cost(e["input_upper"], e["output_limit"]) for e in started
         ))
-        graph_event, reused_pool = [event for event in events if event["event"] == "lemma_graph"]
+        graph_event, _ = [event for event in events if event["event"] == "lemma_graph"]
+        self.assertTrue(graph_event["fused"])
         self.assertEqual(graph_event["eligible"], ["L1", "L2"])
         self.assertEqual(graph_event["pruned"], ["L7", "L8", "L9"])
-        self.assertEqual(reused_pool["extraction_outcome"], "reuse_verified_pool")
-        repair, switch = started[3], started[5]
+        repair, switch = started[2], started[4]
         self.assertEqual(repair["action"], "pruned_repair")
         self.assertEqual(switch["action"], "salvage_switch")
         self.assertEqual(switch["lemmas_supplied"], repair["lemmas_supplied"])
         exact, reviewed = switch["lemmas_supplied"]
-        prompt = payloads[5]["messages"][0]["content"]
+        prompt = payloads[4]["messages"][0]["content"]
         self.assertIn(f"[{exact}] [L1-Executable-Verified] lcm(6, 8) = 24", prompt)
         self.assertIn(f"[{reviewed}] [L2-Reviewed] Every solution lies in a single residue class.", prompt)
         self.assertEqual(graph_event["pool_evidence"], {
             exact: "L1-Executable-Verified", reviewed: "L2-Reviewed",
         })
-        reuse = next(event for event in events if event["event"] == "lemma_reuse" and event["call"] == 6)
+        reuse = next(event for event in events if event["event"] == "lemma_reuse" and event["call"] == 5)
         self.assertEqual(reuse["cited"], [reviewed])
 
     def test_l1_checks_exact_algebra_number_theory_and_substitution(self):
@@ -290,16 +295,7 @@ class Track1Tests(unittest.TestCase):
             "Step 3: Independent check 3*4 = 12.\n"
             "Final answer: 10"
         )
-        review_unknown = "not json"
-        review_fail1 = '{"verdict":"fail","first_error":2,"valid_prefix":1,"error_constraint":"Avoid d=0."}'
-        graph_json = json.dumps({"lemmas": [
-            {"id": "L1", "step": 1, "claim": "Valid base setup.", "premises": [], "global_scope": True},
-            {"id": "L2", "step": 2, "claim": "Bad division.", "premises": [], "global_scope": False},
-            {"id": "L3", "step": 3, "claim": "3*4 = 12", "premises": [], "global_scope": True,
-             "check": {"step": 3, "lhs": "3*4", "rhs": "12"}},
-        ]})
         repair_sol = "Step 1: Still missing tail.\nFinal answer: 11"
-        review_fail2 = '{"verdict":"fail","first_error":1,"valid_prefix":0,"error_constraint":"Check parity."}'
         switch_sol = "Step 1: Resolved cleanly.\nFinal answer: 12"
         review_pass = '{"verdict":"pass","first_error":0,"valid_prefix":1}'
 
@@ -312,87 +308,150 @@ class Track1Tests(unittest.TestCase):
             "ricl_runtime.providers.track1.post_chat_completion",
             return_value=ChatCompletionReply("{}", input_tokens=5000, output_tokens=100, finish_reason="stop"),
         ) as direct_post:
-            budget_extract.complete("extract", "x" * 20000)
+            budget_extract.complete("review_extract", "x" * 20000)
         self.assertEqual(direct_post.call_count, 1)
 
+        lemmas = [
+            {"id": "L1", "step": 1, "claim": "Valid base setup.", "premises": [], "global_scope": True},
+            {"id": "L2", "step": 2, "claim": "Bad division.", "premises": [], "global_scope": False},
+            {"id": "L3", "step": 3, "claim": "3*4 = 12", "premises": [], "global_scope": True,
+             "check": {"step": 3, "lhs": "3*4", "rhs": "12"}},
+        ]
+        # Disagreed scout -> R1 fails with l2=unknown (not JSON), R2 audited -> fail -> R2 repair -> pass
+        fused_fail1 = json.dumps({
+            "verdict": "fail", "first_error": 2, "valid_prefix": 1,
+            "error_constraint": "Avoid d=0.", "lemmas": lemmas,
+        })
+        fused_fail2 = json.dumps({
+            "verdict": "fail", "first_error": 1, "valid_prefix": 0,
+            "error_constraint": "Check parity.", "lemmas": lemmas,
+        })
         replies1 = [
             "Step 1: Setup only.\nFinal answer: 9",
-            review_unknown,
-            graph_json,
+            initial,
+            fused_fail1,
+            "not json",
+            repair_sol,
+            fused_fail2,
             switch_sol,
             review_pass,
         ]
         events1 = []
         budget1 = SharedBudget(
-            Track1Provider("fixture", max_output_tokens=8192), 32768, 10, Decimal("1.00"), events1.append,
+            Track1Provider("fixture", max_output_tokens=8192), 49152, 10, Decimal("1.00"), events1.append,
         )
         with patch(
             "ricl_runtime.providers.track1.post_chat_completion",
             side_effect=lambda *a, **kw: ChatCompletionReply(
                 replies1.pop(0), input_tokens=1500, output_tokens=300, finish_reason="stop"
             ),
-        ):
+        ) as post1:
             result1 = solve(long_problem, "RiCL_v0.2", budget1)
 
         self.assertEqual(result1["status"], "completed")
         self.assertEqual(result1["final_answer"], "12")
-        self.assertEqual(result1["action_sequence"], ["initial", "salvage_switch"])
         self.assertNotIn("continue", result1["action_sequence"])
-
-        # 2) Verified prefix + post-error L1 + accumulated error_constraints across repair -> switch
-        replies2 = [
-            initial,
-            review_fail1,
-            graph_json,
-            repair_sol,
-            review_fail2,
-            switch_sol,
-            review_pass,
-        ]
-        events2 = []
-        budget2 = SharedBudget(
-            Track1Provider("fixture", max_output_tokens=8192), 32768, 12, Decimal("1.00"), events2.append,
+        self.assertEqual(
+            result1["action_sequence"],
+            ["initial", "scout_route", "pruned_repair", "salvage_switch"],
         )
-        with patch(
-            "ricl_runtime.providers.track1.post_chat_completion",
-            side_effect=lambda *a, **kw: ChatCompletionReply(
-                replies2.pop(0), input_tokens=1500, output_tokens=300, finish_reason="stop"
-            ),
-        ) as post2:
-            result2 = solve(long_problem, "RiCL_v0.2", budget2)
-
-        self.assertEqual(result2["status"], "completed")
-        self.assertEqual(result2["final_answer"], "12")
-        self.assertEqual(result2["action_sequence"], ["initial", "pruned_repair", "salvage_switch"])
-        payloads = [c.kwargs["payload"]["messages"][0]["content"] for c in post2.call_args_list]
-        repair_prompt = payloads[3]
+        payloads = [c.kwargs["payload"]["messages"][0]["content"] for c in post1.call_args_list]
+        repair_prompt = payloads[4]
         self.assertIn("Step 1: Valid base setup.", repair_prompt)
         self.assertIn("[L1-Executable-Verified] 3*4 = 12", repair_prompt)
         self.assertIn("Avoid d=0.", repair_prompt)
-        switch_prompt = payloads[5]
+        switch_prompt = payloads[6]
         self.assertIn("[L1-Executable-Verified] 3*4 = 12", switch_prompt)
         self.assertIn("Avoid d=0.", switch_prompt)
         self.assertIn("Check parity.", switch_prompt)
 
-        # 3) Genuine incomplete with missing final answer dispatches continue at most once
-        replies3 = [
+        # 2) Genuine incomplete (no scout when first draft has no public answer) dispatches continue at most once
+        fused_inc = json.dumps({
+            "verdict": "incomplete", "first_error": 0, "valid_prefix": 1, "lemmas": lemmas,
+        })
+        replies2 = [
             "Step 1: Valid start.\nStep 2: Unfinished.",
-            '{"verdict":"incomplete","first_error":0,"valid_prefix":1}',
+            fused_inc,
             "Step 1: Valid start.\nStep 2: Still unfinished.",
-            '{"verdict":"incomplete","first_error":0,"valid_prefix":1}',
-            graph_json,
+            fused_inc,
             switch_sol,
-            review_pass,
+            json.dumps({"verdict": "pass", "first_error": 0, "valid_prefix": 1, "lemmas": []}),
         ]
-        events3 = []
-        budget3 = SharedBudget(Track1Provider("fixture"), 32768, 12, Decimal("1.00"), events3.append)
+        events2 = []
+        budget2 = SharedBudget(Track1Provider("fixture"), 32768, 12, Decimal("1.00"), events2.append)
         with patch(
             "ricl_runtime.providers.track1.post_chat_completion",
             side_effect=lambda *a, **kw: ChatCompletionReply(
-                replies3.pop(0), input_tokens=30, output_tokens=40, finish_reason="stop"
+                replies2.pop(0), input_tokens=30, output_tokens=40, finish_reason="stop"
             ),
         ):
-            result3 = solve("Problem", "RiCL_v0.2", budget3)
+            result2 = solve("Problem", "RiCL_v0.2", budget2)
 
-        self.assertEqual(result3["status"], "completed")
-        self.assertEqual(result3["action_sequence"], ["initial", "continue", "salvage_switch"])
+        self.assertEqual(result2["status"], "completed")
+        self.assertEqual(result2["action_sequence"], ["initial", "continue", "salvage_switch"])
+
+    def test_siliconflow_profile_configures_thinking_budget_and_json_no_thinking(self):
+        with patch.dict(os.environ, {
+            "BASE_URL": "https://api.siliconflow.cn/v1",
+            "MODEL": "Qwen/Qwen3.5-35B-A3B",
+            "API_KEY": "fixture",
+        }):
+            provider = Track1Provider.from_environment(16384, "high")
+        with patch("ricl_runtime.providers.track1.post_chat_completion") as post:
+            provider.complete("solve", json_mode=False)
+            provider.complete("audit", json_mode=True, max_output_tokens=4096)
+        solve_payload = post.call_args_list[0].kwargs["payload"]
+        json_payload = post.call_args_list[1].kwargs["payload"]
+        self.assertEqual(
+            post.call_args_list[0].args[0], "https://api.siliconflow.cn/v1/chat/completions"
+        )
+        self.assertNotIn("thinking", solve_payload)
+        self.assertNotIn("reasoning_effort", solve_payload)
+        self.assertTrue(solve_payload["enable_thinking"])
+        self.assertEqual(solve_payload["thinking_budget"], 8192)
+        self.assertFalse(json_payload["enable_thinking"])
+        self.assertNotIn("thinking_budget", json_payload)
+        self.assertEqual(json_payload["response_format"], {"type": "json_object"})
+        self.assertEqual(provider.estimated_cost(1_000_000, 1_000_000), Decimal("2.04"))
+
+    def test_disagreement_gate_exits_in_two_calls_on_consensus(self):
+        replies = [
+            "Step 1: Compute ratio.\nFinal answer: \\frac{1}{2}",
+            "Step 1: Alternate proof.\nFinal answer: 1/2",
+        ]
+        events = []
+        budget = SharedBudget(Track1Provider("fixture"), 32768, 8, Decimal("1.00"), events.append)
+        with patch(
+            "ricl_runtime.providers.track1.post_chat_completion",
+            side_effect=lambda *a, **kw: ChatCompletionReply(
+                replies.pop(0), input_tokens=40, output_tokens=50, finish_reason="stop"
+            ),
+        ):
+            result = solve("Problem", "RiCL_v0.2", budget)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["stop_reason"], "consensus_passed")
+        self.assertEqual(result["api_calls"], 2)
+        self.assertEqual(result["action_sequence"], ["initial", "scout_route"])
+        self.assertEqual(result["verification"]["l2"], "consensus_pass")
+
+    def test_aprs_multi_route_scheduler_and_srs_invalidation(self):
+        srs = Track1SharedState()
+        bad_l2 = (
+            Lemma("L1", 1, "x = 5", (), "uncheckable", True, True),
+            Lemma("L2", 2, "x + 1 = 6", ("L1",), "uncheckable", True, True),
+        )
+        admitted = srs.admit_pruned(bad_l2, ((bad_l2[0], "L2-Reviewed"), (bad_l2[1], "L2-Reviewed")), "R1")
+        self.assertEqual(len(admitted), 2)
+        self.assertEqual(len(srs.active_pool()), 2)
+        srs.invalidate_claim("x = 5")
+        self.assertEqual(srs.active_pool(), {})
+
+        r1 = RouteState("R1", "initial", Candidate("s1", "10", "fail", 3, 1, ("a", "b", "c"), "uncheckable", "err1"), reviewed=True, spent_tokens=4000, l1_lemmas=0, l2_lemmas=1)
+        r2 = RouteState("R2", "scout", Candidate("s2", "11", "fail", 3, 2, ("a", "b", "c"), "uncheckable", "err2"), reviewed=True, spent_tokens=1500, l1_lemmas=2, l2_lemmas=0)
+        rid, act, trace = select_aprs_action([r1, r2], srs)
+        self.assertEqual((rid, act), ("R2", "pruned_repair"))
+        self.assertEqual(trace["priority_order"], ["R2", "R1"])
+
+    def test_strip_thinking_tags_before_step_and_answer_parsing(self):
+        text = "<think>Step 1: wrong scratch.\nFinal answer: 999</think>\nStep 1: Clean proof.\nFinal answer: 42"
+        self.assertEqual(_public_answer(text), "42")

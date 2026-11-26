@@ -3,7 +3,9 @@ name = "mathagent"
 version = "0.1.0"
 description = "RiCL Runtime for mathematical reasoning research"
 requires-python = ">=3.11,<3.13"
-dependencies = []
+dependencies = [
+  "sympy>=1.13,<2",
+]
 
 [dependency-groups]
 dev = [
