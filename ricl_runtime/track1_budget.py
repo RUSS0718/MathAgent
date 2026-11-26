@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from .port import ModelPortFailure
 from .providers.chat_completions import ChatCompletionReply
-from .providers.track1 import Track1Provider, estimated_cost
+from .providers.track1 import Track1Provider
 
 AUX_OUTPUT_LIMITS = {"review": 2048, "extract": 4096}
 
@@ -40,7 +40,7 @@ class SharedBudget:
         """Reserve before dispatch and settle with provider totals or a preflight bound."""
         input_upper = len(prompt.encode("utf-8")) + 1024
         output_limit = AUX_OUTPUT_LIMITS.get(stage, self.provider.max_output_tokens)
-        cost_upper = estimated_cost(input_upper, output_limit)
+        cost_upper = self.provider.estimated_cost(input_upper, output_limit)
         if self.requests >= self.request_limit:
             raise RunStop("stopped", "request_limit")
         if self.tokens + input_upper + output_limit > self.token_limit:
@@ -95,7 +95,7 @@ class SharedBudget:
         output_tokens = getattr(reply, "output_tokens", "unknown")
         self.tokens += sum(value for value in (input_tokens, output_tokens) if type(value) is int)
         if type(input_tokens) is int and type(output_tokens) is int:
-            self.cost += estimated_cost(input_tokens, output_tokens)
+            self.cost += self.provider.estimated_cost(input_tokens, output_tokens)
         else:
             self.usage_unknown += 1
             self.cost += cost_upper

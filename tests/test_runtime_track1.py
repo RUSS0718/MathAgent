@@ -1,18 +1,33 @@
 """Cover the Track 1 salvage handoff and its shared request reservation."""
 
 import json
+import os
 import unittest
 from decimal import Decimal
 from unittest.mock import patch
 
-from ricl_runtime.providers.chat_completions import ChatCompletionReply
-from ricl_runtime.providers.track1 import Track1Provider, estimated_cost
+from ricl_runtime.providers.chat_completions import ChatCompletionReply, ProviderConfigurationError
+from ricl_runtime.providers.track1 import Track1Provider
 from ricl_runtime.track1 import solve
 from ricl_runtime.track1_budget import SharedBudget
 from ricl_runtime.track1_verification import check_assertion
 
 
 class Track1Tests(unittest.TestCase):
+    def test_official_profile_pins_destination_model_and_rates(self):
+        with patch.dict(os.environ, {
+            "BASE_URL": "https://api.deepseek.com", "MODEL": "deepseek-flash", "API_KEY": "fixture",
+        }):
+            provider = Track1Provider.from_environment(16384, "none")
+            with patch.dict(os.environ, {"MODEL": "deepseek-v4.1-flash"}):
+                with self.assertRaises(ProviderConfigurationError):
+                    Track1Provider.from_environment(16384, "none")
+        with patch("ricl_runtime.providers.track1.post_chat_completion") as post:
+            provider.complete("fixture", json_mode=True, max_output_tokens=2048)
+        self.assertEqual(post.call_args.args[0], "https://api.deepseek.com/chat/completions")
+        self.assertEqual(post.call_args.kwargs["payload"]["model"], "deepseek-flash")
+        self.assertEqual(provider.estimated_cost(1000, 1000), Decimal("0.0015"))
+
     def test_salvage_injects_labeled_independent_lemmas_under_auxiliary_caps(self):
         initial = (
             "**Step 1:** We compute lcm(6, 8) = 24.\n"
@@ -62,7 +77,7 @@ class Track1Tests(unittest.TestCase):
         self.assertEqual([p["max_tokens"] for p in payloads], [e["output_limit"] for e in started])
         self.assertEqual(["response_format" in p for p in payloads], [False, True, True, False, True])
         self.assertEqual(budget.reserved_cost, sum(
-            estimated_cost(e["input_upper"], e["output_limit"]) for e in started
+            budget.provider.estimated_cost(e["input_upper"], e["output_limit"]) for e in started
         ))
         graph_event = next(event for event in events if event["event"] == "lemma_graph")
         self.assertEqual(graph_event["eligible"], ["L1", "L2"])

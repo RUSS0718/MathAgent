@@ -1,4 +1,4 @@
-"""Bounded Track 1 profile for the configured OpenAI-compatible gateway."""
+"""Bounded Track 1 profiles for explicitly configured providers."""
 
 import os
 from dataclasses import dataclass, field
@@ -17,11 +17,11 @@ MODEL = "deepseek-v4.1-flash"
 INPUT_RATE = Decimal("0.80")
 OUTPUT_RATE = Decimal("3.20")
 OUTPUT_LIMIT = 16384
-
-
-def estimated_cost(input_tokens: int, output_tokens: int) -> Decimal:
-    """Charge all input at the highest advertised group rate, ignoring cache discounts."""
-    return (input_tokens * INPUT_RATE + output_tokens * OUTPUT_RATE) / 1_000_000
+OFFICIAL_HOST = "api.deepseek.com"
+PROFILES = {
+    HOST: (MODEL, INPUT_RATE, OUTPUT_RATE),
+    OFFICIAL_HOST: ("deepseek-flash", Decimal("0.30"), Decimal("1.20")),
+}
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,13 @@ class Track1Provider:
     reasoning_effort: str = "high"
     timeout: float = 180
     name: str = MODEL
+    host: str = HOST
+    input_rate: Decimal = INPUT_RATE
+    output_rate: Decimal = OUTPUT_RATE
+
+    def estimated_cost(self, input_tokens: int, output_tokens: int) -> Decimal:
+        """Use peak uncached rates as a conservative estimate."""
+        return (input_tokens * self.input_rate + output_tokens * self.output_rate) / 1_000_000
 
     @property
     def thinking(self) -> str:
@@ -42,15 +49,19 @@ class Track1Provider:
     @classmethod
     def from_environment(cls, max_output_tokens: int, reasoning_effort: str) -> "Track1Provider":
         """Require the local credential to have been selected for this gateway."""
-        if not validate_base_url(os.environ.get("BASE_URL", ""), HOST):
-            raise ProviderConfigurationError("BASE_URL must select the Track 1 gateway")
-        if os.environ.get("MODEL") != MODEL:
-            raise ProviderConfigurationError("MODEL must select the Track 1 model")
+        base_url = os.environ.get("BASE_URL", "")
+        host = next((host for host in PROFILES if validate_base_url(base_url, host)), None)
+        if host is None:
+            raise ProviderConfigurationError("BASE_URL must select a supported Track 1 provider")
+        model, input_rate, output_rate = PROFILES[host]
+        if os.environ.get("MODEL") != model:
+            raise ProviderConfigurationError("MODEL must match the selected Track 1 provider")
         key = os.environ.get("API_KEY", "")
         validate_api_key(key)
         if not 8192 <= max_output_tokens <= 32768:
             raise ProviderConfigurationError("Track 1 max_tokens must be between 8192 and 32768")
-        return cls(key, max_output_tokens, reasoning_effort)
+        return cls(key, max_output_tokens, reasoning_effort, name=model, host=host,
+                   input_rate=input_rate, output_rate=output_rate)
 
     def complete(
         self, prompt: str, *, json_mode: bool = False, max_output_tokens: int | None = None,
@@ -65,8 +76,9 @@ class Track1Provider:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        path = "/chat/completions" if self.host == OFFICIAL_HOST else "/v1/chat/completions"
         return post_chat_completion(
-            f"https://{HOST}/v1/chat/completions",
+            f"https://{self.host}{path}",
             api_key=self.api_key,
             payload=payload,
             timeout=self.timeout,
