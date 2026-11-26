@@ -15,6 +15,7 @@ CHECK_FORMAT = (
     "Use exact integer arithmetic, fractions, %, ** (exponents -12 to 12), choose(n,k), "
     "and gcd(a,b). For a claimed universal equality, integer samples such as "
     '"at":{"x":3} can disprove it but cannot establish it. '
+    'Use "variable":"x" (with at null) to verify a one-variable polynomial identity. '
     "Quote an equality actually asserted in that step, including its erroneous side as written. "
     "Use null when there is no useful exact check."
 )
@@ -55,6 +56,12 @@ def check_assertion(check: dict) -> str:
     """Check an exact equality or search for a counterexample at a supplied point."""
     try:
         point = check.get("at")
+        variable = check.get("variable")
+        if variable is not None and (
+            point is not None or not isinstance(variable, str)
+            or len(variable) > 8 or not variable.isidentifier()
+        ):
+            return "uncheckable"
         if point is not None and (
             not isinstance(point, dict) or not 1 <= len(point) <= 4
             or any(not k.isidentifier() or type(v) is not int or abs(v) > 256
@@ -68,12 +75,44 @@ def check_assertion(check: dict) -> str:
             tree = ast.parse(expression, mode="eval")
             if sum(1 for _ in ast.walk(tree)) > 64:
                 return "uncheckable"
-            expressions.append(_number(tree.body, point or {}))
-        if expressions[0] != expressions[1]:
+            expressions.append(tree.body)
+        if variable is not None:
+            degree = max(_degree(expr, variable) for expr in expressions)
+            if degree > 12:
+                return "uncheckable"
+            left, right = expressions
+            return "pass" if all(
+                _number(left, {variable: x}) == _number(right, {variable: x})
+                for x in range(degree + 1)
+            ) else "fail"
+        if _number(expressions[0], point or {}) != _number(expressions[1], point or {}):
             return "fail"
         return "pass" if point is None else "uncheckable"
     except (KeyError, ValueError, SyntaxError, TypeError, ArithmeticError):
         return "uncheckable"
+
+
+def _degree(node: ast.AST, variable: str) -> int:
+    """Bound degree for exact identity testing at enough distinct integer points."""
+    match node:
+        case ast.Constant(value=value) if type(value) is int:
+            return 0
+        case ast.Name(id=name) if name == variable:
+            return 1
+        case ast.UnaryOp(op=ast.UAdd() | ast.USub(), operand=operand):
+            return _degree(operand, variable)
+        case ast.BinOp(left=left, op=ast.Add() | ast.Sub(), right=right):
+            return max(_degree(left, variable), _degree(right, variable))
+        case ast.BinOp(left=left, op=ast.Mult(), right=right):
+            return _degree(left, variable) + _degree(right, variable)
+        case ast.BinOp(left=left, op=ast.Div(), right=right):
+            if _number(right, {}) != 0:
+                return _degree(left, variable)
+        case ast.BinOp(left=left, op=ast.Pow(), right=right):
+            exponent = _number(right, {})
+            if exponent.denominator == 1 and 0 <= exponent <= 12:
+                return _degree(left, variable) * int(exponent)
+    raise ValueError("unsupported polynomial term")
 
 
 def json_object(text: str) -> dict:

@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from time import monotonic
 
+from .identity import stable_id
 from .track1_budget import RunStop, SharedBudget
 from .track1_verification import (
     CHECK_FORMAT,
@@ -98,12 +99,16 @@ def _review(problem: str, solution: str, truncated: bool, budget: SharedBudget) 
 
 def _draft(
     problem: str, instruction: str, action: str, budget: SharedBudget, **context: object,
-) -> Candidate:
+) -> tuple[str, bool]:
     """Dispatch one treatment or baseline draft and apply the same review."""
     reply = budget.complete(
         "solve", f"{instruction}\n{SOLVE_FORMAT}\n\nProblem:\n{problem}", action=action, **context,
     )
-    return _review(problem, reply.text, reply.finish_reason == "length", budget)
+    supplied = context.get("lemmas_supplied", ())
+    if supplied:
+        budget.emit({"event": "lemma_reuse", "call": budget.requests,
+                     "cited": [key for key in supplied if "[" + key + "]" in reply.text]})
+    return reply.text, reply.finish_reason == "length"
 
 
 def _selection(candidates: list[Candidate], condition: str) -> Candidate:
@@ -114,7 +119,10 @@ def _selection(candidates: list[Candidate], condition: str) -> Candidate:
     return max(candidates, key=lambda item: (item.rank[0], votes.count(item.answer), item.rank))
 
 
-def _treatment(problem: str, candidate: Candidate, budget: SharedBudget, repaired: bool) -> tuple:
+def _treatment(
+    problem: str, candidate: Candidate, budget: SharedBudget, repaired: bool,
+    pool: dict[str, str],
+) -> tuple:
     """Compute a single dispatch from a reviewed checkpoint with no online control arm."""
     if candidate.verdict in ("incomplete", "unknown") and candidate.prefix and not repaired:
         return ("continue", "Complete this promising route, checking all omitted cases:\n"
@@ -134,12 +142,16 @@ def _treatment(problem: str, candidate: Candidate, budget: SharedBudget, repaire
         if reply.finish_reason != "length":
             graph = lemma_graph(reply.text, candidate.step_count)
     polluted, retained = prune_graph(graph, candidate.first_error, candidate.prefix)
-    reuse = "\n".join(f"{node.id}: {node.claim}" for node in retained)
+    admitted = {stable_id("lemma", "".join(node.claim.split())): node.claim for node in retained}
+    pool.update(admitted)
+    reuse = "\n".join(f"[{key}] {claim}" for key, claim in pool.items())
     budget.emit({"event": "lemma_graph", "nodes": [
         {"id": node.id, "step": node.step, "premises": node.premises,
          "l1": node.check, "global_scope": node.global_scope} for node in graph
-    ], "pruned": sorted(polluted), "eligible": [node.id for node in retained]})
-    context = {"lemmas_supplied": [node.id for node in retained]}
+    ], "pruned": sorted(polluted), "eligible": [node.id for node in retained],
+                 "verified_pool_ids": list(admitted)})
+    context = {"lemmas_supplied": list(pool)}
+    citation = "Cite the bracketed lemma ID in your numbered derivation if it supports a step. "
     if not repaired and candidate.first_error and any(
         node.step == candidate.first_error for node in graph
     ):
@@ -147,26 +159,37 @@ def _treatment(problem: str, candidate: Candidate, budget: SharedBudget, repaire
                 f"Re-derive the solution locally. Earlier Step {candidate.first_error} was invalid. "
                 f"Critic's failed-inference constraint: {candidate.error_constraint}\n"
                 "Do not assume the invalid step or any downstream conclusion. "
-                f"Only these exact globally applicable lemmas were retained:\n{reuse}",
+                f"{citation}These exact globally applicable lemmas were retained:\n{reuse}",
                 context, True)
     return ("salvage_switch", "Start a mathematically distinct route from the problem's original "
-            f"assumptions. You may reuse these exact globally applicable lemmas:\n{reuse}", context, True)
+            f"assumptions. {citation}You may reuse these exact globally applicable lemmas:\n{reuse}",
+            context, True)
 
 
-def solve(problem: str, condition: str, budget: SharedBudget) -> dict:
+def solve(problem: str, condition: str, budget: SharedBudget, *, screen: bool = False) -> dict:
     """Run one solve/review loop and select an evaluated answer at each observed cost."""
     if condition not in CONDITIONS:
         raise ValueError("unknown Track 1 condition")
     start = monotonic()
     candidates: list[Candidate] = []
     snapshots = []
+    pool: dict[str, str] = {}
     action, instruction, context = "initial", "Solve this contest problem.", {}
     repaired = False
     advanced = 0
     status, reason = "completed", "review_passed"
     try:
         while True:
-            current = _draft(problem, instruction, action, budget, **context)
+            text, truncated = _draft(problem, instruction, action, budget, **context)
+            if screen:
+                point = {"tokens": budget.tokens,
+                         "final_answer": None if truncated else _public_answer(text),
+                         "l1": "uncheckable", "l2": "unknown"}
+                snapshots.append(point)
+                budget.emit({"event": "checkpoint", **point})
+                reason = "pass_at_1_sampled"
+                break
+            current = _review(problem, text, truncated, budget)
             candidates.append(current)
             best = _selection(candidates, condition)
             point = {"tokens": budget.tokens, "final_answer": best.answer,
@@ -191,7 +214,9 @@ def solve(problem: str, condition: str, budget: SharedBudget) -> dict:
                 status, reason = "stopped", "intervention_limit"
                 break
             else:
-                action, instruction, context, repaired = _treatment(problem, current, budget, repaired)
+                action, instruction, context, repaired = _treatment(
+                    problem, current, budget, repaired, pool,
+                )
                 advanced += 1
     except RunStop as stop:
         status, reason = stop.status, stop.reason
@@ -204,6 +229,7 @@ def solve(problem: str, condition: str, budget: SharedBudget) -> dict:
         "unknown_usage_requests": budget.usage_unknown, "api_calls": budget.requests,
         "wall_time_s": round(monotonic() - start, 3),
         "estimated_or_reserved_usd": str(budget.cost),
+        "cost_preflight_upper_usd": str(budget.reserved_cost),
         "actual_paid_usd": "unknown", "warnings": sorted(budget.warnings),
         "action_sequence": budget.actions,
         "checkpoints": snapshots,

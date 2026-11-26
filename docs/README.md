@@ -2,6 +2,8 @@
 
 从这里运行 RiCL Runtime、复跑离线配对并查阅真实先导证据。
 
+当前研究主线见 [RiCL v0.2 Track 1 单题交接](evals/track1-v02-contract.md)。以下条目也保留 v0.1 原型与先导的复跑入口。
+
 ## 当前 Runtime 入口
 
 CLI 默认运行确定性离线端口上的单路线样例；`--population` 可运行两个预先给定候选路线的串行扩展样例：

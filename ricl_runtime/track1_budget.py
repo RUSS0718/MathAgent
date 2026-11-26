@@ -29,6 +29,7 @@ class SharedBudget:
     tokens: int = 0
     requests: int = 0
     cost: Decimal = Decimal(0)
+    reserved_cost: Decimal = Decimal(0)
     usage_unknown: int = 0
     warnings: set[str] = field(default_factory=set)
     actions: list[str] = field(default_factory=list)
@@ -42,9 +43,10 @@ class SharedBudget:
             raise RunStop("stopped", "request_limit")
         if self.tokens + input_upper + output_limit > self.token_limit:
             raise RunStop("stopped", "token_limit")
-        if self.cost + cost_upper > self.cost_limit:
+        if self.reserved_cost + cost_upper > self.cost_limit:
             raise RunStop("stopped", "cost_limit")
         self.requests += 1
+        self.reserved_cost += cost_upper
         if isinstance(action := context.get("action"), str):
             self.actions.append(action)
         self.emit({"event": "request_started", "call": self.requests, "stage": stage,
@@ -68,6 +70,7 @@ class SharedBudget:
         self._settle(reply, cost_upper)
         self.emit({"event": "request_finished", "call": self.requests,
                    "input_tokens": reply.input_tokens, "output_tokens": reply.output_tokens,
+                   "reasoning_tokens": reply.reasoning_tokens,
                    "usage_source": reply.usage_source, "finish_reason": reply.finish_reason,
                    "content_present": bool(reply.text.strip()), "known_total_tokens": self.tokens,
                    "warnings": list(reply.warnings)})

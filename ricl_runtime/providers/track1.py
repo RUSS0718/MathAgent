@@ -30,11 +30,12 @@ class Track1Provider:
 
     api_key: str = field(repr=False)
     max_output_tokens: int = OUTPUT_LIMIT
+    reasoning_effort: str = "high"
     timeout: float = 180
     name: str = MODEL
 
     @classmethod
-    def from_environment(cls, max_output_tokens: int) -> "Track1Provider":
+    def from_environment(cls, max_output_tokens: int, reasoning_effort: str) -> "Track1Provider":
         """Require the local credential to have been selected for this gateway."""
         if not validate_base_url(os.environ.get("BASE_URL", ""), HOST):
             raise ProviderConfigurationError("BASE_URL must select the Track 1 gateway")
@@ -44,7 +45,7 @@ class Track1Provider:
         validate_api_key(key)
         if not 8192 <= max_output_tokens <= 32768:
             raise ProviderConfigurationError("Track 1 max_tokens must be between 8192 and 32768")
-        return cls(key, max_output_tokens)
+        return cls(key, max_output_tokens, reasoning_effort)
 
     def complete(self, prompt: str) -> ChatCompletionReply:
         """Submit only the public task context for this request."""
@@ -56,6 +57,7 @@ class Track1Provider:
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": self.max_output_tokens,
                 "thinking": {"type": "enabled"},
+                "reasoning_effort": self.reasoning_effort,
             },
             timeout=self.timeout,
             max_bytes=1_048_576,

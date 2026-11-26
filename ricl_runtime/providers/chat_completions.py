@@ -79,6 +79,7 @@ class ChatCompletionReply(ModelReply):
     request_id: str = "unknown"
     finish_reason: str = "unknown"
     warnings: tuple[str, ...] = ()
+    reasoning_tokens: int | str = "unknown"
 
 
 def validate_api_key(value: str) -> None:
@@ -215,6 +216,8 @@ def post_chat_completion(
         reasoning = _token_count(details.get("reasoning_tokens")) if isinstance(details, dict) else "unknown"
         if isinstance(output, int) and isinstance(reasoning, int) and output < reasoning <= output + 4:
             warnings = ("usage_subtotal_minor_drift",)
+    else:
+        reasoning = "unknown"
     metadata = ChatCompletionReply(
         text="",
         model=_nonempty_string(response_data.get("model")) or "unknown",
@@ -226,6 +229,7 @@ def post_chat_completion(
         if choice is not None
         else "unknown",
         warnings=warnings,
+        reasoning_tokens=reasoning,
     )
     if choice is None:
         raise ProviderProtocolError(
