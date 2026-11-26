@@ -1,10 +1,16 @@
 # RiCL Research Repository
 
+## Current Research Alignment (v0.2 · 2026-11-26)
+
+- **Single source of truth:** `D:\project\RiCL-home\docs\METHOD_ALIGNMENT_v0.2.md` (ACL 2027路线：按需粗粒度引理图 SRS v0.2 + L1 Python/SymPy 沙箱断言与 L2 纯 API 独立 Critic 混合核查 + 单臂 `{Continue, Pruned-Repair, Salvage-Switch}` 控制循环).
+- **CCL repositioning:** Do **not** run online dual-arm Control vs. Treatment replay during test-time inference (avoids 2x token waste); execute single-arm Treatment gated by the Hybrid Verifier online, and keep same-checkpoint dual-arm CCL strictly as an offline/controlled attribution study in the experiment repo.
+- **Two-Track Governance:** Currently in **Track 1 (Exploration / Dev)** — prioritize general competition math problems (`AIME / OlympiadBench / MATH Level 5`, `BASE_URL=https://cn2.ezaigc.cn`, `max_tokens >= 8192`) and real `Accuracy vs. Total Tokens` curves. Log minor proxy token-subtotal drifts (1–4 tokens) as `warning` instead of halting; do not expand handcrafted radical-equation regex rules or unnecessary audit/test harnesses during Track 1.
+
 ## Research boundary
 
-- Use one Python-owned core for the main solve loop and a distinct, separately controlled auxiliary verification/intervention loop; both share the Run budget. Python controls state, scheduling, and termination, while the model supplies mathematical reasoning and strategy proposals.
+- Use one Python-owned core for the main solve/control loop (`{Continue, Pruned-Repair, Salvage-Switch}`) and a separately controlled hybrid verification layer (`L1 Executable-Verified` + `L2 Step-Reviewed`); all generation, extraction, and verification calls share one Run token budget. Python controls state, scheduling, and termination, while the model supplies mathematical reasoning and strategy proposals.
 - The former official-scoring and Showcase implementations are retired from this branch. Keep their archived evidence separate, and do not reintroduce dependencies on those paths into Runtime.
-- Treat a generated answer as free text. Record independent verification status and scope separately; use `unknown` when no applicable independent criterion exists. A successful run, valid JSON, or model self-review is not mathematical verification.
+- Treat a generated answer as free text. Record independent verification status and scope separately (`Executable-Verified` vs. `Step-Reviewed` vs. `unknown`). A successful run, valid JSON, or model self-review is not deterministic mathematical verification.
 - Persist only research Run data needed for reproduction: source revision, config snapshot/hash, problem and condition IDs, result, status/stop reason, model/reasoning settings, shared budget/use and measurement sources, and a redacted trace. Never store credentials, complete prompts, or private reasoning. Keep generated data under ignored `artifacts/`.
 - `tests/test.md` is user-managed: never read, modify, stage, or delete it.
 
