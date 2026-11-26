@@ -79,6 +79,8 @@ class Track1Provider:
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": effective_max,
                 "enable_thinking": enable_thinking,
+                "stream": True,
+                "stream_options": {"include_usage": True},
             }
             if enable_thinking:
                 cap = 2048 if self.reasoning_effort == "low" else 4096
@@ -94,11 +96,12 @@ class Track1Provider:
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         path = "/chat/completions" if self.host == OFFICIAL_HOST else "/v1/chat/completions"
+        max_bytes = 8_388_608 if self.host == SILICONFLOW_HOST else 1_048_576
         return post_chat_completion(
             f"https://{self.host}{path}",
             api_key=self.api_key,
             payload=payload,
             timeout=self.timeout,
-            max_bytes=1_048_576,
+            max_bytes=max_bytes,
             track1_usage=True,
         )

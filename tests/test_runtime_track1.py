@@ -6,7 +6,12 @@ import unittest
 from decimal import Decimal
 from unittest.mock import patch
 
-from ricl_runtime.providers.chat_completions import ChatCompletionReply, ProviderConfigurationError
+from ricl_runtime.providers.chat_completions import (
+    ChatCompletionReply,
+    ProviderConfigurationError,
+    ProviderProtocolError,
+    post_chat_completion,
+)
 from ricl_runtime.providers.track1 import Track1Provider
 from ricl_runtime.track1 import Candidate, _public_answer, _selection, solve
 from ricl_runtime.track1_budget import SharedBudget
@@ -412,9 +417,12 @@ class Track1Tests(unittest.TestCase):
         self.assertNotIn("thinking", solve_high)
         self.assertNotIn("reasoning_effort", solve_high)
         self.assertTrue(solve_high["enable_thinking"])
+        self.assertTrue(solve_high["stream"])
+        self.assertEqual(solve_high["stream_options"], {"include_usage": True})
         self.assertEqual(solve_high["thinking_budget"], 4096)
         self.assertEqual(solve_low["thinking_budget"], 2048)
         self.assertFalse(json_payload["enable_thinking"])
+        self.assertTrue(json_payload["stream"])
         self.assertNotIn("thinking_budget", json_payload)
         self.assertEqual(json_payload["response_format"], {"type": "json_object"})
         self.assertEqual(provider_high.estimated_cost(1_000_000, 1_000_000), Decimal("2.04"))
@@ -460,3 +468,78 @@ class Track1Tests(unittest.TestCase):
     def test_strip_thinking_tags_before_step_and_answer_parsing(self):
         text = "<think>Step 1: wrong scratch.\nFinal answer: 999</think>\nStep 1: Clean proof.\nFinal answer: 42"
         self.assertEqual(_public_answer(text), "42")
+
+    def test_sse_chat_completion_assembles_content_usage_and_discards_reasoning_content(self):
+        chunks = [
+            b'data: {"id":"req_sse","model":"Qwen/Qwen3.5-35B-A3B","choices":[{"delta":{"reasoning_content":"secret-cot"}}]}\n',
+            b'data: {"id":"req_sse","model":"Qwen/Qwen3.5-35B-A3B","choices":[{"delta":{"content":"Step 1: x = 4.\\n"}}]}\n',
+            b'data: {"id":"req_sse","model":"Qwen/Qwen3.5-35B-A3B","choices":[{"delta":{"content":"Final answer: 4"},"finish_reason":"stop"}]}\n',
+            b'data: {"id":"req_sse","model":"Qwen/Qwen3.5-35B-A3B","choices":[],"usage":{"prompt_tokens":20,"completion_tokens":35,"completion_tokens_details":{"reasoning_tokens":30}}}\n',
+            b"data: [DONE]\n",
+        ]
+
+        class _FakeResponse:
+            def __init__(self, lines: list[bytes]) -> None:
+                self._lines = lines
+
+            def __enter__(self) -> "_FakeResponse":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                return None
+
+            def __iter__(self):
+                return iter(self._lines)
+
+        class _FakeOpener:
+            def __init__(self, lines: list[bytes]) -> None:
+                self._lines = lines
+
+            def open(self, request, timeout: float = 0):
+                return _FakeResponse(self._lines)
+
+        with patch(
+            "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
+            return_value=_FakeOpener(chunks),
+        ):
+            reply = post_chat_completion(
+                "https://api.siliconflow.cn/v1/chat/completions",
+                api_key="sk-secret",
+                payload={"model": "Qwen/Qwen3.5-35B-A3B", "messages": [], "stream": True},
+                timeout=300.0,
+                max_bytes=65536,
+                track1_usage=True,
+            )
+        self.assertEqual(reply.text, "Step 1: x = 4.\nFinal answer: 4")
+        self.assertNotIn("secret-cot", reply.text)
+        self.assertEqual((reply.input_tokens, reply.output_tokens, reply.reasoning_tokens), (20, 35, 30))
+        self.assertEqual((reply.finish_reason, reply.usage_source, reply.model), ("stop", "provider", "Qwen/Qwen3.5-35B-A3B"))
+
+        with patch(
+            "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
+            return_value=_FakeOpener([chunks[1]]),
+        ):
+            with self.assertRaises(ProviderProtocolError):
+                post_chat_completion(
+                    "https://api.siliconflow.cn/v1/chat/completions",
+                    api_key="sk-secret",
+                    payload={"model": "Qwen/Qwen3.5-35B-A3B", "messages": [], "stream": True},
+                    timeout=300.0,
+                    max_bytes=20,
+                    track1_usage=True,
+                )
+
+        leak_chunk = b'data: {"id":"req","model":"m","choices":[{"delta":{"content":"sk-secret"}}]}\n'
+        with patch(
+            "ricl_runtime.providers.chat_completions.urllib.request.build_opener",
+            return_value=_FakeOpener([leak_chunk, b"data: [DONE]\n"]),
+        ):
+            with self.assertRaises(ProviderProtocolError):
+                post_chat_completion(
+                    "https://api.siliconflow.cn/v1/chat/completions",
+                    api_key="sk-secret",
+                    payload={"model": "m", "messages": [], "stream": True},
+                    timeout=300.0,
+                    max_bytes=65536,
+                    track1_usage=True,
+                )
