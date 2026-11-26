@@ -110,7 +110,10 @@ class Track1Provider:
                 enable_thinking = self.reasoning_effort != "none" and not json_mode
                 payload["enable_thinking"] = enable_thinking
                 if enable_thinking:
-                    cap = 2048 if self.reasoning_effort == "low" else 4096
+                    if self.name.startswith("deepseek-ai/"):
+                        cap = 4096 if self.reasoning_effort == "low" else 8192
+                    else:
+                        cap = 2048 if self.reasoning_effort == "low" else 4096
                     payload["thinking_budget"] = max(1024, min(cap, effective_max - 2048))
         else:
             payload = {

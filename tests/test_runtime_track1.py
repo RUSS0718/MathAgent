@@ -607,5 +607,65 @@ class Track1Tests(unittest.TestCase):
                 "API_KEY": "fixture",
             }):
                 provider = Track1Provider.from_environment(16384, "low")
+                provider_high = Track1Provider.from_environment(16384, "high")
             self.assertEqual(provider.name, model_name)
             self.assertTrue(provider.supports_thinking)
+            with patch("ricl_runtime.providers.track1.post_chat_completion") as post_ds:
+                provider.complete("solve", json_mode=False)
+                provider_high.complete("solve-high", json_mode=False)
+            self.assertEqual(post_ds.call_args_list[0].kwargs["payload"]["thinking_budget"], 4096)
+            self.assertEqual(post_ds.call_args_list[1].kwargs["payload"]["thinking_budget"], 8192)
+
+    def test_empty_draft_skips_remote_review_and_does_not_burn_interventions(self):
+        replies = [
+            "Hmm.",
+            "<think>long chain</think>\nWait.",
+            "Step 1: x = 4.\nFinal answer: 4",
+            json.dumps({"verdict": "pass", "first_error": 0, "valid_prefix": 1, "lemmas": []}),
+        ]
+        events = []
+        budget = SharedBudget(Track1Provider("fixture"), 32768, 8, Decimal("1.00"), events.append)
+        with patch(
+            "ricl_runtime.providers.track1.post_chat_completion",
+            side_effect=lambda *a, **kw: ChatCompletionReply(
+                replies.pop(0), input_tokens=40, output_tokens=2053, reasoning_tokens=2049, finish_reason="stop"
+            ),
+        ):
+            result = solve("Problem", "RiCL_v0.2", budget)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["final_answer"], "4")
+        self.assertEqual(result["api_calls"], 4)
+        self.assertEqual(sum(1 for e in events if e.get("local_empty_skip")), 2)
+
+    def test_lemma_grounding_latex_overlap_and_l1_check_matching(self):
+        steps = ("First, \\frac{a+b}{2} * c = 12 holds.", "Identity x^2 - 1 = (x-1)(x+1).")
+        payload = json.dumps({
+            "lemmas": [
+                {
+                    "id": "L1", "step": 1, "claim": "paraphrase",
+                    "source_quote": "\\dfrac{a + b}{2} \\cdot c = 12",
+                    "premises": [], "global_scope": True, "check": None,
+                },
+                {
+                    "id": "L2", "step": 1, "claim": "bad digits",
+                    "source_quote": "\\dfrac{a + b}{2} \\cdot c = 13",
+                    "premises": [], "global_scope": True, "check": None,
+                },
+                {
+                    "id": "L3", "step": 2, "claim": "x^2 - 1 = (x-1)(x+1)",
+                    "source_quote": None, "premises": [], "global_scope": True,
+                    "check": {"step": 2, "lhs": "x**2 - 1", "rhs": "(x-1)*(x+1)", "variable": "x"},
+                },
+                {
+                    "id": "L4", "step": 2, "claim": "x = 5",
+                    "source_quote": None, "premises": [], "global_scope": True,
+                    "check": {"step": 2, "lhs": "1+1", "rhs": "2"},
+                },
+            ]
+        })
+        graph = lemma_graph(payload, steps)
+        self.assertEqual(graph.outcome, "parsed")
+        self.assertTrue(graph.nodes[0].matches_source)
+        self.assertFalse(graph.nodes[1].matches_source)
+        self.assertEqual(graph.nodes[2].check, "pass")
+        self.assertEqual(graph.nodes[3].check, "uncheckable")
