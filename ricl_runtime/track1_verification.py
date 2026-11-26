@@ -182,9 +182,14 @@ def lemma_graph(text: str, steps: tuple[str, ...]) -> GraphExtraction:
             equality = f'{check.get("lhs")} = {check.get("rhs")}'
             if "".join(claim.split()) == "".join(equality.split()):
                 status = check_assertion(check)
+        source = " ".join(steps[step - 1].split())
+        quote = item.get("source_quote")
+        if status == "uncheckable" and isinstance(quote, str) and 0 < len(quote.strip()) <= 400:
+            if " ".join(quote.split()) in source:
+                claim = quote.strip()
         graph.append(Lemma(
             f"L{index}", step, claim, tuple(premises), status, item.get("global_scope") is True,
-            " ".join(claim.split()) in " ".join(steps[step - 1].split()),
+            " ".join(claim.split()) in source,
         ))
     return GraphExtraction(tuple(graph), "parsed", len(raw))
 

@@ -158,17 +158,20 @@ def _treatment(
             "Extract up to 10 coarse lemmas from this candidate without fixing or solving it. "
             "Aim for 5–10 when supported; a smaller graph is valid. Output compact JSON only. "
             f"The independently reviewed prefix ends at step {candidate.prefix}; "
-            "prioritize standalone reusable facts from that prefix. "
+            "list reusable facts with no necessary lemma premise first. "
+            "Prefer facts established in that prefix over restatements of the problem. "
             'Shape: {"lemmas":[{"id":"L1","step":1,"claim":"lcm(6, 8) = 24",'
-            '"premises":[],"global_scope":true,"check":{"step":1,"lhs":"lcm(6, 8)",'
+            '"source_quote":null,"premises":[],"global_scope":true,'
+            '"check":{"step":1,"lhs":"lcm(6, 8)",'
             '"rhs":"24","at":null}}]}. '
             f"Use consecutively numbered IDs L1, L2, etc. and an integer source step 1–{len(candidate.steps)}. "
             "Each premise must cite an earlier lemma ID; use [] when independent. "
             "Set global_scope true only for standalone statements valid under the original problem "
             "assumptions, without route-local notation or hypotheses. "
             "For a computable claim, use the normalized Python lhs = rhs as claim and include "
-            "the matching check with the same step number. Otherwise quote a complete claim "
-            "verbatim from its numbered step, keeping its hypotheses and quantifiers. "
+            "the matching check with the same step number. For other facts, copy a complete "
+            "standalone proposition verbatim into source_quote, with exactly the source math "
+            "notation, hypotheses and quantifiers. Only use [] for genuine independence. "
             f"{CHECK_FORMAT}\n\nProblem:\n{problem}\n\nCandidate:\n{candidate.text}",
         )
         extraction = (

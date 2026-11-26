@@ -14,6 +14,17 @@ from ricl_runtime.track1_verification import check_assertion, lemma_graph
 
 
 class Track1Tests(unittest.TestCase):
+    def test_l2_salvage_uses_source_quote_instead_of_extractor_paraphrase(self):
+        source = "The sum of the two residues is even."
+        node = {"id": "L1", "step": 1, "claim": "Both residues are even.",
+                "source_quote": source, "premises": [], "global_scope": True}
+        graph = lemma_graph(json.dumps({"lemmas": [node]}), (source,))
+        self.assertEqual(graph.nodes[0].claim, source)
+        self.assertTrue(graph.nodes[0].matches_source)
+        graph = lemma_graph(json.dumps({"lemmas": [node | {"source_quote": "Both are even."}]}),
+                            (source,))
+        self.assertFalse(graph.nodes[0].matches_source)
+
     def test_extraction_accepts_a_sparse_graph_and_reports_redacted_shape_errors(self):
         lemma = {"id": "L1", "step": 1, "claim": "Private fixture claim.", "premises": []}
         steps = (lemma["claim"],)
