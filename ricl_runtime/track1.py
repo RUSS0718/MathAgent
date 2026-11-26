@@ -20,9 +20,10 @@ from .track1_verification import (
 
 CONDITIONS = ("B1", "B2", "B3", "B4", "RiCL_v0.2")
 SOLVE_FORMAT = (
-    "Give a concise, public mathematical derivation. Label each main step on a new line "
-    "as Step 1:, Step 2:, and so on. End with one plain line in the form "
-    "'Final answer: 123' using your exact answer. If incomplete say 'Final answer: unknown'."
+    "Give a concise, public mathematical derivation without repetitive brute-force loops "
+    "or re-checking settled cases. Label each main step on a new line as Step 1:, Step 2:, "
+    "and so on. End with one plain line in the form 'Final answer: <exact_answer>' "
+    "(replace <exact_answer> with your computed value). If incomplete say 'Final answer: unknown'."
 )
 _STEP_START = r"(?im)^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?"
 _STEP_NUMBER = r"([1-9][0-9]?)[ \t]*(?:\*\*)?[.):][ \t]*(?:\*\*)?"
@@ -156,7 +157,12 @@ def _public_answer(text: str) -> str | None:
         boxed = _last_boxed(tail)
         if boxed is not None:
             answer = _normalize_candidate_answer(boxed)
-    if not 0 < len(answer) <= 120 or answer.casefold() == "unknown":
+    lowered = answer.casefold()
+    if (
+        not 0 < len(answer) <= 120
+        or lowered in {"unknown", "<exact_answer>", "<answer>", "exact_answer"}
+        or (answer.startswith("<") and answer.endswith(">"))
+    ):
         return None
     return answer
 
@@ -173,6 +179,13 @@ def _parse_review_payload(
     data = json_object(reply_text) if finish_reason != "length" else {}
     verdict = data.get("verdict")
     error, prefix = data.get("first_error"), data.get("valid_prefix")
+    if verdict == "fail" and type(error) is int and 1 <= error <= count:
+        prefix = min(prefix, error - 1) if type(prefix) is int and 0 <= prefix <= count else error - 1
+    elif verdict == "pass" and count > 0 and error in (0, None) and prefix in (0, None, count):
+        error, prefix = 0, count
+    elif verdict == "incomplete" and error in (0, None):
+        error = 0
+        prefix = max(0, min(prefix, count)) if type(prefix) is int else 0
     valid_shape = (
         verdict in ("pass", "fail", "incomplete")
         and type(error) is int and 0 <= error <= count

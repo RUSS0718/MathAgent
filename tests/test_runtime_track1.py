@@ -13,10 +13,22 @@ from ricl_runtime.providers.chat_completions import (
     post_chat_completion,
 )
 from ricl_runtime.providers.track1 import Track1Provider
-from ricl_runtime.track1 import Candidate, _public_answer, _selection, solve
+from ricl_runtime.track1 import (
+    Candidate,
+    _parse_review_payload,
+    _public_answer,
+    _selection,
+    solve,
+)
 from ricl_runtime.track1_budget import SharedBudget
 from ricl_runtime.track1_scheduler import RouteState, Track1SharedState, select_aprs_action
-from ricl_runtime.track1_verification import Lemma, check_assertion, lemma_graph, prune_graph
+from ricl_runtime.track1_verification import (
+    Lemma,
+    check_assertion,
+    json_object,
+    lemma_graph,
+    prune_graph,
+)
 
 
 class Track1Tests(unittest.TestCase):
@@ -564,3 +576,20 @@ class Track1Tests(unittest.TestCase):
                     max_bytes=65536,
                     track1_usage=True,
                 )
+
+    def test_14b_review_clamping_json_extraction_and_placeholder_guard(self):
+        self.assertIsNone(_public_answer("Step 1: x.\nFinal answer: <exact_answer>"))
+        self.assertIsNone(_public_answer("Step 1: x.\nFinal answer: <answer>"))
+        self.assertEqual(json_object("Here is the JSON:\n{\"verdict\": \"pass\"}\nDone."), {"verdict": "pass"})
+        self.assertEqual(json_object("not json"), {})
+
+        steps = ("s1", "s2", "s3", "s4")
+        sol = "Step 1: s1\nStep 2: s2\nStep 3: s3\nStep 4: s4\nFinal answer: 42"
+        verdict, error, prefix, *_ = _parse_review_payload(
+            '{"verdict":"fail","first_error":3,"valid_prefix":3}', "stop", sol, steps, False,
+        )
+        self.assertEqual((verdict, error, prefix), ("fail", 3, 2))
+        verdict_p, err_p, pref_p, *_ = _parse_review_payload(
+            '{"verdict":"pass","first_error":0,"valid_prefix":0}', "stop", sol, steps, False,
+        )
+        self.assertEqual((verdict_p, err_p, pref_p), ("pass", 0, 4))
