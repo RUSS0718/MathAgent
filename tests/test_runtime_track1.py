@@ -10,10 +10,27 @@ from ricl_runtime.providers.chat_completions import ChatCompletionReply, Provide
 from ricl_runtime.providers.track1 import Track1Provider
 from ricl_runtime.track1 import solve
 from ricl_runtime.track1_budget import SharedBudget
-from ricl_runtime.track1_verification import check_assertion
+from ricl_runtime.track1_verification import check_assertion, lemma_graph
 
 
 class Track1Tests(unittest.TestCase):
+    def test_extraction_accepts_a_sparse_graph_and_reports_redacted_shape_errors(self):
+        lemma = {"id": "L1", "step": 1, "claim": "Private fixture claim.", "premises": []}
+        steps = (lemma["claim"],)
+        parsed = lemma_graph(json.dumps({"lemmas": [lemma]}), steps)
+        self.assertEqual((parsed.outcome, parsed.node_count, len(parsed.nodes)), ("parsed", 1, 1))
+        for changes, expected in (
+            ({"id": "unexpected"}, "node_id"),
+            ({"step": 2}, "source_step"),
+            ({"premises": ["L9"]}, "premise_shape"),
+        ):
+            with self.subTest(expected=expected):
+                rejected = lemma_graph(json.dumps({"lemmas": [lemma | changes]}), steps)
+                self.assertEqual((rejected.outcome, rejected.node_count, rejected.rejected_node),
+                                 (expected, 1, 1))
+                self.assertEqual(rejected.nodes, ())
+                self.assertNotIn(lemma["claim"], repr(rejected))
+
     def test_official_profile_pins_destination_model_and_rates(self):
         with patch.dict(os.environ, {
             "BASE_URL": "https://api.deepseek.com", "MODEL": "deepseek-flash", "API_KEY": "fixture",
@@ -56,7 +73,7 @@ class Track1Tests(unittest.TestCase):
             {"id": "L8", "step": 4, "claim": "The two counts are equal.",
              "premises": ["L7"], "global_scope": True},
         ]}
-        replies = [initial, review, json.dumps(graph), "", review]
+        replies = [initial, review, json.dumps(graph), ""]
         events = []
         budget = SharedBudget(Track1Provider("fixture"), 24000, 5, Decimal("0.14"), events.append)
 
@@ -69,13 +86,14 @@ class Track1Tests(unittest.TestCase):
             return ChatCompletionReply(text, input_tokens=30, output_tokens=40, finish_reason="stop")
 
         with patch("ricl_runtime.providers.track1.post_chat_completion", side_effect=respond) as post:
-            solve("Problem", "RiCL_v0.2", budget)
+            result = solve("Problem", "RiCL_v0.2", budget, stop_after_salvage_dispatch=True)
 
         started = [event for event in events if event["event"] == "request_started"]
         payloads = [call.kwargs["payload"] for call in post.call_args_list]
-        self.assertEqual([p["max_tokens"] for p in payloads], [16384, 2048, 4096, 16384, 2048])
+        self.assertEqual(result["stop_reason"], "nonempty_salvage_dispatched")
+        self.assertEqual([p["max_tokens"] for p in payloads], [16384, 2048, 4096, 16384])
         self.assertEqual([p["max_tokens"] for p in payloads], [e["output_limit"] for e in started])
-        self.assertEqual(["response_format" in p for p in payloads], [False, True, True, False, True])
+        self.assertEqual(["response_format" in p for p in payloads], [False, True, True, False])
         self.assertEqual(budget.reserved_cost, sum(
             budget.provider.estimated_cost(e["input_upper"], e["output_limit"]) for e in started
         ))

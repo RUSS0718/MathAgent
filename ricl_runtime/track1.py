@@ -9,6 +9,7 @@ from .track1_budget import RunStop, SharedBudget
 from .track1_verification import (
     CHECK_FORMAT,
     L1_EVIDENCE,
+    GraphExtraction,
     check_assertion,
     json_object,
     lemma_graph,
@@ -146,16 +147,21 @@ def _treatment(
     if candidate.verdict in ("incomplete", "unknown") and candidate.prefix and not repaired:
         return ("continue", "Complete this promising route, checking all omitted cases:\n"
                 + candidate.text, {}, repaired)
-    graph = ()
-    if len(candidate.steps) >= 5 and budget.requests + 3 <= budget.request_limit:
+    extraction = GraphExtraction(outcome="insufficient_numbered_steps")
+    if candidate.steps and budget.requests + 3 > budget.request_limit:
+        extraction = GraphExtraction(outcome="request_headroom")
+    elif candidate.steps:
         reply = budget.complete(
             "extract",
-            "Extract 5–10 coarse lemmas from this candidate without fixing or solving it. "
-            "Include reusable problem-level facts from the early steps. Output compact JSON only. "
+            "Extract up to 10 coarse lemmas from this candidate without fixing or solving it. "
+            "Aim for 5–10 when supported; a smaller graph is valid. Output compact JSON only. "
+            f"The independently reviewed prefix ends at step {candidate.prefix}; "
+            "prioritize standalone reusable facts from that prefix. "
             'Shape: {"lemmas":[{"id":"L1","step":1,"claim":"lcm(6, 8) = 24",'
             '"premises":[],"global_scope":true,"check":{"step":1,"lhs":"lcm(6, 8)",'
             '"rhs":"24","at":null}}]}. '
-            "Use L1, L2, etc. in topological order. Each premise must cite an earlier lemma. "
+            f"Use consecutively numbered IDs L1, L2, etc. and an integer source step 1–{len(candidate.steps)}. "
+            "Each premise must cite an earlier lemma ID; use [] when independent. "
             "Set global_scope true only for standalone statements valid under the original problem "
             "assumptions, without route-local notation or hypotheses. "
             "For a computable claim, use the normalized Python lhs = rhs as claim and include "
@@ -163,8 +169,11 @@ def _treatment(
             "verbatim from its numbered step, keeping its hypotheses and quantifiers. "
             f"{CHECK_FORMAT}\n\nProblem:\n{problem}\n\nCandidate:\n{candidate.text}",
         )
-        if reply.finish_reason != "length":
-            graph = lemma_graph(reply.text, candidate.steps)
+        extraction = (
+            GraphExtraction(outcome="truncated") if reply.finish_reason == "length"
+            else lemma_graph(reply.text, candidate.steps)
+        )
+    graph = extraction.nodes
     polluted, retained = prune_graph(graph, candidate.first_error, candidate.prefix)
     admitted = {}
     for node, evidence in retained:
@@ -177,7 +186,9 @@ def _treatment(
         {"id": node.id, "step": node.step, "premises": node.premises,
          "l1": node.check, "global_scope": node.global_scope,
          "matches_source": node.matches_source} for node in graph
-    ], "pruned": sorted(polluted), "eligible": [node.id for node, _ in retained],
+    ], "extraction_outcome": extraction.outcome, "reported_nodes": extraction.node_count,
+                 "rejected_node": extraction.rejected_node,
+                 "pruned": sorted(polluted), "eligible": [node.id for node, _ in retained],
                  "verified_pool_ids": list(admitted), "pool_evidence": admitted})
     context = {"lemmas_supplied": list(pool)}
     citation = "Cite the bracketed lemma ID in your numbered derivation if it supports a step. "
@@ -195,7 +206,10 @@ def _treatment(
             context, False)
 
 
-def solve(problem: str, condition: str, budget: SharedBudget, *, screen: bool = False) -> dict:
+def solve(
+    problem: str, condition: str, budget: SharedBudget, *, screen: bool = False,
+    stop_after_salvage_dispatch: bool = False,
+) -> dict:
     """Run one solve/review loop and select an evaluated answer at each observed cost."""
     if condition not in CONDITIONS:
         raise ValueError("unknown Track 1 condition")
@@ -212,6 +226,9 @@ def solve(problem: str, condition: str, budget: SharedBudget, *, screen: bool = 
             if not screen and budget.requests + 2 > budget.request_limit:
                 raise RunStop("stopped", "request_limit")
             text, truncated = _draft(problem, instruction, action, budget, **context)
+            if stop_after_salvage_dispatch and action == "salvage_switch" and context.get("lemmas_supplied"):
+                status, reason = "stopped", "nonempty_salvage_dispatched"
+                break
             if screen:
                 point = {"tokens": budget.tokens,
                          "final_answer": None if truncated else _public_answer(text),

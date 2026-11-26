@@ -144,24 +144,38 @@ class Lemma:
     matches_source: bool
 
 
-def lemma_graph(text: str, steps: tuple[str, ...]) -> tuple[Lemma, ...]:
+@dataclass(frozen=True)
+class GraphExtraction:
+    """Describe a parsed graph or a redacted validation failure."""
+
+    nodes: tuple[Lemma, ...] = ()
+    outcome: str = "not_requested"
+    node_count: int | None = None
+    rejected_node: int | None = None
+
+
+def lemma_graph(text: str, steps: tuple[str, ...]) -> GraphExtraction:
     """Require topological dependencies and evidence tied to a source step."""
     raw = json_object(text).get("lemmas")
-    if not isinstance(raw, list) or not 5 <= len(raw) <= 10:
-        return ()
+    if not isinstance(raw, list):
+        return GraphExtraction(outcome="missing_lemma_array")
+    if not 1 <= len(raw) <= 10:
+        return GraphExtraction(outcome="node_count", node_count=len(raw))
     graph = []
     for index, item in enumerate(raw, 1):
         if not isinstance(item, dict):
-            return ()
+            return GraphExtraction(outcome="node_shape", node_count=len(raw), rejected_node=index)
         step, claim, premises = item.get("step"), item.get("claim"), item.get("premises")
-        if (
-            item.get("id") != f"L{index}" or type(step) is not int or not 1 <= step <= len(steps)
-            or not isinstance(claim, str) or not 0 < len(claim.strip()) <= 400
-            or not isinstance(premises, list)
+        if item.get("id") != f"L{index}":
+            return GraphExtraction(outcome="node_id", node_count=len(raw), rejected_node=index)
+        if type(step) is not int or not 1 <= step <= len(steps):
+            return GraphExtraction(outcome="source_step", node_count=len(raw), rejected_node=index)
+        if not isinstance(claim, str) or not 0 < len(claim.strip()) <= 400:
+            return GraphExtraction(outcome="claim_shape", node_count=len(raw), rejected_node=index)
+        if (not isinstance(premises, list)
             or any(p not in [node.id for node in graph] for p in premises)
-            or len(set(premises)) != len(premises)
-        ):
-            return ()
+            or len(set(premises)) != len(premises)):
+            return GraphExtraction(outcome="premise_shape", node_count=len(raw), rejected_node=index)
         check = item.get("check")
         status = "uncheckable"
         if isinstance(check, dict) and type(check.get("step")) is int and check["step"] == step:
@@ -172,7 +186,7 @@ def lemma_graph(text: str, steps: tuple[str, ...]) -> tuple[Lemma, ...]:
             f"L{index}", step, claim, tuple(premises), status, item.get("global_scope") is True,
             " ".join(claim.split()) in " ".join(steps[step - 1].split()),
         ))
-    return tuple(graph)
+    return GraphExtraction(tuple(graph), "parsed", len(raw))
 
 
 def prune_graph(

@@ -27,6 +27,8 @@ def main() -> int:
     parser.add_argument("--max-tokens", type=int, default=OUTPUT_LIMIT)
     parser.add_argument("--reasoning-effort", choices=("none", "low", "high"), default="high")
     parser.add_argument("--screen", action="store_true", help="sample once for pass@1")
+    parser.add_argument("--stop-after-salvage-dispatch", action="store_true",
+                        help="stop smoke after a provider response to a nonempty salvage dispatch")
     args = parser.parse_args()
     try:
         cost_limit = Decimal(args.cost_limit_usd)
@@ -38,6 +40,8 @@ def main() -> int:
         parser.error("request and token limits must be positive")
     if args.screen and (args.condition != "B1" or args.request_limit != 1):
         parser.error("pass@1 screening requires B1 with one request")
+    if args.stop_after_salvage_dispatch and args.condition != "RiCL_v0.2":
+        parser.error("salvage dispatch smoke requires RiCL_v0.2")
     if not re.fullmatch("[0-9a-f]{40}", args.source_revision):
         parser.error("source revision must be a full Git commit ID")
     problem = args.problem_file.read_text(encoding="utf-8-sig").strip()
@@ -57,6 +61,8 @@ def main() -> int:
         "source_revision": args.source_revision, "condition": args.condition,
         "problem_id": args.problem_id, "problem_hash": stable_id("problem", problem),
     }
+    if args.stop_after_salvage_dispatch:
+        configuration["stop_after_salvage_dispatch"] = True
     args.output_dir.mkdir(parents=True, exist_ok=False)
     run_path = args.output_dir / "run.json"
     trace_path = args.output_dir / "trace.jsonl"
@@ -68,7 +74,8 @@ def main() -> int:
         config_hash = stable_id("config", configuration)
         emit({"event": "run_started", "config_hash": config_hash, "configuration": configuration})
         budget = SharedBudget(provider, args.token_limit, args.request_limit, cost_limit, emit)
-        result = solve(problem, args.condition, budget, screen=args.screen)
+        result = solve(problem, args.condition, budget, screen=args.screen,
+                       stop_after_salvage_dispatch=args.stop_after_salvage_dispatch)
         result.update(configuration=configuration, config_hash=config_hash, problem_id=args.problem_id)
         emit({"event": "run_finished", "status": result["status"], "reason": result["stop_reason"]})
     temporary = run_path.with_suffix(".tmp")
