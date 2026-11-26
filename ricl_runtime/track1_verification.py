@@ -291,9 +291,19 @@ def json_object(text: str) -> dict:
         text = text.split("\n", 1)[1][:-3].strip()
     try:
         value = json.loads(text)
+        if isinstance(value, dict):
+            return value
     except (ValueError, RecursionError):
-        return {}
-    return value if isinstance(value, dict) else {}
+        pass
+    start, end = text.find("{"), text.rfind("}")
+    if 0 <= start < end:
+        try:
+            value = json.loads(text[start : end + 1])
+            if isinstance(value, dict):
+                return value
+        except (ValueError, RecursionError):
+            return {}
+    return {}
 
 
 @dataclass(frozen=True)
