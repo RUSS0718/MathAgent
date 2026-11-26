@@ -2,24 +2,30 @@
 
 import ast
 import json
+import math
 import operator
+import re
 from dataclasses import dataclass
 from fractions import Fraction
-from math import comb, gcd, lcm
+from math import comb, factorial, gcd, lcm
+from typing import Any
 
 _OPERATORS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
               ast.Div: operator.truediv, ast.Mod: operator.mod}
 _FUNCTIONS = {"choose": comb, "gcd": gcd, "lcm": lcm}
+_MATH_DELIM_RE = re.compile(r"\$\$?|\\\[|\\\]|\\\(|\\\)|\*\*|__")
+_OP_SPACE_RE = re.compile(r"\s*([=+\-*/<>(),])\s*")
+_WS_RE = re.compile(r"\s+")
 L1_EVIDENCE = "L1-Executable-Verified"
 L2_EVIDENCE = "L2-Reviewed"
 CHECK_FORMAT = (
     'A check is {"step": 1, "lhs": "choose(10, 2)", "rhs": "45", "at": null}. '
-    "Use exact integer arithmetic, fractions, %, ** (exponents -12 to 12), choose(n,k), "
-    "gcd(a,b), and lcm(a,b). For a claimed universal equality, integer samples such as "
-    '"at":{"x":3} can disprove it but cannot establish it. '
-    'Use "variable":"x" (with at null) to verify a one-variable polynomial identity. '
-    "For a value or equation root explicitly claimed in the step, substitute the stated "
-    'values into a closed equality (e.g. "2*3+1 = 7" for x=3 in 2*x+1=7). '
+    "Use exact integer arithmetic, fractions, %, ** (exponents -12 to 12), abs, sqrt, "
+    "factorial, pi, sin, cos, choose(n,k), gcd(a,b), and lcm(a,b). For a claimed universal "
+    'equality, integer samples such as "at":{"x":3} can disprove it but cannot establish it. '
+    'Use "variable":"x" or "variables":["x","y"] (with at null) to verify a symbolic '
+    "identity. For a value or equation root explicitly claimed in the step, substitute the "
+    'stated values into a closed equality (e.g. "2*3+1 = 7" for x=3 in 2*x+1=7). '
     "Keep the original equality, including any erroneous side. "
     "Use null when there is no useful exact check."
 )
@@ -44,6 +50,13 @@ def _number(node: ast.AST, bindings: dict[str, int]) -> Fraction:
                 result = a ** int(b)
             else:
                 result = _OPERATORS[type(op)](a, b)
+        case ast.Call(func=ast.Name(id="abs"), args=[arg], keywords=[]):
+            result = abs(_number(arg, bindings))
+        case ast.Call(func=ast.Name(id="factorial"), args=[arg], keywords=[]):
+            n = _number(arg, bindings)
+            if n.denominator != 1 or not 0 <= n <= 64:
+                raise ValueError("unsupported factorial argument")
+            result = Fraction(factorial(int(n)))
         case ast.Call(func=ast.Name(id=name), args=[left, right], keywords=[]) if name in _FUNCTIONS:
             a, b = _number(left, bindings), _number(right, bindings)
             if any(v.denominator != 1 for v in (a, b)) or (name == "choose" and max(a, b) > 256):
@@ -56,16 +69,162 @@ def _number(node: ast.AST, bindings: dict[str, int]) -> Fraction:
     return result
 
 
+def _sympy_expr(node: ast.AST, bindings: dict[str, int], free_vars: set[str], sp: Any) -> Any:
+    """Translate a whitelisted AST into SymPy without calling eval/sympify on strings."""
+    match node:
+        case ast.Constant(value=value) if type(value) is int and value.bit_length() <= 128:
+            return sp.Integer(value)
+        case ast.Name(id=name):
+            if name in bindings:
+                return sp.Integer(bindings[name])
+            if name == "pi":
+                return sp.pi
+            if name == "E":
+                return sp.E
+            if name in free_vars:
+                return sp.Symbol(name)
+            raise ValueError("unsupported symbol")
+        case ast.UnaryOp(op=ast.UAdd() | ast.USub(), operand=operand):
+            val = _sympy_expr(operand, bindings, free_vars, sp)
+            return -val if isinstance(node.op, ast.USub) else val
+        case ast.BinOp(left=left, op=op, right=right):
+            a = _sympy_expr(left, bindings, free_vars, sp)
+            b = _sympy_expr(right, bindings, free_vars, sp)
+            if isinstance(op, ast.Add):
+                return a + b
+            if isinstance(op, ast.Sub):
+                return a - b
+            if isinstance(op, ast.Mult):
+                return a * b
+            if isinstance(op, ast.Div):
+                if b == 0:
+                    raise ValueError("division by zero")
+                return a / b
+            if isinstance(op, ast.Mod):
+                if a.is_Integer and b.is_Integer and b != 0:
+                    return a % b
+                raise ValueError("unsupported modulo")
+            if isinstance(op, ast.Pow):
+                if not b.is_Rational or int(b.q) > 6 or abs(b) > 12:
+                    raise ValueError("unsupported symbolic exponent")
+                return a ** b
+            raise ValueError("unsupported binary operator")
+        case ast.Call(func=ast.Name(id=name), args=args, keywords=[]):
+            vals = [_sympy_expr(arg, bindings, free_vars, sp) for arg in args]
+            if len(vals) == 1:
+                x = vals[0]
+                if name == "sqrt":
+                    return sp.sqrt(x)
+                if name == "abs":
+                    return sp.Abs(x)
+                if name == "sin":
+                    return sp.sin(x)
+                if name == "cos":
+                    return sp.cos(x)
+                if name == "tan":
+                    return sp.tan(x)
+                if name == "log":
+                    return sp.log(x)
+                if name == "exp":
+                    return sp.exp(x)
+                if name == "factorial":
+                    if x.is_Integer and 0 <= int(x) <= 64:
+                        return sp.factorial(int(x))
+                    raise ValueError("unsupported factorial argument")
+            if len(vals) == 2:
+                a, b = vals
+                if name in ("choose", "binomial"):
+                    if a.is_Integer and b.is_Integer and max(abs(int(a)), abs(int(b))) <= 256:
+                        return sp.binomial(int(a), int(b))
+                    raise ValueError("unsupported binomial argument")
+                if name in ("gcd", "lcm"):
+                    if a.is_Integer and b.is_Integer:
+                        return sp.Integer(_FUNCTIONS[name](int(a), int(b)))
+                    raise ValueError("unsupported integer function")
+                if name == "Rational":
+                    if a.is_Integer and b.is_Integer and b != 0:
+                        return sp.Rational(int(a), int(b))
+                    raise ValueError("unsupported Rational argument")
+                if name == "root":
+                    if b.is_Integer and 2 <= int(b) <= 6:
+                        return sp.root(a, int(b))
+                    raise ValueError("unsupported root index")
+            raise ValueError("unsupported call")
+        case _:
+            raise ValueError("unsupported symbolic expression")
+
+
+def _check_sympy(
+    left: ast.AST, right: ast.AST, point: dict[str, int] | None, var_names: list[str],
+) -> str:
+    """Verify closed symbolic identities or disprove via exact/high-precision witness."""
+    try:
+        import sympy as sp
+    except ImportError:
+        return "uncheckable"
+    bindings = point or {}
+    free_vars = set(var_names)
+    try:
+        diff = _sympy_expr(left, bindings, free_vars, sp) - _sympy_expr(right, bindings, free_vars, sp)
+        if diff.has(sp.zoo, sp.oo, -sp.oo, sp.nan):
+            return "uncheckable"
+        expanded = sp.expand(diff)
+        if expanded == 0:
+            return "pass" if point is None else "uncheckable"
+        simplified = sp.simplify(expanded)
+        if simplified == 0 or simplified.is_zero is True:
+            return "pass" if point is None else "uncheckable"
+        if not simplified.free_symbols:
+            if simplified.is_nonzero is True:
+                return "fail"
+            num = complex(simplified.evalf(30))
+            if math.isfinite(num.real) and math.isfinite(num.imag) and abs(num) > 1e-12:
+                return "fail"
+            return "uncheckable"
+        if point is None and var_names:
+            for base in (2, 3, -2):
+                subs = {sp.Symbol(v): base + i for i, v in enumerate(var_names)}
+                sample = simplified.subs(subs)
+                if sample.has(sp.zoo, sp.oo, -sp.oo, sp.nan):
+                    continue
+                if sample.is_nonzero is True:
+                    return "fail"
+                num = complex(sample.evalf(30))
+                if math.isfinite(num.real) and math.isfinite(num.imag) and abs(num) > 1e-12:
+                    return "fail"
+        return "uncheckable"
+    except (ValueError, TypeError, ArithmeticError, RecursionError):
+        return "uncheckable"
+
+
 def check_assertion(check: dict) -> str:
     """Check an exact equality or search for a counterexample at a supplied point."""
     try:
         point = check.get("at")
         variable = check.get("variable")
-        if variable is not None and (
-            point is not None or not isinstance(variable, str)
-            or len(variable) > 8 or not variable.isidentifier()
-        ):
+        variables = check.get("variables")
+        if variable is not None and variables is not None:
             return "uncheckable"
+        var_names: list[str] = []
+        if variable is not None:
+            if (
+                point is not None or not isinstance(variable, str)
+                or len(variable) > 8 or not variable.isidentifier()
+                or variable in ("pi", "E")
+            ):
+                return "uncheckable"
+            var_names = [variable]
+        elif variables is not None:
+            if (
+                point is not None or not isinstance(variables, list)
+                or not 1 <= len(variables) <= 3
+                or any(
+                    not isinstance(v, str) or len(v) > 8 or not v.isidentifier() or v in ("pi", "E")
+                    for v in variables
+                )
+            ):
+                return "uncheckable"
+            var_names = list(dict.fromkeys(variables))
         if point is not None and (
             not isinstance(point, dict) or not 1 <= len(point) <= 4
             or any(not k.isidentifier() or type(v) is not int or abs(v) > 256
@@ -80,18 +239,24 @@ def check_assertion(check: dict) -> str:
             if sum(1 for _ in ast.walk(tree)) > 64:
                 return "uncheckable"
             expressions.append(tree.body)
-        if variable is not None:
-            degree = max(_degree(expr, variable) for expr in expressions)
-            if degree > 12:
-                return "uncheckable"
-            left, right = expressions
-            return "pass" if all(
-                _number(left, {variable: x}) == _number(right, {variable: x})
-                for x in range(degree + 1)
-            ) else "fail"
-        if _number(expressions[0], point or {}) != _number(expressions[1], point or {}):
-            return "fail"
-        return "pass" if point is None else "uncheckable"
+        left, right = expressions
+        if len(var_names) <= 1:
+            try:
+                if var_names:
+                    var = var_names[0]
+                    degree = max(_degree(expr, var) for expr in expressions)
+                    if degree > 12:
+                        return "uncheckable"
+                    return "pass" if all(
+                        _number(left, {var: x}) == _number(right, {var: x})
+                        for x in range(degree + 1)
+                    ) else "fail"
+                if _number(left, point or {}) != _number(right, point or {}):
+                    return "fail"
+                return "pass" if point is None else "uncheckable"
+            except (ValueError, ArithmeticError):
+                return _check_sympy(left, right, point, var_names)
+        return _check_sympy(left, right, point, var_names)
     except (KeyError, ValueError, SyntaxError, TypeError, ArithmeticError):
         return "uncheckable"
 
@@ -154,6 +319,20 @@ class GraphExtraction:
     rejected_node: int | None = None
 
 
+def _normalize_math_text(text: str) -> str:
+    """Normalize lightweight markdown and LaTeX spacing for source-quote verification."""
+    cleaned = _MATH_DELIM_RE.sub(" ", text).casefold()
+    cleaned = _OP_SPACE_RE.sub(r"\1", cleaned)
+    return _WS_RE.sub(" ", cleaned).strip(" .,:;")
+
+
+def _matches_source(candidate: str, source: str) -> bool:
+    """Verify whether a candidate proposition aligns verbatim or after light math normalization."""
+    norm_cand = _normalize_math_text(candidate)
+    norm_src = _normalize_math_text(source)
+    return len(norm_cand) >= 3 and norm_cand in norm_src
+
+
 def lemma_graph(text: str, steps: tuple[str, ...]) -> GraphExtraction:
     """Require topological dependencies and evidence tied to a source step."""
     raw = json_object(text).get("lemmas")
@@ -182,14 +361,14 @@ def lemma_graph(text: str, steps: tuple[str, ...]) -> GraphExtraction:
             equality = f'{check.get("lhs")} = {check.get("rhs")}'
             if "".join(claim.split()) == "".join(equality.split()):
                 status = check_assertion(check)
-        source = " ".join(steps[step - 1].split())
+        source = steps[step - 1]
         quote = item.get("source_quote")
         if status == "uncheckable" and isinstance(quote, str) and 0 < len(quote.strip()) <= 400:
-            if " ".join(quote.split()) in source:
+            if _matches_source(quote, source):
                 claim = quote.strip()
         graph.append(Lemma(
             f"L{index}", step, claim, tuple(premises), status, item.get("global_scope") is True,
-            " ".join(claim.split()) in source,
+            _matches_source(claim, source),
         ))
     return GraphExtraction(tuple(graph), "parsed", len(raw))
 
@@ -208,10 +387,10 @@ def prune_graph(
         if not node.global_scope or not checked.issuperset(node.premises):
             continue
         if node.check == "pass" and (
-            node.step <= reviewed_prefix or node.step > first_error > 0 and not node.premises
+            node.step <= reviewed_prefix or not node.premises or (first_error > 0 and node.step > first_error)
         ):
             evidence = L1_EVIDENCE
-        elif node.matches_source and node.step <= reviewed_prefix and node.step < first_error:
+        elif node.matches_source and node.step <= reviewed_prefix and (first_error == 0 or node.step < first_error):
             evidence = L2_EVIDENCE
         else:
             continue

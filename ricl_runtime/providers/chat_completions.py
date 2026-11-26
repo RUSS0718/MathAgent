@@ -7,6 +7,7 @@ import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace
+from time import monotonic
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -173,6 +174,128 @@ def _windows_ie_proxies() -> dict[str, str]:
         return {}
 
 
+def _build_metadata(
+    *,
+    request_id: str,
+    model: str,
+    finish_reason: str,
+    usage: dict[str, Any],
+    track1_usage: bool,
+) -> ChatCompletionReply:
+    """Build redacted reply metadata and check Track 1 token subtotal drift."""
+    warnings: tuple[str, ...] = ()
+    if track1_usage:
+        details = usage.get("completion_tokens_details")
+        output = _token_count(usage.get("completion_tokens"))
+        reasoning = _token_count(details.get("reasoning_tokens")) if isinstance(details, dict) else "unknown"
+        if isinstance(output, int) and isinstance(reasoning, int) and output < reasoning <= output + 4:
+            warnings = ("usage_subtotal_minor_drift",)
+    else:
+        reasoning = "unknown"
+    return ChatCompletionReply(
+        text="",
+        model=model,
+        input_tokens=_token_count(usage.get("prompt_tokens")),
+        output_tokens=_token_count(usage.get("completion_tokens")),
+        usage_source="provider" if _has_usage(usage) else "unknown",
+        request_id=request_id,
+        finish_reason=finish_reason,
+        warnings=warnings,
+        reasoning_tokens=reasoning,
+    )
+
+
+def _read_sse_chat_completion(
+    request: urllib.request.Request,
+    *,
+    api_key: str,
+    timeout: float,
+    max_bytes: int,
+    track1_usage: bool,
+) -> ChatCompletionReply:
+    """Assemble one bounded SSE chat completion while discarding private reasoning deltas."""
+    started = monotonic()
+    socket_timeout = min(timeout, 60.0)
+    total_bytes = 0
+    content_parts: list[str] = []
+    request_id = "unknown"
+    model = "unknown"
+    finish_reason = "unknown"
+    usage: dict[str, Any] = {}
+    saw_choice = False
+    try:
+        opener = urllib.request.build_opener(_RejectRedirects, *_proxy_handlers())
+        with opener.open(request, timeout=socket_timeout) as response:
+            for raw in response:
+                if monotonic() - started > timeout:
+                    raise ProviderTimeoutError(
+                        "provider request timed out; remote outcome may be unknown"
+                    )
+                total_bytes += len(raw)
+                if total_bytes > max_bytes:
+                    raise ProviderProtocolError(
+                        "provider response exceeded the configured size limit"
+                    )
+                line = raw.decode("utf-8", errors="replace").strip()
+                if not line or line.startswith(":") or not line.startswith("data:"):
+                    continue
+                payload_str = line[5:].strip()
+                if payload_str == "[DONE]":
+                    break
+                chunk = _decode_response(payload_str.encode("utf-8"))
+                request_id = _nonempty_string(chunk.get("id")) or request_id
+                model = _nonempty_string(chunk.get("model")) or model
+                chunk_usage = chunk.get("usage")
+                if isinstance(chunk_usage, dict) and _has_usage(chunk_usage):
+                    usage = chunk_usage
+                choices = chunk.get("choices")
+                if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                    saw_choice = True
+                    choice = choices[0]
+                    finish_reason = _nonempty_string(choice.get("finish_reason")) or finish_reason
+                    delta = choice.get("delta")
+                    if isinstance(delta, dict):
+                        piece = delta.get("content")
+                        if isinstance(piece, str):
+                            content_parts.append(piece)
+    except ModelPortFailure:
+        raise
+    except urllib.error.HTTPError as error:
+        raise ProviderHTTPError(error.code) from None
+    except TimeoutError:
+        raise ProviderTimeoutError(
+            "provider request timed out; remote outcome may be unknown"
+        ) from None
+    except urllib.error.URLError as error:
+        if isinstance(error.reason, TimeoutError):
+            raise ProviderTimeoutError(
+                "provider request timed out; remote outcome may be unknown"
+            ) from None
+        raise ProviderOutcomeUnknownError(
+            "provider transport failed; remote outcome is unknown"
+        ) from None
+    except (http.client.HTTPException, OSError):
+        raise ProviderOutcomeUnknownError(
+            "provider transport failed; remote outcome is unknown"
+        ) from None
+
+    text = "".join(content_parts)
+    if any(isinstance(value, str) and api_key in value for value in (request_id, model, finish_reason, text)):
+        raise ProviderProtocolError("provider response echoed its credential")
+    metadata = _build_metadata(
+        request_id=request_id,
+        model=model,
+        finish_reason=finish_reason,
+        usage=usage,
+        track1_usage=track1_usage,
+    )
+    if not saw_choice:
+        raise ProviderProtocolError(
+            "provider response did not contain a chat choice", reply=metadata
+        )
+    return replace(metadata, text=text)
+
+
 def post_chat_completion(
     url: str,
     *,
@@ -189,6 +312,14 @@ def post_chat_completion(
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
+    if payload.get("stream") is True:
+        return _read_sse_chat_completion(
+            request,
+            api_key=api_key,
+            timeout=timeout,
+            max_bytes=max_bytes,
+            track1_usage=track1_usage,
+        )
     response_data = read_json(request, timeout=timeout, max_bytes=max_bytes)
     choices = response_data.get("choices")
     choice = (
@@ -209,27 +340,14 @@ def post_chat_completion(
     usage = response_data.get("usage")
     if not isinstance(usage, dict):
         usage = {}
-    warnings = ()
-    if track1_usage:
-        details = usage.get("completion_tokens_details")
-        output = _token_count(usage.get("completion_tokens"))
-        reasoning = _token_count(details.get("reasoning_tokens")) if isinstance(details, dict) else "unknown"
-        if isinstance(output, int) and isinstance(reasoning, int) and output < reasoning <= output + 4:
-            warnings = ("usage_subtotal_minor_drift",)
-    else:
-        reasoning = "unknown"
-    metadata = ChatCompletionReply(
-        text="",
-        model=_nonempty_string(response_data.get("model")) or "unknown",
-        input_tokens=_token_count(usage.get("prompt_tokens")),
-        output_tokens=_token_count(usage.get("completion_tokens")),
-        usage_source="provider" if _has_usage(usage) else "unknown",
+    metadata = _build_metadata(
         request_id=_nonempty_string(response_data.get("id")) or "unknown",
+        model=_nonempty_string(response_data.get("model")) or "unknown",
         finish_reason=_nonempty_string(choice.get("finish_reason")) or "unknown"
         if choice is not None
         else "unknown",
-        warnings=warnings,
-        reasoning_tokens=reasoning,
+        usage=usage,
+        track1_usage=track1_usage,
     )
     if choice is None:
         raise ProviderProtocolError(
