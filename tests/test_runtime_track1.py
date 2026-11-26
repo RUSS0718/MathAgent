@@ -398,7 +398,7 @@ class Track1Tests(unittest.TestCase):
     def test_siliconflow_profile_configures_thinking_budget_and_json_no_thinking(self):
         with patch.dict(os.environ, {
             "BASE_URL": "https://api.siliconflow.cn/v1",
-            "MODEL": "Qwen/Qwen3.5-35B-A3B",
+            "MODEL": "Qwen/Qwen3-14B",
             "API_KEY": "fixture",
         }):
             provider_high = Track1Provider.from_environment(16384, "high")
@@ -425,7 +425,28 @@ class Track1Tests(unittest.TestCase):
         self.assertTrue(json_payload["stream"])
         self.assertNotIn("thinking_budget", json_payload)
         self.assertEqual(json_payload["response_format"], {"type": "json_object"})
-        self.assertEqual(provider_high.estimated_cost(1_000_000, 1_000_000), Decimal("2.04"))
+        self.assertEqual(provider_high.estimated_cost(1_000_000, 1_000_000), Decimal("0.35"))
+
+        with patch.dict(os.environ, {
+            "BASE_URL": "https://api.siliconflow.cn/v1",
+            "MODEL": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "API_KEY": "fixture",
+        }):
+            inst = Track1Provider.from_environment(16384, "low")
+        with patch("ricl_runtime.providers.track1.post_chat_completion") as post_inst:
+            inst.complete("solve", json_mode=False)
+        inst_payload = post_inst.call_args.kwargs["payload"]
+        self.assertNotIn("enable_thinking", inst_payload)
+        self.assertNotIn("thinking_budget", inst_payload)
+        self.assertEqual(inst.estimated_cost(1_000_000, 1_000_000), Decimal("0.39"))
+
+        with patch.dict(os.environ, {
+            "BASE_URL": "https://api.siliconflow.cn/v1",
+            "MODEL": "Qwen/unlisted-model",
+            "API_KEY": "fixture",
+        }):
+            with self.assertRaises(ProviderConfigurationError):
+                Track1Provider.from_environment(16384, "low")
 
     def test_disagreement_gate_exits_in_two_calls_on_consensus(self):
         replies = [
