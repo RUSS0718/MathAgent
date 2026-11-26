@@ -139,3 +139,100 @@ class Track1Tests(unittest.TestCase):
                 self.assertEqual(check_assertion(check), "pass")
         self.assertEqual(check_assertion({"lhs": "x**2", "rhs": "x", "at": {"x": 1}}), "uncheckable")
         self.assertEqual(check_assertion({"lhs": "x**2", "rhs": "x", "at": {"x": 2}}), "fail")
+
+    def test_b2_truncates_trajectory_to_verified_prefix_on_fail(self):
+        initial = (
+            "Step 1: Keep this valid step.\n"
+            "Step 2: Also valid.\n"
+            "Step 3: Bad step to discard.\n"
+            "Step 4: Downstream polluted step.\nFinal answer: 99"
+        )
+        review1 = '{"verdict":"fail","first_error":3,"valid_prefix":2,"error_constraint":"Avoid division by zero."}'
+        repaired = "Step 1: Keep this valid step.\nStep 2: Also valid.\nStep 3: Fixed step.\nFinal answer: 4"
+        review2 = '{"verdict":"pass","first_error":0,"valid_prefix":3}'
+        replies = [initial, review1, repaired, review2]
+        events = []
+        budget = SharedBudget(Track1Provider("fixture"), 40000, 6, Decimal("0.50"), events.append)
+        with patch(
+            "ricl_runtime.providers.track1.post_chat_completion",
+            side_effect=lambda *a, **kw: ChatCompletionReply(
+                replies.pop(0), input_tokens=20, output_tokens=30, finish_reason="stop"
+            ),
+        ) as post:
+            result = solve("Problem", "B2", budget)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["final_answer"], "4")
+        self.assertEqual(result["action_sequence"], ["initial", "within_route_prefix_repair"])
+        repair_prompt = post.call_args_list[2].kwargs["payload"]["messages"][0]["content"]
+        self.assertIn("Step 1: Keep this valid step.", repair_prompt)
+        self.assertIn("Step 2: Also valid.", repair_prompt)
+        self.assertNotIn("Bad step to discard", repair_prompt)
+        self.assertNotIn("Downstream polluted step", repair_prompt)
+        self.assertIn("Avoid division by zero.", repair_prompt)
+
+    def test_b3_rse_uses_same_l1_l2_verifier_without_dag_pruning(self):
+        initial = "Step 1: 2 + 2 = 4.\nStep 2: Bad step.\nFinal answer: 5"
+        review1 = '{"verdict":"fail","first_error":2,"valid_prefix":1}'
+        rse_extract = json.dumps({
+            "positive_lemmas": [
+                {"claim": "2 + 2 = 4", "check": {"step": 1, "lhs": "2 + 2", "rhs": "4"}},
+                {"claim": "2 + 2 = 5", "check": {"step": 1, "lhs": "2 + 2", "rhs": "5"}},
+                {"claim": "Even parity holds.", "check": None},
+            ],
+            "negative_lessons": ["Do not skip parity check."],
+        })
+        rse_verify = '{"valid_lemma_indices":[2],"valid_lesson_indices":[0]}'
+        retry_solve = "Step 1: Reuse lemma.\nFinal answer: 4"
+        review2 = '{"verdict":"pass","first_error":0,"valid_prefix":1}'
+        replies = [initial, review1, rse_extract, rse_verify, retry_solve, review2]
+        events = []
+        budget = SharedBudget(Track1Provider("fixture"), 48000, 8, Decimal("0.50"), events.append)
+
+        def respond(url, *, payload, **kwargs):
+            text = replies.pop(0)
+            if text == retry_solve:
+                supplied = events[-1]["lemmas_supplied"]
+                text = f"Step 1: Apply [{supplied[0]}].\nFinal answer: 4"
+            return ChatCompletionReply(text, input_tokens=20, output_tokens=30, finish_reason="stop")
+
+        with patch("ricl_runtime.providers.track1.post_chat_completion", side_effect=respond) as post:
+            result = solve("Problem", "B3", budget)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["final_answer"], "4")
+        self.assertEqual(result["action_sequence"], ["initial", "rse_retry"])
+        payloads = [c.kwargs["payload"] for c in post.call_args_list]
+        self.assertEqual([p["max_tokens"] for p in payloads], [16384, 2048, 4096, 2048, 16384, 2048])
+        retry_prompt = payloads[4]["messages"][0]["content"]
+        self.assertIn("[L1-Executable-Verified] 2 + 2 = 4", retry_prompt)
+        self.assertIn("[L2-Reviewed] Even parity holds.", retry_prompt)
+        self.assertNotIn("2 + 2 = 5", retry_prompt)
+        self.assertIn("Do not skip parity check.", retry_prompt)
+        bank_event = next(e for e in events if e["event"] == "rse_bank_updated")
+        self.assertEqual(bank_event["l1_failed"], 1)
+        self.assertEqual(bank_event["bank_size"], 2)
+        self.assertEqual(bank_event["lessons_size"], 1)
+        reuse_event = next(e for e in events if e["event"] == "lemma_reuse")
+        self.assertEqual(len(reuse_event["cited"]), 1)
+
+    def test_b4_switches_route_without_extract_or_lemmas(self):
+        initial = "Step 1: Wrong start.\nFinal answer: 1"
+        review1 = '{"verdict":"fail","first_error":1,"valid_prefix":0}'
+        switched = "Step 1: Fresh distinct route.\nFinal answer: 4"
+        review2 = '{"verdict":"pass","first_error":0,"valid_prefix":1}'
+        replies = [initial, review1, switched, review2]
+        events = []
+        budget = SharedBudget(Track1Provider("fixture"), 40000, 6, Decimal("0.50"), events.append)
+        with patch(
+            "ricl_runtime.providers.track1.post_chat_completion",
+            side_effect=lambda *a, **kw: ChatCompletionReply(
+                replies.pop(0), input_tokens=20, output_tokens=30, finish_reason="stop"
+            ),
+        ):
+            result = solve("Problem", "B4", budget)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["final_answer"], "4")
+        self.assertEqual(result["action_sequence"], ["initial", "switch_no_salvage"])
+        started = [e for e in events if e["event"] == "request_started"]
+        self.assertEqual([e["stage"] for e in started], ["solve", "review", "solve", "review"])
+        self.assertFalse(any(e.get("lemmas_supplied") for e in started))
