@@ -63,7 +63,8 @@ class Track1Provider:
         validate_api_key(key)
         if not 8192 <= max_output_tokens <= 32768:
             raise ProviderConfigurationError("Track 1 max_tokens must be between 8192 and 32768")
-        return cls(key, max_output_tokens, reasoning_effort, name=model, host=host,
+        timeout = 300.0 if host == SILICONFLOW_HOST else 180.0
+        return cls(key, max_output_tokens, reasoning_effort, timeout=timeout, name=model, host=host,
                    input_rate=input_rate, output_rate=output_rate)
 
     def complete(
@@ -80,9 +81,8 @@ class Track1Provider:
                 "enable_thinking": enable_thinking,
             }
             if enable_thinking:
-                effort_frac = 0.25 if self.reasoning_effort == "low" else 0.5
-                budget = max(1024, min(effective_max - 2048, int(effective_max * effort_frac)))
-                payload["thinking_budget"] = budget
+                cap = 2048 if self.reasoning_effort == "low" else 4096
+                payload["thinking_budget"] = max(1024, min(cap, effective_max - 2048))
         else:
             payload = {
                 "model": self.name,

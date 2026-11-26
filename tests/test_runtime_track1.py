@@ -396,23 +396,28 @@ class Track1Tests(unittest.TestCase):
             "MODEL": "Qwen/Qwen3.5-35B-A3B",
             "API_KEY": "fixture",
         }):
-            provider = Track1Provider.from_environment(16384, "high")
+            provider_high = Track1Provider.from_environment(16384, "high")
+            provider_low = Track1Provider.from_environment(16384, "low")
+        self.assertEqual(provider_high.timeout, 300.0)
         with patch("ricl_runtime.providers.track1.post_chat_completion") as post:
-            provider.complete("solve", json_mode=False)
-            provider.complete("audit", json_mode=True, max_output_tokens=4096)
-        solve_payload = post.call_args_list[0].kwargs["payload"]
-        json_payload = post.call_args_list[1].kwargs["payload"]
+            provider_high.complete("solve", json_mode=False)
+            provider_low.complete("solve-low", json_mode=False)
+            provider_high.complete("audit", json_mode=True, max_output_tokens=4096)
+        solve_high = post.call_args_list[0].kwargs["payload"]
+        solve_low = post.call_args_list[1].kwargs["payload"]
+        json_payload = post.call_args_list[2].kwargs["payload"]
         self.assertEqual(
             post.call_args_list[0].args[0], "https://api.siliconflow.cn/v1/chat/completions"
         )
-        self.assertNotIn("thinking", solve_payload)
-        self.assertNotIn("reasoning_effort", solve_payload)
-        self.assertTrue(solve_payload["enable_thinking"])
-        self.assertEqual(solve_payload["thinking_budget"], 8192)
+        self.assertNotIn("thinking", solve_high)
+        self.assertNotIn("reasoning_effort", solve_high)
+        self.assertTrue(solve_high["enable_thinking"])
+        self.assertEqual(solve_high["thinking_budget"], 4096)
+        self.assertEqual(solve_low["thinking_budget"], 2048)
         self.assertFalse(json_payload["enable_thinking"])
         self.assertNotIn("thinking_budget", json_payload)
         self.assertEqual(json_payload["response_format"], {"type": "json_object"})
-        self.assertEqual(provider.estimated_cost(1_000_000, 1_000_000), Decimal("2.04"))
+        self.assertEqual(provider_high.estimated_cost(1_000_000, 1_000_000), Decimal("2.04"))
 
     def test_disagreement_gate_exits_in_two_calls_on_consensus(self):
         replies = [
