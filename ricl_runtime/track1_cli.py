@@ -25,7 +25,7 @@ def main() -> int:
     parser.add_argument("--request-limit", type=int, required=True)
     parser.add_argument("--cost-limit-usd", required=True)
     parser.add_argument("--max-tokens", type=int, default=OUTPUT_LIMIT)
-    parser.add_argument("--reasoning-effort", choices=("low", "high"), default="high")
+    parser.add_argument("--reasoning-effort", choices=("none", "low", "high"), default="high")
     parser.add_argument("--screen", action="store_true", help="sample once for pass@1")
     args = parser.parse_args()
     try:
@@ -48,7 +48,7 @@ def main() -> int:
     except ProviderConfigurationError as exc:
         parser.error(str(exc))
     configuration = {
-        "endpoint_host": HOST, "model": MODEL, "thinking": "enabled",
+        "endpoint_host": HOST, "model": MODEL, "thinking": provider.thinking,
         "reasoning_effort": args.reasoning_effort, "screen": args.screen,
         "max_output_tokens": args.max_tokens, "token_limit": args.token_limit,
         "request_limit": args.request_limit, "cost_limit_usd": str(cost_limit),

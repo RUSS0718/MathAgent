@@ -34,6 +34,11 @@ class Track1Provider:
     timeout: float = 180
     name: str = MODEL
 
+    @property
+    def thinking(self) -> str:
+        """Keep the API thinking switch consistent with the configured effort."""
+        return "disabled" if self.reasoning_effort == "none" else "enabled"
+
     @classmethod
     def from_environment(cls, max_output_tokens: int, reasoning_effort: str) -> "Track1Provider":
         """Require the local credential to have been selected for this gateway."""
@@ -56,7 +61,7 @@ class Track1Provider:
                 "model": self.name,
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": self.max_output_tokens,
-                "thinking": {"type": "enabled"},
+                "thinking": {"type": self.thinking},
                 "reasoning_effort": self.reasoning_effort,
             },
             timeout=self.timeout,

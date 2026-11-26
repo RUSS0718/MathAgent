@@ -81,7 +81,8 @@ class SharedBudget:
         if reply.input_tokens > input_upper or reply.output_tokens > output_limit:
             raise RunStop("failed", "provider_usage_exceeded_request_reservation")
         if not reply.text.strip():
-            raise RunStop("failed", "empty_content")
+            reason = "empty_content_at_output_limit" if reply.finish_reason == "length" else "empty_content"
+            raise RunStop("failed", reason)
         return reply
 
     def _settle(self, reply: ChatCompletionReply | None, cost_upper: Decimal) -> None:
