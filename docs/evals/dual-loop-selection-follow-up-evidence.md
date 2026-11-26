@@ -9,12 +9,14 @@
 | ricl-dual-loop-20261126-v6 | `556857aa1d5489d8b5cd67ab5179ec4d0a09b744` | 8 | 16,384 | 393,216 | 0.0663552 | 6.3700992 |
 | ricl-dual-loop-20261126-v7 | `e33b4ffe6f22362203c5aa62cafa7a8e74e86d9a` | 4 | 24,576 | 524,288 | 0.0925696 | 4.4433408 |
 | ricl-dual-loop-20261126-v8 | `9948f808af81b66fe93afa5b943af32e9dfabd26` | 4 | 24,576 | 524,288 | 0.0925696 | 4.4433408 |
+| ricl-dual-loop-20261126-v9 | `9948f808af81b66fe93afa5b943af32e9dfabd26` | 3 | 24,576 | 524,288 | 0.0925696 | 3.3325056 |
 
 v6 的四个核心配对为新题。归一化比较平方约束与符号阈值，未与既有 14 道留出输入重复。
 v7 原样复用 v6 首两个两臂均已确认截断的配对，保留 v6 的每条记录。v7 两条件同步启用扩大后的上限。
 v7 首个 Run 确认 3 次派发，第 4 次回访在本机预检拒绝，未发送。回访草稿超限路径由 [PR #270](https://github.com/RUSS0718/RiCL/pull/270) 的正常入口夹具复现。
 v8 在应用回访修复后保留 v7 的两对、配对顺序及预算。完整提示超限时仅省略旧自由文本草稿。
 v8 第三次请求在约 125.5 秒后返回 HTTP 524。网关直连响应头确认经过 Cloudflare，耗时与 [源站响应超时](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-5xx-errors/error-524/) 一致。实际推理结果和用量未知。
+v9 只首派 v8 尚未执行的三个条件，保持原顺序和原配置。v8 的超时尝试保留在分母中。
 
 ## ricl-dual-loop-20261126-v6
 
@@ -108,9 +110,43 @@ v8 第三次请求在约 125.5 秒后返回 HTTP 524。网关直连响应头确�
 | --- | --- | --- | --- |
 | `run_c35826d8fca24824998c7201d64fb5fa` | `7ed2d2247ff21c4e25e87ad0eb89ce7994e455c6216f65c959b70f7a1a5dc0d6` | `63824169f349d33eafc24ed7e55dddf22c44a309f30f15ac1f22c1fdc9d39375` | `d480f0ee1e139d61cd689dfd959106303db0f5d209b1533dafd7b4a91bec87ed` |
 
+## ricl-dual-loop-20261126-v9
+
+| 题目 | 条件 | Run 状态／停止原因 | 末次 Provider 状态 | 独立正确性／完备性 | 确认派发／远端结果未知 | 已知输入／输出 Token | 估算／授权扣减（US$） |
+| --- | --- | --- | --- | --- | ---: | ---: | ---: |
+| DLV6-01 | APRS | `stopped` / `model_request_budget_exhausted` | stop | unknown / unknown | 12 / 0 | 8,909 / 51,464 | 0.171812 / 1.1108352 |
+| DLV6-02 | APRS | `failed` / `budget_exhausted` | length | unknown / unknown | 3 / 0 | 1,077 / 25,128 | 0.0812712 / 0.2777088 |
+| DLV6-02 | APRS+CCL | `stopped` / `model_request_budget_exhausted` | stop | incorrect / unknown | 12 / 0 | 9,981 / 22,147 | 0.0788552 / 1.1108352 |
+
+状态为 failed 1、stopped 2。实际 APRS 派发为 cold_start 8、fallback_round_robin 13。
+本批已观察到 1 个自然触发 Run，裁决记录为 `tied` 1。采纳 0 次。回灌后实际 gain 派发为 0 次，单步移除回灌信用后改变选路为 0 次。
+批次请求上界 27，已知用量峰值估算 US$0.3319384，按预检上界扣减 US$2.4993792。
+- `run_dacdcca0f8ee4619a50820fa95f1e958_request_005` 移除了会使整段提示达到 39,374 字节的旧草稿。请求随后实际送达 Provider。
+- `run_dacdcca0f8ee4619a50820fa95f1e958_request_006` 移除了会使整段提示达到 31,375 字节的旧草稿。请求随后实际送达 Provider。
+- `run_dacdcca0f8ee4619a50820fa95f1e958_request_008` 移除了会使整段提示达到 27,751 字节的旧草稿。请求随后实际送达 Provider。
+- `run_dacdcca0f8ee4619a50820fa95f1e958_request_010` 移除了会使整段提示达到 25,260 字节的旧草稿。请求随后实际送达 Provider。
+- `run_12e52c9c9bf74decad572aaa9e5012ab_request_009` 移除了会使整段提示达到 45,321 字节的旧草稿。请求随后实际送达 Provider。
+
+| 文件 | SHA-256 |
+| --- | --- |
+| `budget.json` | `cc7ffe4d720db8b4f60e763cde5a3853eed878af6e49758e00838cf73d60f29c` |
+| `frozen-plan.json` | `7cfcac2e3490f7f75f9dcb25c541b4c454c5200f15a372a86b1c2f0f62d598d4` |
+| `preflight.json` | `ff41c2ad3814e1b2c6851c96973840a961699ebdc3013720c81bb15974952491` |
+| `archive-manifest.json` | `2cf89960326a88cc31f134638c8905f6c4df34f1867d074bd5c48abd7b7bb34e` |
+| `audit.json` | `2315dba7d7ffab996270b1b3ab8270f5461922528f3f8da657c6259ec3056a28` |
+| `selection-audit.py` | `a96d6be7a1209e99bf4a6731be975d7bf402e33bfd4fb53ba30ba2f60d1eaf15` |
+| `selection-audit.json` | `e16e7f419637a37e44df8287747b0e750fdd3e6095c7275c89ffba928d3b3a04` |
+
+| Run ID | Run SHA-256 | Trace SHA-256 | 配置 SHA-256 |
+| --- | --- | --- | --- |
+| `run_dacdcca0f8ee4619a50820fa95f1e958` | `767d7a592732740b5153b62c5e9ff0c0d7695defdc57dfbebf3d9d0ee8aaaa65` | `56b0acb5306181199676e0906dcb81407ad527bda6a2972a5ee2be36649afff9` | `1f8448801577dd87d1814ff3e10be3c34399e508b325cb34da2276aa7ef0e8ff` |
+| `run_33bbce9a43064f1ba2fda409f156bf3b` | `2c6b6c1747b6603e77c4234f68879428064d52f8c6f6508bc8477c772e211b96` | `3f7adef7761834a81caf69ed84de45b238feb78c0772c300ed46e7895ae98446` | `1f8448801577dd87d1814ff3e10be3c34399e508b325cb34da2276aa7ef0e8ff` |
+| `run_12e52c9c9bf74decad572aaa9e5012ab` | `3810f461c7abd4f104f2a92679d82c52c02a40d7bef3385999af8444be07b918` | `b51bf3ad7cdefec650b9882e019ce269afc7f3c09a930d7fe833e76cbfe35e42` | `d480f0ee1e139d61cd689dfd959106303db0f5d209b1533dafd7b4a91bec87ed` |
+
 ## 验收与复算
 
-全任务累计授权账本为 329/384 次、US$18.8948480/US$30。实付账单为 `unknown`。
+上述批次合计 91 次推理请求上界、341,779 个已知 Token。实际结算为 1 完成、5 预算停止及 7 失败。各批的 6 个未执行记录保留。
+全任务累计授权账本为 356/384 次、US$21.3942272/US$30。实付账单为 `unknown`。
 分别在批次源码工作树运行对应批次目录的 `audit.py` 和 `selection-audit.py`。前者核对题目与独立答案键、根预算、Run 和 Trace。后者重算真实派发的单步决策。
 #259 仍缺同一真实 Run 中回灌信用改变冷启动后实际选路的证据，保持开放。
 #256 的真实撤销证据继续跟踪。[已归档的依赖与替代支撑复算](dependency-replay-v3-v5-evidence.md)。
