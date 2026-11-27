@@ -18,6 +18,11 @@ _MATH_DELIM_RE = re.compile(
 )
 _FRAC_NORM_RE = re.compile(r"\\[dt]?frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}")
 _MATH_TOKEN_RE = re.compile(r"[a-z0-9]+|[=+\-*/<>^]")
+_SQRT_NORM_RE = re.compile(r"\\sqrt\s*\{([^{}]+)\}")
+_AUTO_ALLOWED_FUNCS = frozenset({
+    "pi", "E", "sqrt", "abs", "sin", "cos", "tan", "log", "exp",
+    "factorial", "choose", "binomial", "gcd", "lcm", "Rational", "root",
+})
 _OP_SPACE_RE = re.compile(r"\s*([=+\-*/<>(),])\s*")
 _WS_RE = re.compile(r"\s+")
 L1_EVIDENCE = "L1-Executable-Verified"
@@ -384,6 +389,54 @@ def _check_matches_claim(claim: str, lhs: str, rhs: str) -> bool:
     return bool(norm_eq) and (norm_eq == norm_claim or (len(norm_eq) >= 5 and norm_eq in norm_claim))
 
 
+def _claim_side_to_py(side: str) -> str:
+    """Translate a simple LaTeX equality side into bounded Python syntax for L1 checking."""
+    out = _MATH_DELIM_RE.sub("", side).strip()
+    out = out.replace("\\cdot", "*").replace("\\times", "*").replace("\\pi", "pi")
+    for _ in range(2):
+        out, n1 = _FRAC_NORM_RE.subn(r"((\1)/(\2))", out)
+        out, n2 = _SQRT_NORM_RE.subn(r"sqrt(\1)", out)
+        if n1 == 0 and n2 == 0:
+            break
+    out = out.replace("^", "**")
+    out = re.sub(r"(\d)([a-zA-Z(])", r"\1*\2", out)
+    return re.sub(r"(\))([a-zA-Z0-9(])", r"\1*\2", out).strip()
+
+
+def _auto_l1_pass(claim: str, step: int) -> bool:
+    """Promote exact closed equalities/identities via L1 without emitting false refutations."""
+    if any(tok in claim for tok in ("<=", ">=", "!=", "<", ">")):
+        return False
+    stripped = claim.strip().strip("$`").strip()
+    if stripped.count("=") != 1:
+        return False
+    raw_lhs, raw_rhs = stripped.split("=", 1)
+    lhs_py, rhs_py = _claim_side_to_py(raw_lhs), _claim_side_to_py(raw_rhs)
+    if not lhs_py or not rhs_py or len(lhs_py) > 240 or len(rhs_py) > 240:
+        return False
+    try:
+        ltree = ast.parse(lhs_py, mode="eval")
+        rtree = ast.parse(rhs_py, mode="eval")
+    except SyntaxError:
+        return False
+    vars_found: list[str] = []
+    for tree in (ltree, rtree):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id not in _AUTO_ALLOWED_FUNCS:
+                if len(node.id) > 8 or not node.id.isidentifier():
+                    return False
+                if node.id not in vars_found:
+                    vars_found.append(node.id)
+    if len(vars_found) > 3:
+        return False
+    check: dict[str, Any] = {"step": step, "lhs": lhs_py, "rhs": rhs_py, "at": None}
+    if len(vars_found) == 1:
+        check["variable"] = vars_found[0]
+    elif vars_found:
+        check["variables"] = vars_found
+    return check_assertion(check) == "pass"
+
+
 def lemma_graph(text: str, steps: tuple[str, ...]) -> GraphExtraction:
     """Require topological dependencies and evidence tied to a source step."""
     raw = json_object(text).get("lemmas")
@@ -424,6 +477,8 @@ def lemma_graph(text: str, steps: tuple[str, ...]) -> GraphExtraction:
         if status == "uncheckable" and isinstance(quote, str) and 0 < len(quote.strip()) <= 400:
             if _matches_source(quote, source):
                 claim = quote.strip()
+        if status == "uncheckable" and _auto_l1_pass(claim, step):
+            status = "pass"
         graph.append(Lemma(
             f"L{index}", step, claim, tuple(premises), status, item.get("global_scope") is True,
             _matches_source(claim, source),

@@ -23,7 +23,8 @@ SOLVE_FORMAT = (
     "Give a concise, public mathematical derivation without repetitive brute-force loops "
     "or re-checking settled cases. Label each main step on a new line as Step 1:, Step 2:, "
     "and so on. End with one plain line in the form 'Final answer: <exact_answer>' "
-    "(replace <exact_answer> with your computed value). If incomplete say 'Final answer: unknown'."
+    "(replace <exact_answer> with ONLY your final computed value or expression, without an "
+    "equation prefix like x=). If incomplete say 'Final answer: unknown'."
 )
 _STEP_START = r"(?im)^[ \t]*(?:#{1,6}[ \t]+)?(?:\*\*)?"
 _STEP_NUMBER = r"([1-9][0-9]?)[ \t]*(?:\*\*)?[.):][ \t]*(?:\*\*)?"
@@ -712,13 +713,16 @@ def _solve_ricl_v02(
         if not empty_draft:
             advanced += 1
         target_route.spent_tokens += max(0, budget.tokens - t0)
-        target_route.latest = Candidate(
+        prev_cand = route_cands.get(target_route.route_id)
+        cand = Candidate(
             clean, ans, "incomplete" if empty_draft else "unreviewed", 0, 0, steps, "uncheckable", "",
         )
+        target_route.latest = cand
         target_route.reviewed = empty_draft
         target_route.exhausted = empty_draft
         truncated_by_route[target_route.route_id] = trunc
-        route_cands[target_route.route_id] = target_route.latest
+        if not (empty_draft and prev_cand is not None and prev_cand.answer is not None):
+            route_cands[target_route.route_id] = cand
         if empty_draft:
             _emit_empty_verification(budget, trunc, fused=True)
         if stop_on_reply:
@@ -741,7 +745,7 @@ def _solve_ricl_v02(
         ):
             _emit_best("consensus_pass", ans)
             return ("completed", "consensus_passed")
-        if ans is not None or empty_draft:
+        if ans is not None or (empty_draft and not snapshots):
             _emit_best()
 
 

@@ -669,3 +669,38 @@ class Track1Tests(unittest.TestCase):
         self.assertFalse(graph.nodes[1].matches_source)
         self.assertEqual(graph.nodes[2].check, "pass")
         self.assertEqual(graph.nodes[3].check, "uncheckable")
+
+    def test_empty_repair_preserves_route_answer_and_auto_l1_extraction(self):
+        # Empty draft on pruned_repair keeps previous non-empty candidate answer intact
+        replies_preserve = [
+            "Step 1: Good.\nStep 2: Slip.\nFinal answer: 6",
+            "Step 1: Alt.\nStep 2: Bad.\nFinal answer: 9",
+            json.dumps({"verdict": "fail", "first_error": 2, "valid_prefix": 1, "error_constraint": "fix step 2", "lemmas": []}),
+            json.dumps({"verdict": "fail", "first_error": 2, "valid_prefix": 1, "error_constraint": "fix step 2", "lemmas": []}),
+            "Hmm.",
+            "Still nothing.",
+        ]
+        events: list[dict] = []
+        budget = SharedBudget(Track1Provider("fixture"), 32768, 6, Decimal("1.00"), events.append)
+        with patch(
+            "ricl_runtime.providers.track1.post_chat_completion",
+            side_effect=lambda *a, **kw: ChatCompletionReply(
+                replies_preserve.pop(0), input_tokens=40, output_tokens=100, finish_reason="stop"
+            ),
+        ):
+            res = solve("Problem", "RiCL_v0.2", budget)
+        self.assertEqual(res["final_answer"], "6")
+        checkpoints = [e for e in events if e.get("event") == "checkpoint"]
+        self.assertTrue(all(cp["final_answer"] is not None for cp in checkpoints))
+
+        # 0-token auto-L1 promotion without false fail on assignments
+        auto_steps = ("Compute 3*4 + 2 = 14.", "Use (x-1)*(x+1) = x^2 - 1.", "Let x = 5.")
+        auto_payload = json.dumps({
+            "lemmas": [
+                {"id": "L1", "step": 1, "claim": "3*4 + 2 = 14", "premises": [], "global_scope": True, "check": None},
+                {"id": "L2", "step": 2, "claim": "(x-1)*(x+1) = x^2 - 1", "premises": [], "global_scope": True, "check": None},
+                {"id": "L3", "step": 3, "claim": "x = 5", "premises": [], "global_scope": True, "check": None},
+            ]
+        })
+        auto_graph = lemma_graph(auto_payload, auto_steps)
+        self.assertEqual([n.check for n in auto_graph.nodes], ["pass", "pass", "uncheckable"])
