@@ -2,9 +2,19 @@
 
 # RiCL Runtime
 
-RiCL Runtime is the repository's Python entry point for research on mathematical reasoning. It runs single problems and records independent verification, resource use, and a redacted trace. The former Showcase and official-scoring implementations are retired from this branch; historical evidence remains in the documentation and Git history.
+RiCL Runtime is the repository's Python single-problem solver and control kernel for budgeted mathematical reasoning.
 
-## Run the offline single-route CLI
+> **Reading Guide (Active Mainline vs. Archived v0.1 Prototype)**
+> - **Active Mainline (`RiCL v0.2` general mathematical reasoning kernel)** — used in Track 1 (`#35`) and Track 2 (`track2-frozen200`, frozen SHA `fe5f219`):
+>   - Entry CLI: `uv run python -m ricl_runtime.track1_cli --help`
+>   - Core modules: `ricl_runtime/track1.py` (controller for `B1/B2/B3/B4/RiCL_v0.2`), `ricl_runtime/track1_verification.py` (L1 Python/SymPy + L2 independent Critic & `prune_graph()`), `ricl_runtime/track1_scheduler.py` (APRS route/action selection), `ricl_runtime/track1_budget.py` (shared full-cost accounting)
+>   - Contract & ADR: [docs/evals/track1-v02-contract.md](docs/evals/track1-v02-contract.md) · [docs/adr/0016-track1-v021-five-baselines-and-offline-ccl.md](docs/adr/0016-track1-v021-five-baselines-and-offline-ccl.md)
+>   - Focused tests: `uv run python -m unittest tests/test_runtime_track1.py`
+> - **Archived v0.1 Prototype** (sections below): offline radical-equation (`sqrt(ax+b)=cx+d`) fixtures and earlier `#236–#259` mechanism proofs preserved for historical reproducibility.
+
+---
+
+## Archived v0.1 Prototype: Run the offline single-route CLI
 
 From the repository root:
 

@@ -1,10 +1,19 @@
 # RiCL Runtime 文档索引
 
-从这里运行 RiCL Runtime、复跑离线配对并查阅真实先导证据。
+本仓库维护 RiCL 单题求解与控制内核。以下按**现行研究主线（v0.2）**与**历史原型归档（v0.1）**分层导航：
 
-当前研究主线见 [RiCL v0.2 Track 1 单题交接](evals/track1-v02-contract.md)。以下条目也保留 v0.1 原型与先导的复跑入口。
+## 一、现行研究主线（RiCL v0.2 · 通用竞赛数学内核）
 
-## 当前 Runtime 入口
+- **单题交接契约**：[evals/track1-v02-contract.md](evals/track1-v02-contract.md)（`B1/B2/B3/B4/RiCL_v0.2` 统一接口、预算记账与产物格式）
+- **架构决策记录**：[adr/0016-track1-v021-five-baselines-and-offline-ccl.md](adr/0016-track1-v021-five-baselines-and-offline-ccl.md)
+- **核心源码**：`ricl_runtime/track1.py`、`ricl_runtime/track1_verification.py`、`ricl_runtime/track1_scheduler.py`、`ricl_runtime/track1_budget.py`、`ricl_runtime/track1_cli.py`
+- **对应实验结果与深度归因**：位于实验仓 `RiCL_experiment` 的 `docs/track2-frozen200-report.md`、`docs/track2-frozen200-attribution.md` 与 `results/track2-frozen200/`（总览见 `RiCL-home/README.md`）。
+
+---
+
+## 二、历史 v0.1 原型与离线先导入口（Archived Prototype）
+
+以下保留早期根号方程原型与 `#236–#259` 机制验证的复跑入口：
 
 CLI 默认运行确定性离线端口上的单路线样例；`--population` 可运行两个预先给定候选路线的串行扩展样例：
 
